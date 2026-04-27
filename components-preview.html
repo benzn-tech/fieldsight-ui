@@ -1,0 +1,849 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FieldSight · Components Preview</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles/tokens.css" />
+  <link rel="stylesheet" href="styles/app-shell.css" />
+  <link rel="stylesheet" href="styles/components.css?v=4" />
+
+  <style>
+    html, body { overflow: auto; height: auto; }
+    #root { height: auto; }
+    body {
+      padding: 32px 40px 80px;
+      max-width: 1100px;
+      margin: 0 auto;
+      background: var(--surface-app);
+    }
+    h1 {
+      font-size: 24px; font-weight: 700; margin: 0 0 4px;
+      color: var(--text-primary);
+    }
+    h2 {
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-tertiary);
+      font-weight: 600;
+      margin: 32px 0 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .subtitle { color: var(--text-tertiary); font-size: 14px; margin: 0 0 8px; }
+    .version  { color: var(--color-accent-600); font-size: 12px; font-weight: 600;
+                letter-spacing: 0.05em; text-transform: uppercase; margin: 0 0 32px; }
+    .row {
+      display: flex; flex-wrap: wrap; gap: 10px;
+      align-items: center;
+      padding: 14px 16px;
+      background: var(--surface-panel);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      margin-bottom: 6px;
+    }
+    .row-label {
+      width: 110px;
+      font-size: 11px;
+      color: var(--text-tertiary);
+      font-weight: 600;
+      flex-shrink: 0;
+      letter-spacing: 0.03em;
+      font-family: var(--font-mono);
+    }
+    .divider {
+      width: 1px;
+      height: 20px;
+      background: var(--border-subtle);
+    }
+  </style>
+</head>
+<body>
+  <h1>FieldSight · Components</h1>
+  <p class="subtitle">Layer 4 base components</p>
+  <p class="version">Sprint 1.5 · Badge + Avatar</p>
+
+  <div id="root"></div>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+  <script src="scripts/fs-globals.js"></script>
+  <script type="text/babel" src="scripts/left-nav.js?v=2"></script>
+  <script type="text/babel" src="scripts/components/button.js?v=1"></script>
+  <script type="text/babel" src="scripts/components/input.js?v=1"></script>
+  <script type="text/babel" src="scripts/components/card.js?v=1"></script>
+  <script type="text/babel" src="scripts/components/badge.js?v=1"></script>
+  <script type="text/babel" src="scripts/components/avatar.js?v=1"></script>
+
+  <script type="text/babel">
+    const { Button, IconButton, Input, Textarea, Select, Card, Badge, Avatar, AvatarGroup } = window.FieldSight;
+
+    function Section({ title, children }) {
+      return (
+        <React.Fragment>
+          <h2>{title}</h2>
+          {children}
+        </React.Fragment>
+      );
+    }
+
+    function Row({ label, children }) {
+      return (
+        <div className="row">
+          <div className="row-label">{label}</div>
+          {children}
+        </div>
+      );
+    }
+
+    function Showcase() {
+      const [loadingId, setLoadingId] = React.useState(null);
+      function fakeAsync(id) {
+        setLoadingId(id);
+        setTimeout(() => setLoadingId(null), 1500);
+      }
+
+      return (
+        <React.Fragment>
+
+          <Section title="Variants · md size (default)">
+            <Row label="primary">
+              <Button>Save changes</Button>
+              <Button leftIcon="check">Approve</Button>
+              <Button rightIcon="arrow-right">Continue</Button>
+              <Button disabled>Disabled</Button>
+              <Button
+                loading={loadingId === 'p1'}
+                onClick={() => fakeAsync('p1')}
+              >Submit</Button>
+            </Row>
+            <Row label="secondary">
+              <Button variant="secondary">Cancel</Button>
+              <Button variant="secondary" leftIcon="download">Export</Button>
+              <Button variant="secondary" rightIcon="chevron-down">Options</Button>
+              <Button variant="secondary" disabled>Disabled</Button>
+            </Row>
+            <Row label="tertiary">
+              <Button variant="tertiary">More info</Button>
+              <Button variant="tertiary" leftIcon="filter">Filter</Button>
+              <Button variant="tertiary" disabled>Disabled</Button>
+            </Row>
+            <Row label="danger">
+              <Button variant="danger">Delete report</Button>
+              <Button variant="danger" leftIcon="trash-2">Remove</Button>
+              <Button
+                variant="danger"
+                loading={loadingId === 'd1'}
+                onClick={() => fakeAsync('d1')}
+              >Reject</Button>
+              <Button variant="danger" disabled>Disabled</Button>
+            </Row>
+            <Row label="link">
+              <Button variant="link">View transcript</Button>
+              <Button variant="link" rightIcon="external-link">Open docs</Button>
+              <Button variant="link" disabled>Disabled</Button>
+            </Row>
+          </Section>
+
+          <Section title="Sizes (primary variant)">
+            <Row label="sm · 32px">
+              <Button size="sm">Small</Button>
+              <Button size="sm" leftIcon="check">Approve</Button>
+              <Button size="sm" loading>Loading</Button>
+              <Button size="sm" disabled>Disabled</Button>
+            </Row>
+            <Row label="md · 40px">
+              <Button size="md">Medium</Button>
+              <Button size="md" leftIcon="check">Approve</Button>
+              <Button size="md" loading>Loading</Button>
+              <Button size="md" disabled>Disabled</Button>
+            </Row>
+            <Row label="lg · 48px">
+              <Button size="lg">Large</Button>
+              <Button size="lg" leftIcon="check">Approve</Button>
+              <Button size="lg" loading>Loading</Button>
+              <Button size="lg" disabled>Disabled</Button>
+            </Row>
+          </Section>
+
+          <Section title="Full width">
+            <div style={{
+              display: 'flex', flexDirection: 'column', gap: '8px',
+              padding: '16px',
+              background: 'var(--surface-panel)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-lg)',
+            }}>
+              <Button fullWidth>Primary full width</Button>
+              <Button variant="secondary" fullWidth leftIcon="download">Secondary full width</Button>
+              <Button variant="danger" fullWidth>Danger full width</Button>
+            </div>
+          </Section>
+
+          <Section title="IconButton">
+            <Row label="ghost (default)">
+              <IconButton icon="settings"       ariaLabel="Settings" size="sm" />
+              <IconButton icon="settings"       ariaLabel="Settings" size="md" />
+              <IconButton icon="settings"       ariaLabel="Settings" size="lg" />
+              <div className="divider" />
+              <IconButton icon="bell"           ariaLabel="Notifications" />
+              <IconButton icon="more-vertical"  ariaLabel="More options" />
+              <IconButton icon="search"         ariaLabel="Search" />
+              <div className="divider" />
+              <IconButton icon="loader"         ariaLabel="Loading" loading />
+              <IconButton icon="settings"       ariaLabel="Settings" disabled />
+            </Row>
+            <Row label="primary">
+              <IconButton icon="plus"  ariaLabel="Add task"   variant="primary" size="sm" />
+              <IconButton icon="plus"  ariaLabel="Add task"   variant="primary" size="md" />
+              <IconButton icon="plus"  ariaLabel="Add task"   variant="primary" size="lg" />
+            </Row>
+            <Row label="secondary">
+              <IconButton icon="filter"     ariaLabel="Filter"    variant="secondary" />
+              <IconButton icon="sliders"    ariaLabel="Adjust"    variant="secondary" />
+              <IconButton icon="download"   ariaLabel="Download"  variant="secondary" disabled />
+            </Row>
+            <Row label="danger">
+              <IconButton icon="trash-2"    ariaLabel="Delete"    variant="danger" size="sm" />
+              <IconButton icon="trash-2"    ariaLabel="Delete"    variant="danger" size="md" />
+              <IconButton icon="x"          ariaLabel="Dismiss"   variant="danger" size="lg" />
+            </Row>
+          </Section>
+
+          <Section title="Real-world compositions">
+            <Row label="form actions">
+              <Button variant="secondary">Cancel</Button>
+              <Button leftIcon="save">Save report</Button>
+            </Row>
+            <Row label="destructive">
+              <Button variant="tertiary">Keep record</Button>
+              <Button variant="danger" leftIcon="trash-2">Delete report</Button>
+            </Row>
+            <Row label="toolbar group">
+              <IconButton icon="filter"        ariaLabel="Filter"      variant="secondary" size="sm" />
+              <IconButton icon="sort-asc"      ariaLabel="Sort"        variant="secondary" size="sm" />
+              <IconButton icon="layout-list"   ariaLabel="List view"   variant="secondary" size="sm" />
+              <IconButton icon="layout-grid"   ariaLabel="Grid view"   variant="secondary" size="sm" />
+              <div className="divider" />
+              <IconButton icon="download"      ariaLabel="Export"      variant="ghost"     size="sm" />
+            </Row>
+            <Row label="async upload">
+              <Button
+                size="lg"
+                leftIcon="upload"
+                loading={loadingId === 'submit'}
+                onClick={() => fakeAsync('submit')}
+              >
+                Upload evidence
+              </Button>
+            </Row>
+            <Row label="approve flow">
+              <Button
+                size="lg"
+                variant="secondary"
+              >Request changes</Button>
+              <Button
+                size="lg"
+                leftIcon="check-circle"
+                loading={loadingId === 'approve'}
+                onClick={() => fakeAsync('approve')}
+              >
+                Approve report
+              </Button>
+            </Row>
+          </Section>
+
+          <Section title="Input · variants">
+            <Row label="default">
+              <div style={{ width: 320 }}>
+                <Input label="Site name" placeholder="e.g. Ellesmere Block 4" />
+              </div>
+              <div style={{ width: 320 }}>
+                <Input
+                  label="Email"
+                  type="email"
+                  required
+                  placeholder="you@company.com"
+                  hint="We'll send report digests here"
+                />
+              </div>
+            </Row>
+            <Row label="with left icon">
+              <div style={{ width: 320 }}>
+                <Input label="Search" leftIcon="search" placeholder="Search reports..." />
+              </div>
+            </Row>
+            <Row label="with right addon">
+              <div style={{ width: 320 }}>
+                <Input
+                  label="Password"
+                  type="password"
+                  defaultValue="hunter2"
+                  rightAddon={<IconButton icon="eye" ariaLabel="Show password" size="sm" />}
+                />
+              </div>
+            </Row>
+            <Row label="error state">
+              <div style={{ width: 320 }}>
+                <Input
+                  label="Project code"
+                  defaultValue="ABC"
+                  error="Project code must be at least 6 characters"
+                />
+              </div>
+            </Row>
+            <Row label="disabled / readonly">
+              <div style={{ width: 320 }}>
+                <Input label="Site ID" defaultValue="ELL-2024-04" readOnly hint="System-generated" />
+              </div>
+              <div style={{ width: 320 }}>
+                <Input label="Archived field" defaultValue="cannot edit" disabled />
+              </div>
+            </Row>
+          </Section>
+
+          <Section title="Input · sizes">
+            <Row label="sm · 32px">
+              <div style={{ width: 280 }}>
+                <Input size="sm" label="Small" placeholder="Dense form field" />
+              </div>
+            </Row>
+            <Row label="md · 40px">
+              <div style={{ width: 280 }}>
+                <Input size="md" label="Medium" placeholder="Default size" />
+              </div>
+            </Row>
+            <Row label="lg · 48px">
+              <div style={{ width: 280 }}>
+                <Input size="lg" label="Large" placeholder="Mobile / primary" />
+              </div>
+            </Row>
+          </Section>
+
+          <Section title="Textarea">
+            <Row label="default">
+              <div style={{ width: 480 }}>
+                <Textarea
+                  label="Daily notes"
+                  placeholder="What happened on site today?"
+                  hint="Pulled into the daily report summary"
+                  rows={4}
+                />
+              </div>
+            </Row>
+            <Row label="error">
+              <div style={{ width: 480 }}>
+                <Textarea
+                  label="Incident description"
+                  required
+                  defaultValue="brief"
+                  error="Incident description must be at least 20 characters"
+                  rows={3}
+                />
+              </div>
+            </Row>
+            <Row label="disabled">
+              <div style={{ width: 480 }}>
+                <Textarea label="Locked notes" defaultValue="Read-only history" disabled rows={2} />
+              </div>
+            </Row>
+          </Section>
+
+          <Section title="Select">
+            <Row label="default">
+              <div style={{ width: 280 }}>
+                <Select
+                  label="Site"
+                  placeholder="Choose a site..."
+                  options={[
+                    { value: 'ell', label: 'Ellesmere' },
+                    { value: 'rol', label: 'Rolleston' },
+                    { value: 'syd', label: 'Sydenham' },
+                  ]}
+                />
+              </div>
+              <div style={{ width: 280 }}>
+                <Select
+                  label="Severity"
+                  defaultValue="med"
+                  hint="Determines escalation path"
+                  options={[
+                    { value: 'low',  label: 'Low' },
+                    { value: 'med',  label: 'Medium' },
+                    { value: 'high', label: 'High' },
+                    { value: 'crit', label: 'Critical', disabled: true },
+                  ]}
+                />
+              </div>
+            </Row>
+            <Row label="error">
+              <div style={{ width: 280 }}>
+                <Select
+                  label="Assignee"
+                  required
+                  placeholder="Select assignee..."
+                  error="Assignee is required"
+                  options={[
+                    { value: 'ben', label: 'Ben Lin' },
+                    { value: 'jar', label: 'Jarley Trainor' },
+                    { value: 'dav', label: 'David Barillaro' },
+                  ]}
+                />
+              </div>
+            </Row>
+            <Row label="sizes">
+              <div style={{ width: 200 }}>
+                <Select size="sm" label="sm" defaultValue="a"
+                        options={[{value:'a', label:'Option A'},{value:'b', label:'Option B'}]} />
+              </div>
+              <div style={{ width: 200 }}>
+                <Select size="md" label="md" defaultValue="a"
+                        options={[{value:'a', label:'Option A'},{value:'b', label:'Option B'}]} />
+              </div>
+              <div style={{ width: 200 }}>
+                <Select size="lg" label="lg" defaultValue="a"
+                        options={[{value:'a', label:'Option A'},{value:'b', label:'Option B'}]} />
+              </div>
+            </Row>
+          </Section>
+
+          <Section title="Real-world form composition">
+            <div style={{
+              display: 'flex', flexDirection: 'column', gap: 16,
+              padding: 24, maxWidth: 560,
+              background: 'var(--surface-panel)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-lg)',
+            }}>
+              <Input label="Report title" required placeholder="Daily site report — 27 Apr" />
+              <div style={{ display: 'flex', gap: 12 }}>
+                <Select label="Site" required placeholder="Choose..."
+                        options={[{value:'ell', label:'Ellesmere'},{value:'rol', label:'Rolleston'}]} />
+                <Select label="Shift" defaultValue="day"
+                        options={[{value:'day', label:'Day'},{value:'night', label:'Night'}]} />
+              </div>
+              <Textarea label="Summary" required rows={4}
+                        placeholder="What happened on site today?" />
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+                <Button variant="secondary">Save draft</Button>
+                <Button leftIcon="check">Submit report</Button>
+              </div>
+            </div>
+          </Section>
+
+          <Section title="Card · variants">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
+              <div style={{ width: 280 }}>
+                <Card>
+                  <Card.Header title="Default" subtitle="Subtle border, no shadow" />
+                  <Card.Body>
+                    <p style={{ margin: 0 }}>Quiet at rest — the workhorse for dense lists.</p>
+                  </Card.Body>
+                  <Card.Footer>
+                    <Button variant="secondary" size="sm">Edit</Button>
+                    <Button size="sm" leftIcon="check">Approve</Button>
+                  </Card.Footer>
+                </Card>
+              </div>
+              <div style={{ width: 280 }}>
+                <Card variant="elevated">
+                  <Card.Header title="Elevated" subtitle="Shadow at rest, no border" />
+                  <Card.Body>
+                    <p style={{ margin: 0 }}>Floats above the surface. Use for featured content.</p>
+                  </Card.Body>
+                </Card>
+              </div>
+              <div style={{ width: 280 }}>
+                <Card variant="outline">
+                  <Card.Header
+                    title="Outline"
+                    subtitle="Stronger border"
+                    actions={<IconButton icon="more-vertical" ariaLabel="Options" size="sm" />}
+                  />
+                  <Card.Body>
+                    <p style={{ margin: 0 }}>Emphasised border for cards that need more definition.</p>
+                  </Card.Body>
+                </Card>
+              </div>
+              <div style={{ width: 280 }}>
+                <Card variant="ghost">
+                  <Card.Header title="Ghost" subtitle="No border, no background" />
+                  <Card.Body>
+                    <p style={{ margin: 0 }}>Transparent — for flat inline grouping.</p>
+                  </Card.Body>
+                </Card>
+              </div>
+            </div>
+          </Section>
+
+          <Section title="Card · elevated variant">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
+              <div style={{ width: 300 }}>
+                <Card variant="elevated">
+                  <Card.Header title="Elevated card" subtitle="Shadow at rest, no border" />
+                  <Card.Body>
+                    <p style={{ margin: 0 }}>Floats above the surface with a subtle shadow. Use for featured or promoted content.</p>
+                  </Card.Body>
+                </Card>
+              </div>
+              <div style={{ width: 300 }}>
+                <Card variant="elevated" onClick={() => console.log('Clicked elevated')}>
+                  <Card.Header title="Elevated + clickable" subtitle="Deeper shadow on hover" />
+                  <Card.Body>
+                    <p style={{ margin: 0 }}>Interactive elevated cards deepen their shadow on hover.</p>
+                  </Card.Body>
+                </Card>
+              </div>
+            </div>
+          </Section>
+
+          <Section title="Card · clickable (derived from onClick)">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
+              <div style={{ width: 300 }}>
+                <Card onClick={() => console.log('Clicked task card')}>
+                  <Card.Header title="Install temporary fencing" subtitle="Due tomorrow · High priority" />
+                  <Card.Body>
+                    <p style={{ margin: 0 }}>Perimeter fencing required before crane mobilisation on Wednesday. Renders as native button.</p>
+                  </Card.Body>
+                </Card>
+              </div>
+              <div style={{ width: 300 }}>
+                <Card variant="outline" onClick={() => console.log('Clicked outline')}>
+                  <Card.Header
+                    title="Outline + clickable"
+                    subtitle="Any variant can be interactive"
+                    actions={<IconButton icon="chevron-right" ariaLabel="Open" size="sm" />}
+                  />
+                  <Card.Body>
+                    <p style={{ margin: 0 }}>Interactivity is orthogonal to variant — onClick makes any card clickable.</p>
+                  </Card.Body>
+                </Card>
+              </div>
+              <div style={{ width: 300 }}>
+                <Card onClick={() => {}} disabled>
+                  <Card.Header title="Disabled interactive card" subtitle="Cannot be interacted with" />
+                  <Card.Body>
+                    <p style={{ margin: 0 }}>Archived or locked items render as disabled. JS blocks the click handler.</p>
+                  </Card.Body>
+                </Card>
+              </div>
+            </div>
+          </Section>
+
+          <Section title="Card · padding sizes">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
+              <div style={{ width: 220 }}>
+                <Card padding="sm">
+                  <Card.Header title="Small padding" />
+                  <Card.Body>Dense layout for compact lists.</Card.Body>
+                </Card>
+              </div>
+              <div style={{ width: 220 }}>
+                <Card>
+                  <Card.Header title="Default padding" />
+                  <Card.Body>Standard padding (md).</Card.Body>
+                </Card>
+              </div>
+              <div style={{ width: 220 }}>
+                <Card padding="lg">
+                  <Card.Header title="Large padding" />
+                  <Card.Body>Spacious layout for featured content.</Card.Body>
+                </Card>
+              </div>
+            </div>
+          </Section>
+
+          <Section title="Card · composition with form elements">
+            <div style={{ width: 420 }}>
+              <Card padding="lg">
+                <Card.Header title="Quick task" subtitle="Assign a task from the field" />
+                <Card.Body>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <Input label="Task name" required placeholder="What needs to be done?" />
+                    <div style={{ display: 'flex', gap: 12 }}>
+                      <Select label="Priority" defaultValue="med"
+                              options={[{value:'low', label:'Low'},{value:'med', label:'Medium'},{value:'high', label:'High'}]} />
+                      <Select label="Assign to" placeholder="Choose..."
+                              options={[{value:'ben', label:'Ben Lin'},{value:'jar', label:'Jarley Trainor'}]} />
+                    </div>
+                    <Textarea label="Notes" rows={2} placeholder="Additional context..." />
+                  </div>
+                </Card.Body>
+                <Card.Footer>
+                  <Button variant="tertiary" size="sm">Cancel</Button>
+                  <Button size="sm" leftIcon="plus">Create task</Button>
+                </Card.Footer>
+              </Card>
+            </div>
+          </Section>
+
+          <Section title="Card · body-only and header+footer only">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
+              <div style={{ width: 280 }}>
+                <Card>
+                  <Card.Body>
+                    <p style={{ margin: 0, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>Body-only card</p>
+                    <p style={{ margin: 0 }}>Simple content container with no header or footer structure.</p>
+                  </Card.Body>
+                </Card>
+              </div>
+              <div style={{ width: 280 }}>
+                <Card>
+                  <Card.Header title="Header + footer" subtitle="No body needed" />
+                  <Card.Footer align="between">
+                    <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>2 items pending</span>
+                    <Button variant="link" size="sm">View all</Button>
+                  </Card.Footer>
+                </Card>
+              </div>
+              <div style={{ width: 280 }}>
+                <Card>
+                  <Card.Header
+                    title="Actions in header"
+                    actions={
+                      <React.Fragment>
+                        <IconButton icon="edit" ariaLabel="Edit" size="sm" />
+                        <IconButton icon="trash-2" ariaLabel="Delete" size="sm" variant="danger" />
+                      </React.Fragment>
+                    }
+                  />
+                  <Card.Body>
+                    Card with action buttons in the header area.
+                  </Card.Body>
+                </Card>
+              </div>
+            </div>
+          </Section>
+
+          <Section title="Card · real-world list composition">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 420 }}>
+              {[
+                { title: 'Pour concrete — Block 4', status: 'Done', statusColor: 'var(--color-success-600)', time: '08:30' },
+                { title: 'Install edge protection L2', status: 'In progress', statusColor: 'var(--color-warning-600)', time: '10:15' },
+                { title: 'Crane pre-start inspection', status: 'Blocked', statusColor: '#C026D3', time: '—' },
+                { title: 'Site cleanup & waste removal', status: 'Open', statusColor: 'var(--color-info-500)', time: '14:00' },
+              ].map((task, i) => (
+                <Card key={i} padding="sm" onClick={() => console.log('Clicked:', task.title)}>
+                  <Card.Body>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {task.title}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                        <span style={{
+                          fontSize: 11, fontWeight: 600, color: task.statusColor,
+                          padding: '2px 8px', borderRadius: 4,
+                          background: 'var(--surface-panel-muted)',
+                        }}>{task.status}</span>
+                        <span style={{ fontSize: 12, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', minWidth: 36, textAlign: 'right' }}>{task.time}</span>
+                      </div>
+                    </div>
+                  </Card.Body>
+                </Card>
+              ))}
+            </div>
+          </Section>
+
+          <Section title="Badge · subtle (default variant)">
+            <Row label="colors">
+              <Badge color="neutral">Neutral</Badge>
+              <Badge color="accent">Accent</Badge>
+              <Badge color="info">Info</Badge>
+              <Badge color="success">Success</Badge>
+              <Badge color="warning">Warning</Badge>
+              <Badge color="danger">Danger</Badge>
+            </Row>
+            <Row label="with dot">
+              <Badge color="success" dot>Active</Badge>
+              <Badge color="warning" dot>Pending</Badge>
+              <Badge color="danger" dot>Overdue</Badge>
+              <Badge color="info" dot>Open</Badge>
+            </Row>
+            <Row label="with icon">
+              <Badge color="danger" icon="shield-alert">Safety</Badge>
+              <Badge color="info" icon="clock">Scheduled</Badge>
+              <Badge color="success" icon="check">Approved</Badge>
+              <Badge color="warning" icon="alert-triangle">Caution</Badge>
+            </Row>
+            <Row label="sizes">
+              <Badge size="sm" color="accent">Small</Badge>
+              <Badge size="md" color="accent">Medium</Badge>
+              <Badge size="lg" color="accent">Large</Badge>
+            </Row>
+          </Section>
+
+          <Section title="Badge · solid variant">
+            <Row label="colors">
+              <Badge variant="solid" color="neutral">Neutral</Badge>
+              <Badge variant="solid" color="accent">Accent</Badge>
+              <Badge variant="solid" color="info">Info</Badge>
+              <Badge variant="solid" color="success">Done</Badge>
+              <Badge variant="solid" color="warning">Warning</Badge>
+              <Badge variant="solid" color="danger">Critical</Badge>
+            </Row>
+            <Row label="with dot">
+              <Badge variant="solid" color="danger" dot>Incident</Badge>
+              <Badge variant="solid" color="success" dot>Completed</Badge>
+            </Row>
+          </Section>
+
+          <Section title="Badge · outline variant">
+            <Row label="colors">
+              <Badge variant="outline" color="neutral">Draft</Badge>
+              <Badge variant="outline" color="accent">New</Badge>
+              <Badge variant="outline" color="info">Review</Badge>
+              <Badge variant="outline" color="success">Passed</Badge>
+              <Badge variant="outline" color="warning">Pending</Badge>
+              <Badge variant="outline" color="danger">Rejected</Badge>
+            </Row>
+          </Section>
+
+          <Section title="Badge · real-world usage">
+            <Row label="task priorities">
+              <Badge color="danger" dot>Critical</Badge>
+              <Badge color="warning" dot>High</Badge>
+              <Badge color="info" dot>Medium</Badge>
+              <Badge color="neutral" dot>Low</Badge>
+            </Row>
+            <Row label="report states">
+              <Badge variant="outline" color="neutral">Draft</Badge>
+              <Badge color="info">Submitted</Badge>
+              <Badge color="success" icon="check">Approved</Badge>
+              <Badge variant="solid" color="danger">Rejected</Badge>
+            </Row>
+            <Row label="categories">
+              <Badge color="danger" icon="shield-alert">Safety</Badge>
+              <Badge color="info" icon="badge-check">Quality</Badge>
+              <Badge color="accent" icon="gantt-chart">Programme</Badge>
+              <Badge color="neutral" icon="cloud-sun">Weather</Badge>
+            </Row>
+          </Section>
+
+          <Section title="Avatar · sizes">
+            <Row label="circle">
+              <Avatar name="Jarley Trainor" size="xs" />
+              <Avatar name="Jarley Trainor" size="sm" />
+              <Avatar name="Jarley Trainor" size="md" />
+              <Avatar name="Jarley Trainor" size="lg" />
+              <Avatar name="Jarley Trainor" size="xl" />
+            </Row>
+            <Row label="square">
+              <Avatar name="Ben Lin" size="xs" shape="square" />
+              <Avatar name="Ben Lin" size="sm" shape="square" />
+              <Avatar name="Ben Lin" size="md" shape="square" />
+              <Avatar name="Ben Lin" size="lg" shape="square" />
+              <Avatar name="Ben Lin" size="xl" shape="square" />
+            </Row>
+          </Section>
+
+          <Section title="Avatar · deterministic colors">
+            <Row label="different names">
+              <Avatar name="Jarley Trainor" size="lg" />
+              <Avatar name="Ben Lin" size="lg" />
+              <Avatar name="David Barillaro" size="lg" />
+              <Avatar name="Sarah Chen" size="lg" />
+              <Avatar name="Mike O'Brien" size="lg" />
+              <Avatar name="Priya Sharma" size="lg" />
+              <Avatar name="Tom Wilson" size="lg" />
+              <Avatar name="Ana Garcia" size="lg" />
+            </Row>
+            <Row label="explicit initials">
+              <Avatar initials="FS" name="FieldSight System" size="lg" color="#FF6B35" />
+              <Avatar initials="AI" name="AI Suggestion" size="lg" color="#7C3AED" />
+            </Row>
+          </Section>
+
+          <Section title="AvatarGroup">
+            <Row label="default (max 4)">
+              <AvatarGroup size="md">
+                <Avatar name="Jarley Trainor" />
+                <Avatar name="Ben Lin" />
+                <Avatar name="David Barillaro" />
+                <Avatar name="Sarah Chen" />
+                <Avatar name="Mike O'Brien" />
+                <Avatar name="Priya Sharma" />
+              </AvatarGroup>
+            </Row>
+            <Row label="max 3, lg">
+              <AvatarGroup size="lg" max={3}>
+                <Avatar name="Jarley Trainor" />
+                <Avatar name="Ben Lin" />
+                <Avatar name="David Barillaro" />
+                <Avatar name="Sarah Chen" />
+                <Avatar name="Mike O'Brien" />
+              </AvatarGroup>
+            </Row>
+            <Row label="max 5, sm">
+              <AvatarGroup size="sm" max={5}>
+                <Avatar name="Jarley Trainor" />
+                <Avatar name="Ben Lin" />
+                <Avatar name="David Barillaro" />
+                <Avatar name="Sarah Chen" />
+                <Avatar name="Mike O'Brien" />
+                <Avatar name="Priya Sharma" />
+                <Avatar name="Tom Wilson" />
+              </AvatarGroup>
+            </Row>
+          </Section>
+
+          <Section title="Avatar + Badge · real-world compositions">
+            <Row label="user + status">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Avatar name="Jarley Trainor" size="lg" />
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)' }}>Jarley Trainor</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Site Manager</div>
+                </div>
+                <Badge color="success" dot size="sm">Online</Badge>
+              </div>
+            </Row>
+            <Row label="task assignees">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <AvatarGroup size="sm" max={3}>
+                  <Avatar name="Ben Lin" />
+                  <Avatar name="Sarah Chen" />
+                  <Avatar name="Mike O'Brien" />
+                  <Avatar name="Priya Sharma" />
+                </AvatarGroup>
+                <Badge color="warning" size="sm">4 assigned</Badge>
+              </div>
+            </Row>
+            <Row label="card with avatar">
+              <div style={{ width: 360 }}>
+                <Card padding="sm">
+                  <Card.Body>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <Avatar name="David Barillaro" size="md" />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)' }}>David Barillaro</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>Submitted daily report · 2h ago</div>
+                      </div>
+                      <Badge color="info" size="sm">Submitted</Badge>
+                    </div>
+                  </Card.Body>
+                </Card>
+              </div>
+            </Row>
+          </Section>
+
+        </React.Fragment>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(
+      React.createElement(Showcase)
+    );
+  </script>
+</body>
+</html>
