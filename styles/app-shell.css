@@ -144,3 +144,56 @@ button:focus-visible,
   border-radius: var(--radius-full);
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* =========================================================================
+   MiddleColumn header utility area (right-side icons / weather / bell)
+   ========================================================================= */
+
+.middle-column__header {
+  /* Existing inline styles still drive layout — these only style the
+     internal utility row. */
+}
+
+.middle-column__utility {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.fs-utility-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+  transition:
+    background 100ms cubic-bezier(0, 0, 0.2, 1),
+    color      100ms cubic-bezier(0, 0, 0.2, 1),
+    border-color 100ms cubic-bezier(0, 0, 0.2, 1);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.fs-utility-item:hover {
+  background: var(--surface-panel-muted);
+  color: var(--text-primary);
+}
+
+.fs-utility-item:focus-visible {
+  outline: none;
+  border-color: var(--color-accent-500);
+  box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.20);
+}
+
+.fs-utility-item__text {
+  font-variant-numeric: tabular-nums;
+  /* Numbers in monospace-ish width so they don't shift on hover */
+}

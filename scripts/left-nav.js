@@ -6,30 +6,50 @@
 /* global React, window */
 
 const NAV_ICONS = {
-  today:         'calendar-check',
-  morning_brief: 'sunrise',
-  portfolio:     'layout-dashboard',
-  regional:      'map',
-  executive:     'briefcase',
-  programme:     'gantt-chart',
-  live:          'radio',
-  review:        'history',
-  tasks:         'check-square',
-  safety:        'shield-alert',
-  quality:       'badge-check',
-  weather:       'cloud-sun',
-  evidence:      'folder-open',
-  reports:       'file-text',
-  sites:         'map-pin',
-  team:          'users',
-  settings:      'settings',
+  today:      'calendar-check',
+  activity:   'activity',
+  portfolio:  'layout-dashboard',
+  regional:   'map',
+  executive:  'briefcase',
+  programme:  'gantt-chart',
+  tasks:      'check-square',
+  safety:     'shield-alert',
+  quality:    'badge-check',
+  evidence:   'folder-open',
+  reports:    'file-text',
+  sites:      'map-pin',
+  team:       'users',
+  settings:   'settings',
 };
 
 const NAV_SECTIONS = [
-  { key: 'DAILY',      label: 'Daily',      items: ['today','morning_brief','live','review'] },
-  { key: 'WORKSPACE',  label: 'Workspace',  items: ['tasks','programme','safety','quality','weather','evidence','reports'] },
-  { key: 'MANAGEMENT', label: 'Management', items: ['sites','team'] },
-  { key: 'STRATEGIC',  label: 'Strategic',  items: ['portfolio','regional','executive'] },
+  {
+    key: 'DAILY',
+    label: 'Daily',
+    items: ['today', 'activity'],
+  },
+  {
+    key: 'WORKSPACE',
+    label: 'Workspace',
+    items: ['tasks', 'programme'],
+    /* `compliance` is a visual sub-grouping inside WORKSPACE.
+       safety and quality remain independent routes. */
+    subgroups: [
+      { key: 'COMPLIANCE', label: 'Compliance', items: ['safety', 'quality'] },
+    ],
+    /* trailing items appear after the subgroup */
+    trailingItems: ['evidence', 'reports'],
+  },
+  {
+    key: 'MANAGEMENT',
+    label: 'Management',
+    items: ['sites', 'team'],
+  },
+  {
+    key: 'STRATEGIC',
+    label: 'Strategic',
+    items: ['portfolio', 'regional', 'executive'],
+  },
 ];
 
 /* ---------- Icon component ------------------------------------------------ */
@@ -67,7 +87,7 @@ function NavIcon({ name, size, color, style: extraStyle }) {
 }
 
 /* ---------- NavItem ------------------------------------------------------- */
-function NavItem({ navKey, label, isActive, isCollapsed, onClick }) {
+function NavItem({ navKey, label, isActive, isCollapsed, onClick, isSubItem }) {
   const [hovered, setHovered] = React.useState(false);
   const t = window.FS.tokens;
 
@@ -84,6 +104,7 @@ function NavItem({ navKey, label, isActive, isCollapsed, onClick }) {
     cursor: 'pointer',
     borderRadius: '6px',
     margin: '1px 8px',
+    marginLeft: isSubItem ? '20px' : '8px',
     position: 'relative',
     justifyContent: isCollapsed ? 'center' : 'flex-start',
     background: isActive
@@ -134,6 +155,28 @@ function SectionLabel({ label, isCollapsed }) {
       letterSpacing: '0.08em',
       textTransform: 'uppercase',
       color: 'rgba(255,255,255,0.35)',
+    },
+  }, label);
+}
+
+/* ---------- SubgroupLabel (smaller, less prominent than SectionLabel) ----- */
+function SubgroupLabel({ label, isCollapsed }) {
+  if (isCollapsed) {
+    return React.createElement('div', {
+      style: {
+        height: '1px',
+        background: 'rgba(255,255,255,0.06)',
+        margin: '4px 16px',
+      },
+    });
+  }
+  return React.createElement('div', {
+    style: {
+      padding: '8px 20px 2px',
+      fontSize: '10px',
+      fontWeight: 500,
+      letterSpacing: '0.04em',
+      color: 'rgba(255,255,255,0.30)',
     },
   }, label);
 }
@@ -325,12 +368,21 @@ function LeftNav({ user, currentRoute, isCollapsed, onToggleCollapse, onNavigate
     /* Scrollable nav sections */
     React.createElement('div', { style: scrollAreaStyle },
       NAV_SECTIONS.map(function(section) {
-        const visibleInSection = section.items.filter(function(k) { return visibleKeys.has(k); });
-        if (visibleInSection.length === 0) return null;
+        const allKeys = [
+          ...(section.items || []),
+          ...((section.subgroups || []).flatMap(function(g) { return g.items; })),
+          ...(section.trailingItems || []),
+        ];
+        const anyVisible = allKeys.some(function(k) { return visibleKeys.has(k); });
+        if (!anyVisible) return null;
 
         return React.createElement(React.Fragment, { key: section.key },
+
+          /* Top-level section label (DAILY / WORKSPACE / ...) */
           React.createElement(SectionLabel, { label: section.label, isCollapsed: isCollapsed }),
-          visibleInSection.map(function(key) {
+
+          /* Direct items in this section */
+          (section.items || []).filter(function(k) { return visibleKeys.has(k); }).map(function(key) {
             const item = window.FS.NAV_ITEMS[key];
             const isActive = currentRoute === item.path;
             return React.createElement(NavItem, {
@@ -342,6 +394,43 @@ function LeftNav({ user, currentRoute, isCollapsed, onToggleCollapse, onNavigate
               onClick: function() { onNavigate(item.path); },
             });
           }),
+
+          /* Subgroups (e.g. Compliance) */
+          (section.subgroups || []).map(function(group) {
+            const visibleInGroup = group.items.filter(function(k) { return visibleKeys.has(k); });
+            if (visibleInGroup.length === 0) return null;
+            return React.createElement(React.Fragment, { key: group.key },
+              React.createElement(SubgroupLabel, { label: group.label, isCollapsed: isCollapsed }),
+              visibleInGroup.map(function(key) {
+                const item = window.FS.NAV_ITEMS[key];
+                const isActive = currentRoute === item.path;
+                return React.createElement(NavItem, {
+                  key: key,
+                  navKey: key,
+                  label: item.label,
+                  isActive: isActive,
+                  isCollapsed: isCollapsed,
+                  isSubItem: true,
+                  onClick: function() { onNavigate(item.path); },
+                });
+              }),
+            );
+          }),
+
+          /* Trailing items (after subgroup) */
+          (section.trailingItems || []).filter(function(k) { return visibleKeys.has(k); }).map(function(key) {
+            const item = window.FS.NAV_ITEMS[key];
+            const isActive = currentRoute === item.path;
+            return React.createElement(NavItem, {
+              key: key,
+              navKey: key,
+              label: item.label,
+              isActive: isActive,
+              isCollapsed: isCollapsed,
+              onClick: function() { onNavigate(item.path); },
+            });
+          }),
+
         );
       }),
     ),

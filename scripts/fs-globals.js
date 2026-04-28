@@ -53,11 +53,11 @@
       },
       category: {
         safety: '#EF4444', public: '#D97706', quality: '#2563EB',
-        programme: '#7C3AED', commercial: '#15803D', weather: '#0891B2',
+        programme: '#7C3AED', commercial: '#15803D',
         general: '#6B7280',
         safetyBg: '#FEE2E2', publicBg: '#FEF3C7', qualityBg: '#DBEAFE',
         programmeBg: '#EDE9FE', commercialBg: '#DCFCE7',
-        weatherBg: '#CFFAFE', generalBg: '#F3F4F6',
+        generalBg: '#F3F4F6',
       },
     },
     surface: {
@@ -253,13 +253,13 @@
         P('report','approve',SCOPES.SITE), P('dashboard','view',SCOPES.SITE),
         P('pre_start','manage',SCOPES.SITE), P('evidence','view',SCOPES.SITE),
         P('safety','view',SCOPES.SITE), P('quality','view',SCOPES.SITE),
-        P('weather','view',SCOPES.SITE), P('incident','capture',SCOPES.SITE),
+        P('incident','capture',SCOPES.SITE),
         P('programme','view',SCOPES.SITE), P('settings','view',SCOPES.SELF),
       ],
     },
     project_manager: {
       level: 4, label: 'Project Manager', scope: SCOPES.PROJECT,
-      defaultLanding: '/morning-brief',
+      defaultLanding: '/today',
       permissions: [
         P('dashboard','view',SCOPES.PROJECT), P('task','view',SCOPES.PROJECT),
         P('safety','view',SCOPES.PROJECT), P('quality','view',SCOPES.PROJECT),
@@ -331,29 +331,35 @@
         P('dashboard','view',SCOPES.ASSIGNED), P('report','view',SCOPES.ASSIGNED),
         P('evidence','view',SCOPES.ASSIGNED), P('safety','view',SCOPES.ASSIGNED),
         P('quality','view',SCOPES.ASSIGNED), P('programme','view',SCOPES.ASSIGNED),
-        P('weather','view',SCOPES.ASSIGNED), P('settings','view',SCOPES.SELF),
+        P('settings','view',SCOPES.SELF),
       ],
     },
   };
 
   const NAV_ITEMS = {
-    today:         { permission: P('dashboard','view'),    label: 'Today',         path: '/today' },
-    morning_brief: { permission: P('pm_brief','view'),     label: 'Morning Brief', path: '/morning-brief' },
-    portfolio:     { permission: P('portfolio','view'),    label: 'Portfolio',     path: '/portfolio' },
-    regional:      { permission: P('regional','view'),     label: 'Regional',      path: '/regional' },
-    executive:     { permission: P('executive','view'),    label: 'Executive',     path: '/executive' },
-    programme:     { permission: P('programme','view'),    label: 'Programme',     path: '/programme' },
-    live:          { permission: P('event','capture'),     label: 'Live',          path: '/live' },
-    review:        { permission: P('report','view'),       label: 'Review',        path: '/review' },
-    tasks:         { permission: P('task','view'),         label: 'Tasks',         path: '/tasks' },
-    safety:        { permission: P('safety','view'),       label: 'Safety',        path: '/safety' },
-    quality:       { permission: P('quality','view'),      label: 'Quality',       path: '/quality' },
-    weather:       { permission: P('weather','view'),      label: 'Weather',       path: '/weather' },
-    evidence:      { permission: P('evidence','view'),     label: 'Evidence',      path: '/evidence' },
-    reports:       { permission: P('report','view'),       label: 'Reports',       path: '/reports' },
-    sites:         { permission: P('sites','view'),        label: 'Sites',         path: '/sites' },
-    team:          { permission: P('user','manage'),       label: 'Team',          path: '/team' },
-    settings:      { permission: P('settings','view'),     label: 'Settings',      path: '/settings' },
+    /* DAILY */
+    today:      { permission: P('dashboard','view'),  label: 'Today',      path: '/today' },
+    activity:   { permission: P('report','view'),     label: 'Activity',   path: '/activity' },
+
+    /* WORKSPACE */
+    tasks:      { permission: P('task','view'),       label: 'Tasks',      path: '/tasks' },
+    programme:  { permission: P('programme','view'),  label: 'Programme',  path: '/programme' },
+    safety:     { permission: P('safety','view'),     label: 'Safety',     path: '/safety' },
+    quality:    { permission: P('quality','view'),    label: 'Quality',    path: '/quality' },
+    evidence:   { permission: P('evidence','view'),   label: 'Evidence',   path: '/evidence' },
+    reports:    { permission: P('report','view'),     label: 'Reports',    path: '/reports' },
+
+    /* MANAGEMENT */
+    sites:      { permission: P('sites','view'),      label: 'Sites',      path: '/sites' },
+    team:       { permission: P('user','manage'),     label: 'Team',       path: '/team' },
+
+    /* STRATEGIC */
+    portfolio:  { permission: P('portfolio','view'),  label: 'Portfolio',  path: '/portfolio' },
+    regional:   { permission: P('regional','view'),   label: 'Regional',   path: '/regional' },
+    executive:  { permission: P('executive','view'),  label: 'Executive',  path: '/executive' },
+
+    /* FOOTER */
+    settings:   { permission: P('settings','view'),   label: 'Settings',   path: '/settings' },
   };
 
   const HIERARCHY_ROLES = ['worker','foreman','site_manager','project_manager',

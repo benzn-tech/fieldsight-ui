@@ -44,7 +44,6 @@ export const RESOURCES = {
   SETTINGS:    'settings',
   SAFETY:      'safety',
   QUALITY:     'quality',
-  WEATHER:     'weather',
   COMMERCIAL:  'commercial',
   PL:          'pl',
   RISK:        'risk',
@@ -175,7 +174,6 @@ export const ROLES = {
       P('evidence',  'view',    SCOPES.SITE),
       P('safety',    'view',    SCOPES.SITE),
       P('quality',   'view',    SCOPES.SITE),
-      P('weather',   'view',    SCOPES.SITE),
       P('incident',  'capture', SCOPES.SITE),
       P('programme', 'view',    SCOPES.SITE),  // SM views but doesn't manage programme
       P('settings',  'view',    SCOPES.SELF),
@@ -188,7 +186,7 @@ export const ROLES = {
     label: 'Project Manager',
     scope: SCOPES.PROJECT,
     description: 'Manages a project (typically 1 site, occasionally multi-stage)',
-    defaultLanding: '/morning-brief',
+    defaultLanding: '/today',
     permissions: [
       P('dashboard', 'view',    SCOPES.PROJECT),
       P('task',      'view',    SCOPES.PROJECT),
@@ -323,7 +321,6 @@ export const ROLES = {
       P('safety',    'view',   SCOPES.ASSIGNED),
       P('quality',   'view',   SCOPES.ASSIGNED),
       P('programme', 'view',   SCOPES.ASSIGNED),
-      P('weather',   'view',   SCOPES.ASSIGNED),
       P('settings',  'view',   SCOPES.SELF),
       // No capture, no manage, no export
     ],
@@ -334,29 +331,35 @@ export const ROLES = {
 /* ==========================================================================
    Top-level navigation registry
    --------------------------------------------------------------------------
-   FIX 2: morning_brief, portfolio, regional, executive, sites, settings now
-   use distinct resources so HSE/QA specialists (with dashboard:view:org)
-   don't incorrectly inherit line-of-authority dashboard nav items.
+   FIX 2: portfolio, regional, executive, sites, settings use distinct
+   resources so HSE/QA specialists (with dashboard:view:org) don't
+   incorrectly inherit line-of-authority dashboard nav items.
    ========================================================================== */
 
 export const NAV_ITEMS = {
-  today:         { permission: P('dashboard', 'view'),                        label: 'Today' },
-  morning_brief: { permission: P('pm_brief',  'view'),                        label: 'Morning Brief' },
-  portfolio:     { permission: P('portfolio', 'view'),                        label: 'Portfolio' },
-  regional:      { permission: P('regional',  'view'),                        label: 'Regional' },
-  executive:     { permission: P('executive', 'view'),                        label: 'Executive' },
-  programme:     { permission: P('programme', 'view'),                        label: 'Programme' },
-  live:          { permission: P('event',     'capture'),                     label: 'Live' },
-  review:        { permission: P('report',    'view'),                        label: 'Review' },
-  tasks:         { permission: P('task',      'view'),                        label: 'Tasks' },
-  safety:        { permission: P('safety',    'view'),                        label: 'Safety' },
-  quality:       { permission: P('quality',   'view'),                        label: 'Quality' },
-  weather:       { permission: P('weather',   'view'),                        label: 'Weather' },
-  evidence:      { permission: P('evidence',  'view'),                        label: 'Evidence' },
-  reports:       { permission: P('report',    'view'),                        label: 'Reports' },
-  sites:         { permission: P('sites',     'view'),                        label: 'Sites' },
-  team:          { permission: P('user',      'manage'),                      label: 'Team' },
-  settings:      { permission: P('settings',  'view'),                        label: 'Settings' },
+  /* DAILY — Today subsumes Morning Brief; Activity subsumes Live + Review */
+  today:      { permission: P('dashboard', 'view'),                   label: 'Today' },
+  activity:   { permission: P('report',    'view'),                   label: 'Activity' },
+
+  /* WORKSPACE */
+  tasks:      { permission: P('task',      'view'),                   label: 'Tasks' },
+  programme:  { permission: P('programme', 'view'),                   label: 'Programme' },
+  safety:     { permission: P('safety',    'view'),                   label: 'Safety' },
+  quality:    { permission: P('quality',   'view'),                   label: 'Quality' },
+  evidence:   { permission: P('evidence',  'view'),                   label: 'Evidence' },
+  reports:    { permission: P('report',    'view'),                   label: 'Reports' },
+
+  /* MANAGEMENT */
+  sites:      { permission: P('sites',     'view'),                   label: 'Sites' },
+  team:       { permission: P('user',      'manage'),                 label: 'Team' },
+
+  /* STRATEGIC */
+  portfolio:  { permission: P('portfolio', 'view'),                   label: 'Portfolio' },
+  regional:   { permission: P('regional',  'view'),                   label: 'Regional' },
+  executive:  { permission: P('executive', 'view'),                   label: 'Executive' },
+
+  /* FOOTER */
+  settings:   { permission: P('settings',  'view'),                   label: 'Settings' },
 };
 
 
