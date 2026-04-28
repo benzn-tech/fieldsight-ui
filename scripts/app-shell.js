@@ -11,6 +11,39 @@ const STORAGE_KEYS = {
 };
 
 const MIDDLE_WIDTH_DEFAULT = 320;
+
+/* ---------- Tiny inline weather indicator ------------------------------- */
+/* Mock data for now — Sprint 2 wires the real API.
+   Render only inside the MiddleColumn header utility area. */
+function WeatherIndicator() {
+  const t = window.FS.tokens;
+  const NavIcon = window.FieldSight && window.FieldSight.NavIcon;
+
+  /* Mock: 17°C, partly cloudy, light wind */
+  const temp = 17;
+  const condition = 'cloud-sun';
+  const wind = '12 km/h';
+
+  function handleClick() {
+    console.log('[Weather] open detail panel (Sprint 2 wires this)');
+  }
+
+  return React.createElement('button', {
+    type: 'button',
+    onClick: handleClick,
+    className: 'fs-utility-item',
+    title: 'Site weather · ' + temp + '°C · ' + wind,
+    'aria-label': 'Site weather, ' + temp + ' degrees, wind ' + wind,
+  },
+    NavIcon && React.createElement(NavIcon, {
+      name: condition,
+      size: 16,
+    }),
+    React.createElement('span', {
+      className: 'fs-utility-item__text',
+    }, temp + '°'),
+  );
+}
 const MIDDLE_WIDTH_MIN     = 280;
 const MIDDLE_WIDTH_MAX     = 480;
 
@@ -51,7 +84,7 @@ function MiddleColumn({ route, width, onWidthChange }) {
 
   return React.createElement('div', { style: style, className: 'middle-column' },
 
-    React.createElement('div', { style: headerStyle },
+    React.createElement('div', { style: headerStyle, className: 'middle-column__header' },
       React.createElement('span', {
         style: {
           fontWeight: t.typography.fontWeight.semibold,
@@ -60,6 +93,11 @@ function MiddleColumn({ route, width, onWidthChange }) {
           flex: 1,
         },
       }, title),
+
+      /* Right-side utility area: weather + future bell etc. */
+      React.createElement('div', { className: 'middle-column__utility' },
+        React.createElement(WeatherIndicator),
+      ),
     ),
 
     React.createElement('div', { style: contentStyle },
