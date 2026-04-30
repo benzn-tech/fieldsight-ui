@@ -724,14 +724,32 @@
   border-radius: var(--radius-md);
   padding: 6px;
   min-height: 100px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: border-color var(--duration-fast) var(--easing-out);
+}
+.fs-photo-grid__cell:hover { border-color: var(--border-default); }
+.fs-photo-grid__cell:focus { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+
+.fs-photo-grid__thumb {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel);
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
 }
 
 .fs-photo-grid__img {
   width: 100%;
-  aspect-ratio: 4 / 3;
+  height: 100%;
   object-fit: cover;
-  border-radius: var(--radius-sm);
-  background: var(--surface-panel);
+}
+
+.fs-photo-grid__placeholder {
+  color: var(--text-tertiary);
+  font-size: 11px;
 }
 
 .fs-photo-grid__caption {
@@ -740,4 +758,256 @@
   color: var(--text-tertiary);
   word-break: break-all;
   line-height: 1.3;
+}
+
+.fs-photo-grid__empty {
+  padding: 24px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+/* Lightbox overlay */
+.fs-photo-lightbox {
+  position: fixed;
+  inset: 0;
+  background: var(--surface-overlay);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 500;
+  padding: 24px;
+}
+.fs-photo-lightbox__inner {
+  max-width: 90vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--surface-panel);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  box-shadow: var(--shadow-2xl);
+}
+.fs-photo-lightbox__img {
+  max-width: 100%;
+  max-height: 80vh;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+}
+.fs-photo-lightbox__caption {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+
+/* =========================================================================
+   TranscriptList — speaker chips + text
+   ========================================================================= */
+
+.fs-transcript-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fs-transcript-list__caption {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.fs-transcript-list__row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.fs-transcript-list__chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  width: 84px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.2;
+  transition: filter var(--duration-fast) var(--easing-out);
+}
+.fs-transcript-list__chip:hover { filter: brightness(0.95); }
+
+.fs-transcript-list__chip-label {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+}
+.fs-transcript-list__chip-time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  margin-top: 2px;
+  opacity: 0.85;
+}
+
+.fs-transcript-list__text {
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  padding-top: 4px;
+}
+
+.fs-transcript-list__loading,
+.fs-transcript-list__empty {
+  padding: 16px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+
+/* =========================================================================
+   AudioPlaylist — playable VAD chunks
+   ========================================================================= */
+
+.fs-audio-playlist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fs-audio-playlist__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  transition: border-color var(--duration-fast) var(--easing-out);
+}
+.fs-audio-playlist__row--playing {
+  border-color: var(--color-accent-400);
+  background: var(--surface-highlight);
+}
+
+.fs-audio-playlist__play {
+  width: 32px; height: 32px;
+  border: 1px solid var(--border-default);
+  background: var(--surface-panel);
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+.fs-audio-playlist__play:hover { background: var(--surface-panel-muted); }
+
+.fs-audio-playlist__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fs-audio-playlist__meta {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-variant-numeric: tabular-nums;
+}
+.fs-audio-playlist__time {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+.fs-audio-playlist__dur {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.fs-audio-playlist__filename {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fs-audio-playlist__loading,
+.fs-audio-playlist__empty {
+  padding: 16px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+
+/* =========================================================================
+   VideoPlayer — single H264 preview at a time, prev/next nav
+   ========================================================================= */
+
+.fs-video-player {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fs-video-player__media {
+  width: 100%;
+  border-radius: var(--radius-md);
+  background: #000;
+}
+
+.fs-video-player__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.fs-video-player__time {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.fs-video-player__filename {
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+.fs-video-player__nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fs-video-player__nav button {
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-panel);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--text-primary);
+}
+.fs-video-player__nav button:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+.fs-video-player__count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.fs-video-player__loading,
+.fs-video-player__empty {
+  padding: 16px;
+  color: var(--text-tertiary);
+  font-size: 13px;
 }

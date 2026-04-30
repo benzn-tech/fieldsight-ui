@@ -304,66 +304,17 @@
     { key: 'photos',     label: 'Photos' },
   ];
 
-  function ComingSoon(props) {
-    return React.createElement('div', { className: 'fs-topic-detail__coming-soon' },
-      React.createElement('div', { className: 'fs-topic-detail__coming-soon-title' },
-        props.title),
-      React.createElement('div', null,
-        'Wired in Sprint 2.3 (Phase C). The api module ' + props.api + ' is already in place.'),
-    );
-  }
-
-  function PhotosTab(props) {
-    var topic    = props.topic;
-    var date     = props.date;
-    var userName = props.userName;
-    var photos   = topic.related_photos || [];
-
-    if (photos.length === 0) {
-      return React.createElement('div', { className: 'fs-topic-detail__empty' },
-        'No photos for this topic.');
-    }
-
-    /* Build the S3 key per BACKEND-CONTEXT §5.1 + §7 — folder = name with
-       spaces → underscores. Real deploy fetches presigned URLs through
-       FS.api.media.presignedUrl on each open (15-min expiry, §7). */
-    return React.createElement('div', { className: 'fs-photo-grid' },
-      photos.map(function (filename, i) {
-        var key = window.FS.api.media.photoKey({
-          userDisplayName: userName, date: date, filename: filename,
-        });
-        return React.createElement(PhotoCell, { key: i, s3Key: key, filename: filename });
-      }),
-    );
-  }
-
-  function PhotoCell(props) {
-    var refUrl = React.useState(null);
-    var url    = refUrl[0];
-    var setUrl = refUrl[1];
-
-    React.useEffect(function () {
-      var cancelled = false;
-      window.FS.api.media.presignedUrl(props.s3Key).then(function (res) {
-        if (!cancelled) setUrl(res.url);
-      });
-      return function () { cancelled = true; };
-    }, [props.s3Key]);
-
-    return React.createElement('div', { className: 'fs-photo-grid__cell' },
-      url
-        ? React.createElement('img', {
-            src: url, alt: props.filename, loading: 'lazy',
-            className: 'fs-photo-grid__img',
-            onError: function (e) {
-              /* Mock URLs won't actually load — show a graceful placeholder. */
-              e.currentTarget.style.display = 'none';
-            },
-          })
-        : null,
-      React.createElement('div', { className: 'fs-photo-grid__caption' },
-        props.filename),
-    );
+  /* Topic time_range uses an en-dash: "07:00 – 07:30". Returns
+     { start: 'HH:MM:SS', end: 'HH:MM:SS' } or { start: null, end: null }. */
+  function parseTimeRange(time_range) {
+    if (!time_range) return { start: null, end: null };
+    var m = String(time_range).match(/(\d{1,2}):(\d{2})\s*[–-]\s*(\d{1,2}):(\d{2})/);
+    if (!m) return { start: null, end: null };
+    function pad(s) { return s.length === 1 ? '0' + s : s; }
+    return {
+      start: pad(m[1]) + ':' + m[2] + ':00',
+      end:   pad(m[3]) + ':' + m[4] + ':00',
+    };
   }
 
   function OverviewTab(props) {
@@ -467,22 +418,35 @@
     }
 
     var topic = sel.topic;
+    var range = parseTimeRange(topic.time_range);
+
+    var TranscriptList = fs.TranscriptList;
+    var AudioPlaylist  = fs.AudioPlaylist;
+    var VideoPlayer    = fs.VideoPlayer;
+    var PhotoGrid      = fs.PhotoGrid;
+
+    var mediaProps = {
+      date:  sel.date,
+      user:  sel.user || (sel.user_name && window.FS.api.folderName(sel.user_name)),
+      start: range.start,
+      end:   range.end,
+    };
+
     var bodyByTab = {
       overview:   React.createElement(OverviewTab, {
         topic: topic, date: sel.date, actionState: refActions[0],
       }),
-      transcript: React.createElement(ComingSoon, {
-        title: 'Transcript', api: 'FS.api.transcripts.getTranscripts',
-      }),
-      audio:      React.createElement(ComingSoon, {
-        title: 'Audio segments', api: 'FS.api.audio.getAudioSegments',
-      }),
-      video:      React.createElement(ComingSoon, {
-        title: 'Video segments', api: 'FS.api.video.getVideoSegments',
-      }),
-      photos:     React.createElement(PhotosTab, {
-        topic: topic, date: sel.date, userName: sel.user_name,
-      }),
+      transcript: TranscriptList ? React.createElement(TranscriptList,
+        Object.assign({}, mediaProps, {
+          participants: topic.participants || [],
+        })) : null,
+      audio:      AudioPlaylist  ? React.createElement(AudioPlaylist,  mediaProps) : null,
+      video:      VideoPlayer    ? React.createElement(VideoPlayer,    mediaProps) : null,
+      photos:     PhotoGrid      ? React.createElement(PhotoGrid, {
+        photos:          topic.related_photos || [],
+        userDisplayName: sel.user_name,
+        date:            sel.date,
+      }) : null,
     };
 
     return React.createElement('div', {
