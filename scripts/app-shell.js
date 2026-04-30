@@ -150,7 +150,7 @@ function formatTodayDate() {
 }
 
 /* ---------- MiddleColumn -------------------------------------------------- */
-function MiddleColumn({ route, width, onWidthChange, onSelect }) {
+function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem }) {
   const t = window.FS.tokens;
 
   const routeLabel = (route || '/').replace(/^\//, '') || 'today';
@@ -211,7 +211,10 @@ function MiddleColumn({ route, width, onWidthChange, onSelect }) {
       (function() {
         var page = window.FieldSight.getPageForRoute && window.FieldSight.getPageForRoute(route);
         if (page && page.Middle) {
-          return React.createElement(page.Middle, { onSelect: onSelect });
+          return React.createElement(page.Middle, {
+            onSelect:     onSelect,
+            selectedItem: selectedItem,
+          });
         }
         /* Fallback placeholder for unregistered routes — Sprint 2 fills in
            remaining pages; until then, visualise the route as a friendly
@@ -437,6 +440,7 @@ function AppShell({ showDevSwitcher = false }) {
       width: middleWidth,
       onWidthChange: setMiddleWidth,
       onSelect: setSelectedItem,
+      selectedItem: selectedItem,
     }),
 
     React.createElement(RightDetail, {

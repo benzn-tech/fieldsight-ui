@@ -12,8 +12,9 @@
 
   <!-- Design tokens + AppShell CSS -->
   <link rel="stylesheet" href="styles/tokens.css" />
-  <link rel="stylesheet" href="styles/app-shell.css" />
+  <link rel="stylesheet" href="styles/app-shell.css?v=2" />
   <link rel="stylesheet" href="styles/components.css?v=4" />
+  <link rel="stylesheet" href="styles/composites.css?v=9" />
 
   <style>
     /* Ensure full-bleed with no scroll */
@@ -48,13 +49,77 @@
   <script type="text/babel" src="scripts/components/badge.js?v=1"></script>
   <script type="text/babel" src="scripts/components/avatar.js?v=2"></script>
 
-  <!-- Mock data + page registry + pages -->
-  <script type="text/babel" src="scripts/mock-data.js?v=2"></script>
+  <!-- Layer 5 composites (depend on L4 atoms above) -->
+  <script type="text/babel" src="scripts/composites/task-card.js?v=2"></script>
+  <script type="text/babel" src="scripts/composites/urgent-card.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/activity-card.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/morning-brief-card.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/on-site-card.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/timeline.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/stat-card.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/kpi-strip.js?v=1"></script>
+  <!-- Sprint 2.2 (Phase B) Timeline composites -->
+  <script type="text/babel" src="scripts/composites/category-badge.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/executive-summary-card.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/safety-flag-row.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/action-item-row.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/topic-card.js?v=1"></script>
+  <!-- Sprint 2.3 (Phase C) Topic-detail media composites -->
+  <script type="text/babel" src="scripts/composites/photo-grid.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/transcript-list.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/audio-playlist.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/video-player.js?v=1"></script>
+  <!-- Sprint 2.5 (Phase E) Calendar/date picker -->
+  <script type="text/babel" src="scripts/composites/date-picker.js?v=1"></script>
+  <!-- Sprint 2.7 (Phase G) Ask Agent chat strip -->
+  <script type="text/babel" src="scripts/composites/ask-chat.js?v=1"></script>
+  <!-- Sprint 2.8 (Phase H) Meeting Minutes -->
+  <script type="text/babel" src="scripts/composites/meeting-topic-card.js?v=1"></script>
+  <!-- Sprint 2.9 (Phase I) Auth scaffolding — Login + 403 -->
+  <script type="text/babel" src="scripts/composites/login-screen.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/access-denied.js?v=1"></script>
+
+  <!-- Auth scaffolding (Phase I) — Cognito IDP wrapper + session store.
+       Loaded before FS.api so api/_fetch.js can use FS.session for
+       Authorization headers when useMocks is flipped to false. -->
+  <script src="scripts/auth/cognito.js?v=1"></script>
+  <script src="scripts/auth/session.js?v=1"></script>
+
+  <!-- Backend-shaped data layer (Sprint 2.1, Phase A): fixtures → api modules → adapter -->
+  <!--   1. FS.api namespace + helpers (must precede every api/* and adapter) -->
+  <script src="scripts/api/index.js?v=1"></script>
+  <script src="scripts/api/_fetch.js?v=1"></script>
+  <!--   2. Fixtures populate window.FieldSight.fixtures.* -->
+  <script src="scripts/mock/sites.fixture.js?v=1"></script>
+  <script src="scripts/mock/dates.fixture.js?v=1"></script>
+  <script src="scripts/mock/actions.fixture.js?v=1"></script>
+  <script src="scripts/mock/daily-report.fixture.js?v=1"></script>
+  <script src="scripts/mock/media.fixture.js?v=1"></script>
+  <script src="scripts/mock/meeting-minutes.fixture.js?v=1"></script>
+  <!--   3. Per-endpoint api modules (read fixtures via FS.api.*) -->
+  <script src="scripts/api/sites.js?v=1"></script>
+  <script src="scripts/api/dates.js?v=1"></script>
+  <script src="scripts/api/timeline.js?v=1"></script>
+  <script src="scripts/api/transcripts.js?v=1"></script>
+  <script src="scripts/api/audio.js?v=1"></script>
+  <script src="scripts/api/video.js?v=1"></script>
+  <script src="scripts/api/actions.js?v=1"></script>
+  <script src="scripts/api/ask.js?v=1"></script>
+  <script src="scripts/api/reports.js?v=1"></script>
+  <script src="scripts/api/media.js?v=1"></script>
+  <script src="scripts/api/meetings.js?v=1"></script>
+  <!--   4. Today adapter (PLAN Phase D sketch — feeds mock-data.js shim) -->
+  <script src="scripts/api/today-adapter.js?v=1"></script>
+
+  <!-- Mock data shim (weather only) + page registry + pages -->
+  <script type="text/babel" src="scripts/mock-data.js?v=4"></script>
   <script type="text/babel" src="scripts/pages/_page-registry.js?v=1"></script>
-  <script type="text/babel" src="scripts/pages/today.js?v=2"></script>
+  <script type="text/babel" src="scripts/pages/today.js?v=4"></script>
+  <script type="text/babel" src="scripts/pages/timeline.js?v=5"></script>
+  <script type="text/babel" src="scripts/pages/reports.js?v=1"></script>
 
   <script type="text/babel" src="scripts/dev-role-switcher.js?v=3"></script>
-  <script type="text/babel" src="scripts/app-shell.js?v=4"></script>
+  <script type="text/babel" src="scripts/app-shell.js?v=5"></script>
 
   <!-- Bootstrap: set default route then mount -->
   <script>
