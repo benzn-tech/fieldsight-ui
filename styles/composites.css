@@ -97,6 +97,51 @@
 }
 
 
+/* "View daily report" CTA — full-width banner above MorningBriefCard.
+   Lifted out of the brief card so the action reads as a top-level
+   page CTA (post-merge review feedback). */
+.fs-today__view-report-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 12px 16px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  color: #fff;
+  background: var(--color-primary-900);
+  border: 1px solid var(--color-primary-800);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--duration-fast) var(--easing-out),
+              transform var(--duration-fast) var(--easing-out);
+}
+.fs-today__view-report-cta:hover {
+  background: var(--color-primary-800);
+}
+.fs-today__view-report-cta:active {
+  transform: translateY(1px);
+}
+.fs-today__view-report-cta:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+.fs-today__view-report-cta-arrow {
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.85;
+  transition: transform var(--duration-fast) var(--easing-out);
+}
+.fs-today__view-report-cta:hover .fs-today__view-report-cta-arrow {
+  transform: translateX(2px);
+}
+
+
 /* "Mine" accent — left edge in safety orange so a user's own tasks
    stand out among the team's. */
 .fs-task-card--mine {

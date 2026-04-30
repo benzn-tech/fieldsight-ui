@@ -1,17 +1,20 @@
 /* ==========================================================================
    FieldSight MorningBriefCard — Layer 5 composite
    --------------------------------------------------------------------------
-   Renders the AI-generated overnight briefing as an elevated Card
-   with a bullet list and a "Read full brief" link. Collapse is a
-   *controlled* prop so parent state can drive it; defaults to a
-   console.log stub when no callback is supplied (Sprint 2.1 wires
-   the real toggle).
+   Renders the AI-generated overnight briefing as an elevated Card with
+   a bullet list. Collapse / expand is local state by default; pass
+   both `collapsed` + `onToggleCollapse` to drive it from the parent.
+
+   The CTA to open the full daily report is intentionally NOT inside
+   this card — it's lifted to the Today page header
+   (`.fs-today__view-report-cta` banner) so the action stands on its
+   own and the brief stays a focused summary.
 
    Props:
-     brief             { generatedAt, bullets: [string] }
-     collapsed         boolean — hide body + footer when true
-     onToggleCollapse  () => void — chevron click handler
-     onOpenFull        () => void — "Read full brief" handler
+     brief             { generatedAt, bullets: [string], date?, userFolder? }
+     collapsed         boolean — controlled mode (with onToggleCollapse)
+     defaultCollapsed  boolean — initial state when uncontrolled
+     onToggleCollapse  () => void — chevron handler (controlled mode)
 
    Exported to:
      window.FieldSight.MorningBriefCard
@@ -24,57 +27,53 @@
 
   function MorningBriefCard(props) {
     var Card       = window.FieldSight.Card;
-    var Button     = window.FieldSight.Button;
     var IconButton = window.FieldSight.IconButton;
 
-    var brief            = props.brief;
-    var collapsed        = !!props.collapsed;
-    var onToggleCollapse = props.onToggleCollapse;
-    var onOpenFull       = props.onOpenFull;
+    var brief             = props.brief || { bullets: [] };
+    var controlled        = typeof props.collapsed === 'boolean'
+                         && typeof props.onToggleCollapse === 'function';
+
+    var ref = React.useState(!!props.defaultCollapsed);
+    var localCollapsed    = ref[0];
+    var setLocalCollapsed = ref[1];
+
+    var collapsed = controlled ? !!props.collapsed : localCollapsed;
 
     function handleToggle() {
-      if (onToggleCollapse) onToggleCollapse();
-      else console.log('[Brief] toggle collapse — Sprint 2 wires this');
-    }
-    function handleOpen() {
-      if (onOpenFull) onOpenFull();
-      else console.log('[Brief] open full brief — Sprint 2 wires this');
+      if (controlled) {
+        props.onToggleCollapse();
+      } else {
+        setLocalCollapsed(function (c) { return !c; });
+      }
     }
 
     var className = 'fs-morning-brief-card' +
       (collapsed ? ' fs-morning-brief-card--collapsed' : '');
 
     return React.createElement(Card, {
-      variant: 'elevated',
-      padding: 'md',
+      variant:   'elevated',
+      padding:   'md',
       className: className,
     },
       React.createElement(Card.Header, {
-        title: 'Morning Brief',
-        subtitle: 'Generated from overnight transcripts · ' + brief.generatedAt,
-        actions: React.createElement(IconButton, {
+        title:    'Morning Brief',
+        subtitle: 'Generated from overnight transcripts · ' + (brief.generatedAt || ''),
+        actions:  React.createElement(IconButton, {
           icon:      collapsed ? 'chevron-down' : 'chevron-up',
           ariaLabel: collapsed ? 'Expand brief'  : 'Collapse brief',
-          size: 'sm',
-          onClick: handleToggle,
+          size:      'sm',
+          onClick:   handleToggle,
         }),
       }),
 
       !collapsed ? React.createElement(Card.Body, null,
         React.createElement('ul', { className: 'fs-morning-brief-card__bullets' },
-          brief.bullets.map(function(b, i) {
+          (brief.bullets || []).map(function(b, i) {
             return React.createElement('li', {
               key: i, className: 'fs-morning-brief-card__bullet',
             }, b);
           })
         ),
-      ) : null,
-
-      !collapsed ? React.createElement(Card.Footer, { align: 'start' },
-        React.createElement(Button, {
-          variant: 'tertiary', size: 'sm', rightIcon: 'arrow-right',
-          onClick: handleOpen,
-        }, 'Read full brief'),
       ) : null,
     );
   }

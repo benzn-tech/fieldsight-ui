@@ -357,3 +357,59 @@ starting the sprint.
 
 After P-01 through P-12, the prototype is ready for handoff to a real
 auth + fetch flip (Phase I activation) without UI surprises.
+
+## Sprint 4+ — Open product questions
+
+Surfaced during the second-pass review of merged main. These aren't
+bugs — they're product / scope decisions that need a yes/no before
+any sprint commits to them. Each one is ~1 sprint of UI plus a
+matching backend change (the prototype has zero backend hooks for
+any of them).
+
+- **Q-1 · Tasks page / cross-day audit aggregation.**
+  `/api/actions` is keyed by date and writes to an immutable audit
+  log (`fieldsight-audit` DynamoDB). Today the UI only surfaces
+  per-action `Checked by …` captions inside one report; there's no
+  "my open actions across the week" view, no "audit history of one
+  action over time" drill-down, no completion-rate dashboard.
+  - Surfaces likely needed: `/tasks` page (already a nav slot — no
+    page yet), filtered by responsible/owner; per-action history
+    drawer; weekly completion KPI on Today.
+  - Backend: add `GET /api/actions/all?from=&to=&user=` aggregator,
+    or have the UI fan out N `getActions(date)` calls.
+
+- **Q-2 · Editable reports + vocabulary system.**
+  BACKEND-CONTEXT §10 explicitly: reports are read-only, only
+  checkboxes mutate. Two related needs raised in review:
+  - Manual correction of inaccurate AI output (typo, mis-attributed
+    speaker, wrong category). Needs `PATCH /api/reports/:date/:user`
+    with audit + diff viewer + edit-in-place UI.
+  - Custom vocabulary for project-specific terms ("SB1108",
+    "MPI") so transcripts and reports get the spellings right.
+    Needs a vocab admin surface + `POST /api/vocab` + Claude
+    prompt injection.
+  Both are sprint-sized features each. Decision needed before
+  designing.
+
+- **Q-3 · Photo lifecycle (delete + UI upload).**
+  §10 explicitly: no UI upload (RealPTT devices push), no delete
+  endpoint.
+  - Delete: `DELETE /api/media/<key>` with permission gate (worker
+    can't delete others'), soft-delete with retention window,
+    audit. UI: trash icon in PhotoGrid + lightbox.
+  - Upload: `POST /api/media/upload` with multipart / chunked
+    upload (videos can be 200–300 MB). UI: drag-drop in topic
+    detail. Changes the data-flow assumption (today: device-only
+    inputs).
+
+- **Q-4 · Global / cross-day Ask.**
+  `/api/ask` is scoped to one (date, user) per call. Per-topic
+  ("transcript" scope) and per-report ("both" scope) live in the
+  current Timeline page. Reviewer asked about cross-day questions
+  ("when was scaffold remediation last raised?"). Options:
+  - Backend: new `POST /api/ask/global` that queries across a
+    date range or all available reports.
+  - Frontend-only: fan out N `/api/ask` calls and aggregate.
+    Cheap to ship, expensive at runtime.
+  - UI surface: a top-bar global search input, or a new `/search`
+    nav item that opens a chat-style scope picker.
