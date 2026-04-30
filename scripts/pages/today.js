@@ -395,6 +395,26 @@
           '· no report yet for today (' + fmtDate(state.today) + ')'),
       ) : null,
 
+      /* "View daily report" CTA — full-width banner above the brief.
+         Lifted out of MorningBriefCard so the action stands on its
+         own (post-merge review feedback). Navigates to the canonical
+         /timeline view scoped to the brief's (date, user). */
+      React.createElement('button', {
+        type:      'button',
+        className: 'fs-today__view-report-cta',
+        onClick:   function () {
+          var qs = '?date=' + encodeURIComponent(effectiveDate);
+          var u  = data.morningBrief && data.morningBrief.userFolder;
+          if (u) qs += '&user=' + encodeURIComponent(u);
+          window.FS.Router.navigate('/timeline' + qs);
+        },
+      },
+        React.createElement('span', { className: 'fs-today__view-report-cta-text' },
+          'View daily report'),
+        React.createElement('span', { className: 'fs-today__view-report-cta-arrow' },
+          '→'),
+      ),
+
       /* MORNING BRIEF */
       React.createElement(fs.MorningBriefCard, { brief: data.morningBrief }),
 
