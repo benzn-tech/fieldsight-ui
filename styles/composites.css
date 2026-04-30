@@ -5,6 +5,22 @@
    adds page-shaped layout. Class names follow .fs-{component}__{element}
    --{modifier} BEM, like Layer 4. All values come from CSS custom
    properties in styles/tokens.css.
+
+   ── Animation registry ────────────────────────────────────────────────
+   tokens.css §16 zeroes animation-duration / iteration-count / transition-
+   duration globally under prefers-reduced-motion (belt). Every named
+   keyframe MUST also ship its own `@media (prefers-reduced-motion)` rule
+   that lands on a sensible static frame (suspenders), because forwards-
+   filling animations can leave elements in transformed end-states.
+
+     Keyframe              Used by                          Override
+     ────────────────────  ───────────────────────────────  ──────────────
+     fs-task-checkoff      .fs-task-card--checking-off      animation:none; opacity:0
+     fs-ask-pending        .fs-ask-chat__pending-dot        animation:none; opacity:0.6
+     (fs-btn-spin)         .fs-btn__spinner [components.css] animation-duration: 1.6s
+
+   When adding a new keyframe, extend this list AND add its override
+   block alongside the @keyframes definition.
    ========================================================================== */
 
 

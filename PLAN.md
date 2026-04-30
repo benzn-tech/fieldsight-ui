@@ -279,12 +279,18 @@ starting the sprint.
   call so toggles land on the right (date, topic_id, action_index)
   key.
 
-- **P-07 · `window.FieldSight._todayCache` should be a Context.**
-  Phase D shares the live Today snapshot from Middle to Right via a
-  window slot. Works, but breaks under SSR / multiple instances and
-  is invisible to React DevTools. Replace with a small React Context
-  provider mounted by the Today page.
-  Files: `scripts/pages/today.js`.
+- **P-07 · `window.FieldSight._todayCache` should be a Context.** ✅ done
+  Shipped on `claude/internals-p07-p11`. New `TodayContext` lives in
+  `today.js`; new `TodayProvider` owns the Today state via
+  `useTodayState` and exposes it via context. The page registry
+  gained an optional `Provider` slot — `AppShell` reads the slot and
+  wraps Middle + Right in it (or `React.Fragment` for pages without
+  state-sharing needs). Provider is a `Context.Provider` underneath,
+  so it adds no DOM and the existing flex layout of LeftNav / Middle
+  / Right is unchanged. `window.FieldSight._todayCache` writes and
+  reads are gone. Visible in React DevTools, scoped per-mount, and
+  the pattern generalises — any future page that wants to share
+  state between Middle and Right just exports a `Provider`.
 
 - **P-08 · Session gate not wired.** ✅ done
   Shipped on `claude/auth-gates-p08-p12`. New `SessionGate` wrapper
@@ -316,13 +322,21 @@ starting the sprint.
   Renders as a faint italic note with a left stripe so it's clearly
   a system explanation, not an action item itself.
 
-- **P-11 · Reduced-motion audit.**
-  Sprint 2.4's task check-off animation respects
-  `prefers-reduced-motion`. The Sprint 2.7 ask-pending dots animation
-  also does. Sweep the rest of `composites.css` for any keyframes /
-  transitions added in 2.5+ that don't have a reduced-motion fallback
-  (date-picker dot pulses, login-screen focus rings).
-  Files: `styles/composites.css`.
+- **P-11 · Reduced-motion audit.** ✅ done
+  Shipped on `claude/internals-p07-p11`. Sweep findings:
+    * `tokens.css §16` zeroes `animation-duration` / `iteration-count`
+      / `transition-duration` globally under reduced-motion (belt).
+    * Three named keyframes total in the codebase, each with its own
+      explicit override (suspenders):
+        - `fs-task-checkoff` (P-04 / 2.4)  → `animation: none; opacity: 0`
+        - `fs-ask-pending`   (Phase G / 2.7) → `animation: none; opacity: 0.6`
+        - `fs-btn-spin`      (pre-existing) → animation slowed to 1.6 s
+    * Sprint 2.5+ added no further keyframes (DatePicker, Reports,
+      Meeting Minutes, Login, AccessDenied, Sprint 3 polish — all use
+      simple hover / focus transitions covered by the global rule).
+  Documented as an "Animation registry" comment block at the top of
+  `composites.css` so any new keyframe is checked against the same
+  belt-and-suspenders rule.
 
 - **P-12 · 403 path coverage.** ✅ done
   Shipped on `claude/auth-gates-p08-p12`. Each page-level fetch in
