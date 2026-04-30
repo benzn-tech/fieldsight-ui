@@ -270,6 +270,8 @@
       ? props.selectedItem.topic_id
       : null;
 
+    var AskChat = window.FieldSight.AskChat;
+
     return React.createElement('div', {
       className: 'fs-timeline-page',
     },
@@ -304,6 +306,26 @@
           });
         }),
       ),
+
+      /* Per-report Ask Agent (PLAN Phase G). Stateless — each question
+         is independent. Scope='both' grounds across transcript +
+         report. */
+      AskChat ? React.createElement(React.Fragment, null,
+        React.createElement('div', { className: 'fs-timeline-page__section-label' },
+          'Ask agent'),
+        React.createElement(AskChat, {
+          date:        date,
+          user:        user,
+          scope:       'both',
+          placeholder: 'Ask anything about today’s report…',
+          compact:     true,
+          suggestions: [
+            'What were today’s safety highlights?',
+            'Which actions are still open?',
+            'Any decisions about the scaffold inspection?',
+          ],
+        }),
+      ) : null,
     );
   }
 
@@ -317,6 +339,7 @@
     { key: 'audio',      label: 'Audio' },
     { key: 'video',      label: 'Video' },
     { key: 'photos',     label: 'Photos' },
+    { key: 'ask',        label: 'Ask' },
   ];
 
   /* Topic time_range uses an en-dash: "07:00 – 07:30". Returns
@@ -439,6 +462,7 @@
     var AudioPlaylist  = fs.AudioPlaylist;
     var VideoPlayer    = fs.VideoPlayer;
     var PhotoGrid      = fs.PhotoGrid;
+    var AskChat        = fs.AskChat;
 
     var mediaProps = {
       date:  sel.date,
@@ -461,6 +485,18 @@
         photos:          topic.related_photos || [],
         userDisplayName: sel.user_name,
         date:            sel.date,
+      }) : null,
+      ask:        AskChat        ? React.createElement(AskChat, {
+        date:        sel.date,
+        user:        mediaProps.user,
+        scope:       'transcript',
+        topic_id:    topic.topic_id,
+        placeholder: 'Ask about this topic…',
+        suggestions: [
+          'What was decided?',
+          'Who is responsible for follow-ups?',
+          'Were any risks flagged?',
+        ],
       }) : null,
     };
 

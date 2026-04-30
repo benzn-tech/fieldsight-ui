@@ -1528,3 +1528,149 @@
 }
 .fs-reports-detail__msg--ok  { color: var(--color-success-700); }
 .fs-reports-detail__msg--err { color: var(--color-danger-700); }
+
+
+/* =========================================================================
+   AskChat — input + history strip, stateless backend
+   ========================================================================= */
+
+.fs-ask-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+}
+.fs-ask-chat--compact { padding: 10px; }
+
+.fs-ask-chat__suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fs-ask-chat__suggestion {
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-panel-muted);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--easing-out);
+}
+.fs-ask-chat__suggestion:hover { background: var(--surface-panel); border-color: var(--color-accent-300); color: var(--color-accent-800); }
+.fs-ask-chat__suggestion:disabled { opacity: 0.5; cursor: default; }
+
+.fs-ask-chat__messages {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px 2px;
+}
+.fs-ask-chat--compact .fs-ask-chat__messages { max-height: 240px; }
+
+.fs-ask-chat__empty {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  padding: 8px 4px;
+}
+
+.fs-ask-chat__msg {
+  max-width: 90%;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.fs-ask-chat__msg--user {
+  align-self: flex-end;
+  background: var(--color-accent-500);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.fs-ask-chat__msg--assistant {
+  align-self: flex-start;
+  background: var(--surface-panel-muted);
+  color: var(--text-primary);
+  border-bottom-left-radius: 4px;
+}
+.fs-ask-chat__msg--error { color: var(--color-danger-700); }
+.fs-ask-chat__msg-text { white-space: pre-wrap; word-break: break-word; }
+
+.fs-ask-chat__citations,
+.fs-ask-chat__model {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+  font-family: var(--font-mono);
+}
+
+/* Pending dots animation */
+.fs-ask-chat__msg--pending {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.fs-ask-chat__pending-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  animation: fs-ask-pending 1.2s var(--easing-in-out) infinite;
+}
+.fs-ask-chat__pending-dot:nth-child(2) { animation-delay: 0.15s; }
+.fs-ask-chat__pending-dot:nth-child(3) { animation-delay: 0.30s; }
+
+@keyframes fs-ask-pending {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.85); }
+  40%           { opacity: 1;   transform: scale(1);    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fs-ask-chat__pending-dot { animation: none; opacity: 0.6; }
+}
+
+.fs-ask-chat__form {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.fs-ask-chat__input {
+  flex: 1;
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  min-width: 0;
+}
+.fs-ask-chat__input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px var(--color-accent-100);
+}
+.fs-ask-chat__input:disabled { color: var(--text-disabled); }
+
+.fs-ask-chat__send {
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 14px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--color-accent-500);
+  color: #fff;
+  cursor: pointer;
+  font-weight: var(--font-weight-medium);
+  transition: background var(--duration-fast) var(--easing-out);
+}
+.fs-ask-chat__send:hover:not(:disabled) { background: var(--color-accent-600); }
+.fs-ask-chat__send:disabled {
+  background: var(--border-default);
+  cursor: not-allowed;
+}
