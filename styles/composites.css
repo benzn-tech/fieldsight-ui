@@ -1278,3 +1278,253 @@
   align-items: center;
   gap: 4px;
 }
+
+
+/* =========================================================================
+   Reports page (L6) — middle list + right detail
+   ========================================================================= */
+
+.fs-reports {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fs-reports__header { padding: 0 4px; }
+
+.fs-reports__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.fs-reports__subtitle {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.fs-reports__chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 0 4px;
+}
+.fs-reports__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-panel);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: background var(--duration-fast) var(--easing-out),
+              border-color var(--duration-fast) var(--easing-out);
+}
+.fs-reports__chip:hover { background: var(--surface-panel-muted); }
+.fs-reports__chip--active {
+  border-color: var(--color-accent-400);
+  background: var(--color-accent-50);
+  color: var(--color-accent-800);
+}
+.fs-reports__chip-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--surface-panel-muted);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+}
+.fs-reports__chip--active .fs-reports__chip-count {
+  background: var(--color-accent-100);
+  color: var(--color-accent-700);
+}
+
+.fs-reports__regen { margin-top: 4px; }
+.fs-reports__regen-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.fs-reports__regen-main { flex: 1; min-width: 200px; }
+.fs-reports__regen-title {
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.fs-reports__regen-body {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.fs-reports__regen-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.fs-reports__regen-msg {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fs-reports__regen-msg--ok  { color: var(--color-success-700); }
+.fs-reports__regen-msg--err { color: var(--color-danger-700); }
+
+.fs-reports__list { display: flex; flex-direction: column; gap: 4px; }
+
+.fs-reports__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-panel);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: background var(--duration-fast) var(--easing-out),
+              border-color var(--duration-fast) var(--easing-out);
+}
+.fs-reports__row:hover { background: var(--surface-panel-muted); }
+.fs-reports__row--selected {
+  border-color: var(--color-accent-500);
+  box-shadow: 0 0 0 2px var(--color-accent-100);
+}
+
+.fs-reports__row-type { flex-shrink: 0; }
+.fs-reports__row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.fs-reports__row-date {
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+.fs-reports__row-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.fs-reports__row-size {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.fs-reports__loading,
+.fs-reports__empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+
+/* ---- Right detail ---- */
+.fs-reports-detail {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 24px;
+  gap: 16px;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+.fs-reports-detail__placeholder {
+  padding: 32px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+.fs-reports-detail__placeholder-title {
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.fs-reports-detail__placeholder-body {
+  font-size: 13px;
+}
+
+.fs-reports-detail__header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.fs-reports-detail__header-main { flex: 1; min-width: 0; }
+.fs-reports-detail__date {
+  font-size: 18px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.fs-reports-detail__metaline {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.fs-reports-detail__site {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.fs-reports-detail__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.fs-reports-detail__row {
+  display: flex;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.fs-reports-detail__row:last-child { border-bottom: none; }
+
+.fs-reports-detail__row-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-weight: var(--font-weight-semibold);
+  width: 88px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding-top: 2px;
+}
+.fs-reports-detail__row-value {
+  font-size: 13px;
+  color: var(--text-primary);
+  flex: 1;
+  word-break: break-word;
+}
+.fs-reports-detail__row-value--mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.fs-reports-detail__actions {
+  margin-top: auto;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.fs-reports-detail__confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+
+.fs-reports-detail__msg {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fs-reports-detail__msg--ok  { color: var(--color-success-700); }
+.fs-reports-detail__msg--err { color: var(--color-danger-700); }

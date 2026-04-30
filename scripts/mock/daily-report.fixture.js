@@ -257,29 +257,51 @@
     Jarley_Trainor: REPORT_2026_04_29_JARLEY,
   };
 
-  /* Reports archive fixture — feeds /api/reports/history (Phase F). */
+  /* Reports archive fixture — feeds /api/reports/history (Phase F).
+     Mix of daily / weekly / monthly across the last few weeks so the
+     list page has enough rows for a useful preview. */
   window.FieldSight.fixtures.reportHistory = [
-    {
-      key:          'reports/2026-04-29/Jarley_Trainor/daily_report.docx',
-      type:         'daily',
-      date:         '2026-04-29',
-      generated_at: '2026-04-29T16:00:00Z',
-      size:         184320,
-    },
-    {
-      key:          'reports/2026-04-26/weekly_report.docx',
-      type:         'weekly',
-      date:         '2026-04-26',
-      generated_at: '2026-04-26T18:00:00Z',
-      size:         412928,
-    },
-    {
-      key:          'reports/2026-03-31/monthly_report.docx',
-      type:         'monthly',
-      date:         '2026-03-31',
-      generated_at: '2026-03-31T18:00:00Z',
-      size:         684032,
-    },
+    /* — Daily reports for the last working week — */
+    { key: 'reports/2026-04-29/Jarley_Trainor/daily_report.docx',
+      type: 'daily', date: '2026-04-29',
+      generated_at: '2026-04-29T16:00:00Z', size: 184320,
+      author: 'Jarley Trainor', site: 'SB1108 Ellesmere College' },
+    { key: 'reports/2026-04-28/Jarley_Trainor/daily_report.docx',
+      type: 'daily', date: '2026-04-28',
+      generated_at: '2026-04-28T16:00:00Z', size: 196608,
+      author: 'Jarley Trainor', site: 'SB1108 Ellesmere College' },
+    { key: 'reports/2026-04-27/Jarley_Trainor/daily_report.docx',
+      type: 'daily', date: '2026-04-27',
+      generated_at: '2026-04-27T16:30:00Z', size: 158720,
+      author: 'Jarley Trainor', site: 'SB1108 Ellesmere College' },
+    { key: 'reports/2026-04-24/Jarley_Trainor/daily_report.docx',
+      type: 'daily', date: '2026-04-24',
+      generated_at: '2026-04-24T16:00:00Z', size: 178176,
+      author: 'Jarley Trainor', site: 'SB1108 Ellesmere College' },
+
+    /* — Weekly summaries (week-ending Sundays) — */
+    { key: 'reports/2026-04-26/weekly_report.docx',
+      type: 'weekly', date: '2026-04-26',
+      generated_at: '2026-04-26T18:00:00Z', size: 412928,
+      author: 'system', site: 'SB1108 Ellesmere College' },
+    { key: 'reports/2026-04-19/weekly_report.docx',
+      type: 'weekly', date: '2026-04-19',
+      generated_at: '2026-04-19T18:00:00Z', size: 397312,
+      author: 'system', site: 'SB1108 Ellesmere College' },
+    { key: 'reports/2026-04-12/weekly_report.docx',
+      type: 'weekly', date: '2026-04-12',
+      generated_at: '2026-04-12T18:00:00Z', size: 421120,
+      author: 'system', site: 'SB1108 Ellesmere College' },
+
+    /* — Monthly (end-of-month) — */
+    { key: 'reports/2026-03-31/monthly_report.docx',
+      type: 'monthly', date: '2026-03-31',
+      generated_at: '2026-03-31T18:00:00Z', size: 684032,
+      author: 'system', site: 'SB1108 Ellesmere College' },
+    { key: 'reports/2026-02-28/monthly_report.docx',
+      type: 'monthly', date: '2026-02-28',
+      generated_at: '2026-02-28T18:00:00Z', size: 717824,
+      author: 'system', site: 'SB1108 Ellesmere College' },
   ];
 
 })();
