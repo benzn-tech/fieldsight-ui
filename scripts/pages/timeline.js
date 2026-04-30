@@ -32,11 +32,6 @@
 (function () {
   'use strict';
 
-  /* Default date for the prototype: the fixture's report date. Real
-     deploy will pass `?date=` or default to today via FS.api.addDaysISO
-     against a NZDT clock. */
-  var DEFAULT_DATE = '2026-04-29';
-
   /* ---------- helpers --------------------------------------------------- */
 
   function readRouteParams() {
@@ -52,6 +47,19 @@
 
   function isAdminLike(user) {
     return user && (user.role === 'admin' || user.role === 'gm' || user.isAdmin);
+  }
+
+  /* Pick the most recent date with a report from /api/dates, or null.
+     Mirrors the helper in today.js so the two pages share the same
+     fallback semantics — when "today" has no report, the user lands
+     on the latest available rather than a stale hardcoded date. */
+  function findLatestReportDate(datesMap) {
+    var keys = Object.keys(datesMap || {}).filter(function (d) {
+      return datesMap[d] && datesMap[d].hasReport;
+    });
+    if (keys.length === 0) return null;
+    keys.sort();
+    return keys[keys.length - 1];
   }
 
   function formatDateLabel(yyyymmdd) {
@@ -197,7 +205,7 @@
 
     /* Resolve effective (date, user) honouring worker-forced-self rule. */
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
-    var date   = params.date || DEFAULT_DATE;
+    var date   = params.date;            /* may be undefined → bootstrap resolves */
     var user   = params.user;
     if (caller.role === 'worker') user = callerFolder();
     if (!user && !isAdminLike(caller)) user = callerFolder();
@@ -212,7 +220,37 @@
     var view    = refView[0];
     var setView = refView[1];
 
+    /* M-2 — when no date is in the URL, resolve one before fetching:
+       try today (NZDT), fall back to the most recent date in
+       /api/dates, then navigate so the URL reflects what the user is
+       looking at. The fetch effect below sits in 'loading' until the
+       redirect lands. */
     React.useEffect(function () {
+      if (date) return undefined;
+      var cancelled = false;
+      var qsUser = user ? '&user=' + encodeURIComponent(user) : '';
+      var today = window.FS.api.todayNZDT();
+
+      window.FS.api.timeline.getTimeline({ date: today, user: user })
+        .then(function (r) {
+          if (cancelled) return null;
+          if (r && !r._notFound && !r._accessDenied) return today;
+          return window.FS.api.dates.getDates({ months: 3 }).then(function (res) {
+            if (cancelled || !res || res._accessDenied) return today;
+            return findLatestReportDate(res.dates || {}) || today;
+          });
+        })
+        .then(function (resolved) {
+          if (cancelled || !resolved) return;
+          window.FS.Router.navigate('/timeline?date=' + resolved + qsUser);
+        })
+        .catch(function () { /* fall through; fetch effect won't run */ });
+
+      return function () { cancelled = true; };
+    }, [date, user]);
+
+    React.useEffect(function () {
+      if (!date) return undefined;            /* bootstrap above is in flight */
       var cancelled = false;
       setState({ status: 'loading' });
       Promise.all([

@@ -258,7 +258,7 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem }) {
           }, title),
           React.createElement('div', {
             style: { fontSize: t.typography.fontSize.sm, lineHeight: 1.5 },
-          }, 'Coming in Sprint 2 — this page is not yet wired up.'),
+          }, 'This page isn’t wired up yet — coming in a later sprint.'),
         );
       })(),
     ),
@@ -475,27 +475,32 @@ function AppShell({ showDevSwitcher = false }) {
      successful sign-in (or a refresh failure that clears the session)
      swaps the screen in place.
 
-   Captured at first mount: which mode we're in. Flipping useMocks at
-   runtime requires a refresh — fine for development. */
+   Hooks are called unconditionally at the top so flipping useMocks
+   at runtime never trips the Rules of Hooks (M-3 fix from the post-
+   merge review). The early branch on useMocks just decides which
+   tree to render after the hooks run. */
 function SessionGate(opts) {
   const useMocks = window.FS && window.FS.api && window.FS.api.useMocks !== false;
   const session  = window.FS && window.FS.session;
   const Login    = window.FieldSight && window.FieldSight.LoginScreen;
 
-  /* Short-circuit when running against fixtures: no session needed. */
-  if (useMocks || !session) {
-    return React.createElement(AppShell, opts);
-  }
-
+  /* Always run the hooks — even in mock mode — so the hook order is
+     stable across re-renders if useMocks ever changes at runtime. */
   const [signedIn, setSignedIn] = React.useState(function () {
-    return session.isSignedIn();
+    return session ? session.isSignedIn() : true;
   });
 
   React.useEffect(function () {
+    if (!session) return undefined;
     return session.onChange(function () {
       setSignedIn(session.isSignedIn());
     });
-  }, []);
+  }, [session]);
+
+  /* Mock mode (or no session module loaded): always render AppShell. */
+  if (useMocks || !session) {
+    return React.createElement(AppShell, opts);
+  }
 
   if (!signedIn) {
     if (!Login) {

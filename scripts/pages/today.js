@@ -504,6 +504,34 @@
     var data = ctx && ctx.state.status === 'ok' ? ctx.state.data : null;
     var item = findItemById(data, sel.id) || sel;
 
+    /* M-4 — wire "Mark complete" to the same persistence path TaskCard
+       uses: toggle the action via /api/actions, then drop the task
+       optimistically from the page snapshot and close the right detail.
+       Surface only when the item is a task that carries the action key. */
+    var effectiveDate = (ctx && ctx.state && ctx.state.effectiveDate) || null;
+    var canCheckOff   = item.kind === 'task'
+                     && item.topic_id   != null
+                     && item.actionIndex != null
+                     && !!effectiveDate;
+
+    function onMarkComplete() {
+      if (!canCheckOff) return;
+      var api = window.FS && window.FS.api && window.FS.api.actions;
+      if (!api) return;
+      api.toggleAction({
+        date:         effectiveDate,
+        topic_id:     item.topic_id,
+        action_index: item.actionIndex,
+        checked:      true,
+        action_text:  item.title,
+      }).then(function () {
+        if (ctx && ctx.removeMyTask) ctx.removeMyTask(item.id);
+        if (props.onClose) props.onClose();
+      }).catch(function (err) {
+        console.error('[Today right] markComplete failed', err);
+      });
+    }
+
     var rows = [];
     if (item.kind === 'task') {
       rows = [
@@ -615,10 +643,13 @@
         React.createElement('div', {
           style: { display: 'flex', flexDirection: 'column', gap: '6px' },
         },
+          /* M-4 — Related rows are informational; clicking did nothing
+             but log a stub. Right detail can't currently change the
+             middle's selectedItem (that lives in AppShell), so surface
+             these as static cards rather than fake-interactive ones. */
           related.map(function (r, i) {
             return React.createElement(Card, {
               key: i, padding: 'sm', variant: 'ghost',
-              onClick: function () { console.log('[Right] navigate to related:', r.id); },
             },
               React.createElement(Card.Body, null,
                 React.createElement('div', {
@@ -645,7 +676,11 @@
         React.createElement(Timeline, { events: timeline }),
       ) : null,
 
-      React.createElement('div', {
+      /* M-4 — only render the action footer when there's an action to
+         take. Today the only persistable action from the right detail
+         is marking a task complete (Reassign + Acknowledge had no API
+         to back them and were stubs). */
+      canCheckOff ? React.createElement('div', {
         style: {
           marginTop: 'auto', display: 'flex', gap: '8px',
           justifyContent: 'flex-end',
@@ -653,14 +688,10 @@
         },
       },
         React.createElement(Button, {
-          variant: 'secondary', size: 'sm',
-          onClick: function () { console.log('[Today] secondary action on', item.id); },
-        }, 'Reassign'),
-        React.createElement(Button, {
           size: 'sm', leftIcon: 'check',
-          onClick: function () { console.log('[Today] primary action on', item.id); },
-        }, item.kind === 'task' ? 'Mark complete' : 'Acknowledge'),
-      ),
+          onClick: onMarkComplete,
+        }, 'Mark complete'),
+      ) : null,
 
     );
   }

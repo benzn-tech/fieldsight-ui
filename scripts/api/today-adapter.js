@@ -106,7 +106,10 @@
       };
     }
 
-    /* ---- morningBrief: executive_summary is array of strings (v3.0+) -- */
+    /* ---- morningBrief: executive_summary is array of strings (v3.0+) --
+       date + userFolder are passed through so MorningBriefCard's
+       "Read full brief" button can deep-link to the canonical
+       /timeline?date=…&user=… view (M-5). */
     var bullets = Array.isArray(report.executive_summary)
       ? report.executive_summary.slice()
       : (report.executive_summary ? [String(report.executive_summary)] : []);
@@ -114,6 +117,10 @@
     var morningBrief = {
       generatedAt: '5:42 AM',
       bullets:     bullets,
+      date:        report.report_date || ctx.date || null,
+      userFolder:  report.user_name
+                     ? window.FS.api.folderName(report.user_name)
+                     : null,
     };
 
     /* ---- urgent: safety topics + non-empty safety_flags + high obs ----
