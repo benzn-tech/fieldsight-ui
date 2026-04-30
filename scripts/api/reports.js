@@ -14,6 +14,9 @@
   }
 
   async function getReportsHistory(limit) {
+    if (!window.FS.api.useMocks) {
+      return window.FS.api.request('/reports/history', { params: { limit: limit || 20 } });
+    }
     await window.FS.api.delay();
     var rows = (fixtures().reportHistory || []).slice(0, limit || 20);
     return { reports: rows };
@@ -21,6 +24,16 @@
 
   async function regenerate(opts) {
     opts = opts || {};
+    if (!window.FS.api.useMocks) {
+      return window.FS.api.request('/reports/generate', {
+        method: 'POST',
+        body: {
+          report_type: opts.report_type,
+          date:        opts.date,
+          force:       !!opts.force,
+        },
+      });
+    }
     await window.FS.api.delay(150);
     return {
       message: 'Regeneration of ' + (opts.report_type || 'daily') + ' for ' + (opts.date || 'latest') + ' queued.',

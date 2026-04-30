@@ -31,6 +31,27 @@
 
   async function getMeetingMinutes(opts) {
     opts = opts || {};
+    if (!window.FS.api.useMocks) {
+      /* No dedicated /api endpoint exists for meeting minutes — fetch
+         the JSON via the generic media presigner. The caller-side
+         folder is enforced server-side. */
+      var folder = window.FS.api.folderName(opts.user || '');
+      var key    = 'reports/' + opts.date + '/' + folder + '/meeting_minutes.json';
+      var pre    = await window.FS.api.media.presignedUrl(key);
+      if (!pre || !pre.url) {
+        return { _notFound: true, message: 'No meeting minutes', date: opts.date };
+      }
+      try {
+        var res = await fetch(pre.url);
+        var ct = (res.headers.get && res.headers.get('content-type')) || '';
+        if (!res.ok || ct.indexOf('application/json') === -1) {
+          return { _notFound: true, message: 'No meeting minutes', date: opts.date };
+        }
+        return await res.json();
+      } catch (e) {
+        return { _notFound: true, message: 'Could not fetch meeting minutes', date: opts.date };
+      }
+    }
     await window.FS.api.delay(120);
 
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};

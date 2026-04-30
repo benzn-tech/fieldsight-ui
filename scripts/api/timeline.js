@@ -26,6 +26,11 @@
 
   async function getTimeline(opts) {
     opts = opts || {};
+    if (!window.FS.api.useMocks) {
+      return window.FS.api.request('/timeline', {
+        params: { date: opts.date, user: opts.user },
+      });
+    }
     await window.FS.api.delay(120);
 
     var date = opts.date;

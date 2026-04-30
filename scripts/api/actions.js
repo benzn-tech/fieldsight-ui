@@ -26,6 +26,9 @@
   }
 
   async function getActions(date) {
+    if (!window.FS.api.useMocks) {
+      return window.FS.api.request('/actions', { params: { date: date } });
+    }
     await window.FS.api.delay();
     ensureState();
     return { date: date, actions: state[date] || {} };
@@ -33,6 +36,18 @@
 
   async function toggleAction(opts) {
     opts = opts || {};
+    if (!window.FS.api.useMocks) {
+      return window.FS.api.request('/actions/toggle', {
+        method: 'POST',
+        body: {
+          date:         opts.date,
+          topic_id:     opts.topic_id,
+          action_index: opts.action_index,
+          checked:      opts.checked,
+          action_text:  opts.action_text,
+        },
+      });
+    }
     await window.FS.api.delay(60);
     ensureState();
 

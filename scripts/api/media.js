@@ -12,6 +12,9 @@
   'use strict';
 
   async function presignedUrl(key) {
+    if (!window.FS.api.useMocks) {
+      return window.FS.api.request('/media/presigned-url', { params: { key: key } });
+    }
     await window.FS.api.delay(40);
     return {
       url:        window.FS.api.mockPresignedUrl(key),

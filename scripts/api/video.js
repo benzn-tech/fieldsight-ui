@@ -27,6 +27,11 @@
 
   async function getVideoSegments(opts) {
     opts = opts || {};
+    if (!window.FS.api.useMocks) {
+      return window.FS.api.request('/video-segments', {
+        params: { date: opts.date, user: opts.user, start: opts.start, end: opts.end },
+      });
+    }
     await window.FS.api.delay(120);
 
     var bundle = lookup(opts.date, opts.user);

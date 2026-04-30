@@ -744,6 +744,129 @@
 
 
 /* =========================================================================
+   LoginScreen — Cognito sign-in (Phase I)
+   ========================================================================= */
+
+.fs-login {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--surface-app);
+}
+
+.fs-login__card {
+  width: 100%;
+  max-width: 360px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 32px;
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.fs-login__brand {
+  font-size: 22px;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-primary-900);
+  letter-spacing: -0.02em;
+}
+.fs-login__caption {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+.fs-login__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.fs-login__hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.fs-login__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fs-login__label {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.fs-login__input {
+  font: inherit;
+  font-size: 14px;
+  padding: 9px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-input);
+  color: var(--text-primary);
+}
+.fs-login__input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px var(--color-accent-100);
+}
+
+.fs-login__error {
+  font-size: 12px;
+  color: var(--color-danger-700);
+  background: var(--color-danger-50);
+  border: 1px solid var(--color-danger-200);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  line-height: 1.4;
+}
+
+
+/* =========================================================================
+   AccessDenied — empathetic 403 state (Phase I)
+   ========================================================================= */
+
+.fs-access-denied {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 40px 32px;
+  color: var(--text-secondary);
+}
+.fs-access-denied__icon {
+  font-size: 28px;
+  margin-bottom: 4px;
+}
+.fs-access-denied__title {
+  font-size: 16px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.fs-access-denied__body {
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 360px;
+}
+.fs-access-denied__role {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+}
+
+
+/* =========================================================================
    TopicDetail (right panel) — header, tabs, body
    ========================================================================= */
 

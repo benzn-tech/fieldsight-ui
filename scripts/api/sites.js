@@ -14,6 +14,7 @@
   }
 
   async function getSites() {
+    if (!window.FS.api.useMocks) return window.FS.api.request('/sites');
     await window.FS.api.delay();
     var f  = fixtures().sites || { sites: [], users: [] };
     var u  = (window.AuthMock && window.AuthMock.currentUser) || {};
@@ -25,6 +26,7 @@
   }
 
   async function getSiteUsers(site) {
+    if (!window.FS.api.useMocks) return window.FS.api.request('/site-users', { params: { site: site } });
     await window.FS.api.delay();
     var f = fixtures().sites || { users: [] };
     var users = f.users.filter(function (u) {
@@ -34,6 +36,7 @@
   }
 
   async function getUsers() {
+    if (!window.FS.api.useMocks) return window.FS.api.request('/users');
     await window.FS.api.delay();
     var f = fixtures().sites || { users: [] };
     return { users: f.users };

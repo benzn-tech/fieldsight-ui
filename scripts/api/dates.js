@@ -13,6 +13,11 @@
 
   async function getDates(opts) {
     opts = opts || {};
+    if (!window.FS.api.useMocks) {
+      return window.FS.api.request('/dates', {
+        params: { months: opts.months, site: opts.site },
+      });
+    }
     await window.FS.api.delay();
     var f = fixtures().dates || { dates: {} };
     /* Sprint 2.1: site filter is a no-op against the fixture. Real backend
