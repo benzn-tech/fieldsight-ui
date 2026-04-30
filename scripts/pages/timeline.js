@@ -74,11 +74,21 @@
     var report = props.report;
     var date   = props.date;
     var user   = props.user;
+    var DatePicker = window.FieldSight.DatePicker;
 
     var subtitleParts = [];
     if (date) subtitleParts.push(formatDateLabel(date));
     if (user) subtitleParts.push(unfolder(user));
     if (report && report.site) subtitleParts.push(report.site);
+
+    /* Navigate the timeline route to a new date while preserving the
+       active user query param (Sprint 2.5 / Phase E). */
+    function onChangeDate(newDate) {
+      var params = readRouteParams();
+      var u = params.user || (user || '');
+      var qs = '?date=' + newDate + (u ? '&user=' + u : '');
+      window.FS.Router.navigate('/timeline' + qs);
+    }
 
     return React.createElement('div', {
       className: 'fs-timeline-page__header',
@@ -87,6 +97,11 @@
         'Daily Report'),
       React.createElement('div', { className: 'fs-timeline-page__subtitle' },
         subtitleParts.join(' · ')),
+      DatePicker && date ? React.createElement(DatePicker, {
+        date:        date,
+        onChange:    onChangeDate,
+        monthsRange: 3,
+      }) : null,
     );
   }
 

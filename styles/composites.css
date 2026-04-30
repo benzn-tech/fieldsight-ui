@@ -1075,3 +1075,206 @@
   color: var(--text-tertiary);
   font-size: 13px;
 }
+
+
+/* =========================================================================
+   DatePicker — heat-mapped strip + month modal
+   ========================================================================= */
+
+.fs-date-picker { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+
+.fs-date-picker__strip {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.fs-date-picker__strip-cells {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.fs-date-picker__nudge {
+  width: 24px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-panel);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font: inherit;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.fs-date-picker__nudge:hover { background: var(--surface-panel-muted); }
+
+.fs-date-picker__more {
+  align-self: flex-start;
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-panel);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.fs-date-picker__more:hover { background: var(--surface-panel-muted); }
+
+/* ---- shared cell ---- */
+.fs-date-picker__cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 4px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--easing-out),
+              border-color var(--duration-fast) var(--easing-out);
+}
+.fs-date-picker__cell:hover { background: var(--surface-panel-muted); }
+.fs-date-picker__cell:disabled { color: var(--text-disabled); cursor: not-allowed; }
+
+.fs-date-picker__cell--strip {
+  flex: 1;
+  min-width: 0;
+}
+
+.fs-date-picker__cell--grid {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  font-size: 12px;
+}
+
+.fs-date-picker__cell-label {
+  font-weight: var(--font-weight-medium);
+  line-height: 1.1;
+}
+
+.fs-date-picker__cell-caption {
+  font-size: 9px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fs-date-picker__cell-dots {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  justify-content: center;
+  height: 6px;
+}
+
+.fs-date-picker__cell-dot {
+  display: inline-block;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--border-default);
+}
+.fs-date-picker__cell-dot--i1 { background: var(--color-info-300); }
+.fs-date-picker__cell-dot--i2 { background: var(--color-info-500); }
+.fs-date-picker__cell-dot--i3 { background: var(--color-info-700); }
+.fs-date-picker__cell-dot--safety { background: var(--color-accent-500); }
+
+/* Heat-map background tints — kept very faint so the dots carry the
+   information density and the cell stays readable. */
+.fs-date-picker__cell--i1 { background: color-mix(in srgb, var(--color-info-100) 40%, var(--surface-panel)); }
+.fs-date-picker__cell--i2 { background: color-mix(in srgb, var(--color-info-200) 35%, var(--surface-panel)); }
+.fs-date-picker__cell--i3 { background: color-mix(in srgb, var(--color-info-300) 35%, var(--surface-panel)); }
+
+.fs-date-picker__cell--selected {
+  border-color: var(--color-accent-500) !important;
+  box-shadow: 0 0 0 2px var(--color-accent-100);
+  font-weight: var(--font-weight-semibold);
+}
+.fs-date-picker__cell--muted { color: var(--text-disabled); }
+
+
+/* ---- modal ---- */
+.fs-date-picker__modal {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.fs-date-picker__modal-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--surface-overlay);
+}
+.fs-date-picker__modal-card {
+  position: relative;
+  background: var(--surface-panel);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  box-shadow: var(--shadow-2xl);
+  width: 360px;
+  max-width: 90vw;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fs-date-picker__modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fs-date-picker__month-label {
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.fs-date-picker__month-nav {
+  width: 28px; height: 28px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-panel);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font: inherit;
+  color: var(--text-secondary);
+}
+.fs-date-picker__month-nav:hover { background: var(--surface-panel-muted); }
+
+.fs-date-picker__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.fs-date-picker__grid-hdr {
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  text-align: center;
+  padding: 4px 0;
+}
+
+.fs-date-picker__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  padding: 4px 0 0;
+}
+.fs-date-picker__legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
