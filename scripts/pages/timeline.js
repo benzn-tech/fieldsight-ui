@@ -489,7 +489,10 @@
      TimelineRightDetail — TopicDetail panel + media tabs
      ===================================================================== */
 
-  var TABS = [
+  /* Tab sets — daily reports surface media (transcript / audio / video
+     / photos), meeting minutes don't (their per-topic recordings live
+     in a different bundle the prototype doesn't fetch). */
+  var DAILY_TABS = [
     { key: 'overview',   label: 'Overview' },
     { key: 'transcript', label: 'Transcript' },
     { key: 'audio',      label: 'Audio' },
@@ -497,6 +500,16 @@
     { key: 'photos',     label: 'Photos' },
     { key: 'ask',        label: 'Ask' },
   ];
+  var MEETING_TABS = [
+    { key: 'overview', label: 'Overview' },
+    { key: 'ask',      label: 'Ask' },
+  ];
+
+  /* Status / category palettes for meeting topics — kept in sync with
+     the MeetingTopicCard composite. */
+  var MEETING_STATUS_TONE  = { decided: 'success', deferred: 'warning', in_discussion: 'info', blocked: 'danger' };
+  var MEETING_STATUS_LABEL = { decided: 'Decided', deferred: 'Deferred', in_discussion: 'In discussion', blocked: 'Blocked' };
+  var MEETING_PRIORITY_TONE = { high: 'danger', medium: 'warning', low: 'info' };
 
   /* Topic time_range uses an en-dash: "07:00 – 07:30". Returns
      { start: 'HH:MM:SS', end: 'HH:MM:SS' } or { start: null, end: null }. */
@@ -570,9 +583,101 @@
     );
   }
 
+  /* Body for a meeting topic's Overview tab — different schema than the
+     daily report (BACKEND-CONTEXT §5.4): action_items.owner instead of
+     responsible, key_decisions are objects with rationale + decided_by,
+     no safety_flags, plus open_questions. */
+  function MeetingOverviewTab(props) {
+    var Badge = window.FieldSight.Badge;
+    var topic = props.topic;
+
+    var actions  = topic.action_items   || [];
+    var deciss   = topic.key_decisions  || [];
+    var openQs   = topic.open_questions || [];
+
+    return React.createElement('div', { className: 'fs-topic-detail__overview' },
+      topic.summary ? React.createElement('p', {
+        className: 'fs-topic-detail__summary',
+      }, topic.summary) : null,
+
+      deciss.length > 0
+        ? React.createElement('div', { className: 'fs-topic-detail__section' },
+            React.createElement('div', { className: 'fs-topic-detail__section-label' },
+              'Key decisions'),
+            React.createElement('div', { className: 'fs-meeting-decisions' },
+              deciss.map(function (d, i) {
+                return React.createElement('div', {
+                  key: i, className: 'fs-meeting-decision',
+                },
+                  React.createElement('div', { className: 'fs-meeting-decision__text' },
+                    d.decision),
+                  d.rationale ? React.createElement('div', {
+                    className: 'fs-meeting-decision__rationale',
+                  },
+                    React.createElement('span', {
+                      className: 'fs-meeting-decision__rationale-label',
+                    }, 'Rationale · '),
+                    d.rationale,
+                  ) : null,
+                  d.decided_by ? React.createElement('div', {
+                    className: 'fs-meeting-decision__by',
+                  }, 'Decided by ' + d.decided_by) : null,
+                );
+              }),
+            ),
+          )
+        : null,
+
+      actions.length > 0
+        ? React.createElement('div', { className: 'fs-topic-detail__section' },
+            React.createElement('div', { className: 'fs-topic-detail__section-label' },
+              'Action items'),
+            React.createElement('div', { className: 'fs-meeting-actions' },
+              actions.map(function (a, i) {
+                var p = (a.priority || '').toLowerCase();
+                return React.createElement('div', {
+                  key: i, className: 'fs-meeting-action',
+                },
+                  React.createElement('div', { className: 'fs-meeting-action__main' },
+                    React.createElement('div', { className: 'fs-meeting-action__text' },
+                      a.action),
+                    React.createElement('div', { className: 'fs-meeting-action__meta' },
+                      a.owner    ? React.createElement('span', null, a.owner) : null,
+                      a.deadline ? React.createElement('span', null, 'Due ' + a.deadline) : null,
+                    ),
+                  ),
+                  a.priority ? React.createElement(Badge, {
+                    tone:    MEETING_PRIORITY_TONE[p] || 'neutral',
+                    size:    'sm', variant: 'outline',
+                  }, a.priority.charAt(0).toUpperCase() + a.priority.slice(1)) : null,
+                );
+              }),
+            ),
+            /* P-10 — read-only caption mirrors the MeetingTopicCard. */
+            React.createElement('div', { className: 'fs-meeting-actions__readonly' },
+              'Read-only — meeting actions are tracked in the minutes,',
+              ' not the daily-action audit log.'),
+          )
+        : null,
+
+      openQs.length > 0
+        ? React.createElement('div', { className: 'fs-topic-detail__section' },
+            React.createElement('div', { className: 'fs-topic-detail__section-label' },
+              'Open questions'),
+            React.createElement('ul', { className: 'fs-topic-detail__decisions' },
+              openQs.map(function (q, i) {
+                return React.createElement('li', { key: i }, q);
+              }),
+            ),
+          )
+        : null,
+    );
+  }
+
   function TimelineRightDetail(props) {
     var fs       = window.FieldSight;
     var IconBtn  = fs.IconButton;
+    var Badge         = fs.Badge;
     var CategoryBadge = fs.CategoryBadge;
 
     var refTab = React.useState('overview');
@@ -583,31 +688,33 @@
     var setActions = refActions[1];
 
     var sel = props.selectedItem;
+    var isMeeting = sel && sel.kind === 'meeting_topic';
+    var isDaily   = sel && sel.kind === 'topic';
 
-    /* Load actions audit state once per (date) — needed for OverviewTab
-       to render checkbox states aligned with the middle column. */
+    /* Load actions audit state once per (date) — only relevant for
+       daily-report topics; meeting actions are read-only. */
     React.useEffect(function () {
-      if (!sel || !sel.date) return;
+      if (!isDaily || !sel || !sel.date) return;
       var cancelled = false;
       window.FS.api.actions.getActions(sel.date).then(function (res) {
         if (!cancelled) setActions(res.actions || {});
       });
       return function () { cancelled = true; };
-    }, [sel && sel.date]);
+    }, [isDaily, sel && sel.date]);
 
     /* Reset to overview tab whenever a new topic is selected. */
     React.useEffect(function () {
       setTab('overview');
     }, [sel && sel.id]);
 
-    if (!sel || sel.kind !== 'topic') {
+    if (!isDaily && !isMeeting) {
       return React.createElement('div', {
         className: 'fs-topic-detail__placeholder',
       },
         React.createElement('div', { className: 'fs-topic-detail__placeholder-title' },
           'Select a topic'),
         React.createElement('div', { className: 'fs-topic-detail__placeholder-body' },
-          'Click any topic in the timeline to view its full detail and recordings.'),
+          'Click any topic in the timeline to view its full detail.'),
       );
     }
 
@@ -627,37 +734,69 @@
       end:   range.end,
     };
 
-    var bodyByTab = {
-      overview:   React.createElement(OverviewTab, {
-        topic: topic, date: sel.date, actionState: refActions[0],
-      }),
-      transcript: TranscriptList ? React.createElement(TranscriptList,
-        Object.assign({}, mediaProps, {
-          participants: topic.participants || [],
-        })) : null,
-      audio:      AudioPlaylist  ? React.createElement(AudioPlaylist,  mediaProps) : null,
-      video:      VideoPlayer    ? React.createElement(VideoPlayer,    mediaProps) : null,
-      photos:     PhotoGrid      ? React.createElement(PhotoGrid, {
-        photos:          topic.related_photos || [],
-        userDisplayName: sel.user_name,
-        date:            sel.date,
-      }) : null,
-      ask:        AskChat        ? React.createElement(AskChat, {
-        date:        sel.date,
-        user:        mediaProps.user,
-        scope:       'transcript',
-        topic_id:    topic.topic_id,
-        placeholder: 'Ask about this topic…',
-        suggestions: [
-          'What was decided?',
-          'Who is responsible for follow-ups?',
-          'Were any risks flagged?',
-        ],
-      }) : null,
-    };
+    /* Tabs + body content depend on the topic kind. Meeting topics
+       skip media tabs — meeting recordings aren't part of the daily
+       report's recording bundle (BACKEND-CONTEXT §5.4 / §5.5). */
+    var TABS = isMeeting ? MEETING_TABS : DAILY_TABS;
+
+    var bodyByTab;
+    if (isMeeting) {
+      bodyByTab = {
+        overview: React.createElement(MeetingOverviewTab, { topic: topic }),
+        ask:      AskChat ? React.createElement(AskChat, {
+          date:        sel.date,
+          user:        mediaProps.user,
+          scope:       'both',  /* meeting transcripts may sit alongside; widen scope */
+          topic_id:    topic.topic_id,
+          placeholder: 'Ask about this meeting topic…',
+          suggestions: [
+            'What was decided?',
+            'Who owns the follow-ups?',
+            'Any open questions?',
+          ],
+        }) : null,
+      };
+    } else {
+      bodyByTab = {
+        overview:   React.createElement(OverviewTab, {
+          topic: topic, date: sel.date, actionState: refActions[0],
+        }),
+        transcript: TranscriptList ? React.createElement(TranscriptList,
+          Object.assign({}, mediaProps, {
+            participants: topic.participants || [],
+          })) : null,
+        audio:      AudioPlaylist  ? React.createElement(AudioPlaylist,  mediaProps) : null,
+        video:      VideoPlayer    ? React.createElement(VideoPlayer,    mediaProps) : null,
+        photos:     PhotoGrid      ? React.createElement(PhotoGrid, {
+          photos:          topic.related_photos || [],
+          userDisplayName: sel.user_name,
+          date:            sel.date,
+        }) : null,
+        ask:        AskChat        ? React.createElement(AskChat, {
+          date:        sel.date,
+          user:        mediaProps.user,
+          scope:       'transcript',
+          topic_id:    topic.topic_id,
+          placeholder: 'Ask about this topic…',
+          suggestions: [
+            'What was decided?',
+            'Who is responsible for follow-ups?',
+            'Were any risks flagged?',
+          ],
+        }) : null,
+      };
+    }
+
+    /* Status pill (meeting only) — sits next to the category badge. */
+    var statusPill = isMeeting && topic.status
+      ? React.createElement(Badge, {
+          tone: MEETING_STATUS_TONE[topic.status] || 'neutral',
+          size: 'sm', variant: 'outline',
+        }, MEETING_STATUS_LABEL[topic.status] || topic.status)
+      : null;
 
     return React.createElement('div', {
-      className: 'fs-topic-detail',
+      className: 'fs-topic-detail' + (isMeeting ? ' fs-topic-detail--meeting' : ''),
     },
 
       /* Header */
@@ -671,6 +810,7 @@
             CategoryBadge ? React.createElement(CategoryBadge, {
               category: topic.category,
             }) : null,
+            statusPill,
             (topic.participants || []).length
               ? React.createElement('span', {
                   className: 'fs-topic-detail__participants',

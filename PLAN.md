@@ -279,12 +279,18 @@ starting the sprint.
   call so toggles land on the right (date, topic_id, action_index)
   key.
 
-- **P-07 · `window.FieldSight._todayCache` should be a Context.**
-  Phase D shares the live Today snapshot from Middle to Right via a
-  window slot. Works, but breaks under SSR / multiple instances and
-  is invisible to React DevTools. Replace with a small React Context
-  provider mounted by the Today page.
-  Files: `scripts/pages/today.js`.
+- **P-07 · `window.FieldSight._todayCache` should be a Context.** ✅ done
+  Shipped on `claude/internals-p07-p11`. New `TodayContext` lives in
+  `today.js`; new `TodayProvider` owns the Today state via
+  `useTodayState` and exposes it via context. The page registry
+  gained an optional `Provider` slot — `AppShell` reads the slot and
+  wraps Middle + Right in it (or `React.Fragment` for pages without
+  state-sharing needs). Provider is a `Context.Provider` underneath,
+  so it adds no DOM and the existing flex layout of LeftNav / Middle
+  / Right is unchanged. `window.FieldSight._todayCache` writes and
+  reads are gone. Visible in React DevTools, scoped per-mount, and
+  the pattern generalises — any future page that wants to share
+  state between Middle and Right just exports a `Provider`.
 
 - **P-08 · Session gate not wired.** ✅ done
   Shipped on `claude/auth-gates-p08-p12`. New `SessionGate` wrapper
@@ -295,29 +301,42 @@ starting the sprint.
   In mock mode it short-circuits to `AppShell` directly — no auth
   needed. `mountAppShell` now mounts `SessionGate` as the root.
 
-- **P-09 · Meeting topic right-detail.**
-  `TimelineRightDetail` only handles `selectedItem.kind === 'topic'`.
-  Selecting a meeting topic emits `kind: 'meeting_topic'`, which
-  falls through to the placeholder. Add a meeting topic detail panel
-  (Overview / Decisions / Open questions; no media tabs since meeting
-  audio/video isn't part of the daily report's recording bundle).
-  Files: `scripts/pages/timeline.js`.
+- **P-09 · Meeting topic right-detail.** ✅ done
+  Shipped on `claude/meeting-detail-p09-p10`. `TimelineRightDetail`
+  now dispatches by `kind`: daily topics keep their full tab set
+  (Overview · Transcript · Audio · Video · Photos · Ask) while
+  meeting topics get a focused two-tab view (Overview · Ask). The
+  meeting Overview renders the §5.4 schema verbatim — decisions
+  are object cards (text + rationale + decided-by), action items
+  use `owner` (not `responsible`) with the read-only caption from
+  P-10, and `open_questions` are rendered as a bulleted section.
+  Header carries the same time / category / participants chrome
+  plus a meeting-specific status pill (decided / deferred /
+  in-discussion / blocked).
 
-- **P-10 · Meeting action items are read-only by design.**
-  `/api/actions/toggle` keys off the daily report's topic_id. Meeting
-  action items live in a different schema and have no toggle endpoint.
-  `MeetingTopicCard` currently renders them as plain rows — add a
-  visible caption ("Read-only — meeting actions are tracked in
-  minutes") so users don't expect to check them off.
-  Files: `scripts/composites/meeting-topic-card.js`.
+- **P-10 · Meeting action items are read-only by design.** ✅ done
+  Shipped on `claude/meeting-detail-p09-p10`. Caption "Read-only —
+  meeting actions are tracked in the minutes, not the daily-action
+  audit log." sits below the action list in both the
+  `MeetingTopicCard` body and the right detail's Meeting Overview.
+  Renders as a faint italic note with a left stripe so it's clearly
+  a system explanation, not an action item itself.
 
-- **P-11 · Reduced-motion audit.**
-  Sprint 2.4's task check-off animation respects
-  `prefers-reduced-motion`. The Sprint 2.7 ask-pending dots animation
-  also does. Sweep the rest of `composites.css` for any keyframes /
-  transitions added in 2.5+ that don't have a reduced-motion fallback
-  (date-picker dot pulses, login-screen focus rings).
-  Files: `styles/composites.css`.
+- **P-11 · Reduced-motion audit.** ✅ done
+  Shipped on `claude/internals-p07-p11`. Sweep findings:
+    * `tokens.css §16` zeroes `animation-duration` / `iteration-count`
+      / `transition-duration` globally under reduced-motion (belt).
+    * Three named keyframes total in the codebase, each with its own
+      explicit override (suspenders):
+        - `fs-task-checkoff` (P-04 / 2.4)  → `animation: none; opacity: 0`
+        - `fs-ask-pending`   (Phase G / 2.7) → `animation: none; opacity: 0.6`
+        - `fs-btn-spin`      (pre-existing) → animation slowed to 1.6 s
+    * Sprint 2.5+ added no further keyframes (DatePicker, Reports,
+      Meeting Minutes, Login, AccessDenied, Sprint 3 polish — all use
+      simple hover / focus transitions covered by the global rule).
+  Documented as an "Animation registry" comment block at the top of
+  `composites.css` so any new keyframe is checked against the same
+  belt-and-suspenders rule.
 
 - **P-12 · 403 path coverage.** ✅ done
   Shipped on `claude/auth-gates-p08-p12`. Each page-level fetch in
