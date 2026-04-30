@@ -31,10 +31,11 @@
 (function () {
   'use strict';
 
-  /* Today's date in NZDT — see BUG-19. The fixture's "today" is
-     2026-04-29; for prototype purposes we anchor there. Real deploy
-     will use addDaysISO(...) against an NZDT clock. */
-  var FIXTURE_DATE = '2026-04-29';
+  /* Today's date in NZDT — see BUG-19. We compute "today" via
+     FS.api.todayNZDT() (Pacific/Auckland clock). If no report exists
+     for that date, fall back to the latest available date from
+     /api/dates so the prototype keeps rendering meaningfully when run
+     on any calendar day. (P-06.) */
 
   /* ---------- SectionLabel (small uppercase heading) --------------------- */
   function SectionLabel(props) {
@@ -67,7 +68,7 @@
 
   /* ---------- Helper: derive Today from a backend report --------------- */
 
-  function buildTodayFromReport(report, actions, caller) {
+  function buildTodayFromReport(report, actions, caller, date) {
     var sitesFx = (window.FieldSight && window.FieldSight.fixtures && window.FieldSight.fixtures.sites) || { users: [] };
     var match = (sitesFx.users || []).filter(function (u) { return u.name === (caller && caller.name); })[0];
     var primarySite = match ? match.primary_site : 'sb1108-ellesmere';
@@ -76,8 +77,18 @@
       currentUserName: caller && caller.name,
       primarySite:     primarySite,
       actionState:     actions || {},
-      date:            FIXTURE_DATE,
+      date:            date,
     });
+  }
+
+  /* Pick the most recent date with a report from /api/dates, or null. */
+  function findLatestReportDate(datesMap) {
+    var keys = Object.keys(datesMap || {}).filter(function (d) {
+      return datesMap[d] && datesMap[d].hasReport;
+    });
+    if (keys.length === 0) return null;
+    keys.sort(); /* YYYY-MM-DD sorts lexically */
+    return keys[keys.length - 1];
   }
 
   /* ---------- TodayState hook ------------------------------------------ */
@@ -96,23 +107,58 @@
       var cancelled = false;
       setState({ status: 'loading' });
 
-      Promise.all([
-        window.FS.api.timeline.getTimeline({ date: FIXTURE_DATE, user: window.FS.api.folderName(caller.name) }),
-        window.FS.api.actions.getActions(FIXTURE_DATE),
-      ]).then(function (results) {
-        if (cancelled) return;
-        var report  = results[0];
-        var actions = results[1].actions || {};
+      var today    = window.FS.api.todayNZDT();
+      var folder   = window.FS.api.folderName(caller.name);
 
-        if (!report || report._notFound || report.available_users) {
-          setState({ status: 'empty', report: report });
+      function loadFor(date, isFallback) {
+        return Promise.all([
+          window.FS.api.timeline.getTimeline({ date: date, user: folder }),
+          window.FS.api.actions.getActions(date),
+        ]).then(function (results) {
+          if (cancelled) return null;
+          var report  = results[0];
+          var actions = results[1].actions || {};
+          if (!report || report._notFound || report.available_users) {
+            return { ok: false, report: report };
+          }
+          var data = buildTodayFromReport(report, actions, caller, date);
+          return {
+            ok:            true,
+            data:          data,
+            actions:       actions,
+            effectiveDate: date,
+            isFallback:    !!isFallback,
+            today:         today,
+          };
+        });
+      }
+
+      loadFor(today, false).then(function (first) {
+        if (cancelled || !first) return;
+        if (first.ok) {
+          setState(Object.assign({ status: 'ok' }, first));
           return;
         }
-        var data = buildTodayFromReport(report, actions, caller);
-        setState({ status: 'ok', data: data, actions: actions });
+        /* No report for today — try the latest available. */
+        return window.FS.api.dates.getDates({ months: 3 }).then(function (res) {
+          if (cancelled) return;
+          var latest = findLatestReportDate(res.dates || {});
+          if (!latest || latest === today) {
+            setState({ status: 'empty', report: first.report, today: today });
+            return;
+          }
+          return loadFor(latest, true).then(function (second) {
+            if (cancelled || !second) return;
+            if (second.ok) {
+              setState(Object.assign({ status: 'ok' }, second));
+            } else {
+              setState({ status: 'empty', report: second.report, today: today });
+            }
+          });
+        });
       }).catch(function (err) {
         if (cancelled) return;
-        setState({ status: 'error', error: err });
+        setState({ status: 'error', error: err, today: today });
       });
 
       return function () { cancelled = true; };
@@ -258,7 +304,9 @@
       );
     }
 
-    var data = state.data;
+    var data          = state.data;
+    var effectiveDate = state.effectiveDate;
+    var isFallback    = !!state.isFallback;
 
     /* When the check-off anim finishes, drop the task locally. The
        optimistic toggle inside TaskCard already persisted via
@@ -267,10 +315,30 @@
       removeMy(task.id);
     }
 
+    /* Format the effective date for the fallback banner. */
+    function fmtDate(yyyymmdd) {
+      var p = (yyyymmdd || '').split('-').map(Number);
+      if (p.length !== 3) return yyyymmdd || '';
+      var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+      var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return d.getUTCDate() + ' ' + months[d.getUTCMonth()] + ' ' + p[0];
+    }
+
     return React.createElement('div', {
       style: { display: 'flex', flexDirection: 'column', gap: 0 },
       className: 'fs-page fs-page--today',
     },
+
+      /* Fallback banner — shown when today has no report yet and we're
+         displaying the latest available one instead. */
+      isFallback ? React.createElement('div', { className: 'fs-today__fallback-banner' },
+        React.createElement('span', { className: 'fs-today__fallback-label' },
+          'Latest available'),
+        React.createElement('span', { className: 'fs-today__fallback-date' },
+          fmtDate(effectiveDate)),
+        React.createElement('span', { className: 'fs-today__fallback-note' },
+          '· no report yet for today (' + fmtDate(state.today) + ')'),
+      ) : null,
 
       /* MORNING BRIEF */
       React.createElement(fs.MorningBriefCard, { brief: data.morningBrief }),
@@ -307,7 +375,7 @@
               onSelect:      onSelect,
               isMine:        true,
               checkable:     task.topic_id != null && task.actionIndex != null,
-              date:          FIXTURE_DATE,
+              date:          effectiveDate,
               onCheckedOff:  onCheckedOff,
             });
           })

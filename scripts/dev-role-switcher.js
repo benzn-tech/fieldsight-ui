@@ -1,6 +1,10 @@
 /* ==========================================================================
    FieldSight Dev Role Switcher — React/JSX
    Floating panel, shown when ?dev=1 or forced via showDevSwitcher prop.
+   Sprint 3 P-05 replaced the native <select> with a custom popover so
+   the dropdown chrome matches the dev panel and the selected option
+   is visibly distinct (the native select rendered an opaque-black
+   menu that hid the active row on macOS Chrome / Safari).
    Exported to window.FieldSight.DevRoleSwitcher
    ========================================================================== */
 
@@ -20,6 +24,11 @@ function DevRoleSwitcher() {
     () => window.AuthMock.currentUser
   );
 
+  /* Custom dropdown state (P-05). */
+  const [dropOpen, setDropOpen] = React.useState(false);
+  const triggerRef = React.useRef(null);
+  const dropRef    = React.useRef(null);
+
   React.useEffect(() => {
     return window.AuthMock.onChange(u => {
       setCurrentUser({ ...u });
@@ -27,6 +36,24 @@ function DevRoleSwitcher() {
       setIsAdmin(!!u.isAdmin);
     });
   }, []);
+
+  /* Close dropdown on outside click + Escape. */
+  React.useEffect(() => {
+    if (!dropOpen) return;
+    function onDown(e) {
+      if (!dropRef.current) return;
+      if (dropRef.current.contains(e.target)) return;
+      if (triggerRef.current && triggerRef.current.contains(e.target)) return;
+      setDropOpen(false);
+    }
+    function onKey(e) { if (e.key === 'Escape') setDropOpen(false); }
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown',   onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown',   onKey);
+    };
+  }, [dropOpen]);
 
   function apply() {
     window.AuthMock.setRole(selectedRole);
@@ -39,6 +66,9 @@ function DevRoleSwitcher() {
     level: r.level,
     specialist: !!r.specialist,
   }));
+
+  const hierarchy  = allRoles.filter(r => !r.specialist).sort((a, b) => a.level - b.level);
+  const specialist = allRoles.filter(r =>  r.specialist);
 
   const visibleItems = isAdmin
     ? Object.values(window.FS.NAV_ITEMS).map(i => i.label)
@@ -63,7 +93,7 @@ function DevRoleSwitcher() {
     fontSize: t.typography.fontSize.sm,
     color: 'rgba(255,255,255,0.85)',
     zIndex: t.zIndex.toast,
-    overflow: 'hidden',
+    overflow: 'visible',  /* allow dropdown to escape */
     backdropFilter: 'blur(8px)',
   };
 
@@ -91,18 +121,67 @@ function DevRoleSwitcher() {
     gap: '10px',
   };
 
-  const selectStyle = {
+  /* The dropdown trigger looks like the old <select> — translucent
+     dark surface, light text, chevron on the right. */
+  const triggerStyle = {
     width: '100%',
     background: 'rgba(255,255,255,0.07)',
-    border: '1px solid rgba(255,255,255,0.12)',
+    border: '1px solid ' + (dropOpen ? 'rgba(255,107,53,0.5)' : 'rgba(255,255,255,0.12)'),
     borderRadius: '6px',
     color: '#fff',
     padding: '7px 10px',
     fontSize: t.typography.fontSize.sm,
     fontFamily: t.typography.fontFamily.sans,
     cursor: 'pointer',
-    appearance: 'none',
+    textAlign: 'left',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '8px',
   };
+
+  /* Popover — opens BELOW the trigger, matching the panel's
+     translucent dark blue (not a black browser native chrome). */
+  const dropStyle = {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: '4px',
+    background: 'rgba(20,28,45,0.98)',
+    border: '1px solid rgba(255,255,255,0.12)',
+    borderRadius: '6px',
+    boxShadow: t.shadow.lg,
+    overflow: 'hidden',
+    zIndex: t.zIndex.toast + 1,
+    maxHeight: '280px',
+    overflowY: 'auto',
+  };
+
+  const dropGroupLabelStyle = {
+    padding: '8px 12px 4px',
+    fontSize: '10px',
+    fontWeight: 700,
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.40)',
+  };
+
+  function dropOptionStyle(active, hovered) {
+    return {
+      padding: '8px 12px',
+      fontSize: t.typography.fontSize.sm,
+      color: active ? t.colors.accent[300] : '#fff',
+      background: active
+        ? 'rgba(255,107,53,0.12)'
+        : (hovered ? 'rgba(255,255,255,0.06)' : 'transparent'),
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      borderLeft: active ? '2px solid ' + t.colors.accent[500] : '2px solid transparent',
+    };
+  }
 
   const checkRowStyle = {
     display: 'flex',
@@ -137,6 +216,12 @@ function DevRoleSwitcher() {
   };
 
   const metaLanding = window.FS.ROLES[selectedRole]?.defaultLanding || '/today';
+  const selectedRoleObj = window.FS.ROLES[selectedRole];
+  const triggerLabel = selectedRoleObj
+    ? (selectedRoleObj.specialist
+        ? selectedRoleObj.label
+        : 'L' + selectedRoleObj.level + ' · ' + selectedRoleObj.label)
+    : selectedRole;
 
   return React.createElement('div', { style: panelStyle, className: 'fs-dev-switcher' },
 
@@ -153,40 +238,47 @@ function DevRoleSwitcher() {
 
     !minimized && React.createElement('div', { style: bodyStyle },
 
-      /* Role selector */
+      /* Custom role dropdown */
       React.createElement('div', null,
         React.createElement('div', {
           style: { fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginBottom: '5px' },
         }, 'Role'),
         React.createElement('div', { style: { position: 'relative' } },
-          React.createElement('select', {
-            style: selectStyle,
-            value: selectedRole,
-            onChange: e => setSelectedRole(e.target.value),
+          React.createElement('button', {
+            ref:     triggerRef,
+            type:    'button',
+            style:   triggerStyle,
+            onClick: function () { setDropOpen(o => !o); },
+            'aria-haspopup': 'listbox',
+            'aria-expanded': dropOpen,
           },
-            /* Hierarchy roles first */
-            React.createElement('optgroup', { label: 'Hierarchy' },
-              allRoles.filter(r => !r.specialist).sort((a, b) => a.level - b.level)
-                .map(r => React.createElement('option', { key: r.key, value: r.key },
-                  `L${r.level} · ${r.label}`
-                ))
-            ),
-            /* Specialist roles */
-            React.createElement('optgroup', { label: 'Specialists' },
-              allRoles.filter(r => r.specialist)
-                .map(r => React.createElement('option', { key: r.key, value: r.key },
-                  r.label
-                ))
-            ),
+            React.createElement('span', null, triggerLabel),
+            React.createElement('span', {
+              style: { color: 'rgba(255,255,255,0.4)', fontSize: '10px' },
+            }, '▾'),
           ),
-          /* Chevron icon */
-          React.createElement('span', {
-            style: {
-              position: 'absolute', right: '10px', top: '50%',
-              transform: 'translateY(-50%)',
-              pointerEvents: 'none', color: 'rgba(255,255,255,0.4)', fontSize: '10px',
-            },
-          }, '▾'),
+          dropOpen ? React.createElement('div', {
+            ref:   dropRef,
+            style: dropStyle,
+            role:  'listbox',
+          },
+            React.createElement('div', { style: dropGroupLabelStyle }, 'Hierarchy'),
+            hierarchy.map(r => React.createElement(DropOption, {
+              key:      r.key,
+              label:    'L' + r.level + ' · ' + r.label,
+              active:   r.key === selectedRole,
+              onSelect: function () { setSelectedRole(r.key); setDropOpen(false); },
+              styleFor: dropOptionStyle,
+            })),
+            React.createElement('div', { style: dropGroupLabelStyle }, 'Specialists'),
+            specialist.map(r => React.createElement(DropOption, {
+              key:      r.key,
+              label:    r.label,
+              active:   r.key === selectedRole,
+              onSelect: function () { setSelectedRole(r.key); setDropOpen(false); },
+              styleFor: dropOptionStyle,
+            })),
+          ) : null,
         ),
       ),
 
@@ -252,6 +344,23 @@ function DevRoleSwitcher() {
       }, `Active: ${currentUser.name} · ${currentUser.role}${currentUser.isAdmin ? ' (admin)' : ''}`),
 
     ),
+  );
+}
+
+/* Single option row inside the custom dropdown — handles its own
+   hover state so we don't have to lift it into DevRoleSwitcher. */
+function DropOption({ label, active, onSelect, styleFor }) {
+  const [hovered, setHovered] = React.useState(false);
+  return React.createElement('div', {
+    role:    'option',
+    'aria-selected': active,
+    style:   styleFor(active, hovered),
+    onClick: onSelect,
+    onMouseEnter: () => setHovered(true),
+    onMouseLeave: () => setHovered(false),
+  },
+    active ? '✓' : React.createElement('span', { style: { display: 'inline-block', width: '10px' } }),
+    label,
   );
 }
 

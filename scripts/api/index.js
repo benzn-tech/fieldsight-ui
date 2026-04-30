@@ -48,6 +48,23 @@
     return d.toISOString().slice(0, 10);
   }
 
+  /* "Today" in NZDT (Pacific/Auckland) — Sprint 3 P-06.
+     Uses Intl with the canonical IANA zone so DST transitions
+     (NZDT/NZST) are handled by the runtime. Falls back to a manual
+     UTC+13 offset if the engine is missing the time-zone tables. */
+  function todayNZDT() {
+    try {
+      var fmt = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Pacific/Auckland',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+      });
+      return fmt.format(new Date()); /* en-CA → YYYY-MM-DD */
+    } catch (e) {
+      var d = new Date(Date.now() + 13 * 60 * 60 * 1000);
+      return d.toISOString().slice(0, 10);
+    }
+  }
+
   /* Detect HTML-content-type 404 trap (BACKEND-CONTEXT §8.2 / BUG-20). */
   function isJsonResponse(res) {
     var ct = (res.headers.get && res.headers.get('content-type')) || '';
@@ -61,6 +78,7 @@
     folderName: folderName,
     mockPresignedUrl: mockPresignedUrl,
     addDaysISO: addDaysISO,
+    todayNZDT: todayNZDT,
     isJsonResponse: isJsonResponse,
   };
 

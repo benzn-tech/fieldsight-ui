@@ -50,6 +50,37 @@
   text-align: right;
 }
 
+/* Today fallback banner — shown when the live "today" has no report
+   yet and we're displaying the latest available one instead. (P-06.) */
+.fs-today__fallback-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px 12px;
+  margin: 4px 4px 12px;
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel-muted);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.fs-today__fallback-label {
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.fs-today__fallback-date {
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.fs-today__fallback-note {
+  font-style: italic;
+}
+
+
 /* "Mine" accent — left edge in safety orange so a user's own tasks
    stand out among the team's. */
 .fs-task-card--mine {
