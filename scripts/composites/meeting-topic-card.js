@@ -226,6 +226,13 @@
                   );
                 }),
               ),
+              /* P-10 — meeting action items aren't backed by
+                 /api/actions/toggle (which keys off the daily report's
+                 topic_id, not meeting minutes). Surface that as a
+                 caption so users don't expect to check them off. */
+              React.createElement('div', { className: 'fs-meeting-actions__readonly' },
+                'Read-only — meeting actions are tracked in the minutes,',
+                ' not the daily-action audit log.'),
             )
           : null,
 

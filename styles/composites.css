@@ -803,6 +803,22 @@
   margin-top: 2px;
 }
 
+/* P-10 — meeting action items aren't backed by /api/actions/toggle.
+   Caption sits below the list in both the card body and the right
+   detail's Overview, so the missing checkbox is explained rather
+   than mysterious. */
+.fs-meeting-actions__readonly {
+  margin-top: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+  font-style: italic;
+  background: var(--surface-panel-muted);
+  border-radius: var(--radius-sm);
+  border-left: 2px solid var(--border-default);
+}
+
 
 /* =========================================================================
    LoginScreen — Cognito sign-in (Phase I)
