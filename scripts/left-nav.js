@@ -95,6 +95,17 @@ function NavItem({ navKey, label, isActive, isCollapsed, onClick, isSubItem }) {
     ? t.colors.accent[500]
     : (hovered ? t.colors.neutral[0] : t.colors.neutral[400]);
 
+  /* Sprint 3 P-04: in collapsed mode (justifyContent:center, 48 px wide
+     row), a 3 px borderLeft eats horizontal space inside the flex,
+     pushing every icon ~1.5 px right of true centre. We keep the
+     borderLeft in expanded mode (where it sits beside text and the
+     visual offset is fine) and switch to a non-layout box-shadow
+     inset stripe when collapsed. */
+  const activeStripe   = isActive ? '3px solid ' + t.colors.accent[500] : '3px solid transparent';
+  const collapsedStripe = isCollapsed && isActive
+    ? 'inset 3px 0 0 ' + t.colors.accent[500]
+    : 'none';
+
   const itemStyle = {
     display: 'flex',
     alignItems: 'center',
@@ -117,7 +128,8 @@ function NavItem({ navKey, label, isActive, isCollapsed, onClick, isSubItem }) {
     userSelect: 'none',
     outline: 'none',
     textDecoration: 'none',
-    borderLeft: isActive ? ('3px solid ' + t.colors.accent[500]) : '3px solid transparent',
+    borderLeft: isCollapsed ? '0' : activeStripe,
+    boxShadow:  collapsedStripe,
     boxSizing: 'border-box',
   };
 
@@ -299,8 +311,11 @@ function LeftNav({ user, currentRoute, isCollapsed, onToggleCollapse, onNavigate
     height: '56px',
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: isCollapsed ? '0 12px' : '0 12px 0 16px',
+    /* Sprint 3 P-03: when collapsed (64 px wide) the 28 px logo + 28 px
+       chevron + 24 px padding = 80 px > 64 px and the two icons overlap.
+       Drop the F mark in collapsed mode and centre the chevron. */
+    justifyContent: isCollapsed ? 'center' : 'space-between',
+    padding: isCollapsed ? '0' : '0 12px 0 16px',
     borderBottom: '1px solid rgba(255,255,255,0.08)',
     flexShrink: 0,
   };
@@ -341,11 +356,15 @@ function LeftNav({ user, currentRoute, isCollapsed, onToggleCollapse, onNavigate
     'aria-label': 'Main navigation',
   },
 
-    /* Logo + collapse toggle */
+    /* Logo + collapse toggle. Collapsed mode shows the chevron only —
+       the F mark is dropped because it can't share the 64 px column
+       with the chevron (P-03). */
     React.createElement('div', { style: logoAreaStyle },
-      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 } },
+      !isCollapsed ? React.createElement('div', {
+        style: { display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 },
+      },
         React.createElement('div', { style: logoMarkStyle }, 'F'),
-        !isCollapsed ? React.createElement('span', {
+        React.createElement('span', {
           style: {
             color: '#fff',
             fontWeight: t.typography.fontWeight.semibold,
@@ -353,8 +372,8 @@ function LeftNav({ user, currentRoute, isCollapsed, onToggleCollapse, onNavigate
             letterSpacing: '-0.01em',
             overflow: 'hidden', whiteSpace: 'nowrap',
           },
-        }, 'FieldSight') : null,
-      ),
+        }, 'FieldSight'),
+      ) : null,
       React.createElement('button', {
         style: toggleBtnStyle,
         onClick: onToggleCollapse,

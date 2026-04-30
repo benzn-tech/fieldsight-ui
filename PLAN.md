@@ -243,21 +243,18 @@ starting the sprint.
   `activity` so the field is available if a future "live feed"
   iteration wants it.
 
-- **P-03 · Left-nav collapsed: logo + chevron overlap.**
-  When `isCollapsed`, `logoAreaStyle` lays out a 28 px logo + 28 px
-  chevron with `space-between` inside a 64 px column (40 px usable
-  after padding) → they overlap. Fix: hide the F mark when collapsed
-  and centre the chevron.
-  Files: `scripts/left-nav.js` (logoAreaStyle + render).
+- **P-03 · Left-nav collapsed: logo + chevron overlap.** ✅ done
+  Shipped on `claude/nav-collapse-p03-p04`. `logoAreaStyle` switches
+  to `justifyContent: center` with zero horizontal padding when
+  collapsed, and the F mark is no longer rendered — only the chevron
+  stays, centred in the 64 px column.
 
-- **P-04 · Left-nav collapsed: NavItem icons drift right.**
-  `NavItem` carries `borderLeft: 3px solid transparent` for the active
-  indicator. When the row is collapsed and centred (`justifyContent:
-  center`), the 3 px border eats space inside the flex, so every icon
-  visually shifts right of true centre. Fix: move the active indicator
-  to a `box-shadow inset` or absolutely-positioned ::before, so it
-  doesn't consume layout width.
-  Files: `scripts/left-nav.js` (itemStyle).
+- **P-04 · Left-nav collapsed: NavItem icons drift right.** ✅ done
+  Shipped on `claude/nav-collapse-p03-p04`. The active stripe in
+  expanded mode still uses `borderLeft` (text-row layout, 3 px is
+  fine). In collapsed mode `borderLeft` is dropped and the stripe is
+  drawn via `box-shadow: inset 3px 0 0 ...` — non-layout, so icons
+  centre on the row's true mid-point.
 
 - **P-05 · Dev role switcher dropdown chrome.**
   The native `<select>` opens a UA-chrome dropdown that (a) doesn't
