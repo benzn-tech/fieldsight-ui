@@ -32,7 +32,7 @@ that derive its sections from a `DailyReport`.
 A four-phase progression. Each phase ships independently and keeps the
 preview HTMLs working.
 
-### Phase A — Backend-shaped data layer (Sprint 2.1, ~½ day)
+### Phase A — Backend-shaped data layer (Sprint 2.1, ~½ day) ✅ done
 
 Goal: stop pretending. Get the in-memory mocks shaped like real API responses
 so every subsequent feature is a drop-in for the real call.
@@ -64,7 +64,7 @@ Critical files:
 - existing `scripts/mock-data.js` kept as a thin shim that re-exports from
   fixtures during the transition
 
-### Phase B — Timeline page (Sprint 2.2, the big one)
+### Phase B — Timeline page (Sprint 2.2, the big one) ✅ done
 
 Goal: build the **missing primary surface** — `/timeline?date=…&user=…`.
 This is what the backend exists to serve.
@@ -106,7 +106,7 @@ Critical files:
 - edit `styles/composites.css` for new composites
 - edit `app-shell-preview.html` script loads + cache-buster bump
 
-### Phase C — Topic-detail media (Sprint 2.3)
+### Phase C — Topic-detail media (Sprint 2.3) ✅ done
 
 Goal: when a topic is selected in the right pane, show the recordings
 behind it.
@@ -126,7 +126,7 @@ behind it.
 - New composites: `transcript-list.js`, `audio-playlist.js`,
   `video-player.js`, `photo-grid.js`.
 
-### Phase D — Today as a derived view (Sprint 2.4)
+### Phase D — Today as a derived view (Sprint 2.4) ✅ done
 
 Goal: keep the existing Today UI, but feed it from the latest `DailyReport`
 for the current user instead of bespoke mocks.
@@ -147,24 +147,31 @@ for the current user instead of bespoke mocks.
 - Now Sprint 2's previously-planned task check-off animation lands on
   *real* action items, with the toggle going through `api/actions`.
 
-### Phase E and beyond (subsequent sprints, scope outline only)
+### Phases E – I (all shipped) ✅ done
 
-- **E. Calendar + multi-day** — heat-mapped date picker on the
-  Timeline page using `/api/dates`. Top-of-page widget that toggles to a
-  full-month modal.
-- **F. Reports archive** — `/reports` page: list weekly/monthly history,
-  presigned-URL download for `.docx`, regenerate button (admin/pm only,
-  workers forced to self).
-- **G. Ask Agent** — chat strip per-topic and per-report; client-side
-  history reconstruction since the endpoint is stateless.
-- **H. Meeting Minutes** — separate composite set
-  (`meeting-topic-card.js`, etc.) that reads the meeting schema (`owner`
-  not `responsible`, no `safety_flags`). Side-by-side toggle when both a
-  daily report and meeting minutes exist for the same date.
-- **I. Real auth + fetch** — replace `auth-mock.js` with a Cognito
-  `USER_PASSWORD_AUTH` flow, switch `window.FS.api.useMocks` to false,
-  add token refresh, render the role-aware empty/403 state. Until this
-  ships, the prototype stays preview-only.
+- **E. Calendar + multi-day** — ✅ heat-mapped date picker on the
+  Timeline page using `/api/dates`. Top-of-page widget toggles a
+  full-month modal. (`scripts/composites/date-picker.js`,
+  Sprint 2.5.)
+- **F. Reports archive** — ✅ `/reports` page lists weekly/monthly
+  history, presigned-URL download for `.docx`, regenerate button
+  gated behind `report:create`. (`scripts/pages/reports.js`,
+  Sprint 2.6.)
+- **G. Ask Agent** — ✅ stateless chat strip per-topic and per-report;
+  client-side history reconstruction. (`scripts/composites/ask-chat.js`,
+  Sprint 2.7.)
+- **H. Meeting Minutes** — ✅ separate composite set
+  (`meeting-topic-card.js`, `meetings.js`, `meeting-minutes.fixture.js`)
+  reading the §5.4 schema (`owner` not `responsible`, no `safety_flags`,
+  decisions as objects). Daily / Meeting toggle when both exist for
+  the date. (Sprint 2.8.)
+- **I. Real auth + fetch** — ✅ scaffolding complete: `auth/cognito.js`
+  wraps `USER_PASSWORD_AUTH`, `auth/session.js` manages tokens with
+  auto-refresh, `api/_fetch.js` handles 401 retry + BUG-20 +
+  `_accessDenied`, every api module dispatches on `useMocks`,
+  `LoginScreen` + `AccessDenied` composites land. Prototype still ships
+  with `useMocks=true` — flipping false activates the real flow.
+  (Sprint 2.9.)
 
 ## Concrete next step (what I'd do this week)
 
