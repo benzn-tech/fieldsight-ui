@@ -256,28 +256,28 @@ starting the sprint.
   drawn via `box-shadow: inset 3px 0 0 ...` — non-layout, so icons
   centre on the row's true mid-point.
 
-- **P-05 · Dev role switcher dropdown chrome.**
-  The native `<select>` opens a UA-chrome dropdown that (a) doesn't
-  match the dev panel's translucent dark blue and (b) renders the
-  selected row in the same colour as the menu background, killing
-  visibility. Two options:
-    - Quick: add `color-scheme: dark` + `option { background: ... }`
-      for partial cross-browser improvement.
-    - Proper: replace with a custom dropdown (mirror the timeline
-      view-toggle / date-picker month-nav pattern).
-  Dev-only surface, lowest priority.
-  Files: `scripts/dev-role-switcher.js`.
+- **P-05 · Dev role switcher dropdown chrome.** ✅ done
+  Shipped on `claude/polish-p05-p06`. Replaced the native `<select>`
+  with a custom popover dropdown so the menu inherits the dev panel's
+  translucent dark blue (rgba(20,28,45,0.98)) and the active option
+  is unambiguous: accent-orange text, accent-100 background, an
+  accent left stripe, and a leading ✓. Optgroup labels (Hierarchy /
+  Specialists) match the original `<optgroup>` shape. Closes on
+  outside click + Escape.
 
 ### Loose ends from the build
 
-- **P-06 · Today's date is hard-coded.**
-  `scripts/pages/today.js` uses `FIXTURE_DATE = '2026-04-29'` to anchor
-  the prototype on the fixture report. Production needs an NZDT
-  "today" computed via `FS.api.addDaysISO(...)` against the user's
-  clock. Trivial replacement — guarded by the fact the fixture only
-  has one date, so flipping requires either generating more fixtures
-  or wiring real fetch.
-  Files: `scripts/pages/today.js`.
+- **P-06 · Today's date is hard-coded.** ✅ done
+  Shipped on `claude/polish-p05-p06`. New `FS.api.todayNZDT()` helper
+  returns `YYYY-MM-DD` in `Pacific/Auckland` via `Intl.DateTimeFormat`
+  (DST-correct), with a manual UTC+13 fallback for engines lacking
+  the time-zone tables. `today.js` calls it on mount; if the live
+  date has no report it falls back to the most recent date in
+  `/api/dates` and renders a "Latest available · DD MMM YYYY" banner
+  so the UI never silently anchors on a stale fixture. Effective
+  date is now threaded into the TaskCard's check-off persistence
+  call so toggles land on the right (date, topic_id, action_index)
+  key.
 
 - **P-07 · `window.FieldSight._todayCache` should be a Context.**
   Phase D shares the live Today snapshot from Middle to Right via a
