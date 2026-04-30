@@ -425,6 +425,16 @@ function AppShell({ showDevSwitcher = false }) {
      visible: middle when nothing is selected, right detail when something is. */
   var shellClassName = 'app-shell' + (selectedItem ? ' has-selection' : '');
 
+  /* Sprint 3 P-07 — pages may declare a `Provider` slot in the page
+     registry. AppShell wraps Middle + Right in it so the two columns
+     share state through React Context (replaces the old window slot
+     pattern). Provider's a Context.Provider under the hood — no DOM
+     element — so the flex layout of LeftNav / Middle / Right is
+     unchanged. Pages without a Provider get React.Fragment, which is
+     equally transparent. */
+  var pageEntry    = window.FieldSight.getPageForRoute && window.FieldSight.getPageForRoute(route);
+  var PageProvider = (pageEntry && pageEntry.Provider) || React.Fragment;
+
   return React.createElement('div', { style: shellStyle, className: shellClassName },
 
     React.createElement(window.FieldSight.LeftNav, {
@@ -435,19 +445,20 @@ function AppShell({ showDevSwitcher = false }) {
       onNavigate: navigate,
     }),
 
-    React.createElement(MiddleColumn, {
-      route: route,
-      width: middleWidth,
-      onWidthChange: setMiddleWidth,
-      onSelect: setSelectedItem,
-      selectedItem: selectedItem,
-    }),
-
-    React.createElement(RightDetail, {
-      route: route,
-      selectedItem: selectedItem,
-      onClose: function() { setSelectedItem(null); },
-    }),
+    React.createElement(PageProvider, null,
+      React.createElement(MiddleColumn, {
+        route: route,
+        width: middleWidth,
+        onWidthChange: setMiddleWidth,
+        onSelect: setSelectedItem,
+        selectedItem: selectedItem,
+      }),
+      React.createElement(RightDetail, {
+        route: route,
+        selectedItem: selectedItem,
+        onClose: function() { setSelectedItem(null); },
+      }),
+    ),
 
     showDevSwitcher && window.FieldSight.DevRoleSwitcher
       ? React.createElement(window.FieldSight.DevRoleSwitcher)

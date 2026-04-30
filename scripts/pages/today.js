@@ -91,9 +91,20 @@
     return keys[keys.length - 1];
   }
 
+  /* ---------- TodayContext (Sprint 3, P-07) ---------------------------- */
+  /* TodayMiddleColumn loads the report; TodayRightDetail needs the same
+     snapshot to render `findItemById` lookups for the selected item.
+     Phase D used a `window.FieldSight._todayCache` slot for this — fast
+     to ship but invisible to React DevTools and broken under multiple
+     instances. P-07 replaces it with a proper Context provided at the
+     page level via the new `Provider` slot in the page registry; the
+     AppShell wraps both Middle + Right in that Provider so they share
+     state. */
+  var TodayContext = React.createContext(null);
+
   /* ---------- TodayState hook ------------------------------------------ */
   /* Encapsulates the async fetch + optimistic-removal semantics for
-     check-off. Returns { status, data, removeMyTask, error }. */
+     check-off. Returns { state, removeMyTask }. */
   function useTodayState(caller) {
     var refState = React.useState({ status: 'loading' });
     var state    = refState[0];
@@ -278,24 +289,35 @@
   }
 
   /* =====================================================================
+     TodayProvider — owns the page state and exposes it via TodayContext.
+     AppShell wraps Middle + Right in this so both columns see the same
+     snapshot. (P-07)
+     ===================================================================== */
+  function TodayProvider(props) {
+    var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
+    var ts     = useTodayState(caller);
+    /* Stable-ish value object — not memoised because the TodayState
+       hook already re-keys its effect on caller identity, and the
+       consumers below read .state every render anyway. */
+    var ctx = { state: ts.state, removeMyTask: ts.removeMyTask };
+    return React.createElement(TodayContext.Provider, { value: ctx },
+      props.children);
+  }
+
+  /* =====================================================================
      Today Middle Column
      ===================================================================== */
   function TodayMiddleColumn(props) {
     var fs       = window.FieldSight;
-    var caller   = (window.AuthMock && window.AuthMock.currentUser) || {};
     var onSelect = props.onSelect || function () {};
 
-    var ts        = useTodayState(caller);
-    var state     = ts.state;
-    var removeMy  = ts.removeMyTask;
-
-    /* Expose the loaded data to TodayRightDetail via a window slot —
-       the simplest way to share state across the AppShell-managed
-       split between Middle and Right components without restructuring
-       the shell. Mounted Middle is the source of truth. */
-    React.useEffect(function () {
-      window.FieldSight._todayCache = state.status === 'ok' ? state.data : null;
-    }, [state]);
+    var ctx = React.useContext(TodayContext);
+    if (!ctx) {
+      console.warn('[TodayMiddleColumn] TodayContext missing — was the page Provider mounted?');
+      return null;
+    }
+    var state    = ctx.state;
+    var removeMy = ctx.removeMyTask;
 
     if (state.status === 'loading') {
       return React.createElement('div', { className: 'fs-page fs-page--today' },
@@ -475,11 +497,11 @@
       );
     }
 
-    /* The Middle column publishes the latest TODAY snapshot to a window
-       slot when it loads. We read it here for findItemById/getRelated.
-       If the user clicked a row that's since been check-off-removed,
-       the lookup falls back to the selectedItem itself. */
-    var data = window.FieldSight._todayCache;
+    /* P-07 — the Middle column owns the snapshot via TodayProvider;
+       we read it through TodayContext. If a row was check-off-removed
+       between click and render, fall back to the selectedItem itself. */
+    var ctx  = React.useContext(TodayContext);
+    var data = ctx && ctx.state.status === 'ok' ? ctx.state.data : null;
     var item = findItemById(data, sel.id) || sel;
 
     var rows = [];
@@ -647,8 +669,12 @@
   if (!window.FieldSight) window.FieldSight = {};
   if (!window.FieldSight.PAGES) window.FieldSight.PAGES = {};
   window.FieldSight.PAGES['/today'] = {
-    Middle: TodayMiddleColumn,
-    Right:  TodayRightDetail,
+    Middle:   TodayMiddleColumn,
+    Right:    TodayRightDetail,
+    /* P-07 — page-level Provider; AppShell wraps Middle + Right in this
+       so they share TodayContext. Pages without page-level state simply
+       omit this and AppShell falls back to React.Fragment. */
+    Provider: TodayProvider,
   };
 
 })();
