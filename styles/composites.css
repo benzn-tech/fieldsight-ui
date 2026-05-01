@@ -2701,3 +2701,193 @@
   padding-top: 12px;
   border-top: 1px solid var(--border-subtle);
 }
+
+
+/* =========================================================================
+   Sub-sprint 4.3 — Evidence library + EvidenceTabs
+   ========================================================================= */
+
+/* EvidenceTabs ------------------------------------------------------------- */
+.fs-evidence-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-x: auto;
+}
+.fs-evidence-tabs__tab {
+  padding: 10px 14px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color var(--duration-fast) var(--easing-out),
+              border-color var(--duration-fast) var(--easing-out);
+}
+.fs-evidence-tabs__tab:hover { color: var(--text-primary); }
+.fs-evidence-tabs__tab--active {
+  color: var(--text-primary);
+  border-bottom-color: var(--color-accent-500);
+  font-weight: var(--font-weight-medium);
+}
+.fs-evidence-tabs__count {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  background: var(--surface-panel-muted);
+  color: var(--text-tertiary);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+}
+.fs-evidence-tabs__tab--active .fs-evidence-tabs__count {
+  background: var(--color-accent-100);
+  color: var(--color-accent-700);
+}
+
+
+/* Evidence page (middle column) ------------------------------------------- */
+.fs-evidence { display: flex; flex-direction: column; gap: 12px; }
+
+.fs-evidence__header { padding: 0 4px; }
+.fs-evidence__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.fs-evidence__subtitle {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.fs-evidence__sections { display: flex; flex-direction: column; gap: 16px; }
+
+.fs-evidence__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fs-evidence__section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 4px 0;
+}
+.fs-evidence__section-date {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.fs-evidence__section-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.fs-evidence__load-more {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 4px;
+}
+
+.fs-evidence__loading,
+.fs-evidence__empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+
+/* Evidence right detail --------------------------------------------------- */
+.fs-evidence-detail {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 24px;
+  gap: 18px;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+
+.fs-evidence-detail__placeholder {
+  padding: 32px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+.fs-evidence-detail__placeholder-title {
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.fs-evidence-detail__placeholder-body {
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 320px;
+  margin: 0 auto;
+}
+
+.fs-evidence-detail__header { display: flex; flex-direction: column; gap: 4px; }
+.fs-evidence-detail__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.fs-evidence-detail__blurb {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+}
+
+.fs-evidence-detail__stats {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.fs-evidence-detail__stat {
+  display: flex;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.fs-evidence-detail__stat:last-child { border-bottom: none; }
+.fs-evidence-detail__stat-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-weight: var(--font-weight-semibold);
+  width: 120px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding-top: 2px;
+}
+.fs-evidence-detail__stat-value {
+  font-size: 13px;
+  color: var(--text-primary);
+  flex: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.fs-evidence-detail__note {
+  margin-top: auto;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  padding: 10px 12px;
+  background: var(--surface-panel-muted);
+  border-left: 2px solid var(--border-default);
+  border-radius: var(--radius-sm);
+}

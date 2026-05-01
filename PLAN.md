@@ -399,7 +399,20 @@ Five sub-sprints, one PR each. See the Sprint 4 plan file
   as overdue. Page header carries an explicit perf caveat:
   "Aggregated client-side — slow at scale until backend ships
   /api/actions/all".
-- **Sprint 4.3 · Evidence library (`/evidence`)** ⏳ pending
+- **Sprint 4.3 · Evidence library (`/evidence`)** ✅ done
+  Shipped on `claude/sprint4-00-sites` (stacked on 4.2). New
+  `EvidenceTabs` composite (Photos / Audio / Video / Transcripts
+  with optional counts) and `/evidence` page with `EvidenceProvider`
+  (P-07 page-Provider pattern). Default range = trailing 7 days
+  with reports; "Load more" extends by 7. Tab activation drives
+  rendering — Photos tab uses an aggregated count + central fetch
+  (extracts `topic.related_photos` from per-day timelines and feeds
+  one `PhotoGrid` per day); Audio / Video / Transcripts tabs render
+  one Phase C composite per day, each fetching its own slice
+  (parallel internal fetches, no central coordination needed).
+  Right detail = read-only summary card (active tab name + range +
+  found-count + tab blurb). Worker rule honoured (forced-self
+  client-side).
 - **Sprint 4.4 · Programme MVP (`/programme`)** ⏳ pending
 
 ## Sprint 4+ — Open product questions
