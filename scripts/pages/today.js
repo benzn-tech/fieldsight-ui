@@ -398,7 +398,9 @@
       /* "View daily report" CTA — full-width banner above the brief.
          Lifted out of MorningBriefCard so the action stands on its
          own (post-merge review feedback). Navigates to the canonical
-         /timeline view scoped to the brief's (date, user). */
+         /timeline view scoped to the brief's (date, user). The
+         &from=today flag tells TimelineMiddleColumn to render a
+         "← Back to today" link in its header (Sprint 4.5). */
       React.createElement('button', {
         type:      'button',
         className: 'fs-today__view-report-cta',
@@ -406,6 +408,7 @@
           var qs = '?date=' + encodeURIComponent(effectiveDate);
           var u  = data.morningBrief && data.morningBrief.userFolder;
           if (u) qs += '&user=' + encodeURIComponent(u);
+          qs += '&from=today';
           window.FS.Router.navigate('/timeline' + qs);
         },
       },

@@ -1,5 +1,31 @@
 # Plan — Aligning the Prototype With Backend Reality
 
+## Design alternatives held for revisit
+
+Quick recall: `grep -n "Design alternatives" PLAN.md`. Each entry below is
+a candidate that was *not* chosen during a sub-sprint but is still
+considered viable enough to come back to if the chosen direction proves
+wrong.
+
+### Activity page (`/activity`) — direction not chosen Sprint 4.6
+
+The Sprint 4.6 redesign settled on **direction C — user activity stream**
+(group events by user, "what each person did this week"). The two
+alternatives below were rejected for now, but kept on file:
+
+- **A — Kill `/activity` entirely.** It's coverable by `/timeline` (single
+  day, structured) + `/tasks` (cross-day action tracker). Simplest path:
+  remove the route + nav slot, delete the page + composite. Recall if
+  user-activity-stream proves redundant in usage testing.
+- **B — Repositioned as "raw on-site stream".** Show *unstructured* field
+  signals before AI processing: PTT audio chunks just uploaded, photos
+  mid-classification, voice notes, safety flags raised in real time —
+  i.e., the raw event stream that feeds the daily-report pipeline. This
+  is conceptually stronger but needs backend endpoints we don't have
+  (per BACKEND-CONTEXT §10 the device→S3 path is one-way; there's no
+  `/api/feed/raw` endpoint). Worth revisiting once backend exposes that
+  stream.
+
 ## Context
 
 The prototype was built (Sprints 0–2.0) before the backend's data shapes were
@@ -438,6 +464,29 @@ Five sub-sprints, one PR each. See the Sprint 4 plan file
   admin (Safety/Quality/Team/Settings) tracked for Sprint 6;
   Strategic dashboards (Portfolio/Regional/Executive) tracked for
   Sprint 7.
+
+## Sprint 4 follow-up sub-sprints (post-review feedback)
+
+Five follow-up sub-sprints opened on top of 4.4 in response to the
+post-walkthrough feedback. All stack on the same `claude/sprint4-00-sites`
+branch (PR #14) until the user merges.
+
+- **Sprint 4.5 · Today back-nav + Tasks subtitle clarity** ✅ done
+  Two tiny UX fixes from the review:
+  (1) `/today`'s "View daily report" CTA now appends `&from=today`
+      to the timeline URL; `TimelineMiddleColumn`'s header detects
+      that flag and renders a `← Back to Today` link above the
+      title (no more digging for the left-nav).
+  (2) `/tasks` subtitle replaced — verbose perf caveat lifted into
+      a hover-tooltip on a small ⓘ icon. New subtitle: "Action items
+      assigned across reports — yours, your team's, by status."
+  Touched `today.js`, `timeline.js`, `tasks.js`, plus a small CSS
+  block. Cache busters: today.js v=11, timeline.js v=9, tasks.js
+  v=2, composites.css v=20.
+- **Sprint 4.6 · Activity → user activity stream** ⏳ pending (direction C)
+- **Sprint 4.7 · Programme full-width layout + slide-in drawer** ⏳ pending
+- **Sprint 4.8 · Jira-style 4-column kanban replaces ProgrammeTodoList** ⏳ pending
+- **Sprint 4.9 · Gantt drag (L1 move + L2 edge resize)** ⏳ pending
 
 ## Sprint 4+ — Open product questions
 

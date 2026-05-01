@@ -244,9 +244,15 @@
       React.createElement('div', { className: 'fs-tasks__header' },
         React.createElement('h2', { className: 'fs-tasks__title' }, 'Tasks'),
         React.createElement('div', { className: 'fs-tasks__subtitle' },
-          rows.length + ' actions across last ' + DEFAULT_DAYS + ' days · ' + fmtDate(state.from) + ' → ' + fmtDate(state.to)),
-        React.createElement('div', { className: 'fs-tasks__caveat' },
-          'Aggregated client-side — slow at scale until backend ships /api/actions/all'),
+          'Action items assigned across reports — yours, your team’s, by status'),
+        React.createElement('div', { className: 'fs-tasks__meta' },
+          rows.length + ' actions · last ' + DEFAULT_DAYS + ' days'
+            + ' (' + fmtDate(state.from) + ' → ' + fmtDate(state.to) + ')',
+          React.createElement('span', {
+            className: 'fs-tasks__meta-info',
+            title:     'Aggregated client-side from /api/timeline + /api/actions per day. A backend /api/actions/all aggregator would speed this up at scale.',
+          }, 'ⓘ'),
+        ),
       ),
 
       /* Filter chips */
