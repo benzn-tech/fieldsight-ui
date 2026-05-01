@@ -372,7 +372,17 @@ Five sub-sprints, one PR each. See the Sprint 4 plan file
   click-through to `/timeline?date=…&user=…`). Worker role gates
   the list to `caller.primary_site` only.
 
-- **Sprint 4.1 · Activity feed (`/activity`)** ⏳ pending
+- **Sprint 4.1 · Activity feed (`/activity`)** ✅ done
+  Shipped on `claude/sprint4-00-sites` (stacked on 4.0). New
+  `ActivityFeedRow` composite (multi-day variant of `ActivityCard` —
+  drops "Xm ago" relative time in favour of HH:MM clock time so date
+  grouping happens upstream). New `/activity` page with
+  `ActivityProvider` running the same Sprint 3 P-07 page-Provider
+  pattern. Default range = 5 most recent days with reports; "Load
+  more" extends by 5 each click. Date headers (Today / Yesterday /
+  Wed 28 Apr) group rows desc. Selected event opens a right-pane
+  preview (counts strip + summary + "Open in timeline" CTA). Worker
+  rule honoured client-side.
 - **Sprint 4.2 · Tasks page (`/tasks`)** ⏳ pending
 - **Sprint 4.3 · Evidence library (`/evidence`)** ⏳ pending
 - **Sprint 4.4 · Programme MVP (`/programme`)** ⏳ pending
