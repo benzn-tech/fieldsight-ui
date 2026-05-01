@@ -174,6 +174,27 @@
       });
     }
 
+    /* Sprint 5.1 — full-task patch from ProgrammeTaskEditor. Same
+       in-memory mutation pattern as updateTask above; a real backend
+       call would be PATCH /api/programmes/:id/tasks/:task_id with the
+       merged patch object. duration_days is recomputed by the editor's
+       validatePatch when start/end are present, so we just spread the
+       patch over the matching leaf here. */
+    function editTask(opts) {
+      opts = opts || {};
+      var task_id = opts.task_id;
+      var patch   = opts.patch || {};
+      if (!task_id) return;
+      setState(function (s) {
+        if (s.status !== 'ok') return s;
+        var nextLeaves = s.leaves.map(function (t) {
+          if (t.task_id !== task_id) return t;
+          return Object.assign({}, t, patch);
+        });
+        return Object.assign({}, s, { leaves: nextLeaves });
+      });
+    }
+
     var ctx = {
       state:        state,
       view:         view,    setView:    setView,
@@ -181,6 +202,7 @@
       collapsed:    collapsed,
       toggleGroup:  toggleGroup,
       updateTask:   updateTask,
+      editTask:     editTask,
     };
     return React.createElement(ProgrammeContext.Provider, { value: ctx },
       props.children);
@@ -531,9 +553,15 @@
     var Badge    = fs.Badge;
     var Button   = fs.Button;
     var IconBtn  = fs.IconButton;
+    var Editor   = fs.ProgrammeTaskEditor;
 
     var ctx = React.useContext(ProgrammeContext);
     var sel = props.selectedItem;
+
+    /* Sprint 5.1 — Edit modal open state, scoped to this detail panel. */
+    var refEdit = React.useState(false);
+    var editing  = refEdit[0];
+    var setEdit  = refEdit[1];
 
     /* Linked-action lazy fetch — only when a task is selected and it
        carries linked_action_items. We pull each action's text from
@@ -675,6 +703,11 @@
             }),
           ),
         ),
+        /* Sprint 5.1 — Edit opens the task editor modal. */
+        Editor ? React.createElement(Button, {
+          variant: 'ghost', size: 'sm',
+          onClick: function () { setEdit(true); },
+        }, 'Edit') : null,
         IconBtn ? React.createElement(IconBtn, {
           icon: 'x', ariaLabel: 'Close detail', size: 'sm',
           onClick: function () { if (props.onClose) props.onClose(); },
@@ -742,6 +775,19 @@
               }),
             ),
       ),
+
+      /* Sprint 5.1 — task editor modal */
+      Editor ? React.createElement(Editor, {
+        open:    editing,
+        task:    t,
+        leaves:  (s && s.leaves) || [],
+        parents: (s && s.parents) || [],
+        onClose: function () { setEdit(false); },
+        onSubmit: function (opts) {
+          ctx.editTask(opts);
+          setEdit(false);
+        },
+      }) : null,
     );
   }
 

@@ -3999,3 +3999,105 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   }
   .fs-modal--open { transform: translate(-50%, -50%); }
 }
+
+
+/* =========================================================================
+   Sprint 5.1 — ProgrammeTaskEditor (modal form body)
+   ========================================================================= */
+.fs-task-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.fs-task-editor__row { display: flex; flex-direction: column; gap: 8px; }
+.fs-task-editor__row--split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.fs-task-editor__deps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+.fs-task-editor__deps-label {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.fs-task-editor__deps-error {
+  font-size: 12px;
+  color: var(--color-danger-700);
+  background: var(--color-danger-50);
+  border: 1px solid var(--color-danger-200);
+  border-radius: var(--radius-md);
+  padding: 6px 10px;
+}
+.fs-task-editor__deps-empty {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text-tertiary);
+}
+
+.fs-task-editor__deps-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fs-task-editor__deps-group-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: var(--font-weight-medium);
+  font-family: var(--font-mono);
+}
+.fs-task-editor__deps-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 4px;
+}
+.fs-task-editor__dep {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-panel);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--easing-out),
+              border-color var(--duration-fast) var(--easing-out);
+}
+.fs-task-editor__dep:hover { background: var(--surface-panel-muted); }
+.fs-task-editor__dep--on {
+  border-color: var(--color-accent-400);
+  background: var(--color-accent-50);
+}
+.fs-task-editor__dep input { margin: 0; }
+.fs-task-editor__dep-id {
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.fs-task-editor__dep-name {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.fs-task-editor__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
