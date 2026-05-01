@@ -82,8 +82,12 @@
     {
       task_id: 'T-003', wbs: '1.3', parent_id: 'T-100',
       name: 'Foundation pour',
-      start: '2026-04-16', end: '2026-04-30',
-      duration_days: 15, progress_pct: 95, status: 'in_progress',
+      /* Extended end-date by one day to 2026-05-01 so the
+         Today × Programme integration (Sprint 4.10) showcases both
+         a wrap-up task (T-003 at 95%) and a kickoff task (T-004
+         at 12%) on the demo date. */
+      start: '2026-04-16', end: '2026-05-01',
+      duration_days: 16, progress_pct: 95, status: 'in_progress',
       depends_on: ['T-002'],
       assignees: ['Jarley_Trainor', 'Sarah_Chen'],
       resource_pool: ['Crew-A', 'Subcontractor-Concrete'],

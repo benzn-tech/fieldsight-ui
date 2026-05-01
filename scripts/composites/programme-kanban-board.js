@@ -74,7 +74,7 @@
     var Badge    = fs.Badge;
 
     var parents       = props.parents       || [];
-    var leaves        = props.leaves        || [];
+    var leavesAll     = props.leaves        || [];
     var today         = props.today         || '';
     var selectedId    = props.selectedId    || null;
     var criticalSet   = props.criticalSet   || new Set();
@@ -82,13 +82,71 @@
     var onSelect      = props.onSelect      || function () {};
     var onToggleGroup = props.onToggleGroup || function () {};
 
-    /* Aggregate counts per column (top-of-board). */
+    /* Sprint 4.10.8 — Mine / All filter chips.
+       Worker scope is already enforced server-side by the api module
+       (workers see only assigned tasks), so we hide the chip for
+       them. site_manager / pm / admin / gm see the full scope and
+       use the chip to narrow to just their own assignments. */
+    var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
+    var canFilter = caller.role !== 'worker';
+    var callerFolderName = caller.name
+      ? window.FS.api.folderName(caller.name)
+      : null;
+
+    var refFilter = React.useState('all');
+    var filter    = refFilter[0];
+    var setFilter = refFilter[1];
+
+    var leaves = leavesAll;
+    if (canFilter && filter === 'mine' && callerFolderName) {
+      leaves = leavesAll.filter(function (t) {
+        return (t.assignees || []).indexOf(callerFolderName) !== -1;
+      });
+    }
+
+    /* Counts for both filter modes — visible in the chip badge. */
+    var allCount  = leavesAll.length;
+    var mineCount = callerFolderName
+      ? leavesAll.filter(function (t) {
+          return (t.assignees || []).indexOf(callerFolderName) !== -1;
+        }).length
+      : 0;
+
+    /* Aggregate counts per column (top-of-board) — based on the
+       FILTERED leaves so the totals reflect what's actually shown. */
     var totals = { not_started: 0, in_progress: 0, blocked: 0, done: 0 };
     leaves.forEach(function (t) {
       totals[statusToColumn(t.status)]++;
     });
 
     return React.createElement('div', { className: 'fs-prog-kanban' },
+
+      /* Sprint 4.10.8 — Mine/All filter chips (gated to non-workers) */
+      canFilter ? React.createElement('div', { className: 'fs-prog-kanban__filter' },
+        React.createElement('button', {
+          type:      'button',
+          className: 'fs-prog-kanban__chip'
+                     + (filter === 'all' ? ' fs-prog-kanban__chip--active' : ''),
+          onClick:   function () { setFilter('all'); },
+          'aria-pressed': filter === 'all',
+        },
+          'All',
+          React.createElement('span', { className: 'fs-prog-kanban__chip-count' },
+            allCount),
+        ),
+        React.createElement('button', {
+          type:      'button',
+          className: 'fs-prog-kanban__chip'
+                     + (filter === 'mine' ? ' fs-prog-kanban__chip--active' : ''),
+          onClick:   function () { setFilter('mine'); },
+          'aria-pressed': filter === 'mine',
+          disabled:  !callerFolderName,
+        },
+          'Mine',
+          React.createElement('span', { className: 'fs-prog-kanban__chip-count' },
+            mineCount),
+        ),
+      ) : null,
 
       /* Top status counts */
       React.createElement('div', { className: 'fs-prog-kanban__totals' },

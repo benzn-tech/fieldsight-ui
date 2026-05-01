@@ -397,6 +397,36 @@
     }
     var s = ctx.state;
 
+    /* Sprint 4.10.1 — URL deep-link.
+       When the page mounts (or programme finishes loading) and the URL
+       carries `?task=T-XXX`, automatically select that task so the
+       RightDrawer slides in. Used by the Today → Programme click-through
+       (4.10.6). Only fires if the caller hasn't already manually
+       selected something else, and only once per (state.status, task_id)
+       transition. */
+    var deepLinkRouteRef = React.useRef(null);
+    React.useEffect(function () {
+      if (s.status !== 'ok') return;
+      var route = window.FS && window.FS.Router && window.FS.Router.getCurrentRoute();
+      var params = (route && route.params) || {};
+      var taskId = params.task;
+      if (!taskId) return;
+
+      /* Avoid re-firing on every re-render — only when the URL value
+         actually changes. */
+      if (deepLinkRouteRef.current === taskId) return;
+      deepLinkRouteRef.current = taskId;
+
+      var task = (s.leaves || []).filter(function (t) { return t.task_id === taskId; })[0];
+      if (!task) return;
+      onSelect({
+        kind:     'programme_task',
+        id:       'task_' + task.task_id,
+        task_id:  task.task_id,
+        task:     task,
+      });
+    }, [s.status, s.leaves]);
+
     if (s.status === 'loading') {
       return React.createElement('div', { className: 'fs-programme' },
         React.createElement('div', { className: 'fs-programme__loading' },

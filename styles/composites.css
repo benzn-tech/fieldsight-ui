@@ -687,27 +687,45 @@
 
 .fs-timeline-page__header { padding: 0 4px; }
 
-/* Sprint 4.5 — back link surfaced when arriving from /today. */
+/* Sprint 4.5 — back link surfaced when arriving from /today.
+   Sprint 4.10 — restyled to match the "View daily report" CTA on
+   /today: full-width, dark navy primary button, with the arrow
+   on the left and text following. Visually parallel to the
+   CTA so users perceive the round-trip as one symmetrical action. */
 .fs-timeline-page__back {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 6px;
-  border: none;
-  background: transparent;
-  padding: 4px 8px 4px 0;
-  margin-bottom: 6px;
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 12px 16px;
   font: inherit;
-  font-size: 12px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  border-radius: var(--radius-sm);
-  transition: color var(--duration-fast) var(--easing-out);
-}
-.fs-timeline-page__back:hover { color: var(--color-accent-700); }
-.fs-timeline-page__back-arrow {
   font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  color: #fff;
+  background: var(--color-primary-900);
+  border: 1px solid var(--color-primary-800);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--duration-fast) var(--easing-out),
+              transform var(--duration-fast) var(--easing-out);
+}
+.fs-timeline-page__back:hover {
+  background: var(--color-primary-800);
+}
+.fs-timeline-page__back:active {
+  transform: translateY(1px);
+}
+.fs-timeline-page__back:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+.fs-timeline-page__back-arrow {
+  font-size: 16px;
   line-height: 1;
-  display: inline-block;
+  opacity: 0.85;
   transition: transform var(--duration-fast) var(--easing-out);
 }
 .fs-timeline-page__back:hover .fs-timeline-page__back-arrow {
@@ -3758,4 +3776,137 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   background: var(--surface-panel-muted);
   border-radius: var(--radius-md);
   font-style: italic;
+}
+
+
+/* =========================================================================
+   Sub-sprint 4.10 — Today × Programme integration
+     • ProgrammeTaskCard (Today My-tasks subgroup variant)
+     • Programme Board Mine / All filter chips
+   ========================================================================= */
+
+/* ProgrammeTaskCard — Today variant ---------------------------------------- */
+.fs-programme-task-card {
+  cursor: pointer;
+  border-left: 3px solid var(--color-accent-500);
+  transition: background var(--duration-fast) var(--easing-out),
+              border-color var(--duration-fast) var(--easing-out);
+}
+.fs-programme-task-card:hover {
+  background: var(--surface-panel-muted);
+}
+.fs-programme-task-card--critical {
+  border-left-color: var(--color-danger-500);
+}
+
+.fs-programme-task-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.fs-programme-task-card__wbs {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  background: var(--surface-panel-muted);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+.fs-programme-task-card__name {
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+}
+.fs-programme-task-card__badges {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.fs-programme-task-card__day {
+  margin-top: 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+.fs-programme-task-card__progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.fs-programme-task-card__progress-track {
+  flex: 1;
+  height: 6px;
+  background: var(--surface-panel-muted);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.fs-programme-task-card__progress-fill {
+  height: 100%;
+  background: var(--color-accent-500);
+  border-radius: 3px;
+  transition: width var(--duration-base) var(--easing-out);
+}
+.fs-programme-task-card--critical .fs-programme-task-card__progress-fill {
+  background: var(--color-danger-500);
+}
+.fs-programme-task-card__progress-text {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  min-width: 32px;
+  text-align: right;
+}
+
+
+/* Programme Board — Mine / All filter chips -------------------------------- */
+.fs-prog-kanban__filter {
+  display: flex;
+  gap: 6px;
+  padding: 0 4px;
+}
+.fs-prog-kanban__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-panel);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: background var(--duration-fast) var(--easing-out),
+              border-color var(--duration-fast) var(--easing-out);
+}
+.fs-prog-kanban__chip:hover:not(:disabled) {
+  background: var(--surface-panel-muted);
+}
+.fs-prog-kanban__chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.fs-prog-kanban__chip--active {
+  border-color: var(--color-accent-400);
+  background: var(--color-accent-50);
+  color: var(--color-accent-800);
+  font-weight: var(--font-weight-medium);
+}
+.fs-prog-kanban__chip-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--surface-panel-muted);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+}
+.fs-prog-kanban__chip--active .fs-prog-kanban__chip-count {
+  background: var(--color-accent-100);
+  color: var(--color-accent-700);
 }

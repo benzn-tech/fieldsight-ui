@@ -471,6 +471,54 @@ Five follow-up sub-sprints opened on top of 4.4 in response to the
 post-walkthrough feedback. All stack on the same `claude/sprint4-00-sites`
 branch (PR #14) until the user merges.
 
+- **Sprint 4.10 · Today × Programme integration + Board Mine/All filter** ✅ done
+  Connects the planning layer (Programme) to the execution layer
+  (Today). Eight surgical pieces:
+
+  1. `ProgrammeMiddleColumn` reads `?task=T-XXX` from the URL on
+     mount and auto-selects the task (RightDrawer slides in
+     automatically). Used by 4.10.6 click-throughs.
+  2. New `FS.api.todayProgramme.getTodayProgrammeTasks` adapter
+     module — finds programme tasks where today ∈ task.start..end
+     AND caller ∈ task.assignees, returns rows shaped for the
+     Today UI with Day-N-of-M + progress + critical flag.
+  3. `TodayProvider` now fans the adapter in parallel with the
+     daily-report load; result lives at `state.data.programmeTasks`.
+     Empty-state still shows programme tasks if any (programme is
+     not gated on a daily report existing).
+  4. New `ProgrammeTaskCard` composite — Today-page variant of
+     TaskCard for programme rows. WBS code prefix, accent left
+     border (danger when critical), Day N of M, dominant progress
+     bar. No checkbox (programme progress is multi-day).
+  5. Today's My-tasks region splits into two visually-distinct
+     subgroups: "From your programme · N" (above) and "From recent
+     reports · N" (below). Same parent SectionLabel, so the user
+     reads them as ONE list with provenance.
+  6. Click any programme card on Today → navigates to
+     `/programme?task=T-XXX&from=today`. Drawer auto-opens via 4.10.1.
+  7. Timeline `← Back to Today` link restyled — now a full-width
+     dark-navy CTA matching `fs-today__view-report-cta` so the
+     round-trip looks symmetrical from both ends.
+  8. `ProgrammeKanbanBoard` adds a Mine/All chip toggle (workers
+     hidden — api already enforces the scope; site_manager / pm /
+     admin / gm see it). Counts on each chip; column totals
+     refresh against the filtered set.
+
+  Fixture tweak: T-003 Foundation pour end-date extended from
+  2026-04-30 → 2026-05-01 so the demo date carries both a wrap-up
+  (T-003 95%) and a kickoff (T-004 12%) for Jarley — exactly the
+  scenario described in the original product question.
+
+  Smoke (node, mock mode):
+    • Jarley (site_manager) → 2 today programme tasks
+      (T-003 wrap-up + T-004 kickoff, both critical)
+    • Sarah (worker) → 1 task (T-003 only — she joins T-005
+      starting 2026-05-04)
+  Cache busters: composites.css v=24, today.js v=12, timeline.js
+  v=10, programme.js v=5, programme-kanban-board.js v=2,
+  today-programme-adapter.js v=1 (new), programme-task-card.js
+  v=1 (new).
+
 - **Sprint 4.5 · Today back-nav + Tasks subtitle clarity** ✅ done
   Two tiny UX fixes from the review:
   (1) `/today`'s "View daily report" CTA now appends `&from=today`
