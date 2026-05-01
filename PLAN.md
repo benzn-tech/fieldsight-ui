@@ -413,7 +413,31 @@ Five sub-sprints, one PR each. See the Sprint 4 plan file
   Right detail = read-only summary card (active tab name + range +
   found-count + tab blurb). Worker rule honoured (forced-self
   client-side).
-- **Sprint 4.4 · Programme MVP (`/programme`)** ⏳ pending
+- **Sprint 4.4 · Programme MVP (`/programme`)** ✅ done — biggest sub-sprint
+  Shipped on `claude/sprint4-00-sites` (stacked on 4.3). New
+  `FS.api.programme` module (`getProgramme` + `getProgrammeTasksForRange`,
+  mock-only branch reads from `programme.fixture.js`; backend branch
+  is a stub with documented endpoint contracts), new
+  `programme.fixture.js` (1 programme · 5 WBS groups · 14 leaf tasks
+  · 8 critical-path tasks · 4 linked report actions), and four new
+  composites: `GanttStrip`, `TaskTreeCell`, `GanttRow`, and
+  `ProgrammeTodoList`. New `/programme` page with `ProgrammeProvider`
+  (P-07 page-Provider pattern) supporting Gantt/TO-DO view toggle,
+  Day/Week/Month tier toggle, sticky WBS tree on the left, scrollable
+  timeline on the right, today-marker overlay, group expand/collapse,
+  critical-path highlighting (border), status-coloured bars, progress
+  fill. TO-DO mode renders Jira-style buckets (This week / Next week /
+  Later) with clickable rows. Right detail = full task fields + lazy
+  linked-actions fetch (one `getTimeline` per unique linked date),
+  click-through to `/timeline?date=…&user=…`. Worker rule applied
+  inside the api module. Sprint 5 picks up imports / native edit /
+  cascade engine.
+
+  Sprint 4 complete. 5/14 nav slots → 9/14. Programme follow-ups
+  (imports + native edit + cascade) tracked for Sprint 5; Compliance/
+  admin (Safety/Quality/Team/Settings) tracked for Sprint 6;
+  Strategic dashboards (Portfolio/Regional/Executive) tracked for
+  Sprint 7.
 
 ## Sprint 4+ — Open product questions
 
