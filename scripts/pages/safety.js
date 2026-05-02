@@ -427,8 +427,16 @@
     }
 
     function onOpenInTimeline() {
+      /* Sprint 6.6.4 — append &topic=N for topic-source rows so the
+         timeline page lands in focus mode (target topic auto-opens
+         and flashes; others force-collapse). Observation rows skip
+         the topic param since they're report-level — the user lands
+         on the daily report's overview without a focal point. */
       var qs = '?date=' + encodeURIComponent(sel.date);
       if (sel.user_folder) qs += '&user=' + encodeURIComponent(sel.user_folder);
+      if (sel.topic_id != null && sel.topic_id >= 0) {
+        qs += '&topic=' + encodeURIComponent(sel.topic_id);
+      }
       window.FS.Router.navigate('/timeline' + qs);
     }
 

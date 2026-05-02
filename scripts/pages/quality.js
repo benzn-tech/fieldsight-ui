@@ -417,8 +417,14 @@
     }
 
     function onOpenInTimeline() {
+      /* Sprint 6.6.4 — append &topic=N for topic-source rows so the
+         timeline page lands in focus mode. qc_item rows are
+         report-level and skip the topic param. */
       var qs = '?date=' + encodeURIComponent(sel.date);
       if (sel.user_folder) qs += '&user=' + encodeURIComponent(sel.user_folder);
+      if (sel.topic_id != null && sel.topic_id >= 0) {
+        qs += '&topic=' + encodeURIComponent(sel.topic_id);
+      }
       window.FS.Router.navigate('/timeline' + qs);
     }
 

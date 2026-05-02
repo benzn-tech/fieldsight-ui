@@ -570,6 +570,29 @@
   box-shadow: 0 0 0 2px var(--color-accent-100);
 }
 
+/* Sprint 6.6.4 — deep-link spotlight. Three soft pulses then settle.
+   Total ~1.8s. The flash class lands on the inner Card (which carries
+   .fs-topic-card); the wrapper just exists for the ref / scrollIntoView
+   target. Uses accent-100 for the pulse — same token the --selected
+   state uses, so no new palette work. */
+.fs-topic-card-wrap > .fs-topic-card--flash {
+  animation: fs-topic-card-flash 1800ms ease-out 1;
+}
+@keyframes fs-topic-card-flash {
+  0%, 100% { background: var(--surface-panel); }
+  16%      { background: var(--color-accent-100); }
+  33%      { background: var(--surface-panel); }
+  50%      { background: var(--color-accent-100); }
+  66%      { background: var(--surface-panel); }
+  83%      { background: var(--color-accent-100); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fs-topic-card-wrap > .fs-topic-card--flash {
+    animation: none;
+    background: var(--color-accent-100);
+  }
+}
+
 .fs-topic-card__header {
   display: flex;
   align-items: flex-start;
