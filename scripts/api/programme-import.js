@@ -272,10 +272,294 @@
     return { parents: parents, leaves: leaves, errors: errors, warnings: warnings };
   }
 
+  /* =========================================================================
+     Sprint 5.5 — MS Project XML import
+     =========================================================================
+     DOMParser walk of <Project>/<Tasks>/<Task>.
+     Field mapping:
+       <UID>            → task_id  (prefixed "T-NNN")
+       <Name>           → name
+       <WBS>            → wbs
+       <OutlineLevel>   → 1 = group, >1 = leaf
+       <Summary>        → "1" overrides OutlineLevel to force group
+       <Start>/<Finish> → start / end  (YYYY-MM-DD prefix only)
+       <PercentComplete>→ progress_pct; status derived from it
+       <PredecessorLink>→ depends_on  (FS/Type=1 only, no lag)
+
+     Ignored (warned once): calendars, resource assignments, non-FS links,
+     lag values.
+     ======================================================================== */
+
+  /* --- XML DOM helpers (namespace-agnostic) -------------------------------- */
+
+  function _getTags(node, localName) {
+    if (node.getElementsByTagNameNS) {
+      return Array.prototype.slice.call(node.getElementsByTagNameNS('*', localName));
+    }
+    return Array.prototype.slice.call(node.getElementsByTagName(localName));
+  }
+
+  function _getTag(node, localName) {
+    var els = _getTags(node, localName);
+    return els.length > 0 ? els[0] : null;
+  }
+
+  function _getText(node, localName) {
+    var el = _getTag(node, localName);
+    return el ? el.textContent.trim() : '';
+  }
+
+  /* Resolve a WBS string's immediate group ancestor in rawNodes[]. */
+  function _groupAncestor(wbs, rawNodes, wbsToTaskId) {
+    var parts = wbs.split('.');
+    for (var i = parts.length - 1; i >= 1; i--) {
+      var ancestorWBS = parts.slice(0, i).join('.');
+      var ancestorId  = wbsToTaskId[ancestorWBS];
+      if (ancestorId) {
+        for (var j = 0; j < rawNodes.length; j++) {
+          if (rawNodes[j].task_id === ancestorId && rawNodes[j]._isGroup) {
+            return ancestorId;
+          }
+        }
+      }
+    }
+    return '';
+  }
+
+  /* --- main XML parser ----------------------------------------------------- */
+
+  function parseMSProjectXML(text) {
+    var errors   = [];
+    var warnings = [];
+
+    if (typeof DOMParser === 'undefined') {
+      errors.push({ row: 0, field: null, message: 'DOMParser is not available in this environment.' });
+      return { parents: [], leaves: [], errors: errors, warnings: warnings };
+    }
+
+    var doc;
+    try {
+      doc = (new DOMParser()).parseFromString(text || '', 'text/xml');
+    } catch (e) {
+      errors.push({ row: 0, field: null, message: 'Failed to parse XML: ' + e.message });
+      return { parents: [], leaves: [], errors: errors, warnings: warnings };
+    }
+
+    /* DOMParser signals parse failures via <parsererror> in the document. */
+    var parseErrEl = _getTag(doc, 'parsererror');
+    if (parseErrEl) {
+      errors.push({
+        row: 0, field: null,
+        message: 'XML parse error: ' + parseErrEl.textContent.replace(/\s+/g, ' ').slice(0, 200),
+      });
+      return { parents: [], leaves: [], errors: errors, warnings: warnings };
+    }
+
+    var tasksEl = _getTag(doc, 'Tasks');
+    if (!tasksEl) {
+      errors.push({
+        row: 0, field: null,
+        message: 'No <Tasks> element found. Confirm this is an MS Project XML export ' +
+                 '(File → Save As → XML Format in MS Project).',
+      });
+      return { parents: [], leaves: [], errors: errors, warnings: warnings };
+    }
+
+    var taskNodes = _getTags(tasksEl, 'Task');
+    if (taskNodes.length === 0) {
+      errors.push({ row: 0, field: null, message: 'No <Task> elements found inside <Tasks>.' });
+      return { parents: [], leaves: [], errors: errors, warnings: warnings };
+    }
+
+    /* One-shot ignored-feature warnings. */
+    var calendarsEl = _getTag(doc, 'Calendars');
+    if (calendarsEl && _getTags(calendarsEl, 'Calendar').length > 0) {
+      warnings.push({ row: 0, field: null, message: 'Calendar definitions ignored — tasks imported as calendar-independent.' });
+    }
+    var resourcesEl = _getTag(doc, 'Resources');
+    if (resourcesEl && _getTags(resourcesEl, 'Resource').length > 0) {
+      warnings.push({ row: 0, field: null, message: 'Resource assignments ignored — assign team members manually after import.' });
+    }
+
+    /* --- First pass: parse each <Task> -------------------------------------- */
+
+    var seenUIDs    = {};   /* uid string → 1-based position */
+    var wbsToTaskId = {};   /* wbs string → task_id */
+    var rawNodes    = [];
+    var warnedNonFS = false;
+    var warnedLag   = false;
+
+    taskNodes.forEach(function (node, idx) {
+      var uid          = _getText(node, 'UID');
+      var name         = _getText(node, 'Name');
+      var wbs          = _getText(node, 'WBS') || _getText(node, 'OutlineNumber');
+      var outlineLevel = parseInt(_getText(node, 'OutlineLevel') || '0', 10);
+      var isSummaryTag = _getText(node, 'Summary') === '1';
+      var startRaw     = _getText(node, 'Start');
+      var finishRaw    = _getText(node, 'Finish');
+      var pctRaw       = _getText(node, 'PercentComplete') || '0';
+
+      var rowNum = idx + 1;
+
+      /* Skip project-root task (UID=0 / OutlineLevel=0). */
+      if (!uid || uid === '0' || outlineLevel === 0) return;
+
+      if (!name) {
+        warnings.push({ row: rowNum, field: 'Name', message: 'UID ' + uid + ' has no <Name> — skipped.' });
+        return;
+      }
+
+      var taskId = 'T-' + (Array(4).join('0') + uid).slice(-3);
+
+      if (seenUIDs[uid] !== undefined) {
+        errors.push({ row: rowNum, field: 'UID', message: 'Duplicate <UID> ' + uid + ' (task "' + name + '") — skipped.' });
+        return;
+      }
+      seenUIDs[uid] = rowNum;
+      if (wbs) wbsToTaskId[wbs] = taskId;
+
+      var isGroup = isSummaryTag || outlineLevel === 1;
+
+      /* Predecessor links — FS (Type=1) only, no lag. */
+      var predLinkNodes  = _getTags(node, 'PredecessorLink');
+      var dependsOnUIDs  = [];
+      predLinkNodes.forEach(function (link) {
+        var predUID = _getText(link, 'PredecessorUID');
+        var type    = _getText(link, 'Type');
+        var lag     = _getText(link, 'LinkLag');
+
+        if (type !== '' && type !== '1') {
+          if (!warnedNonFS) {
+            warnings.push({ row: 0, field: 'PredecessorLink', message: 'Non-FS predecessor relationships (FF/SS/SF) ignored — only Finish-to-Start links imported.' });
+            warnedNonFS = true;
+          }
+          return;
+        }
+        if (lag && lag !== '0') {
+          if (!warnedLag) {
+            warnings.push({ row: 0, field: 'PredecessorLink', message: 'Predecessor lags ignored — relationships imported without lag.' });
+            warnedLag = true;
+          }
+        }
+        if (predUID && predUID !== '0') dependsOnUIDs.push(predUID);
+      });
+
+      /* Extract YYYY-MM-DD prefix from ISO datetime (2026-05-01T08:00:00). */
+      var startMatch  = startRaw  ? startRaw.match(/^(\d{4}-\d{2}-\d{2})/)  : null;
+      var finishMatch = finishRaw ? finishRaw.match(/^(\d{4}-\d{2}-\d{2})/) : null;
+      var start = startMatch  ? startMatch[1]  : '';
+      var end   = finishMatch ? finishMatch[1] : '';
+
+      /* Date validation for leaf tasks only. */
+      if (!isGroup) {
+        if (!start || !isValidDate(start)) {
+          errors.push({ row: rowNum, field: 'Start', message: 'UID ' + uid + ' (' + name + '): invalid or missing <Start> "' + startRaw + '".' });
+          return;
+        }
+        if (!end || !isValidDate(end)) {
+          errors.push({ row: rowNum, field: 'Finish', message: 'UID ' + uid + ' (' + name + '): invalid or missing <Finish> "' + finishRaw + '".' });
+          return;
+        }
+        if (end < start) {
+          errors.push({ row: rowNum, field: 'Finish', message: 'UID ' + uid + ' (' + name + '): <Finish> must be ≥ <Start>.' });
+          return;
+        }
+      }
+
+      /* Derive status from percent complete. */
+      var pct = parseInt(pctRaw, 10);
+      if (isNaN(pct)) pct = 0;
+      pct = Math.min(100, Math.max(0, pct));
+      var status = isGroup    ? 'group'
+                 : pct >= 100 ? 'completed'
+                 : pct > 0    ? 'in_progress'
+                 :              'not_started';
+
+      rawNodes.push({
+        _uid:           uid,
+        _outlineLevel:  outlineLevel,
+        _isGroup:       isGroup,
+        _wbs:           wbs,
+        _dependsOnUIDs: dependsOnUIDs,
+        task_id:        taskId,
+        wbs:            wbs,
+        name:           name,
+        start:          start,
+        end:            end,
+        duration_days:  (start && end) ? diffDays(start, end) + 1 : null,
+        progress_pct:   pct,
+        status:         status,
+        depends_on:     [],   /* resolved in pass 2 */
+        parent_id:      '',   /* resolved in pass 2 */
+        assignees:      [],
+        resource_pool:  [],
+        linked_action_items: [],
+        tags:           [],
+        baseline_start: start,
+        baseline_end:   end,
+      });
+    });
+
+    if (errors.length > 0) {
+      return { parents: [], leaves: [], errors: errors, warnings: warnings };
+    }
+
+    /* --- Second pass: resolve UIDs → task_ids and parent_ids via WBS ------- */
+
+    var uidMap = {};
+    rawNodes.forEach(function (r) { uidMap[r._uid] = r.task_id; });
+
+    rawNodes.forEach(function (r) {
+      /* Resolve predecessor UIDs. */
+      r.depends_on = r._dependsOnUIDs.map(function (uid) { return uidMap[uid]; }).filter(Boolean);
+      r._dependsOnUIDs.forEach(function (uid) {
+        if (!uidMap[uid]) {
+          warnings.push({ row: 0, field: 'PredecessorLink', message: r.task_id + ': predecessor UID "' + uid + '" not found in file (relationship ignored).' });
+        }
+      });
+
+      /* Resolve parent_id from WBS for leaf tasks. */
+      if (!r._isGroup && r._wbs) {
+        r.parent_id = _groupAncestor(r._wbs, rawNodes, wbsToTaskId);
+        if (!r.parent_id) {
+          warnings.push({ row: 0, field: 'WBS', message: r.task_id + ' (' + r.name + '): no group ancestor found for WBS "' + r._wbs + '" — task imported without a parent.' });
+        }
+      }
+    });
+
+    /* --- Split and strip internal fields ------------------------------------ */
+
+    function cleanXMLRow(r) {
+      return {
+        task_id:        r.task_id,
+        wbs:            r.wbs,
+        parent_id:      r.parent_id,
+        name:           r.name,
+        start:          r.start,
+        end:            r.end,
+        duration_days:  r.duration_days,
+        progress_pct:   r.progress_pct,
+        status:         r.status,
+        depends_on:     r.depends_on,
+        assignees:      r.assignees,
+        resource_pool:  r.resource_pool,
+        linked_action_items: r.linked_action_items,
+        tags:           r.tags,
+        baseline_start: r.baseline_start,
+        baseline_end:   r.baseline_end,
+      };
+    }
+
+    var parents = rawNodes.filter(function (r) { return  r._isGroup; }).map(cleanXMLRow);
+    var leaves  = rawNodes.filter(function (r) { return !r._isGroup; }).map(cleanXMLRow);
+
+    return { parents: parents, leaves: leaves, errors: errors, warnings: warnings };
+  }
+
   /* --- attach -------------------------------------------------------------- */
 
   window.FS = window.FS || {};
   window.FS.api = window.FS.api || {};
-  window.FS.api.programmeImport = { parseCSV: parseCSV };
+  window.FS.api.programmeImport = { parseCSV: parseCSV, parseMSProjectXML: parseMSProjectXML };
 
 }());

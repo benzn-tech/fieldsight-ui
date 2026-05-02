@@ -56,7 +56,13 @@
 
     function handleFiles(fileList) {
       var f = fileList && fileList[0];
-      if (f) onFile(f);
+      if (!f) return;
+      var ext = f.name.split('.').pop().toLowerCase();
+      if (ext !== 'csv' && ext !== 'xml') {
+        alert('Unsupported file type. Please select a .csv or .xml (MS Project) file.');
+        return;
+      }
+      onFile(f);
     }
 
     function onDragOver(e) {
@@ -83,7 +89,7 @@
       onClick:     function () { inputRef.current && inputRef.current.click(); },
       role:        'button',
       tabIndex:    0,
-      'aria-label': 'Select a CSV file to import',
+      'aria-label': 'Select a CSV or MS Project XML file to import',
       onKeyDown: function (e) {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inputRef.current && inputRef.current.click(); }
       },
@@ -91,18 +97,21 @@
       React.createElement('input', {
         ref:      inputRef,
         type:     'file',
-        accept:   '.csv,text/csv',
+        accept:   '.csv,text/csv,.xml,text/xml,application/xml',
         style:    { display: 'none' },
         onChange: onInputChange,
       }),
       React.createElement('div', { className: 'fs-prog-import__drop-icon' }, '📂'),
       React.createElement('div', { className: 'fs-prog-import__drop-title' },
-        dragOver ? 'Drop to import' : 'Drag & drop a CSV file here'),
+        dragOver ? 'Drop to import' : 'Drag & drop a file here'),
       React.createElement('div', { className: 'fs-prog-import__drop-sub' },
-        'or click to browse · .csv only'),
-      React.createElement('div', { className: 'fs-prog-import__drop-cols' },
-        React.createElement('code', null,
-          'task_id, wbs, parent_id, name, start, end, progress_pct, status, depends_on, assignees')),
+        'or click to browse · .csv or .xml (MS Project)'),
+      React.createElement('div', { className: 'fs-prog-import__drop-formats' },
+        React.createElement('span', { className: 'fs-prog-import__drop-format-label' }, 'CSV columns:'),
+        React.createElement('code', null, 'task_id, wbs, parent_id, name, start, end, progress_pct, status, depends_on, assignees'),
+        React.createElement('span', { className: 'fs-prog-import__drop-format-label' }, 'MS Project XML:'),
+        'File → Save As → XML Format in MS Project 2016+',
+      ),
     );
   }
 
@@ -235,10 +244,13 @@
 
     function handleFile(f) {
       setFileName(f.name);
+      var isXML = /\.xml$/i.test(f.name);
       var reader = new FileReader();
       reader.onload = function (e) {
         var text   = e.target.result;
-        var parsed = window.FS.api.programmeImport.parseCSV(text);
+        var parsed = isXML
+          ? window.FS.api.programmeImport.parseMSProjectXML(text)
+          : window.FS.api.programmeImport.parseCSV(text);
         setResult(parsed);
         setPhase('preview');
       };
@@ -263,7 +275,7 @@
       ? React.createElement(ModalOverlay, {
           open:            open,
           onClose:         onClose,
-          title:           phase === 'pick' ? 'Import programme from CSV' : 'Preview import — ' + fileName,
+          title:           phase === 'pick' ? 'Import programme — CSV or MS Project XML' : 'Preview import — ' + fileName,
           size:            'lg',
           closeOnBackdrop: phase === 'pick',
         },
