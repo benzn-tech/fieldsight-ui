@@ -1,5 +1,5 @@
 /* ==========================================================================
-   FieldSight ModalOverlay — Layer 5 composite (Sprint 5.0)
+   FieldSight ModalOverlay — Layer 5 composite (Sprint 5.0 / 5.7.1)
    --------------------------------------------------------------------------
    Centred modal primitive used by Programme task editor (5.1) and import
    modal (5.4). Architecturally a sibling of `RightDrawer`: same backdrop +
@@ -12,6 +12,16 @@
    through OK/Cancel. Different lifetime, different layering (modals
    above drawers via --z-modal=500 vs drawer's z=50).
 
+   Sprint 5.7.1 — uses `ReactDOM.createPortal` to mount at document.body.
+   Without the portal, when the editor is mounted from inside RightDrawer
+   (which has `overflow: hidden` + `transform: translateX(...)` creating
+   its own stacking context), the modal got clipped to the drawer's
+   bounds AND its z-index was scoped relative to the drawer — making
+   the centred panel render off-centre and partially hidden. Portaling
+   to the body lifts the entire modal subtree out of every parent
+   stacking context, restoring true viewport-centred positioning and
+   correct z-layer ordering against the drawer.
+
    Props:
      open              boolean
      onClose           () => void
@@ -19,14 +29,14 @@
      ariaLabel         string?    — fallback when title isn't set
      size              'sm'|'md'|'lg' (default 'md')
      closeOnBackdrop   boolean (default true) — set false for forms with
-                        unsaved input (5.1 editor will pass false)
+                        unsaved input (5.1 editor passes false)
      children          modal body content
 
    Exported to:
      window.FieldSight.ModalOverlay
    ========================================================================== */
 
-/* global React, window */
+/* global React, ReactDOM, window, document */
 
 (function () {
   'use strict';
@@ -61,7 +71,7 @@
       if (closeOnBackdrop) onClose();
     }
 
-    return React.createElement(React.Fragment, null,
+    var tree = React.createElement(React.Fragment, null,
       React.createElement('div', {
         className:     'fs-modal__backdrop' + (open ? ' fs-modal__backdrop--open' : ''),
         onClick:       onBackdropClick,
@@ -90,6 +100,15 @@
         React.createElement('div', { className: 'fs-modal__body' }, props.children),
       ),
     );
+
+    /* Portal lift — see Sprint 5.7.1 note in the file header. Falls back
+       to in-tree rendering only when ReactDOM/document.body aren't
+       available (e.g. node smoke tests where document is stubbed). */
+    if (typeof ReactDOM !== 'undefined' && ReactDOM.createPortal
+        && typeof document !== 'undefined' && document.body) {
+      return ReactDOM.createPortal(tree, document.body);
+    }
+    return tree;
   }
 
   if (!window.FieldSight) window.FieldSight = {};

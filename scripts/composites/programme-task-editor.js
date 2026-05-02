@@ -91,6 +91,92 @@
     return { ok: false, errors: errors, normalized: null };
   }
 
+  /* ---------- ChipInput (Sprint 5.7.1) --------------------------------- */
+  /* Combobox-style multi-value field used by Assignees and Tags. Renders
+     existing values as removable chips + a single text input bound to a
+     <datalist> that autocompletes from a provided option pool. Commits
+     a chip on Enter, comma, or blur; backspace on an empty draft pops
+     the last chip. Free input is allowed — the datalist is a hint, not
+     a constraint. The form holds these fields as `string[]` directly. */
+  function ChipInput(props) {
+    var values   = props.values || [];
+    var options  = props.options || [];
+    var label    = props.label || '';
+    var hint     = props.hint || '';
+    var onChange = props.onChange || function () {};
+
+    var refDraft = React.useState('');
+    var draft    = refDraft[0];
+    var setDraft = refDraft[1];
+
+    var listId = React.useMemo(function () {
+      return 'fs-chip-list-' + Math.random().toString(36).slice(2, 8);
+    }, []);
+
+    function commit(raw) {
+      var v = String(raw || '').trim().replace(/,$/, '');
+      if (!v) { setDraft(''); return; }
+      if (values.indexOf(v) === -1) onChange(values.concat([v]));
+      setDraft('');
+    }
+    function remove(v) { onChange(values.filter(function (x) { return x !== v; })); }
+    function onKeyDown(e) {
+      if (e.key === 'Enter' || e.key === ',') {
+        e.preventDefault();
+        commit(draft);
+      } else if (e.key === 'Backspace' && !draft && values.length) {
+        onChange(values.slice(0, -1));
+      }
+    }
+
+    /* Filter out already-selected values so the dropdown doesn't dupe. */
+    var dataOptions = options.filter(function (o) { return values.indexOf(o) === -1; });
+
+    return React.createElement('div', { className: 'fs-chip-input' },
+      label
+        ? React.createElement('label', { className: 'fs-chip-input__label' }, label)
+        : null,
+      React.createElement('div', { className: 'fs-chip-input__field' },
+        values.map(function (v) {
+          return React.createElement('span', {
+            key: v, className: 'fs-chip-input__chip',
+          },
+            React.createElement('span', { className: 'fs-chip-input__chip-text' }, v),
+            React.createElement('button', {
+              type:        'button',
+              className:   'fs-chip-input__chip-x',
+              'aria-label': 'Remove ' + v,
+              onClick:     function () { remove(v); },
+            }, '×'),
+          );
+        }),
+        React.createElement('input', {
+          type:       'text',
+          className:  'fs-chip-input__draft',
+          list:       listId,
+          value:      draft,
+          onChange:   function (e) {
+            var v = e.target.value;
+            /* Trailing comma → commit the token before the comma. */
+            if (v.slice(-1) === ',') { commit(v); return; }
+            setDraft(v);
+          },
+          onKeyDown:  onKeyDown,
+          onBlur:     function () { if (draft) commit(draft); },
+          placeholder: values.length === 0 ? (props.placeholder || 'Type and press Enter') : '',
+        }),
+        React.createElement('datalist', { id: listId },
+          dataOptions.map(function (o) {
+            return React.createElement('option', { key: o, value: o });
+          }),
+        ),
+      ),
+      hint
+        ? React.createElement('div', { className: 'fs-chip-input__hint' }, hint)
+        : null,
+    );
+  }
+
   /* ---------- ProgrammeTaskEditor -------------------------------------- */
 
   function ProgrammeTaskEditor(props) {
@@ -109,9 +195,26 @@
     var onSubmit = props.onSubmit || function () {};
     var onDelete = props.onDelete || null;
 
-    /* Form state — string-only.
-       Edit mode: mirrored from props.task on each open.
-       Create mode: blank defaults on each open. */
+    /* Sprint 5.7.1 — auto-pool option lists for the Assignees + Tags
+       chip dropdowns from the live `leaves[]`. New typing is still
+       allowed (the datalist is a hint, not a constraint). */
+    var assigneeOptions = React.useMemo(function () {
+      var set = {};
+      leaves.forEach(function (t) {
+        (t.assignees || []).forEach(function (a) { if (a) set[a] = true; });
+      });
+      return Object.keys(set).sort();
+    }, [leaves]);
+    var tagOptions = React.useMemo(function () {
+      var set = {};
+      leaves.forEach(function (t) {
+        (t.tags || []).forEach(function (a) { if (a) set[a] = true; });
+      });
+      return Object.keys(set).sort();
+    }, [leaves]);
+
+    /* Form state — assignees/tags now live as string[] arrays directly,
+       not joined CSV strings (5.7.1 chip refactor). */
     var initial = React.useMemo(function () {
       if (mode === 'create') {
         return {
@@ -121,8 +224,8 @@
           progress_pct: '0',
           start:        '',
           end:          '',
-          assignees:    '',
-          tags:         '',
+          assignees:    [],
+          tags:         [],
           depends_on:   [],
         };
       }
@@ -133,8 +236,8 @@
         progress_pct: String(task.progress_pct == null ? 0 : task.progress_pct),
         start:        task.start || '',
         end:          task.end   || '',
-        assignees:    (task.assignees || []).join(', '),
-        tags:         (task.tags || []).join(', '),
+        assignees:    (task.assignees || []).slice(),
+        tags:         (task.tags || []).slice(),
         depends_on:   (task.depends_on || []).slice(),
       };
     }, [mode, task && task.task_id, open]);
@@ -189,8 +292,8 @@
         progress_pct: Number(form.progress_pct),
         start:        form.start,
         end:          form.end,
-        assignees:    splitCsv(form.assignees),
-        tags:         splitCsv(form.tags),
+        assignees:    form.assignees.slice(),
+        tags:         form.tags.slice(),
         depends_on:   form.depends_on.slice(),
       };
 
@@ -295,30 +398,41 @@
             label:    'Start', type: 'date',
             value:    form.start,
             error:    errors.start,
+            /* Sprint 5.7.1 — force English locale on the native date
+               picker so the format stays "yyyy-mm-dd" / "dd Mmm yyyy"
+               regardless of the operating system's display language
+               (Chrome/Edge follow the input's `lang` for date format
+               when set explicitly). */
+            lang:     'en-NZ',
             onChange: function (e) { set('start', e.target.value); },
           }),
           React.createElement(Input, {
             label:    'End', type: 'date',
             value:    form.end,
             error:    errors.end,
+            lang:     'en-NZ',
             onChange: function (e) { set('end', e.target.value); },
           }),
         ),
 
         React.createElement('div', { className: 'fs-task-editor__row' },
-          React.createElement(Input, {
-            label:    'Assignees', fullWidth: true,
-            hint:     'Comma-separated (e.g. Jarley_Trainor, Ben_Lin)',
-            value:    form.assignees,
-            onChange: function (e) { set('assignees', e.target.value); },
+          React.createElement(ChipInput, {
+            label:       'Assignees',
+            hint:        'Type to add (existing names auto-suggest). Press Enter or comma to commit.',
+            placeholder: 'e.g. Jarley_Trainor',
+            values:      form.assignees,
+            options:     assigneeOptions,
+            onChange:    function (next) { set('assignees', next); },
           }),
         ),
         React.createElement('div', { className: 'fs-task-editor__row' },
-          React.createElement(Input, {
-            label:    'Tags', fullWidth: true,
-            hint:     'Comma-separated (e.g. safety_critical, milestone)',
-            value:    form.tags,
-            onChange: function (e) { set('tags', e.target.value); },
+          React.createElement(ChipInput, {
+            label:       'Tags',
+            hint:        'Type to add (existing tags auto-suggest). Press Enter or comma to commit.',
+            placeholder: 'e.g. safety_critical',
+            values:      form.tags,
+            options:     tagOptions,
+            onChange:    function (next) { set('tags', next); },
           }),
         ),
 

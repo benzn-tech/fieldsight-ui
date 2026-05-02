@@ -364,6 +364,17 @@
       });
     }
 
+    /* Sprint 5.7.1 — write permission gate. Only project_manager,
+       construction_manager (and above via role hierarchy) and admin
+       can mutate the programme. Site managers and below get
+       programme:view but not programme:manage, so they see the
+       Gantt + can drag-reschedule (since the drag is gated separately
+       in scripts/composites/gantt-row.js where applicable) but cannot
+       Add or Delete tasks. The button + reducer are both gated to
+       keep the contract symmetric. */
+    var canWrite = !!(window.FS && window.FS.can
+                      && window.FS.can(caller, 'programme:manage'));
+
     var ctx = {
       state:        state,
       view:         view,    setView:    setView,
@@ -375,6 +386,7 @@
       addTask:      addTask,
       deleteTask:   deleteTask,
       replaceTasks: replaceTasks,
+      canWrite:     canWrite,
     };
     return React.createElement(ProgrammeContext.Provider, { value: ctx },
       props.children);
@@ -701,16 +713,16 @@
               )
             : null,
 
-          /* Sprint 5.2 — Add task button */
-          Button
+          /* Sprint 5.2 — Add task button (gated 5.7.1: PM / CM / admin) */
+          Button && ctx.canWrite
             ? React.createElement(Button, {
                 variant: 'primary', size: 'sm',
                 onClick:  function () { setAdding(true); },
               }, '+ Add task')
             : null,
 
-          /* Sprint 5.4 — Import CSV button */
-          Button
+          /* Sprint 5.4 — Import CSV button (gated 5.7.1: PM / CM / admin) */
+          Button && ctx.canWrite
             ? React.createElement(Button, {
                 variant: 'secondary', size: 'sm',
                 onClick:  function () { setImporting(true); },
@@ -1003,7 +1015,11 @@
             ),
       ),
 
-      /* Sprint 5.1 / 5.3 — task editor modal */
+      /* Sprint 5.1 / 5.3 — task editor modal.
+         Sprint 5.7.1 — only PM / CM / admin (canWrite) get the Delete
+         button. The editor checks `onDelete` truthiness to render the
+         red Delete control in the footer, so passing null hides it
+         entirely for read-only roles. */
       Editor ? React.createElement(Editor, {
         open:    editing,
         task:    t,
@@ -1014,11 +1030,13 @@
           ctx.editTask(opts);
           setEdit(false);
         },
-        onDelete: function (taskId) {
-          ctx.deleteTask(taskId);
-          setEdit(false);
-          if (props.onClose) props.onClose();
-        },
+        onDelete: ctx.canWrite
+          ? function (taskId) {
+              ctx.deleteTask(taskId);
+              setEdit(false);
+              if (props.onClose) props.onClose();
+            }
+          : null,
       }) : null,
     );
   }

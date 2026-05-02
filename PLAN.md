@@ -799,6 +799,53 @@ bolted on later.
   no new entry. `node --check` clean across all 86 JS files
   under `scripts/`.
 
+- **Sprint 5.7.1 · Post-deploy follow-up batch** ✅ done
+  Four issues caught in the first round of human testing on the
+  branch:
+
+  1. *Modal clipped by RightDrawer.* Clicking Edit inside the
+     drawer rendered the modal off-centre and partially hidden —
+     the drawer creates its own stacking context (it has
+     `transform` + `overflow: hidden`), so the centred modal got
+     positioned relative to the drawer rather than the viewport
+     and was clipped. Fix: `ModalOverlay` now uses
+     `ReactDOM.createPortal` to mount at `document.body`, lifting
+     the entire backdrop + panel out of any parent stacking
+     context. Falls back to in-tree rendering when ReactDOM is
+     unavailable (node smoke harness).
+
+  2. *Permission gate on Add task (5.2).* "+ Add task" now only
+     renders when `window.FS.can(caller, 'programme:manage')` —
+     i.e. project_manager, construction_manager (and above via
+     hierarchy) and admin. Site managers and below see the
+     programme but no longer the create button.
+
+  3. *Permission gate on Delete (5.3) + visibility.* Same gate
+     as 5.2 applied to the editor's `onDelete` prop; the trash
+     control disappears completely for non-write roles. The
+     button was always there for write roles — it sits in the
+     bottom-LEFT of the editor footer — but was previously
+     hidden by issue #1's clipping; the portal fix makes it
+     visible.
+
+  4. *Date input locale + Assignees/Tags UX.* Added `lang="en-NZ"`
+     to the two `<Input type="date">` controls in the editor so
+     Chrome/Edge stop showing the placeholder/format in the OS's
+     display language (was rendering "yyyy/mm/日" on Chinese
+     locale). Replaced the comma-separated string Inputs for
+     Assignees and Tags with a new `ChipInput` composite — chips
+     render selected values with × to remove, the input
+     autocompletes via `<datalist>` from a pool collected from
+     all leaves' existing assignees/tags, and Enter or comma
+     commits a chip. Free input still allowed (datalist is a
+     hint, not a constraint).
+
+  Edit was deliberately left ungated: site_managers can still
+  edit existing tasks (consistent with their `programme:view`
+  scope), but cannot add or delete. Cache busters: composites.css
+  v=28 → v=29, modal-overlay.js v=1 → v=2, programme-task-editor.js
+  v=3 → v=4, programme.js v=10 → v=11.
+
 ### Deferred to Sprint 6+
 
 | Item | Why deferred |

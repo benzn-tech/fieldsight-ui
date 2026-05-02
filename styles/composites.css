@@ -4102,6 +4102,74 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   border-top: 1px solid var(--border-subtle);
 }
 
+/* ---- ChipInput (Sprint 5.7.1) ------------------------------------------ */
+.fs-chip-input { display: flex; flex-direction: column; gap: 4px; }
+.fs-chip-input__label {
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+}
+.fs-chip-input__field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  min-height: 36px;
+  cursor: text;
+  transition: border-color var(--duration-fast) var(--easing-out),
+              box-shadow var(--duration-fast) var(--easing-out);
+}
+.fs-chip-input__field:focus-within {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px var(--color-accent-100);
+}
+.fs-chip-input__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  background: var(--color-accent-100);
+  color: var(--color-accent-800);
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.fs-chip-input__chip-text { font-family: var(--font-mono); }
+.fs-chip-input__chip-x {
+  background: transparent;
+  border: 0;
+  color: var(--color-accent-700);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: var(--radius-full);
+}
+.fs-chip-input__chip-x:hover {
+  background: var(--color-accent-200);
+  color: var(--color-accent-900);
+}
+.fs-chip-input__draft {
+  flex: 1;
+  min-width: 80px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  outline: none;
+  padding: 2px;
+}
+.fs-chip-input__hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
 /* =========================================================================
    Sprint 5.4 — ProgrammeImportModal
    ========================================================================= */
