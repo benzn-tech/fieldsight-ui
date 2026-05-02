@@ -4413,3 +4413,172 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   padding-top: 12px;
   border-top: 1px solid var(--border-subtle);
 }
+
+
+/* =========================================================================
+   Sprint 6.1 — /safety page (middle column)
+   ========================================================================= */
+
+.fs-safety { display: flex; flex-direction: column; gap: 12px; }
+
+.fs-safety__header { padding: 0 4px; }
+.fs-safety__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.fs-safety__subtitle {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.fs-safety__meta {
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Range toolbar ------------------------------------------------------------ */
+.fs-safety__toolbar {
+  position: relative;
+  padding: 0 4px;
+}
+.fs-safety__chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.fs-safety__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-panel);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: background var(--duration-fast) var(--easing-out),
+              border-color var(--duration-fast) var(--easing-out);
+}
+.fs-safety__chip:hover { background: var(--surface-panel-muted); }
+.fs-safety__chip--active {
+  border-color: var(--color-accent-400);
+  background: var(--color-accent-50);
+  color: var(--color-accent-800);
+}
+.fs-safety__picker-wrap {
+  margin-top: 8px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 8px;
+}
+
+/* Date-grouped list -------------------------------------------------------- */
+.fs-safety__groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.fs-safety__group { display: flex; flex-direction: column; gap: 6px; }
+.fs-safety__group-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 4px;
+}
+.fs-safety__group-date {
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.fs-safety__group-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.fs-safety__group-rows { display: flex; flex-direction: column; gap: 4px; }
+
+.fs-safety__row-btn {
+  display: block;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--easing-out),
+              background var(--duration-fast) var(--easing-out);
+}
+.fs-safety__row-btn:hover {
+  background: var(--surface-panel-muted);
+}
+.fs-safety__row-btn--active {
+  border-color: var(--color-accent-400);
+  background: var(--color-accent-50);
+}
+.fs-safety__row-meta {
+  padding: 0 12px 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.fs-safety__row-topic {
+  display: inline-block;
+}
+
+.fs-safety__loading,
+.fs-safety__empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+
+/* Safety right detail (placeholder for 6.1, beefed in 6.2) ----------------- */
+.fs-safety-detail {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 24px;
+  gap: 16px;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+.fs-safety-detail__placeholder {
+  padding: 32px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+.fs-safety-detail__placeholder-title {
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.fs-safety-detail__placeholder-body {
+  font-size: 13px;
+  max-width: 320px;
+  margin: 0 auto;
+}
+.fs-safety-detail__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+.fs-safety-detail__body {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
