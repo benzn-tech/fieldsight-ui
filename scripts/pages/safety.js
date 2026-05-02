@@ -284,8 +284,11 @@
         }),
         React.createElement(StatCard, { value: totals.sites, label: 'Sites affected' }),
         React.createElement(StatCard, {
-          value: totals.open + ' / ' + totals.closed,
-          label: 'Open / closed',
+          /* Sprint 6.6.2 — visual order: closed first (resolved/safe
+             reads as the desirable end-state). Tone still keyed on
+             `open` since "open issues" is the alarm signal. */
+          value: totals.closed + ' / ' + totals.open,
+          label: 'Closed / open',
           tone:  totals.open > 0 ? 'warning' : 'success',
         }),
       ),
