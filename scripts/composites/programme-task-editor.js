@@ -1,17 +1,25 @@
 /* ==========================================================================
-   FieldSight ProgrammeTaskEditor — Layer 5 composite (Sprint 5.1)
+   FieldSight ProgrammeTaskEditor — Layer 5 composite (Sprint 5.1 / 5.2)
    --------------------------------------------------------------------------
-   Modal form for editing a Programme leaf task. Mounted inside
-   `ProgrammeRightDetail` and triggered by an Edit button next to the
-   detail close (×). Commits via `ProgrammeProvider.editTask({task_id,
-   patch})` (Sprint 5.1 reducer) — mock-only, mutates the in-memory
-   leaves[] and re-publishes state.
+   Modal form for editing OR creating a Programme leaf task.
 
-   Form fields:
+   mode='edit' (default, Sprint 5.1):
+     Triggered by the Edit button in ProgrammeRightDetail. Commits via
+     `ProgrammeProvider.editTask({task_id, patch})`.
+
+   mode='create' (Sprint 5.2):
+     Triggered by the "+ Add task" button in ProgrammeMiddleColumn header.
+     Shows a WBS-group selector (parent_id) plus the same fields as edit.
+     Commits via onSubmit({parentId, name, status, progress_pct, start,
+     end, assignees, tags, depends_on}) — caller mints task_id and WBS
+     via ProgrammeProvider.addTask.
+
+   Form fields (both modes):
+     • parent_id             (Select; create mode only)
      • name                  (Input)
      • status                (Select; 5 enum values)
      • progress_pct          (Input type=number, 0–100)
-     • start / end           (Input type=date)
+     • start / end           (Input type=date; required in create mode)
      • assignees             (Input, comma-separated underscore folders)
      • tags                  (Input, comma-separated)
      • depends_on            (checkbox grid grouped by WBS parent)
@@ -92,15 +100,31 @@
     var Select       = fs.Select;
     var Button       = fs.Button;
 
-    var open    = !!props.open;
-    var task    = props.task || null;
-    var leaves  = props.leaves || [];
-    var parents = props.parents || [];
-    var onClose = props.onClose || function () {};
+    var open     = !!props.open;
+    var mode     = props.mode || 'edit';
+    var task     = props.task || null;
+    var leaves   = props.leaves || [];
+    var parents  = props.parents || [];
+    var onClose  = props.onClose || function () {};
     var onSubmit = props.onSubmit || function () {};
 
-    /* Form state — string-only, mirrored from props.task on each open. */
+    /* Form state — string-only.
+       Edit mode: mirrored from props.task on each open.
+       Create mode: blank defaults on each open. */
     var initial = React.useMemo(function () {
+      if (mode === 'create') {
+        return {
+          parent_id:    parents.length > 0 ? parents[0].task_id : '',
+          name:         '',
+          status:       'not_started',
+          progress_pct: '0',
+          start:        '',
+          end:          '',
+          assignees:    '',
+          tags:         '',
+          depends_on:   [],
+        };
+      }
       if (!task) return null;
       return {
         name:         task.name || '',
@@ -112,7 +136,7 @@
         tags:         (task.tags || []).join(', '),
         depends_on:   (task.depends_on || []).slice(),
       };
-    }, [task && task.task_id, open]);
+    }, [mode, task && task.task_id, open]);
 
     var refForm = React.useState(initial);
     var form    = refForm[0];
@@ -124,11 +148,12 @@
 
     React.useEffect(function () { setForm(initial); setErrors({}); }, [initial]);
 
-    if (!open || !task || !form) {
-      /* Always render the modal so backdrop animates; no task = bail. */
+    /* In edit mode we require a task; in create mode we don't. */
+    if (!open || (mode !== 'create' && !task) || !form) {
       if (Modal) {
         return React.createElement(Modal, {
-          open: false, onClose: onClose, title: 'Edit task',
+          open: false, onClose: onClose,
+          title: mode === 'create' ? 'Add task' : 'Edit task',
         });
       }
       return null;
@@ -157,29 +182,78 @@
         tags:         splitCsv(form.tags),
         depends_on:   form.depends_on.slice(),
       };
+
+      if (mode === 'create') {
+        var errs = {};
+        if (!patch.name)  errs.name  = 'Name is required.';
+        if (!patch.start) errs.start = 'Start date is required.';
+        if (!patch.end)   errs.end   = 'End date is required.';
+        if (patch.start && patch.end && patch.start > patch.end) {
+          errs.end = 'End must be on or after start.';
+        }
+        var pct = patch.progress_pct;
+        if (Number.isNaN(pct) || pct < 0 || pct > 100) {
+          errs.progress_pct = 'Progress must be 0–100.';
+        }
+        if (Object.keys(errs).length > 0) { setErrors(errs); return; }
+        onSubmit({
+          parentId:     form.parent_id,
+          name:         patch.name,
+          status:       patch.status,
+          progress_pct: patch.progress_pct,
+          start:        patch.start,
+          end:          patch.end,
+          assignees:    patch.assignees,
+          tags:         patch.tags,
+          depends_on:   patch.depends_on,
+        });
+        return;
+      }
+
       var result = validatePatch(patch, task.task_id);
       if (!result.ok) { setErrors(result.errors); return; }
       onSubmit({ task_id: task.task_id, patch: result.normalized });
     }
 
-    /* Group leaves by parent WBS for the depends_on checkbox grid. */
+    /* Group leaves by parent WBS for the depends_on checkbox grid.
+       In create mode task is null, so skip the self-exclusion filter. */
+    var currentTaskId = task ? task.task_id : null;
     var depGroups = parents.map(function (p) {
       return {
         parent: p,
         items:  leaves.filter(function (t) {
-          return t.parent_id === p.task_id && t.task_id !== task.task_id;
+          return t.parent_id === p.task_id
+            && (currentTaskId ? t.task_id !== currentTaskId : true);
         }),
       };
     }).filter(function (g) { return g.items.length > 0; });
 
+    var modalTitle = mode === 'create' ? 'Add task' : ('Edit task · ' + task.task_id);
+
+    var parentOptions = parents.map(function (p) {
+      return { value: p.task_id, label: p.wbs + ' · ' + p.name };
+    });
+
     return React.createElement(Modal, {
       open:            true,
       onClose:         onClose,
-      title:           'Edit task · ' + task.task_id,
+      title:           modalTitle,
       size:            'lg',
       closeOnBackdrop: false,           /* protect unsaved input */
     },
       React.createElement('div', { className: 'fs-task-editor' },
+
+        /* WBS group selector — create mode only */
+        mode === 'create' && parentOptions.length > 0
+          ? React.createElement('div', { className: 'fs-task-editor__row' },
+              React.createElement(Select, {
+                label:    'WBS Group',
+                value:    form.parent_id,
+                options:  parentOptions,
+                onChange: function (e) { set('parent_id', e.target.value); },
+              }),
+            )
+          : null,
 
         React.createElement('div', { className: 'fs-task-editor__row' },
           React.createElement(Input, {
@@ -209,6 +283,7 @@
           React.createElement(Input, {
             label:    'Start', type: 'date',
             value:    form.start,
+            error:    errors.start,
             onChange: function (e) { set('start', e.target.value); },
           }),
           React.createElement(Input, {
@@ -284,7 +359,7 @@
           }, 'Cancel'),
           React.createElement(Button, {
             variant: 'primary', onClick: commit,
-          }, 'Save'),
+          }, mode === 'create' ? 'Add task' : 'Save'),
         ),
       ),
     );

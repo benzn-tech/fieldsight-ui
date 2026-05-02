@@ -42,6 +42,38 @@
 
   /* ---------- Helpers --------------------------------------------------- */
 
+  /* Sprint 5.2 — auto-mint a task_id that's never been used.
+     Scans numeric suffixes so deletes never cause id reuse. */
+  function mintTaskId(leaves) {
+    var max = 0;
+    leaves.forEach(function (t) {
+      var m = t.task_id && t.task_id.match(/^T-(\d+)$/);
+      if (m) {
+        var n = parseInt(m[1], 10);
+        if (n > max) max = n;
+      }
+    });
+    var next = String(max + 1);
+    while (next.length < 3) next = '0' + next;
+    return 'T-' + next;
+  }
+
+  /* Sprint 5.2 — auto-mint a WBS code as "{parentPrefix}.{N+1}"
+     where N = max existing fractional suffix among the parent's children. */
+  function mintWbs(parent, leaves) {
+    var prefix = parent.wbs.split('.')[0];
+    var siblings = leaves.filter(function (t) { return t.parent_id === parent.task_id; });
+    var maxSuffix = 0;
+    siblings.forEach(function (t) {
+      var parts = t.wbs ? t.wbs.split('.') : [];
+      if (parts.length >= 2) {
+        var n = parseInt(parts[1], 10);
+        if (!isNaN(n) && n > maxSuffix) maxSuffix = n;
+      }
+    });
+    return prefix + '.' + (maxSuffix + 1);
+  }
+
   function fmtDate(yyyymmdd) {
     if (!yyyymmdd) return '';
     var p = String(yyyymmdd).split('-').map(Number);
@@ -238,6 +270,53 @@
       });
     }
 
+    /* Sprint 5.2 — create a new leaf task from editor form data.
+       Mints task_id and WBS, appends to leaves[], recomputes CPM.
+       No cascade needed (new task has no dependents yet). */
+    function addTask(opts) {
+      opts = opts || {};
+      setState(function (s) {
+        if (s.status !== 'ok') return s;
+        var parent = (s.parents || []).filter(function (p) {
+          return p.task_id === opts.parentId;
+        })[0];
+        if (!parent) return s;
+
+        var newId    = mintTaskId(s.leaves);
+        var newWbs   = mintWbs(parent, s.leaves);
+        var start    = opts.start;
+        var end      = opts.end;
+        var newLeaf  = {
+          task_id:             newId,
+          wbs:                 newWbs,
+          parent_id:           parent.task_id,
+          name:                opts.name || 'New task',
+          start:               start,
+          end:                 end,
+          duration_days:       diffDays(start, end) + 1,
+          progress_pct:        Number(opts.progress_pct) || 0,
+          status:              opts.status || 'not_started',
+          depends_on:          (opts.depends_on || []).slice(),
+          assignees:           (opts.assignees || []).slice(),
+          resource_pool:       [],
+          linked_action_items: [],
+          tags:                (opts.tags || []).slice(),
+          baseline_start:      start,
+          baseline_end:        end,
+        };
+
+        var nextLeaves = s.leaves.concat([newLeaf]);
+        var sched = window.FieldSight && window.FieldSight.programmeSchedule;
+        var critIds = sched
+          ? sched.computeCriticalPath(nextLeaves, s.programme.start_date)
+          : Array.from(s.critical);
+        return Object.assign({}, s, {
+          leaves:   nextLeaves,
+          critical: new Set(critIds),
+        });
+      });
+    }
+
     var ctx = {
       state:        state,
       view:         view,    setView:    setView,
@@ -246,6 +325,7 @@
       toggleGroup:  toggleGroup,
       updateTask:   updateTask,
       editTask:     editTask,
+      addTask:      addTask,
     };
     return React.createElement(ProgrammeContext.Provider, { value: ctx },
       props.children);
@@ -453,7 +533,13 @@
        This-Week / Next-Week / Later bucket list from 4.4. */
     var ProgrammeKanbanBoard  = fs.ProgrammeKanbanBoard;
     var Button                = fs.Button;
+    var Editor                = fs.ProgrammeTaskEditor;
     var onSelect              = props.onSelect || function () {};
+
+    /* Sprint 5.2 — "+ Add task" modal open state. */
+    var refAdding = React.useState(false);
+    var adding    = refAdding[0];
+    var setAdding = refAdding[1];
 
     var ctx = React.useContext(ProgrammeContext);
     if (!ctx) {
@@ -559,6 +645,14 @@
                 }),
               )
             : null,
+
+          /* Sprint 5.2 — Add task button */
+          Button
+            ? React.createElement(Button, {
+                variant: 'primary', size: 'sm',
+                onClick:  function () { setAdding(true); },
+              }, '+ Add task')
+            : null,
         ),
       ),
 
@@ -585,6 +679,21 @@
               });
             },
           }),
+
+      /* Sprint 5.2 — add-task modal (create mode) */
+      Editor
+        ? React.createElement(Editor, {
+            open:    adding,
+            mode:    'create',
+            leaves:  s.leaves,
+            parents: s.parents,
+            onClose: function () { setAdding(false); },
+            onSubmit: function (opts) {
+              ctx.addTask(opts);
+              setAdding(false);
+            },
+          })
+        : null,
     );
   }
 
