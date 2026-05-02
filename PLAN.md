@@ -614,6 +614,258 @@ branch (PR #14) until the user merges.
   cost: 5 sub-sprints, ~13 new files, 2 deleted, no nav-slot
   changes. PR #14 ready for review/merge.
 
+## Sprint 5 — Programme operability (active)
+
+Sprint 4 delivered Programme as a **read-only** Gantt + Board +
+RightDrawer surface (4.4) with one interactive escape hatch —
+drag-to-reschedule shipped in 4.9. Sprint 5 closes the rest of the
+operability gap that 4.4 deliberately deferred: **task editing,
+creation, deletion**, **importing** an external programme from
+CSV / MS Project XML, and a **cascade engine** that keeps dependent
+tasks + critical path consistent when anything changes. Detailed
+plan in `/root/.claude/plans/ok-very-good-plan-sprint4-graceful-trinket.md`
+(Sprint 5 section).
+
+Branch strategy: stack all sub-sprints on
+`claude/sprint5-00-programme-operability` and roll the PR title
+forward (same convention as the Sprint 4 follow-up batch).
+
+User decisions captured at sprint open:
+
+| Question | Choice |
+|---|---|
+| Imports scope | CSV + MS Project XML (no Excel; .mpp not feasible client-side) |
+| Cascade engine depth | Medium — chain-shift + CPM recompute (~80 LoC) |
+| Reverse linking (action → programme progress) | Defer to Sprint 6+ — field-test 4.10 first |
+
+Critical invariants across all sub-sprints:
+- No build step (every new lib via UMD/CDN; everything else native).
+- Mock-only persistence — all writes mutate `leaves[]` in
+  `ProgrammeProvider`'s React state; reload still resets to fixture.
+- No backend API changes — additive provider methods (`editTask`,
+  `addTask`, `deleteTask`, `replaceTasks`) live alongside 4.9's
+  `updateTask`.
+- Reuse Sprint 4 patterns — RightDrawer for modal architecture,
+  Input/Select/DatePicker for forms, `updateTask` reducer pattern
+  for new mutations.
+
+Execution order: `5.0 → 5.1 → 5.6 → 5.2 → 5.3 → 5.4 → 5.5 → 5.7`.
+5.6 is pulled forward so all subsequent reducers (`addTask`,
+`replaceTasks`) plug into the cascade pipeline at write time, not
+bolted on later.
+
+- **Sprint 5.0 · ModalOverlay primitive** ✅ done
+  Centred modal composite for 5.1 task editor and 5.4 import flow.
+  New `scripts/composites/modal-overlay.js` (~97 LoC) + appended
+  `.fs-modal*` block in `styles/composites.css` (~85 LoC). Mirrors
+  RightDrawer's backdrop + ESC + always-mounted-while-open pattern
+  but layers above the drawer (z=50) via `--z-modal=500` so a modal
+  opened from inside the drawer visually stacks on top. Supports
+  sm/md/lg sizes, optional title with `aria-labelledby`,
+  `closeOnBackdrop` toggle (default true; 5.1 editor passes false
+  to protect unsaved input), and respects
+  `prefers-reduced-motion`. Cache busters: composites.css v=25,
+  modal-overlay.js v=1.
+
+- **Sprint 5.1 · ProgrammeTaskEditor** ✅ done
+  Modal form for editing a Programme leaf task. Mounted inside
+  `ProgrammeRightDetail` and triggered by an Edit button next to
+  the detail close (×). Commits via new
+  `ProgrammeProvider.editTask({task_id, patch})` reducer — same
+  in-memory mutation pattern as 4.9's `updateTask` drag handler.
+  New `scripts/composites/programme-task-editor.js` (~306 LoC)
+  covers name, status, progress %, start/end dates, assignees,
+  tags, and a `depends_on` checkbox grid grouped by WBS parent.
+  Pure `validatePatch(patch, taskId)` factored out and exposed at
+  `window.FieldSight._programmeEditor.validatePatch` for node
+  tests: name non-empty, start ≤ end, depends_on excludes own id
+  (1-step cycle; full DAG check lives in 5.6), progress_pct in
+  [0, 100]. On success recomputes `duration_days = diffDays(start,
+  end) + 1`. Native `Input type="date"` rather than `DatePicker`
+  here — the existing DatePicker queries report-day fixture data
+  which is unrelated to programme task scheduling. Cache busters:
+  composites.css v=26, programme.js v=6,
+  programme-task-editor.js v=1.
+
+- **Sprint 5.6 · Cascade engine (medium depth)** ✅ done
+  Pure module `scripts/api/programme-schedule.js` (~216 LoC)
+  exporting `cascadeFromTask(leaves, task_id, deltaDays)` and
+  `computeCriticalPath(leaves, programmeStartISO)`. Both run a
+  Kahn's-algorithm cycle check up front; on cycle they
+  `console.warn` and return safe values (input unchanged for
+  cascade, `[]` for CPM) — never deadlock. Cascade is a
+  chain-shift on the transitive dependents of the trigger task.
+  CPM is a standard forward + backward pass returning task_ids
+  with zero slack. Date helpers (`addDaysISO`, `diffDaysISO`)
+  inlined so the module stays node-importable without booting
+  `FS.api`. `programme.js` now routes both `updateTask` (drag)
+  and `editTask` (form) through a single `applyTaskMutation`
+  helper that: applies the patch, computes end-delta, cascades,
+  recomputes critical_path. Initial mount also recomputes the
+  critical path from the loaded fixture rather than using the
+  stored `critical_path` array — so the fixture's value is now a
+  hint, not the authority. Note: the engine-computed CP for the
+  current fixture is `T-001 → T-002 → T-003 → T-004 → T-006 →
+  T-007 → T-013 → T-014` (92 days) which is genuinely longer
+  than the fixture's hand-coded chain through T-009 (86 days);
+  the math wins. Cache busters: programme.js v=7,
+  programme-schedule.js v=1.
+
+- **Sprint 5.2 · Add task** ✅ done
+  Shipped on `claude/sprint5-00-programme-operability`.
+  ProgrammeTaskEditor gains a `mode='create'` branch — WBS-group
+  selector, blank defaults on open, required start/end validation,
+  onSubmit emits `{parentId, name, status, …}` instead of a patch.
+  New `ProgrammeProvider.addTask` reducer mints `task_id` as
+  `T-<NNN>` from `max(numeric suffix) + 1` (scans suffixes, not
+  array length, so deletes never cause id reuse), derives WBS as
+  `{parent.N}.(maxSuffix+1)`, appends the leaf, and recomputes the
+  critical path through the same `applyTaskMutation` helper used by
+  5.6. New `+ Add task` primary button in the programme header
+  toolbar opens the create-mode editor. Cache busters:
+  programme-task-editor.js v=2, programme.js v=8.
+
+- **Sprint 5.3 · Delete task** ✅ done
+  Shipped on `claude/sprint5-00-programme-operability`. New
+  `ProgrammeProvider.deleteTask(taskId)` reducer removes the leaf
+  from `leaves[]`, **scrubs the deleted id from every other leaf's
+  `depends_on[]`** so dangling references can't cause cascade
+  infinite-loops in the 5.6 engine, and recomputes the critical
+  path. ProgrammeTaskEditor gains an `onDelete` prop and a Delete
+  button in the footer (edit mode only). First click shows a ghost
+  button with danger colour; second click changes to a full
+  `variant='danger'` "Confirm delete?" button; confirming calls
+  `onDelete(task_id)` + `onClose`. Cancel resets the confirm state.
+  ProgrammeRightDetail wires `onDelete` → `ctx.deleteTask` +
+  `setEdit(false)` + drawer close so the panel closes immediately.
+  Cache busters: programme-task-editor.js v=3, programme.js v=9.
+
+- **Sprint 5.4 · CSV import** ✅ done
+  Shipped on `claude/sprint5-00-programme-operability`. New
+  `scripts/api/programme-import.js` (plain script, no Babel) —
+  BOM + CRLF-tolerant parser with RFC-4180-ish tokeniser, validates
+  required columns (task_id, wbs, name, start, end, status),
+  parses pipe-separated lists for `depends_on` + `assignees`,
+  splits output into `{ parents, leaves, errors, warnings }`.
+  New `scripts/composites/programme-import-modal.js` — three-phase
+  ModalOverlay wrapper: (1) drop-zone (drag-drop + click-to-browse,
+  .csv only); (2) preview — validation report (errors block confirm;
+  warnings advisory), WBS-ordered task table (max 20 rows shown,
+  overflow count), replace-note; (3) confirm calls new
+  `ProgrammeProvider.replaceTasks(parents, leaves)` which does a
+  full in-memory snapshot swap and recomputes CPM from scratch.
+  "Import…" secondary button added to Programme toolbar next to
+  "+ Add task". Cache busters: composites.css v=27,
+  programme-import.js v=1 (new), programme-import-modal.js v=1
+  (new), programme.js v=10.
+
+- **Sprint 5.5 · MS Project XML import** ✅ done
+  Shipped on `claude/sprint5-00-programme-operability`. New
+  `parseMSProjectXML(text)` in `scripts/api/programme-import.js`
+  does a namespace-agnostic `DOMParser` walk of
+  `<Project>/<Tasks>/<Task>`, mapping `<UID>` → `T-NNN` task_id,
+  `<WBS>` → wbs, `<Name>`, `<Start>`/`<Finish>` (YYYY-MM-DD prefix
+  only), `<PercentComplete>` → progress_pct + derived status,
+  `<Summary>` / `<OutlineLevel>=1` → group rows.
+  `<PredecessorLink>` resolves FS relationships only (Type=1);
+  non-FS relationships and lag are warned once. Parent ids
+  resolved by WBS ancestor walk so output keeps the FS fixture's
+  two-level group/leaf shape. Calendars, resource assignments,
+  non-FS links, and lag warned (once) and ignored. Returns the
+  same `{ parents, leaves, errors, warnings }` contract as
+  `parseCSV`. The Sprint 5.4 modal now accepts `.csv` and `.xml`
+  with extension validation in DropZone, dispatches to the right
+  parser in `handleFile`, and updates pick-phase title, aria-label,
+  hint text, and column guide for both formats. Cache busters:
+  composites.css v=28, programme-import.js v=2,
+  programme-import-modal.js v=2.
+
+- **Sprint 5.7 · Wire-up + cache-buster sweep** ✅ done
+  Wraps the sprint. Per-sub-sprint cache busters were already
+  bumped at write time (programme.js v=5 → v=10 across 5.1/5.6/
+  5.2/5.3/5.4; composites.css v=24 → v=28 across 5.0/5.1/5.4/
+  5.5; programme-task-editor.js v=1 → v=3 across 5.1/5.2/5.3;
+  programme-import.js v=1 → v=2 across 5.4/5.5;
+  programme-import-modal.js v=1 → v=2 across 5.4/5.5; new
+  modules modal-overlay.js + programme-schedule.js shipped at
+  v=1) so no sweep-bump was needed in this commit. Reduced-motion
+  audit: Sprint 5 introduced **zero new `@keyframes`** —
+  ModalOverlay's slide-in is pure CSS transition (opacity +
+  transform), zeroed by tokens.css §16's global belt and reset
+  by an explicit suspenders block at composites.css §Sprint-5.0
+  (`transition: none; transform: translate(-50%, -50%)` under
+  `prefers-reduced-motion: reduce`). The animation registry
+  comment block at the top of composites.css therefore needs
+  no new entry. `node --check` clean across all 86 JS files
+  under `scripts/`.
+
+- **Sprint 5.7.1 · Post-deploy follow-up batch** ✅ done
+  Four issues caught in the first round of human testing on the
+  branch:
+
+  1. *Modal clipped by RightDrawer.* Clicking Edit inside the
+     drawer rendered the modal off-centre and partially hidden —
+     the drawer creates its own stacking context (it has
+     `transform` + `overflow: hidden`), so the centred modal got
+     positioned relative to the drawer rather than the viewport
+     and was clipped. Fix: `ModalOverlay` now uses
+     `ReactDOM.createPortal` to mount at `document.body`, lifting
+     the entire backdrop + panel out of any parent stacking
+     context. Falls back to in-tree rendering when ReactDOM is
+     unavailable (node smoke harness).
+
+  2. *Permission gate on Add task (5.2).* "+ Add task" now only
+     renders when `window.FS.can(caller, 'programme:manage')` —
+     i.e. project_manager, construction_manager (and above via
+     hierarchy) and admin. Site managers and below see the
+     programme but no longer the create button.
+
+  3. *Permission gate on Delete (5.3) + visibility.* Same gate
+     as 5.2 applied to the editor's `onDelete` prop; the trash
+     control disappears completely for non-write roles. The
+     button was always there for write roles — it sits in the
+     bottom-LEFT of the editor footer — but was previously
+     hidden by issue #1's clipping; the portal fix makes it
+     visible.
+
+  4. *Date input locale + Assignees/Tags UX.* Added `lang="en-NZ"`
+     to the two `<Input type="date">` controls in the editor so
+     Chrome/Edge stop showing the placeholder/format in the OS's
+     display language (was rendering "yyyy/mm/日" on Chinese
+     locale). Replaced the comma-separated string Inputs for
+     Assignees and Tags with a new `ChipInput` composite — chips
+     render selected values with × to remove, the input
+     autocompletes via `<datalist>` from a pool collected from
+     all leaves' existing assignees/tags, and Enter or comma
+     commits a chip. Free input still allowed (datalist is a
+     hint, not a constraint).
+
+  Edit was deliberately left ungated: site_managers can still
+  edit existing tasks (consistent with their `programme:view`
+  scope), but cannot add or delete. Cache busters: composites.css
+  v=28 → v=29, modal-overlay.js v=1 → v=2, programme-task-editor.js
+  v=3 → v=4, programme.js v=10 → v=11.
+
+- **Sprint 5.7.2 · Gate Edit too** ✅ done
+  Followed up on 5.7.1 by extending the `programme:manage` gate
+  to the Edit button itself in `ProgrammeRightDetail`. The three
+  write actions (Edit / Add / Delete) now share one symmetric
+  permission contract — site_managers and below see the
+  programme + can drag-reschedule (drag is gated separately
+  inside `gantt-row.js`) but cannot enter the editor at all.
+  Cache buster: programme.js v=11 → v=12.
+
+### Deferred to Sprint 6+
+
+| Item | Why deferred |
+|---|---|
+| Excel `.xlsx` import (SheetJS) | Commercial license caveat; CSV covers the common path |
+| MS Project `.mpp` binary | No pure-JS parser exists. Either backend conversion or accept .xml only |
+| Reverse linking (action done → programme progress nudge) | Field-test 4.10 first — UX is not yet validated |
+| Deep cascade (slack analysis + over-allocation warnings) | Medium covers ~80% of value; deep needs domain rules per org |
+| Persistent edits (write-through to backend) | `PATCH /api/programmes/...` doesn't exist yet — currently mock-only |
+| Resource pool conflict detection | Needs a separate sub-sprint after deep cascade lands |
+
 ## Sprint 4+ — Open product questions
 
 Surfaced during the second-pass review of merged main. These aren't

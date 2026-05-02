@@ -42,6 +42,38 @@
 
   /* ---------- Helpers --------------------------------------------------- */
 
+  /* Sprint 5.2 — auto-mint a task_id that's never been used.
+     Scans numeric suffixes so deletes never cause id reuse. */
+  function mintTaskId(leaves) {
+    var max = 0;
+    leaves.forEach(function (t) {
+      var m = t.task_id && t.task_id.match(/^T-(\d+)$/);
+      if (m) {
+        var n = parseInt(m[1], 10);
+        if (n > max) max = n;
+      }
+    });
+    var next = String(max + 1);
+    while (next.length < 3) next = '0' + next;
+    return 'T-' + next;
+  }
+
+  /* Sprint 5.2 — auto-mint a WBS code as "{parentPrefix}.{N+1}"
+     where N = max existing fractional suffix among the parent's children. */
+  function mintWbs(parent, leaves) {
+    var prefix = parent.wbs.split('.')[0];
+    var siblings = leaves.filter(function (t) { return t.parent_id === parent.task_id; });
+    var maxSuffix = 0;
+    siblings.forEach(function (t) {
+      var parts = t.wbs ? t.wbs.split('.') : [];
+      if (parts.length >= 2) {
+        var n = parseInt(parts[1], 10);
+        if (!isNaN(n) && n > maxSuffix) maxSuffix = n;
+      }
+    });
+    return prefix + '.' + (maxSuffix + 1);
+  }
+
   function fmtDate(yyyymmdd) {
     if (!yyyymmdd) return '';
     var p = String(yyyymmdd).split('-').map(Number);
@@ -111,7 +143,18 @@
         }
         var leaves   = (p.tasks || []).filter(function (t) { return t.status !== 'group'; });
         var parents  = (p.tasks || []).filter(function (t) { return t.status === 'group'; });
-        var critical = new Set(p.critical_path || []);
+        /* Sprint 5.6 — recompute the critical path from the dependency
+           graph on every load. The fixture's hand-coded critical_path
+           is now a hint, not the authority. The engine result is
+           mathematically the longest-cumulative-duration chain, so
+           subsequent cascades + edits stay self-consistent. Falls
+           back to the fixture value if the engine isn't loaded
+           (graceful degradation in unit-style harnesses). */
+        var sched = window.FieldSight && window.FieldSight.programmeSchedule;
+        var critIds = sched
+          ? sched.computeCriticalPath(leaves, p.start_date)
+          : (p.critical_path || []);
+        var critical = new Set(critIds);
         setState({
           status:   'ok',
           programme: p,
@@ -146,6 +189,44 @@
        resets to fixture defaults, which is the prototype's known
        limitation for any optimistic action (toggleAction works
        the same way). */
+    /* Sprint 5.6 — single mutation pipeline used by both updateTask
+       (drag) and editTask (form). Steps:
+         1. find the matching leaf (oldTask) so we can compute the
+            end-date delta
+         2. apply the patch to produce nextLeaves[]
+         3. cascade transitive dependents by deltaDays via the engine
+         4. recompute critical_path[] from the new graph
+         5. publish the new state
+
+       Cascade trigger = end-date shift only. If end didn't move (e.g.
+       editor changed only progress + assignees) we skip cascade but
+       still recompute the critical path defensively, since duration
+       changes alone could re-rank the longest chain. */
+    function applyTaskMutation(s, taskId, patcher) {
+      if (s.status !== 'ok') return s;
+      var oldTask = s.leaves.filter(function (t) { return t.task_id === taskId; })[0];
+      if (!oldTask) return s;
+
+      var nextLeaves = s.leaves.map(function (t) {
+        return t.task_id === taskId ? patcher(t) : t;
+      });
+      var newTask = nextLeaves.filter(function (t) { return t.task_id === taskId; })[0];
+
+      var sched = window.FieldSight && window.FieldSight.programmeSchedule;
+      if (sched) {
+        var deltaDays = sched.diffDaysISO(oldTask.end, newTask.end);
+        if (deltaDays) {
+          nextLeaves = sched.cascadeFromTask(nextLeaves, taskId, deltaDays);
+        }
+        var critIds = sched.computeCriticalPath(nextLeaves, s.programme.start_date);
+        return Object.assign({}, s, {
+          leaves:   nextLeaves,
+          critical: new Set(critIds),
+        });
+      }
+      return Object.assign({}, s, { leaves: nextLeaves });
+    }
+
     function updateTask(opts) {
       opts = opts || {};
       var task_id = opts.task_id;
@@ -161,18 +242,138 @@
         if (start < pStart) start = pStart;
         if (end   > pEnd)   end   = pEnd;
         if (end < start) end = start;
-
-        var nextLeaves = s.leaves.map(function (t) {
-          if (t.task_id !== task_id) return t;
+        return applyTaskMutation(s, task_id, function (t) {
           return Object.assign({}, t, {
             start:         start,
             end:           end,
             duration_days: diffDays(start, end) + 1,
           });
         });
-        return Object.assign({}, s, { leaves: nextLeaves });
       });
     }
+
+    /* Sprint 5.1 — full-task patch from ProgrammeTaskEditor. Same
+       in-memory mutation pattern as updateTask above; a real backend
+       call would be PATCH /api/programmes/:id/tasks/:task_id with the
+       merged patch object. duration_days is recomputed by the editor's
+       validatePatch when start/end are present, so we just spread the
+       patch over the matching leaf here. */
+    function editTask(opts) {
+      opts = opts || {};
+      var task_id = opts.task_id;
+      var patch   = opts.patch || {};
+      if (!task_id) return;
+      setState(function (s) {
+        return applyTaskMutation(s, task_id, function (t) {
+          return Object.assign({}, t, patch);
+        });
+      });
+    }
+
+    /* Sprint 5.3 — delete a leaf task by id.
+       Scrubs the id from every other leaf's depends_on[] so dangling
+       references can't cause cascade infinite-loops. Recomputes CPM
+       over the remaining leaves. */
+    function deleteTask(taskId) {
+      setState(function (s) {
+        if (s.status !== 'ok') return s;
+        var nextLeaves = s.leaves
+          .filter(function (t) { return t.task_id !== taskId; })
+          .map(function (t) {
+            if (!t.depends_on || t.depends_on.indexOf(taskId) === -1) return t;
+            return Object.assign({}, t, {
+              depends_on: t.depends_on.filter(function (id) { return id !== taskId; }),
+            });
+          });
+        var sched = window.FieldSight && window.FieldSight.programmeSchedule;
+        var critIds = sched
+          ? sched.computeCriticalPath(nextLeaves, s.programme.start_date)
+          : Array.from(s.critical).filter(function (id) { return id !== taskId; });
+        return Object.assign({}, s, {
+          leaves:   nextLeaves,
+          critical: new Set(critIds),
+        });
+      });
+    }
+
+    /* Sprint 5.2 — create a new leaf task from editor form data.
+       Mints task_id and WBS, appends to leaves[], recomputes CPM.
+       No cascade needed (new task has no dependents yet). */
+    function addTask(opts) {
+      opts = opts || {};
+      setState(function (s) {
+        if (s.status !== 'ok') return s;
+        var parent = (s.parents || []).filter(function (p) {
+          return p.task_id === opts.parentId;
+        })[0];
+        if (!parent) return s;
+
+        var newId    = mintTaskId(s.leaves);
+        var newWbs   = mintWbs(parent, s.leaves);
+        var start    = opts.start;
+        var end      = opts.end;
+        var newLeaf  = {
+          task_id:             newId,
+          wbs:                 newWbs,
+          parent_id:           parent.task_id,
+          name:                opts.name || 'New task',
+          start:               start,
+          end:                 end,
+          duration_days:       diffDays(start, end) + 1,
+          progress_pct:        Number(opts.progress_pct) || 0,
+          status:              opts.status || 'not_started',
+          depends_on:          (opts.depends_on || []).slice(),
+          assignees:           (opts.assignees || []).slice(),
+          resource_pool:       [],
+          linked_action_items: [],
+          tags:                (opts.tags || []).slice(),
+          baseline_start:      start,
+          baseline_end:        end,
+        };
+
+        var nextLeaves = s.leaves.concat([newLeaf]);
+        var sched = window.FieldSight && window.FieldSight.programmeSchedule;
+        var critIds = sched
+          ? sched.computeCriticalPath(nextLeaves, s.programme.start_date)
+          : Array.from(s.critical);
+        return Object.assign({}, s, {
+          leaves:   nextLeaves,
+          critical: new Set(critIds),
+        });
+      });
+    }
+
+    /* Sprint 5.4 — full snapshot replace after CSV import.
+       Preserves programme-level metadata (name, dates) from the current
+       programme; swaps the entire parents[] + leaves[] graph. CPM is
+       recomputed from scratch so the import doesn't rely on the CSV
+       carrying a valid critical_path hint. */
+    function replaceTasks(nextParents, nextLeaves) {
+      setState(function (s) {
+        if (s.status !== 'ok') return s;
+        var sched = window.FieldSight && window.FieldSight.programmeSchedule;
+        var critIds = sched
+          ? sched.computeCriticalPath(nextLeaves, s.programme.start_date)
+          : [];
+        return Object.assign({}, s, {
+          parents:  nextParents,
+          leaves:   nextLeaves,
+          critical: new Set(critIds),
+          /* Reset selection — the old selected task may no longer exist */
+        });
+      });
+    }
+
+    /* Sprint 5.7.1 — write permission gate. Only project_manager,
+       construction_manager (and above via role hierarchy) and admin
+       can mutate the programme. Site managers and below get
+       programme:view but not programme:manage, so they see the
+       Gantt + can drag-reschedule (since the drag is gated separately
+       in scripts/composites/gantt-row.js where applicable) but cannot
+       Add or Delete tasks. The button + reducer are both gated to
+       keep the contract symmetric. */
+    var canWrite = !!(window.FS && window.FS.can
+                      && window.FS.can(caller, 'programme:manage'));
 
     var ctx = {
       state:        state,
@@ -181,6 +382,11 @@
       collapsed:    collapsed,
       toggleGroup:  toggleGroup,
       updateTask:   updateTask,
+      editTask:     editTask,
+      addTask:      addTask,
+      deleteTask:   deleteTask,
+      replaceTasks: replaceTasks,
+      canWrite:     canWrite,
     };
     return React.createElement(ProgrammeContext.Provider, { value: ctx },
       props.children);
@@ -388,7 +594,19 @@
        This-Week / Next-Week / Later bucket list from 4.4. */
     var ProgrammeKanbanBoard  = fs.ProgrammeKanbanBoard;
     var Button                = fs.Button;
+    var Editor                = fs.ProgrammeTaskEditor;
+    var ImportModal           = fs.ProgrammeImportModal;
     var onSelect              = props.onSelect || function () {};
+
+    /* Sprint 5.2 — "+ Add task" modal open state. */
+    var refAdding = React.useState(false);
+    var adding    = refAdding[0];
+    var setAdding = refAdding[1];
+
+    /* Sprint 5.4 — CSV import modal open state. */
+    var refImporting = React.useState(false);
+    var importing    = refImporting[0];
+    var setImporting = refImporting[1];
 
     var ctx = React.useContext(ProgrammeContext);
     if (!ctx) {
@@ -494,6 +712,22 @@
                 }),
               )
             : null,
+
+          /* Sprint 5.2 — Add task button (gated 5.7.1: PM / CM / admin) */
+          Button && ctx.canWrite
+            ? React.createElement(Button, {
+                variant: 'primary', size: 'sm',
+                onClick:  function () { setAdding(true); },
+              }, '+ Add task')
+            : null,
+
+          /* Sprint 5.4 — Import CSV button (gated 5.7.1: PM / CM / admin) */
+          Button && ctx.canWrite
+            ? React.createElement(Button, {
+                variant: 'secondary', size: 'sm',
+                onClick:  function () { setImporting(true); },
+              }, 'Import…')
+            : null,
         ),
       ),
 
@@ -520,6 +754,33 @@
               });
             },
           }),
+
+      /* Sprint 5.2 — add-task modal (create mode) */
+      Editor
+        ? React.createElement(Editor, {
+            open:    adding,
+            mode:    'create',
+            leaves:  s.leaves,
+            parents: s.parents,
+            onClose: function () { setAdding(false); },
+            onSubmit: function (opts) {
+              ctx.addTask(opts);
+              setAdding(false);
+            },
+          })
+        : null,
+
+      /* Sprint 5.4 — CSV import modal */
+      ImportModal
+        ? React.createElement(ImportModal, {
+            open:     importing,
+            onClose:  function () { setImporting(false); },
+            onImport: function (parents, leaves) {
+              ctx.replaceTasks(parents, leaves);
+              setImporting(false);
+            },
+          })
+        : null,
     );
   }
 
@@ -531,9 +792,15 @@
     var Badge    = fs.Badge;
     var Button   = fs.Button;
     var IconBtn  = fs.IconButton;
+    var Editor   = fs.ProgrammeTaskEditor;
 
     var ctx = React.useContext(ProgrammeContext);
     var sel = props.selectedItem;
+
+    /* Sprint 5.1 — Edit modal open state, scoped to this detail panel. */
+    var refEdit = React.useState(false);
+    var editing  = refEdit[0];
+    var setEdit  = refEdit[1];
 
     /* Linked-action lazy fetch — only when a task is selected and it
        carries linked_action_items. We pull each action's text from
@@ -675,6 +942,13 @@
             }),
           ),
         ),
+        /* Sprint 5.1 — Edit opens the task editor modal.
+           Sprint 5.7.2 — gated on programme:manage (admin/PM/CM only),
+           consistent with the Add (5.2) and Delete (5.3) gates. */
+        Editor && ctx && ctx.canWrite ? React.createElement(Button, {
+          variant: 'ghost', size: 'sm',
+          onClick: function () { setEdit(true); },
+        }, 'Edit') : null,
         IconBtn ? React.createElement(IconBtn, {
           icon: 'x', ariaLabel: 'Close detail', size: 'sm',
           onClick: function () { if (props.onClose) props.onClose(); },
@@ -742,6 +1016,30 @@
               }),
             ),
       ),
+
+      /* Sprint 5.1 / 5.3 — task editor modal.
+         Sprint 5.7.1 — only PM / CM / admin (canWrite) get the Delete
+         button. The editor checks `onDelete` truthiness to render the
+         red Delete control in the footer, so passing null hides it
+         entirely for read-only roles. */
+      Editor ? React.createElement(Editor, {
+        open:    editing,
+        task:    t,
+        leaves:  (s && s.leaves) || [],
+        parents: (s && s.parents) || [],
+        onClose: function () { setEdit(false); },
+        onSubmit: function (opts) {
+          ctx.editTask(opts);
+          setEdit(false);
+        },
+        onDelete: ctx.canWrite
+          ? function (taskId) {
+              ctx.deleteTask(taskId);
+              setEdit(false);
+              if (props.onClose) props.onClose();
+            }
+          : null,
+      }) : null,
     );
   }
 
