@@ -485,6 +485,26 @@
       key: 'source', label: 'Source', value: sourceLabel,
     }));
 
+    /* Sprint 6.6.3 — photos block, rendered between field rows and
+       linked actions. Topic-flag rows carry related_photos from the
+       aggregator; observation rows are report-level and don't have a
+       specific topic to lift photos from. */
+    var photosBlock = null;
+    var PhotoGrid   = fs.PhotoGrid;
+    var photos      = (sel.related_photos || []);
+    if (photos.length > 0 && PhotoGrid) {
+      photosBlock = React.createElement('div', { className: 'fs-safety-detail__photos' },
+        React.createElement('div', { className: 'fs-safety-detail__photos-label' },
+          'Photos · ' + photos.length),
+        React.createElement(PhotoGrid, {
+          photos:           photos,
+          userDisplayName:  sel.user_name,
+          date:             sel.date,
+          variant:          'carousel',
+        }),
+      );
+    }
+
     /* Linked-actions block — only shown for topic-flag rows (since
        observation rows don't have a topic to lift action_items from). */
     var linkedBlock = null;
@@ -541,6 +561,9 @@
 
       /* Field rows */
       React.createElement('div', { className: 'fs-safety-detail__rows' }, rows),
+
+      /* Photos (Sprint 6.6.3) */
+      photosBlock,
 
       /* Linked actions */
       linkedBlock,

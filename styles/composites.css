@@ -1190,6 +1190,29 @@
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   gap: 8px;
 }
+/* Sprint 6.6.3 — carousel variant for /safety + /quality right panel.
+   Horizontal-scroll row with snap; default 2 cells visible at typical
+   right-panel widths (~360-420px), swipe/scroll for more. Larger
+   thumbs than the grid variant since context photos read better at
+   size. */
+.fs-photo-grid--carousel {
+  display: flex;
+  grid-template-columns: none;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 4px;  /* room for native scrollbar without clipping */
+}
+.fs-photo-grid--carousel .fs-photo-grid__cell {
+  flex: 0 0 calc(50% - 4px);  /* default 2 visible (gap-aware) */
+  scroll-snap-align: start;
+  min-width: 140px;
+}
+.fs-photo-grid--carousel .fs-photo-grid__thumb {
+  aspect-ratio: 4 / 3;        /* tall enough to read details */
+}
 
 .fs-photo-grid__cell {
   display: flex;
@@ -4631,6 +4654,24 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color: var(--text-primary);
   flex: 1;
   word-break: break-word;
+}
+
+/* Sprint 6.6.3 — photos block (carousel) on /safety + /quality
+   right panels. Lightweight wrapper above the carousel; the
+   PhotoGrid composite owns the cells. */
+.fs-safety-detail__photos,
+.fs-quality-detail__photos {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fs-safety-detail__photos-label,
+.fs-quality-detail__photos-label {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .fs-safety-detail__linked {

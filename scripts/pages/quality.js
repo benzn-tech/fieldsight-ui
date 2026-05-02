@@ -469,6 +469,25 @@
       key: 'source', label: 'Source', value: sourceLabel,
     }));
 
+    /* Sprint 6.6.3 — photos block. Topic-quality rows carry
+       related_photos from the aggregator; report-level qc_items don't
+       (no topic to lift them from). */
+    var photosBlock = null;
+    var PhotoGrid   = fs.PhotoGrid;
+    var photos      = (sel.related_photos || []);
+    if (photos.length > 0 && PhotoGrid) {
+      photosBlock = React.createElement('div', { className: 'fs-quality-detail__photos' },
+        React.createElement('div', { className: 'fs-quality-detail__photos-label' },
+          'Photos · ' + photos.length),
+        React.createElement(PhotoGrid, {
+          photos:           photos,
+          userDisplayName:  sel.user_name,
+          date:             sel.date,
+          variant:          'carousel',
+        }),
+      );
+    }
+
     var linkedBlock = null;
     if (sel.topic_id >= 0) {
       if (linksS.status === 'loading') {
@@ -521,6 +540,9 @@
       ),
 
       React.createElement('div', { className: 'fs-quality-detail__rows' }, rows),
+
+      /* Photos (Sprint 6.6.3) */
+      photosBlock,
 
       linkedBlock,
 

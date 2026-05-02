@@ -188,7 +188,9 @@
       });
 
       /* b) Topic-level safety_flags (less rich — no location/who, but
-         carries topic context). */
+         carries topic context). Also surfaces related_photos so the
+         /safety right panel can render them inline (Sprint 6.6.3 —
+         removes the round-trip to /timeline just to see the photos). */
       (r.topics || []).forEach(function (t) {
         (t.safety_flags || []).forEach(function (f, idx) {
           rows.push({
@@ -207,6 +209,7 @@
             location:           null,
             who_raised:         null,
             status:             'open',  /* see _AUDIT-2 */
+            related_photos:     (t.related_photos || []).slice(),
           });
         });
       });
@@ -255,7 +258,8 @@
       });
 
       /* b) Topics tagged category === 'quality' — surface as a row each
-         so the page covers both shapes. */
+         so the page covers both shapes. related_photos carried through
+         for /quality right panel inline preview (Sprint 6.6.3). */
       (r.topics || []).forEach(function (t) {
         if (t.category !== 'quality') return;
         rows.push({
@@ -273,6 +277,7 @@
           details:          t.summary || null,
           follow_up_needed: false,
           who_raised:       (t.participants && t.participants[0]) || null,
+          related_photos:   (t.related_photos || []).slice(),
         });
       });
     });
