@@ -203,6 +203,7 @@
                 setOpen(false);
               },
               monthsRange: 3,
+              inline:      true,
             }))
         : null,
     );

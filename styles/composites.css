@@ -1639,11 +1639,22 @@
   gap: 10px;
 }
 
-.fs-date-picker__modal-header {
+.fs-date-picker__modal-header,
+.fs-date-picker__inline-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+/* Inline mode (Sprint 6.6.1) — compact stack, no modal chrome. */
+.fs-date-picker--inline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fs-date-picker--inline .fs-date-picker__inline-header {
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-subtle);
 }
 .fs-date-picker__month-label {
   font-size: 14px;
