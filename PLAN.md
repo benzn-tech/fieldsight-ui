@@ -711,17 +711,34 @@ bolted on later.
   the math wins. Cache busters: programme.js v=7,
   programme-schedule.js v=1.
 
-- **Sprint 5.2 · Add task** — pending
-  Reuses 5.1 editor with a `mode: 'create'` branch. Auto-mints
-  `task_id` as `T-<NNN>` from `max(numeric suffix) + 1` (scans
-  suffixes, not array length, so deletes never cause id reuse).
-  Adds `+ Add task` button to programme header.
+- **Sprint 5.2 · Add task** ✅ done
+  Shipped on `claude/sprint5-00-programme-operability`.
+  ProgrammeTaskEditor gains a `mode='create'` branch — WBS-group
+  selector, blank defaults on open, required start/end validation,
+  onSubmit emits `{parentId, name, status, …}` instead of a patch.
+  New `ProgrammeProvider.addTask` reducer mints `task_id` as
+  `T-<NNN>` from `max(numeric suffix) + 1` (scans suffixes, not
+  array length, so deletes never cause id reuse), derives WBS as
+  `{parent.N}.(maxSuffix+1)`, appends the leaf, and recomputes the
+  critical path through the same `applyTaskMutation` helper used by
+  5.6. New `+ Add task` primary button in the programme header
+  toolbar opens the create-mode editor. Cache busters:
+  programme-task-editor.js v=2, programme.js v=8.
 
-- **Sprint 5.3 · Delete task** — pending
-  Trash button in editor (edit mode only) with confirm-via-second-
-  click. **Scrubs the deleted id from every other leaf's
+- **Sprint 5.3 · Delete task** ✅ done
+  Shipped on `claude/sprint5-00-programme-operability`. New
+  `ProgrammeProvider.deleteTask(taskId)` reducer removes the leaf
+  from `leaves[]`, **scrubs the deleted id from every other leaf's
   `depends_on[]`** so dangling references can't cause cascade
-  infinite-loops in 5.6.
+  infinite-loops in the 5.6 engine, and recomputes the critical
+  path. ProgrammeTaskEditor gains an `onDelete` prop and a Delete
+  button in the footer (edit mode only). First click shows a ghost
+  button with danger colour; second click changes to a full
+  `variant='danger'` "Confirm delete?" button; confirming calls
+  `onDelete(task_id)` + `onClose`. Cancel resets the confirm state.
+  ProgrammeRightDetail wires `onDelete` → `ctx.deleteTask` +
+  `setEdit(false)` + drawer close so the panel closes immediately.
+  Cache busters: programme-task-editor.js v=3, programme.js v=9.
 
 - **Sprint 5.4 · CSV import** ✅ done
   Shipped on `claude/sprint5-00-programme-operability`. New
@@ -742,18 +759,45 @@ bolted on later.
   programme-import.js v=1 (new), programme-import-modal.js v=1
   (new), programme.js v=10.
 
-- **Sprint 5.5 · MS Project XML import** — pending
-  Same modal as 5.4, dispatched by extension. Native `DOMParser`
-  walks `<Project>/<Tasks>/<Task>` mapping `<UID>` → `task_id`,
-  `<Name>` → `name`, `<Start>`/`<Finish>` → `start`/`end`,
-  `<OutlineNumber>` → `wbs`, `<PredecessorLink>` → `depends_on`
-  (FS-only relationships, no lag). Calendar / lag / resource
-  assignments not parsed; flagged in preview as ignored.
+- **Sprint 5.5 · MS Project XML import** ✅ done
+  Shipped on `claude/sprint5-00-programme-operability`. New
+  `parseMSProjectXML(text)` in `scripts/api/programme-import.js`
+  does a namespace-agnostic `DOMParser` walk of
+  `<Project>/<Tasks>/<Task>`, mapping `<UID>` → `T-NNN` task_id,
+  `<WBS>` → wbs, `<Name>`, `<Start>`/`<Finish>` (YYYY-MM-DD prefix
+  only), `<PercentComplete>` → progress_pct + derived status,
+  `<Summary>` / `<OutlineLevel>=1` → group rows.
+  `<PredecessorLink>` resolves FS relationships only (Type=1);
+  non-FS relationships and lag are warned once. Parent ids
+  resolved by WBS ancestor walk so output keeps the FS fixture's
+  two-level group/leaf shape. Calendars, resource assignments,
+  non-FS links, and lag warned (once) and ignored. Returns the
+  same `{ parents, leaves, errors, warnings }` contract as
+  `parseCSV`. The Sprint 5.4 modal now accepts `.csv` and `.xml`
+  with extension validation in DropZone, dispatches to the right
+  parser in `handleFile`, and updates pick-phase title, aria-label,
+  hint text, and column guide for both formats. Cache busters:
+  composites.css v=28, programme-import.js v=2,
+  programme-import-modal.js v=2.
 
-- **Sprint 5.7 · Wire-up + cache-buster sweep** — pending
-  Bump cache busters on every touched file, confirm
-  `prefers-reduced-motion` honoured on modal slide-in, full
-  `node --check` sweep across all JS files. Wraps the sprint.
+- **Sprint 5.7 · Wire-up + cache-buster sweep** ✅ done
+  Wraps the sprint. Per-sub-sprint cache busters were already
+  bumped at write time (programme.js v=5 → v=10 across 5.1/5.6/
+  5.2/5.3/5.4; composites.css v=24 → v=28 across 5.0/5.1/5.4/
+  5.5; programme-task-editor.js v=1 → v=3 across 5.1/5.2/5.3;
+  programme-import.js v=1 → v=2 across 5.4/5.5;
+  programme-import-modal.js v=1 → v=2 across 5.4/5.5; new
+  modules modal-overlay.js + programme-schedule.js shipped at
+  v=1) so no sweep-bump was needed in this commit. Reduced-motion
+  audit: Sprint 5 introduced **zero new `@keyframes`** —
+  ModalOverlay's slide-in is pure CSS transition (opacity +
+  transform), zeroed by tokens.css §16's global belt and reset
+  by an explicit suspenders block at composites.css §Sprint-5.0
+  (`transition: none; transform: translate(-50%, -50%)` under
+  `prefers-reduced-motion: reduce`). The animation registry
+  comment block at the top of composites.css therefore needs
+  no new entry. `node --check` clean across all 86 JS files
+  under `scripts/`.
 
 ### Deferred to Sprint 6+
 
