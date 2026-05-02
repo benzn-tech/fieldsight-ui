@@ -4101,3 +4101,230 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   padding-top: 12px;
   border-top: 1px solid var(--border-subtle);
 }
+
+/* =========================================================================
+   Sprint 5.4 — ProgrammeImportModal
+   ========================================================================= */
+
+/* ---- Drop zone ---------------------------------------------------------- */
+.fs-prog-import__drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 48px 32px;
+  border: 2px dashed var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--easing-out),
+              background   var(--duration-fast) var(--easing-out);
+  text-align: center;
+}
+.fs-prog-import__drop:hover,
+.fs-prog-import__drop:focus-visible {
+  border-color: var(--color-accent-400);
+  background: var(--color-accent-50);
+  outline: none;
+}
+.fs-prog-import__drop--over {
+  border-color: var(--color-accent-500);
+  background: var(--color-accent-50);
+}
+.fs-prog-import__drop-icon {
+  font-size: 36px;
+  line-height: 1;
+  user-select: none;
+}
+.fs-prog-import__drop-title {
+  font-size: 15px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.fs-prog-import__drop-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fs-prog-import__drop-cols {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  word-break: break-all;
+}
+.fs-prog-import__drop-cols code {
+  font-family: var(--font-mono);
+}
+
+/* ---- Preview phase ------------------------------------------------------- */
+.fs-prog-import__preview {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.fs-prog-import__summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.fs-prog-import__summary-count {
+  font-size: 20px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.fs-prog-import__summary-change {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--easing-out);
+}
+.fs-prog-import__summary-change:hover { background: var(--surface-panel-muted); }
+
+/* ---- Validation report -------------------------------------------------- */
+.fs-prog-import__report {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fs-prog-import__report-section {
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+}
+.fs-prog-import__report-section--error {
+  background: var(--color-danger-50);
+  border: 1px solid var(--color-danger-200);
+}
+.fs-prog-import__report-section--warn {
+  background: var(--color-warning-50);
+  border: 1px solid var(--color-warning-200);
+}
+.fs-prog-import__report-header {
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.fs-prog-import__report-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+}
+.fs-prog-import__report-badge--error {
+  background: var(--color-danger-100);
+  color: var(--color-danger-700);
+}
+.fs-prog-import__report-badge--warn {
+  background: var(--color-warning-100);
+  color: var(--color-warning-700);
+}
+.fs-prog-import__report-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* ---- Preview table ------------------------------------------------------- */
+.fs-prog-import__table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  max-height: 280px;
+  overflow-y: auto;
+}
+.fs-prog-import__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.fs-prog-import__table th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-panel-muted);
+  color: var(--text-secondary);
+  font-weight: var(--font-weight-semibold);
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.fs-prog-import__table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fs-prog-import__table tr:last-child td { border-bottom: none; }
+.fs-prog-import__table tr:hover td { background: var(--surface-panel-muted); }
+.fs-prog-import__table-group td {
+  background: var(--surface-panel);
+  border-top: 1px solid var(--border-subtle);
+}
+.fs-prog-import__td-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.fs-prog-import__table-overflow {
+  text-align: center;
+  color: var(--text-tertiary);
+  font-style: italic;
+  font-size: 11px;
+  padding: 8px !important;
+}
+
+/* ---- Status pills in preview -------------------------------------------- */
+.fs-prog-import__status-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+.fs-prog-import__status-pill--not_started  { background: var(--surface-panel-muted); color: var(--text-tertiary); }
+.fs-prog-import__status-pill--in_progress  { background: var(--color-accent-100);    color: var(--color-accent-700); }
+.fs-prog-import__status-pill--completed    { background: var(--color-success-100, #d1fae5); color: var(--color-success-700, #065f46); }
+.fs-prog-import__status-pill--delayed      { background: var(--color-warning-100);   color: var(--color-warning-700); }
+.fs-prog-import__status-pill--blocked      { background: var(--color-danger-100);    color: var(--color-danger-700); }
+.fs-prog-import__status-pill--group        { background: var(--surface-panel-muted); color: var(--text-secondary); font-style: italic; }
+
+/* ---- Replace note + footer ---------------------------------------------- */
+.fs-prog-import__replace-note {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-style: italic;
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--surface-panel-muted);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--border-subtle);
+}
+.fs-prog-import__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}

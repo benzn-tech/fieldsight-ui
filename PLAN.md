@@ -723,14 +723,24 @@ bolted on later.
   `depends_on[]`** so dangling references can't cause cascade
   infinite-loops in 5.6.
 
-- **Sprint 5.4 · CSV import** — pending
-  `Import…` button opens file-picker modal (drag-drop + click).
-  Native parser in `scripts/api/programme-import.js` (BOM + CRLF
-  tolerant). Required header: `task_id,wbs,parent_id,name,start,
-  end,progress_pct,status,depends_on,assignees` with
-  pipe-separated lists. Preview + validation report → user
-  confirms → `replaceTasks(parents, leaves)` full snapshot
-  replace.
+- **Sprint 5.4 · CSV import** ✅ done
+  Shipped on `claude/sprint5-00-programme-operability`. New
+  `scripts/api/programme-import.js` (plain script, no Babel) —
+  BOM + CRLF-tolerant parser with RFC-4180-ish tokeniser, validates
+  required columns (task_id, wbs, name, start, end, status),
+  parses pipe-separated lists for `depends_on` + `assignees`,
+  splits output into `{ parents, leaves, errors, warnings }`.
+  New `scripts/composites/programme-import-modal.js` — three-phase
+  ModalOverlay wrapper: (1) drop-zone (drag-drop + click-to-browse,
+  .csv only); (2) preview — validation report (errors block confirm;
+  warnings advisory), WBS-ordered task table (max 20 rows shown,
+  overflow count), replace-note; (3) confirm calls new
+  `ProgrammeProvider.replaceTasks(parents, leaves)` which does a
+  full in-memory snapshot swap and recomputes CPM from scratch.
+  "Import…" secondary button added to Programme toolbar next to
+  "+ Add task". Cache busters: composites.css v=27,
+  programme-import.js v=1 (new), programme-import-modal.js v=1
+  (new), programme.js v=10.
 
 - **Sprint 5.5 · MS Project XML import** — pending
   Same modal as 5.4, dispatched by extension. Native `DOMParser`

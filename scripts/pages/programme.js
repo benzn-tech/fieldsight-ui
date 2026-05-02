@@ -343,6 +343,27 @@
       });
     }
 
+    /* Sprint 5.4 — full snapshot replace after CSV import.
+       Preserves programme-level metadata (name, dates) from the current
+       programme; swaps the entire parents[] + leaves[] graph. CPM is
+       recomputed from scratch so the import doesn't rely on the CSV
+       carrying a valid critical_path hint. */
+    function replaceTasks(nextParents, nextLeaves) {
+      setState(function (s) {
+        if (s.status !== 'ok') return s;
+        var sched = window.FieldSight && window.FieldSight.programmeSchedule;
+        var critIds = sched
+          ? sched.computeCriticalPath(nextLeaves, s.programme.start_date)
+          : [];
+        return Object.assign({}, s, {
+          parents:  nextParents,
+          leaves:   nextLeaves,
+          critical: new Set(critIds),
+          /* Reset selection — the old selected task may no longer exist */
+        });
+      });
+    }
+
     var ctx = {
       state:        state,
       view:         view,    setView:    setView,
@@ -353,6 +374,7 @@
       editTask:     editTask,
       addTask:      addTask,
       deleteTask:   deleteTask,
+      replaceTasks: replaceTasks,
     };
     return React.createElement(ProgrammeContext.Provider, { value: ctx },
       props.children);
@@ -561,12 +583,18 @@
     var ProgrammeKanbanBoard  = fs.ProgrammeKanbanBoard;
     var Button                = fs.Button;
     var Editor                = fs.ProgrammeTaskEditor;
+    var ImportModal           = fs.ProgrammeImportModal;
     var onSelect              = props.onSelect || function () {};
 
     /* Sprint 5.2 — "+ Add task" modal open state. */
     var refAdding = React.useState(false);
     var adding    = refAdding[0];
     var setAdding = refAdding[1];
+
+    /* Sprint 5.4 — CSV import modal open state. */
+    var refImporting = React.useState(false);
+    var importing    = refImporting[0];
+    var setImporting = refImporting[1];
 
     var ctx = React.useContext(ProgrammeContext);
     if (!ctx) {
@@ -680,6 +708,14 @@
                 onClick:  function () { setAdding(true); },
               }, '+ Add task')
             : null,
+
+          /* Sprint 5.4 — Import CSV button */
+          Button
+            ? React.createElement(Button, {
+                variant: 'secondary', size: 'sm',
+                onClick:  function () { setImporting(true); },
+              }, 'Import…')
+            : null,
         ),
       ),
 
@@ -718,6 +754,18 @@
             onSubmit: function (opts) {
               ctx.addTask(opts);
               setAdding(false);
+            },
+          })
+        : null,
+
+      /* Sprint 5.4 — CSV import modal */
+      ImportModal
+        ? React.createElement(ImportModal, {
+            open:     importing,
+            onClose:  function () { setImporting(false); },
+            onImport: function (parents, leaves) {
+              ctx.replaceTasks(parents, leaves);
+              setImporting(false);
             },
           })
         : null,
