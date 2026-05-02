@@ -614,6 +614,134 @@ branch (PR #14) until the user merges.
   cost: 5 sub-sprints, ~13 new files, 2 deleted, no nav-slot
   changes. PR #14 ready for review/merge.
 
+## Sprint 5 — Programme operability (active)
+
+Sprint 4 delivered Programme as a **read-only** Gantt + Board +
+RightDrawer surface (4.4) with one interactive escape hatch —
+drag-to-reschedule shipped in 4.9. Sprint 5 closes the rest of the
+operability gap that 4.4 deliberately deferred: **task editing,
+creation, deletion**, **importing** an external programme from
+CSV / MS Project XML, and a **cascade engine** that keeps dependent
+tasks + critical path consistent when anything changes. Detailed
+plan in `/root/.claude/plans/ok-very-good-plan-sprint4-graceful-trinket.md`
+(Sprint 5 section).
+
+Branch strategy: stack all sub-sprints on
+`claude/sprint5-00-programme-operability` and roll the PR title
+forward (same convention as the Sprint 4 follow-up batch).
+
+User decisions captured at sprint open:
+
+| Question | Choice |
+|---|---|
+| Imports scope | CSV + MS Project XML (no Excel; .mpp not feasible client-side) |
+| Cascade engine depth | Medium — chain-shift + CPM recompute (~80 LoC) |
+| Reverse linking (action → programme progress) | Defer to Sprint 6+ — field-test 4.10 first |
+
+Critical invariants across all sub-sprints:
+- No build step (every new lib via UMD/CDN; everything else native).
+- Mock-only persistence — all writes mutate `leaves[]` in
+  `ProgrammeProvider`'s React state; reload still resets to fixture.
+- No backend API changes — additive provider methods (`editTask`,
+  `addTask`, `deleteTask`, `replaceTasks`) live alongside 4.9's
+  `updateTask`.
+- Reuse Sprint 4 patterns — RightDrawer for modal architecture,
+  Input/Select/DatePicker for forms, `updateTask` reducer pattern
+  for new mutations.
+
+Execution order: `5.0 → 5.1 → 5.6 → 5.2 → 5.3 → 5.4 → 5.5 → 5.7`.
+5.6 is pulled forward so all subsequent reducers (`addTask`,
+`replaceTasks`) plug into the cascade pipeline at write time, not
+bolted on later.
+
+- **Sprint 5.0 · ModalOverlay primitive** ✅ done
+  Centred modal composite for 5.1 task editor and 5.4 import flow.
+  New `scripts/composites/modal-overlay.js` (~97 LoC) + appended
+  `.fs-modal*` block in `styles/composites.css` (~85 LoC). Mirrors
+  RightDrawer's backdrop + ESC + always-mounted-while-open pattern
+  but layers above the drawer (z=50) via `--z-modal=500` so a modal
+  opened from inside the drawer visually stacks on top. Supports
+  sm/md/lg sizes, optional title with `aria-labelledby`,
+  `closeOnBackdrop` toggle (default true; 5.1 editor passes false
+  to protect unsaved input), and respects
+  `prefers-reduced-motion`. Cache busters: composites.css v=25,
+  modal-overlay.js v=1.
+
+- **Sprint 5.1 · ProgrammeTaskEditor** ✅ done
+  Modal form for editing a Programme leaf task. Mounted inside
+  `ProgrammeRightDetail` and triggered by an Edit button next to
+  the detail close (×). Commits via new
+  `ProgrammeProvider.editTask({task_id, patch})` reducer — same
+  in-memory mutation pattern as 4.9's `updateTask` drag handler.
+  New `scripts/composites/programme-task-editor.js` (~306 LoC)
+  covers name, status, progress %, start/end dates, assignees,
+  tags, and a `depends_on` checkbox grid grouped by WBS parent.
+  Pure `validatePatch(patch, taskId)` factored out and exposed at
+  `window.FieldSight._programmeEditor.validatePatch` for node
+  tests: name non-empty, start ≤ end, depends_on excludes own id
+  (1-step cycle; full DAG check lives in 5.6), progress_pct in
+  [0, 100]. On success recomputes `duration_days = diffDays(start,
+  end) + 1`. Native `Input type="date"` rather than `DatePicker`
+  here — the existing DatePicker queries report-day fixture data
+  which is unrelated to programme task scheduling. Cache busters:
+  composites.css v=26, programme.js v=6,
+  programme-task-editor.js v=1.
+
+- **Sprint 5.6 · Cascade engine (medium depth)** — pending
+  Pulled forward in execution order. Pure module
+  `scripts/api/programme-schedule.js` exporting
+  `cascadeFromTask(leaves, task_id, deltaDays)` and
+  `computeCriticalPath(leaves, programmeStartDate)`. Cycle
+  detection via Kahn's topological sort up front; CPM forward
+  pass for critical-path recompute. `programme.js` plugs the
+  cascader into `updateTask` / `editTask` / `addTask` /
+  `replaceTasks` so all mutation paths share one pipeline.
+
+- **Sprint 5.2 · Add task** — pending
+  Reuses 5.1 editor with a `mode: 'create'` branch. Auto-mints
+  `task_id` as `T-<NNN>` from `max(numeric suffix) + 1` (scans
+  suffixes, not array length, so deletes never cause id reuse).
+  Adds `+ Add task` button to programme header.
+
+- **Sprint 5.3 · Delete task** — pending
+  Trash button in editor (edit mode only) with confirm-via-second-
+  click. **Scrubs the deleted id from every other leaf's
+  `depends_on[]`** so dangling references can't cause cascade
+  infinite-loops in 5.6.
+
+- **Sprint 5.4 · CSV import** — pending
+  `Import…` button opens file-picker modal (drag-drop + click).
+  Native parser in `scripts/api/programme-import.js` (BOM + CRLF
+  tolerant). Required header: `task_id,wbs,parent_id,name,start,
+  end,progress_pct,status,depends_on,assignees` with
+  pipe-separated lists. Preview + validation report → user
+  confirms → `replaceTasks(parents, leaves)` full snapshot
+  replace.
+
+- **Sprint 5.5 · MS Project XML import** — pending
+  Same modal as 5.4, dispatched by extension. Native `DOMParser`
+  walks `<Project>/<Tasks>/<Task>` mapping `<UID>` → `task_id`,
+  `<Name>` → `name`, `<Start>`/`<Finish>` → `start`/`end`,
+  `<OutlineNumber>` → `wbs`, `<PredecessorLink>` → `depends_on`
+  (FS-only relationships, no lag). Calendar / lag / resource
+  assignments not parsed; flagged in preview as ignored.
+
+- **Sprint 5.7 · Wire-up + cache-buster sweep** — pending
+  Bump cache busters on every touched file, confirm
+  `prefers-reduced-motion` honoured on modal slide-in, full
+  `node --check` sweep across all JS files. Wraps the sprint.
+
+### Deferred to Sprint 6+
+
+| Item | Why deferred |
+|---|---|
+| Excel `.xlsx` import (SheetJS) | Commercial license caveat; CSV covers the common path |
+| MS Project `.mpp` binary | No pure-JS parser exists. Either backend conversion or accept .xml only |
+| Reverse linking (action done → programme progress nudge) | Field-test 4.10 first — UX is not yet validated |
+| Deep cascade (slack analysis + over-allocation warnings) | Medium covers ~80% of value; deep needs domain rules per org |
+| Persistent edits (write-through to backend) | `PATCH /api/programmes/...` doesn't exist yet — currently mock-only |
+| Resource pool conflict detection | Needs a separate sub-sprint after deep cascade lands |
+
 ## Sprint 4+ — Open product questions
 
 Surfaced during the second-pass review of merged main. These aren't
