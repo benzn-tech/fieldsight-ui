@@ -846,6 +846,15 @@ bolted on later.
   v=28 → v=29, modal-overlay.js v=1 → v=2, programme-task-editor.js
   v=3 → v=4, programme.js v=10 → v=11.
 
+- **Sprint 5.7.2 · Gate Edit too** ✅ done
+  Followed up on 5.7.1 by extending the `programme:manage` gate
+  to the Edit button itself in `ProgrammeRightDetail`. The three
+  write actions (Edit / Add / Delete) now share one symmetric
+  permission contract — site_managers and below see the
+  programme + can drag-reschedule (drag is gated separately
+  inside `gantt-row.js`) but cannot enter the editor at all.
+  Cache buster: programme.js v=11 → v=12.
+
 ### Deferred to Sprint 6+
 
 | Item | Why deferred |

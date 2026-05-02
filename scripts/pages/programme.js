@@ -942,8 +942,10 @@
             }),
           ),
         ),
-        /* Sprint 5.1 — Edit opens the task editor modal. */
-        Editor ? React.createElement(Button, {
+        /* Sprint 5.1 — Edit opens the task editor modal.
+           Sprint 5.7.2 — gated on programme:manage (admin/PM/CM only),
+           consistent with the Add (5.2) and Delete (5.3) gates. */
+        Editor && ctx && ctx.canWrite ? React.createElement(Button, {
           variant: 'ghost', size: 'sm',
           onClick: function () { setEdit(true); },
         }, 'Edit') : null,
