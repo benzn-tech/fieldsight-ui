@@ -687,15 +687,29 @@ bolted on later.
   composites.css v=26, programme.js v=6,
   programme-task-editor.js v=1.
 
-- **Sprint 5.6 · Cascade engine (medium depth)** — pending
-  Pulled forward in execution order. Pure module
-  `scripts/api/programme-schedule.js` exporting
-  `cascadeFromTask(leaves, task_id, deltaDays)` and
-  `computeCriticalPath(leaves, programmeStartDate)`. Cycle
-  detection via Kahn's topological sort up front; CPM forward
-  pass for critical-path recompute. `programme.js` plugs the
-  cascader into `updateTask` / `editTask` / `addTask` /
-  `replaceTasks` so all mutation paths share one pipeline.
+- **Sprint 5.6 · Cascade engine (medium depth)** ✅ done
+  Pure module `scripts/api/programme-schedule.js` (~216 LoC)
+  exporting `cascadeFromTask(leaves, task_id, deltaDays)` and
+  `computeCriticalPath(leaves, programmeStartISO)`. Both run a
+  Kahn's-algorithm cycle check up front; on cycle they
+  `console.warn` and return safe values (input unchanged for
+  cascade, `[]` for CPM) — never deadlock. Cascade is a
+  chain-shift on the transitive dependents of the trigger task.
+  CPM is a standard forward + backward pass returning task_ids
+  with zero slack. Date helpers (`addDaysISO`, `diffDaysISO`)
+  inlined so the module stays node-importable without booting
+  `FS.api`. `programme.js` now routes both `updateTask` (drag)
+  and `editTask` (form) through a single `applyTaskMutation`
+  helper that: applies the patch, computes end-delta, cascades,
+  recomputes critical_path. Initial mount also recomputes the
+  critical path from the loaded fixture rather than using the
+  stored `critical_path` array — so the fixture's value is now a
+  hint, not the authority. Note: the engine-computed CP for the
+  current fixture is `T-001 → T-002 → T-003 → T-004 → T-006 →
+  T-007 → T-013 → T-014` (92 days) which is genuinely longer
+  than the fixture's hand-coded chain through T-009 (86 days);
+  the math wins. Cache busters: programme.js v=7,
+  programme-schedule.js v=1.
 
 - **Sprint 5.2 · Add task** — pending
   Reuses 5.1 editor with a `mode: 'create'` branch. Auto-mints

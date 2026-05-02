@@ -111,7 +111,18 @@
         }
         var leaves   = (p.tasks || []).filter(function (t) { return t.status !== 'group'; });
         var parents  = (p.tasks || []).filter(function (t) { return t.status === 'group'; });
-        var critical = new Set(p.critical_path || []);
+        /* Sprint 5.6 — recompute the critical path from the dependency
+           graph on every load. The fixture's hand-coded critical_path
+           is now a hint, not the authority. The engine result is
+           mathematically the longest-cumulative-duration chain, so
+           subsequent cascades + edits stay self-consistent. Falls
+           back to the fixture value if the engine isn't loaded
+           (graceful degradation in unit-style harnesses). */
+        var sched = window.FieldSight && window.FieldSight.programmeSchedule;
+        var critIds = sched
+          ? sched.computeCriticalPath(leaves, p.start_date)
+          : (p.critical_path || []);
+        var critical = new Set(critIds);
         setState({
           status:   'ok',
           programme: p,
@@ -146,6 +157,44 @@
        resets to fixture defaults, which is the prototype's known
        limitation for any optimistic action (toggleAction works
        the same way). */
+    /* Sprint 5.6 — single mutation pipeline used by both updateTask
+       (drag) and editTask (form). Steps:
+         1. find the matching leaf (oldTask) so we can compute the
+            end-date delta
+         2. apply the patch to produce nextLeaves[]
+         3. cascade transitive dependents by deltaDays via the engine
+         4. recompute critical_path[] from the new graph
+         5. publish the new state
+
+       Cascade trigger = end-date shift only. If end didn't move (e.g.
+       editor changed only progress + assignees) we skip cascade but
+       still recompute the critical path defensively, since duration
+       changes alone could re-rank the longest chain. */
+    function applyTaskMutation(s, taskId, patcher) {
+      if (s.status !== 'ok') return s;
+      var oldTask = s.leaves.filter(function (t) { return t.task_id === taskId; })[0];
+      if (!oldTask) return s;
+
+      var nextLeaves = s.leaves.map(function (t) {
+        return t.task_id === taskId ? patcher(t) : t;
+      });
+      var newTask = nextLeaves.filter(function (t) { return t.task_id === taskId; })[0];
+
+      var sched = window.FieldSight && window.FieldSight.programmeSchedule;
+      if (sched) {
+        var deltaDays = sched.diffDaysISO(oldTask.end, newTask.end);
+        if (deltaDays) {
+          nextLeaves = sched.cascadeFromTask(nextLeaves, taskId, deltaDays);
+        }
+        var critIds = sched.computeCriticalPath(nextLeaves, s.programme.start_date);
+        return Object.assign({}, s, {
+          leaves:   nextLeaves,
+          critical: new Set(critIds),
+        });
+      }
+      return Object.assign({}, s, { leaves: nextLeaves });
+    }
+
     function updateTask(opts) {
       opts = opts || {};
       var task_id = opts.task_id;
@@ -161,16 +210,13 @@
         if (start < pStart) start = pStart;
         if (end   > pEnd)   end   = pEnd;
         if (end < start) end = start;
-
-        var nextLeaves = s.leaves.map(function (t) {
-          if (t.task_id !== task_id) return t;
+        return applyTaskMutation(s, task_id, function (t) {
           return Object.assign({}, t, {
             start:         start,
             end:           end,
             duration_days: diffDays(start, end) + 1,
           });
         });
-        return Object.assign({}, s, { leaves: nextLeaves });
       });
     }
 
@@ -186,12 +232,9 @@
       var patch   = opts.patch || {};
       if (!task_id) return;
       setState(function (s) {
-        if (s.status !== 'ok') return s;
-        var nextLeaves = s.leaves.map(function (t) {
-          if (t.task_id !== task_id) return t;
+        return applyTaskMutation(s, task_id, function (t) {
           return Object.assign({}, t, patch);
         });
-        return Object.assign({}, s, { leaves: nextLeaves });
       });
     }
 
