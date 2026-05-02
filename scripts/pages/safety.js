@@ -340,11 +340,78 @@
     );
   }
 
-  /* ---------- Right detail (placeholder for 6.1, beefed up in 6.2) ----- */
+  /* ---------- Right detail (Sprint 6.2 — full inspection panel) -------- */
+
+  var RISK_TONE   = { high: 'danger', medium: 'warning', low: 'neutral' };
+  var STATUS_TONE = { open: 'warning', resolved: 'success' };
+
+  function DetailRow(props) {
+    return React.createElement('div', { className: 'fs-safety-detail__row' },
+      React.createElement('div', { className: 'fs-safety-detail__row-label' },
+        props.label),
+      React.createElement('div', { className: 'fs-safety-detail__row-value' },
+        props.value),
+    );
+  }
 
   function SafetyRightDetail(props) {
+    var fs       = window.FieldSight;
+    var Card     = fs.Card;
+    var Badge    = fs.Badge;
+    var Button   = fs.Button;
+    var IconBtn  = fs.IconButton;
+
     var ctx = React.useContext(SafetyContext);
     var sel = ctx && ctx.selectedFlag;
+
+    /* Lazy-fetch related action_items from the source topic. Mirrors
+       the linked-actions lazy-fetch from programme.js:805-881. The
+       source topic carries N action_items — we surface them as
+       click-through chips so the field user can jump from a flag to
+       any related corrective action in one tap. */
+    var refLinks = React.useState({ status: 'idle', items: [] });
+    var linksS   = refLinks[0];
+    var setLinks = refLinks[1];
+
+    React.useEffect(function () {
+      /* Skip lookup for report-level safety_observations — those don't
+         carry a topic_id (we set it to -1 in the aggregator). */
+      if (!sel || sel.topic_id == null || sel.topic_id < 0 || !sel.date) {
+        setLinks({ status: 'ok', items: [] });
+        return undefined;
+      }
+      var cancelled = false;
+      setLinks({ status: 'loading', items: [] });
+
+      window.FS.api.timeline.getTimeline({ date: sel.date, user: sel.user_folder })
+        .then(function (r) {
+          if (cancelled) return;
+          if (!r || r._notFound || r.available_users) {
+            setLinks({ status: 'ok', items: [] });
+            return;
+          }
+          var topic = (r.topics || []).filter(function (t) {
+            return t.topic_id === sel.topic_id;
+          })[0];
+          var actions = topic ? (topic.action_items || []) : [];
+          setLinks({
+            status: 'ok',
+            items:  actions.map(function (a, idx) {
+              return {
+                action_index: idx,
+                text:         a.action,
+                responsible:  a.responsible || null,
+                priority:     a.priority || null,
+              };
+            }),
+          });
+        })
+        .catch(function () {
+          if (!cancelled) setLinks({ status: 'error', items: [] });
+        });
+
+      return function () { cancelled = true; };
+    }, [sel && sel.id]);
 
     if (!sel) {
       return React.createElement('div', { className: 'fs-safety-detail__placeholder' },
@@ -355,14 +422,132 @@
       );
     }
 
-    /* Sprint 6.1 minimal detail — Sprint 6.2 replaces with full
-       inspection panel (status badge, source-report link, linked
-       actions). */
+    function onOpenInTimeline() {
+      var qs = '?date=' + encodeURIComponent(sel.date);
+      if (sel.user_folder) qs += '&user=' + encodeURIComponent(sel.user_folder);
+      window.FS.Router.navigate('/timeline' + qs);
+    }
+
+    var risk = (sel.risk_level || 'medium').toLowerCase();
+    var riskBadge = React.createElement(Badge, {
+      tone: RISK_TONE[risk] || 'neutral', size: 'sm', prefixDot: true,
+    }, risk.charAt(0).toUpperCase() + risk.slice(1) + ' risk');
+
+    var statusBadge = React.createElement(Badge, {
+      tone: STATUS_TONE[sel.status] || 'neutral', size: 'sm', variant: 'outline',
+    }, (sel.status || 'open').charAt(0).toUpperCase() + (sel.status || 'open').slice(1));
+
+    var sourceLabel = sel.source === 'observation'
+      ? 'Site-level observation'
+      : 'Topic safety flag';
+
+    /* Build the field rows — skip rows whose value is null, since the
+       two source shapes carry different fields. */
+    var rows = [];
+    if (sel.recommended_action) {
+      rows.push(React.createElement(DetailRow, {
+        key: 'action', label: 'Action', value: sel.recommended_action,
+      }));
+    }
+    if (sel.location) {
+      rows.push(React.createElement(DetailRow, {
+        key: 'location', label: 'Location', value: sel.location,
+      }));
+    }
+    if (sel.who_raised) {
+      rows.push(React.createElement(DetailRow, {
+        key: 'who', label: 'Raised by', value: sel.who_raised,
+      }));
+    }
+    rows.push(React.createElement(DetailRow, {
+      key: 'date', label: 'Date', value: fmtDateLong(sel.date),
+    }));
+    if (sel.topic_id >= 0) {
+      rows.push(React.createElement(DetailRow, {
+        key: 'topic', label: 'From topic', value: sel.topic_title,
+      }));
+    }
+    if (sel.user_name) {
+      rows.push(React.createElement(DetailRow, {
+        key: 'reporter', label: 'Reporter', value: sel.user_name,
+      }));
+    }
+    if (sel.site) {
+      rows.push(React.createElement(DetailRow, {
+        key: 'site', label: 'Site', value: sel.site,
+      }));
+    }
+    rows.push(React.createElement(DetailRow, {
+      key: 'source', label: 'Source', value: sourceLabel,
+    }));
+
+    /* Linked-actions block — only shown for topic-flag rows (since
+       observation rows don't have a topic to lift action_items from). */
+    var linkedBlock = null;
+    if (sel.topic_id >= 0) {
+      if (linksS.status === 'loading') {
+        linkedBlock = React.createElement('div', { className: 'fs-safety-detail__linked' },
+          React.createElement('div', { className: 'fs-safety-detail__linked-label' },
+            'Related actions'),
+          React.createElement('div', { className: 'fs-safety-detail__linked-loading' },
+            'Loading…'),
+        );
+      } else if (linksS.items.length > 0) {
+        linkedBlock = React.createElement('div', { className: 'fs-safety-detail__linked' },
+          React.createElement('div', { className: 'fs-safety-detail__linked-label' },
+            'Related actions in this topic'),
+          React.createElement('div', { className: 'fs-safety-detail__linked-items' },
+            linksS.items.map(function (it) {
+              return React.createElement('div', {
+                key:       it.action_index,
+                className: 'fs-safety-detail__linked-chip',
+              },
+                React.createElement('div', { className: 'fs-safety-detail__linked-text' },
+                  it.text),
+                it.responsible
+                  ? React.createElement('div', { className: 'fs-safety-detail__linked-meta' },
+                      it.responsible + (it.priority ? ' · ' + it.priority : ''))
+                  : null,
+              );
+            }),
+          ),
+        );
+      }
+    }
+
     return React.createElement('div', { className: 'fs-safety-detail' },
-      React.createElement('h2', { className: 'fs-safety-detail__title' },
-        sel.observation),
-      React.createElement('div', { className: 'fs-safety-detail__body' },
-        'Detail panel — built out in Sprint 6.2.'),
+
+      /* Header */
+      React.createElement('div', { className: 'fs-safety-detail__header' },
+        React.createElement('div', { className: 'fs-safety-detail__header-main' },
+          React.createElement('h2', { className: 'fs-safety-detail__title' },
+            sel.observation),
+          React.createElement('div', { className: 'fs-safety-detail__metaline' },
+            riskBadge, statusBadge,
+          ),
+        ),
+        IconBtn ? React.createElement(IconBtn, {
+          icon: 'x', ariaLabel: 'Close detail', size: 'sm',
+          onClick: function () {
+            if (ctx && ctx.setSelected) ctx.setSelected(null);
+            if (props.onClose) props.onClose();
+          },
+        }) : null,
+      ),
+
+      /* Field rows */
+      React.createElement('div', { className: 'fs-safety-detail__rows' }, rows),
+
+      /* Linked actions */
+      linkedBlock,
+
+      /* Footer actions */
+      React.createElement('div', { className: 'fs-safety-detail__actions' },
+        React.createElement(Button, {
+          variant: 'secondary', size: 'sm', rightIcon: 'arrow-right',
+          onClick: onOpenInTimeline,
+        }, 'Open source report'),
+      ),
     );
   }
 
