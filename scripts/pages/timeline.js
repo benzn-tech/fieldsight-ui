@@ -330,6 +330,30 @@
       return function () { cancelled = true; };
     }, [date, user]);
 
+    /* Sprint 6.7.1 — keep state.actions in sync with cross-component
+       toggles (the right-detail OverviewTab also renders the same
+       action_items via its own ActionItemRow instances). When any
+       sibling fires a successful toggle, mirror it into our local
+       actions map so re-renders here see the new check state. */
+    React.useEffect(function () {
+      var bus = window.FS && window.FS.actionsBus;
+      if (!bus) return undefined;
+      return bus.subscribe(function (payload) {
+        if (!payload || payload.date !== date) return;
+        setState(function (s) {
+          if (s.status !== 'ok') return s;
+          var key = payload.topic_id + '_' + payload.action_index;
+          var nextActions = Object.assign({}, s.actions || {});
+          nextActions[key] = {
+            checked:    !!payload.checked,
+            checked_by: payload.checked_by,
+            checked_at: payload.checked_at,
+          };
+          return Object.assign({}, s, { actions: nextActions });
+        });
+      });
+    }, [date]);
+
     /* Sprint 6.6.4 — auto-select the deep-linked topic once per
        (date, topicId) pair. Fires after the report loads; finds the
        matching topic, asks the AppShell to open the right panel via
@@ -804,6 +828,30 @@
         if (!cancelled) setActions(res.actions || {});
       });
       return function () { cancelled = true; };
+    }, [isDaily, sel && sel.date]);
+
+    /* Sprint 6.7.1 — same bus subscription as MiddleColumn but for
+       this right-detail's action map. Keeps the OverviewTab's
+       ActionItemRows synced when the user toggles in the middle
+       column. */
+    React.useEffect(function () {
+      if (!isDaily || !sel || !sel.date) return undefined;
+      var bus = window.FS && window.FS.actionsBus;
+      if (!bus) return undefined;
+      var myDate = sel.date;
+      return bus.subscribe(function (payload) {
+        if (!payload || payload.date !== myDate) return;
+        setActions(function (cur) {
+          var key = payload.topic_id + '_' + payload.action_index;
+          var next = Object.assign({}, cur || {});
+          next[key] = {
+            checked:    !!payload.checked,
+            checked_by: payload.checked_by,
+            checked_at: payload.checked_at,
+          };
+          return next;
+        });
+      });
     }, [isDaily, sel && sel.date]);
 
     /* Reset to overview tab whenever a new topic is selected. */
