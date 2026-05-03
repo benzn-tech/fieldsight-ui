@@ -5015,3 +5015,315 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   padding-top: 12px;
   border-top: 1px solid var(--border-subtle);
 }
+
+/* ==========================================================================
+   Team page — Sprint 7.1 + 7.2
+   .fs-team        — middle column
+   .fs-team-detail — right detail
+   ========================================================================== */
+
+/* ---------- Middle column ------------------------------------------------- */
+
+.fs-team {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.fs-team__loading,
+.fs-team__empty {
+  padding: 32px 20px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  text-align: center;
+}
+
+.fs-team__header {
+  padding: 20px 20px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.fs-team__title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 2px;
+}
+
+.fs-team__subtitle {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* KPI strip */
+.fs-team__kpi-strip {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.fs-team__kpi {
+  flex: 1;
+  padding: 12px 0;
+  text-align: center;
+  border-right: 1px solid var(--border-subtle);
+}
+
+.fs-team__kpi:last-child {
+  border-right: none;
+}
+
+.fs-team__kpi-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.fs-team__kpi-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+/* Groups */
+.fs-team__groups {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0 16px;
+}
+
+.fs-team__group {
+  margin-bottom: 4px;
+}
+
+.fs-team__group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 20px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+.fs-team__group-count {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--surface-subtle);
+  border-radius: 10px;
+  padding: 1px 7px;
+}
+
+.fs-team__user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.fs-team__user-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 20px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: background 120ms;
+  min-height: 48px;
+}
+
+.fs-team__user-row:hover {
+  background: var(--surface-hover);
+}
+
+.fs-team__user-row--selected {
+  background: var(--surface-selected);
+}
+
+.fs-team__user-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.fs-team__user-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fs-team__user-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.fs-team__extra-sites {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--surface-subtle);
+  border-radius: 10px;
+  padding: 1px 6px;
+}
+
+/* ---------- Right detail -------------------------------------------------- */
+
+.fs-team-detail {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.fs-team-detail__placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 32px 24px;
+  text-align: center;
+  gap: 8px;
+}
+
+.fs-team-detail__placeholder-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.fs-team-detail__placeholder-body {
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.fs-team-detail__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.fs-team-detail__header-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+}
+
+.fs-team-detail__header-text {
+  flex: 1;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.fs-team-detail__name {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+
+.fs-team-detail__badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.fs-team-detail__scope {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* Field rows */
+.fs-team-detail__fields {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.fs-team-detail__field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fs-team-detail__field-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+.fs-team-detail__field-value {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.fs-team-detail__field-value--mono {
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* Action footer */
+.fs-team-detail__actions {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.fs-team-detail__action-btn {
+  padding: 10px 16px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: background 120ms, border-color 120ms;
+  min-height: 44px;
+}
+
+.fs-team-detail__action-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+.fs-team-detail__action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fs-team__user-row,
+  .fs-team-detail__action-btn {
+    transition: none;
+  }
+}

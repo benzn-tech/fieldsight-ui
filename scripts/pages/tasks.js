@@ -39,6 +39,11 @@
 
   /* ---------- Helpers --------------------------------------------------- */
 
+  function readRouteParams() {
+    var r = window.FS && window.FS.Router && window.FS.Router.getCurrentRoute();
+    return (r && r.params) || {};
+  }
+
   function parseHHMM(text) {
     if (!text) return null;
     var m = String(text).match(/(\d{1,2}):(\d{2})/);
@@ -100,7 +105,20 @@
 
   function TasksProvider(props) {
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
-    var depKey = (caller.name || '') + '|' + (caller.role || '') + '|' + (caller.isAdmin ? 'admin' : '');
+
+    var refParams = React.useState(function () { return readRouteParams(); });
+    var routeParams = refParams[0];
+    var setRouteParams = refParams[1];
+
+    React.useEffect(function () {
+      return window.FS.Router.subscribe(function () {
+        setRouteParams(readRouteParams());
+      });
+    }, []);
+
+    var targetUser = routeParams.user || null;
+    var depKey = (caller.name || '') + '|' + (caller.role || '') + '|' + (caller.isAdmin ? 'admin' : '')
+      + '|' + (targetUser || '');
 
     var refState = React.useState({ status: 'loading' });
     var state    = refState[0];
@@ -113,9 +131,10 @@
       var today = window.FS.api.todayNZDT();
       var from  = window.FS.api.addDaysISO(today, -(DEFAULT_DAYS - 1));
 
-      window.FS.api.tasks.getActionsResolvedRange({
-        from: from, to: today,
-      }).then(function (res) {
+      var fetchOpts = { from: from, to: today };
+      if (targetUser) fetchOpts.user = targetUser;
+
+      window.FS.api.tasks.getActionsResolvedRange(fetchOpts).then(function (res) {
         if (cancelled) return;
         if (res && res._accessDenied) {
           setState({ status: 'access_denied', message: res.error });
@@ -123,12 +142,13 @@
         }
         var rows = (res && res.rows) || [];
         setState({
-          status: 'ok',
-          rows:   rows,
-          from:   from,
-          to:     today,
-          today:  today,
-          user:   res.user || null,
+          status:     'ok',
+          rows:       rows,
+          from:       from,
+          to:         today,
+          today:      today,
+          user:       res.user || null,
+          filterUser: targetUser || null,
         });
       }).catch(function (err) {
         if (cancelled) return;

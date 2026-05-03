@@ -8,6 +8,7 @@
 const STORAGE_KEYS = {
   middleWidth:  'fs.appshell.middleWidth',
   navCollapsed: 'fs.appshell.navCollapsed',
+  theme:        'fs.settings.theme',
 };
 
 const MIDDLE_WIDTH_DEFAULT = 320;
@@ -560,6 +561,7 @@ function SessionGate(opts) {
 function mountAppShell(containerId, opts) {
   containerId = containerId || 'root';
   opts = opts || {};
+  if (window.FS && window.FS.theme) window.FS.theme.init();
   var el = document.getElementById(containerId);
   if (!el) { console.error('[AppShell] No element #' + containerId); return; }
   var root = ReactDOM.createRoot(el);
