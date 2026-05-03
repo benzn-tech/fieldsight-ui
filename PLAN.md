@@ -1364,9 +1364,50 @@ Audit method (grep-based, no headless browser):
   - **gm** / **admin** — /team visible in nav, /settings shows
     all nav items in the landing dropdown.
 
+#### 7.6 — Density toggle (Comfortable / Compact) ✅ done
+
+New `scripts/density.js` (~55 LoC) — mirrors `theme.js` pattern
+exactly. Public API: `window.FS.density = { init(), set(mode),
+get(), getStored() }`. Two modes: `'comfortable'` (default, no
+`data-density` attribute) | `'compact'` (sets
+`[data-density="compact"]` on `<html>`). Storage key:
+`'fs.settings.density'`.
+
+`styles/tokens.css` §16 (renumbered to §17 for reduced-motion):
+new `§16 · DENSITY` section with `:root` comfortable defaults
+(`--density-row-py`, `--density-row-px`, `--density-row-min-h`,
+`--density-card-header-p`, `--density-card-body-p`,
+`--density-list-gap`, `--density-group-gap`) and
+`[data-density="compact"]` overrides that tighten each.
+
+`styles/composites.css` new `§DC · DENSITY — compact overrides`
+block at end (~65 LoC): flat `[data-density="compact"] .selector`
+rules targeting highest-ROI rows — team user rows (padding +
+min-height), safety flag rows, action item rows, card
+header/body/footer padding, topic card body, timeline topic list
+gap. No existing rules modified — purely additive.
+
+`scripts/pages/settings.js` updated: new Section 2 "Display
+density" radio group (Comfortable / Compact) between Theme and
+Default landing. `handleSetDensity` in Provider, `densityStored`
+in state, density row in RightDetail summary. Old Theme +
+landing sections shift to Sections 1 + 3 with no functional
+change. Cache buster: `settings.js?v=1 → v=2`.
+
+`scripts/app-shell.js`: `STORAGE_KEYS.density` added;
+`FS.density.init()` called alongside `FS.theme.init()` in
+`mountAppShell`. Cache buster: `app-shell.js?v=10 → v=11`.
+
+`app-shell-preview.html`: `density.js?v=1` script tag added
+after `theme.js?v=1`; `composites.css?v=31 → v=32`.
+
+Reduced-motion audit: density.js and the §DC CSS block introduce
+zero new `@keyframes` — no new entry needed in the animation
+registry. `node --check` clean across all modified JS files.
+
 ### Recommended execution order
 
-`7.0 → 7.1 → 7.2 → 7.3 → 7.4 → 7.5`
+`7.0 → 7.1 → 7.2 → 7.3 → 7.4 → 7.5 → 7.6`
 
 7.0 must come first (7.3 + 7.4 depend on the theme module). 7.1
 and 7.2 can swap places without consequence but conventionally
@@ -1379,7 +1420,8 @@ sprints).
 | Path | Role | New / Modified |
 |---|---|---|
 | `scripts/theme.js` | Theme apply + persist + auto-mode listener | NEW (7.0) |
-| `scripts/app-shell.js` | Add `FS.theme.init()` call + `STORAGE_KEYS.theme` + defaultLanding override hook | MODIFIED (7.0, 7.3) |
+| `scripts/density.js` | Density apply + persist | NEW (7.6) |
+| `scripts/app-shell.js` | Add `FS.theme.init()` + `FS.density.init()` calls + `STORAGE_KEYS` | MODIFIED (7.0, 7.3, 7.6) |
 | `scripts/pages/team.js` | Provider + Middle + Right | NEW (7.1, 7.2) |
 | `scripts/pages/settings.js` | Provider + Middle + Right | NEW (7.3) |
 | `scripts/pages/tasks.js` | Read `?user=` from URL | MODIFIED (7.2) |
@@ -1423,7 +1465,7 @@ happens at 7.5 close. Same convention as Sprint 5 + Sprint 6.
 | Mobile / responsive | Cross-cutting work touching every page; deserves its own sprint |
 | User profile editing (email, phone) | AuthMock doesn't have these fields; no `PATCH /api/users/me` endpoint |
 | Notification preferences (real) | No toast/snack composite + no `/api/notifications` endpoint |
-| Density toggle (Comfortable / Compact) | Requires building density CSS variables + reworking spacing tokens; sizable own sprint |
+| ~~Density toggle (Comfortable / Compact)~~ | ✅ **Shipped in Sprint 7.6** — scoped density CSS block; no full token rework needed |
 | `/team` write actions (invite user, deactivate) | Read-only by user decision; needs `POST /api/users` + audit |
 | `/settings` backend persistence | All prefs land in localStorage; migrate when `/api/user/prefs` exists |
 | Per-user defaultLanding stored server-side | Currently localStorage; Sprint 8 if backend prefs ship |
@@ -1435,7 +1477,7 @@ happens at 7.5 close. Same convention as Sprint 5 + Sprint 6.
 |---|---|---|
 | Minimum | 7.0, 7.1, 7.3 | Theme + /team middle only + /settings. 3 commits. Punts /team right detail and dark audit. |
 | **Nominal (chosen)** | 7.0–7.5 | Full /team + /settings + dark audit. 6 commits. |
-| Maximum | + 7.6 density toggle + 7.7 notification stub | Adds half-baked features that don't fully work without backend. Not chosen. |
+| Maximum (extended) | + 7.6 density toggle ✅ + 7.7 notification stub | 7.6 shipped; 7.7 still deferred (no toast/snack composite + no API). |
 
 Estimated total: **~5 working days** at sub-sprint-per-day pace.
 7.4's audit is the wild card — could be 1 day if existing pages

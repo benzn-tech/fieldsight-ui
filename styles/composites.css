@@ -5552,3 +5552,106 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
     transition: none;
   }
 }
+
+
+/* ==========================================================================
+   §DC · DENSITY — compact overrides
+   --------------------------------------------------------------------------
+   Applied when [data-density="compact"] is set on <html> by density.js.
+   Targets only the highest-ROI list rows; layout, nav, and shell are
+   unchanged. Each selector mirrors an existing rule and overrides only the
+   spacing properties — nothing else changes.
+   ========================================================================== */
+
+/* ---- Interactive row rows (team, safety, action items) ----------------- */
+
+[data-density="compact"] .fs-team__user-row {
+  padding: var(--density-row-py) 20px;
+  min-height: var(--density-row-min-h);
+}
+
+[data-density="compact"] .fs-team__user-list {
+  gap: 0;
+}
+
+[data-density="compact"] .fs-team__groups {
+  padding: 4px 0 8px;
+}
+
+[data-density="compact"] .fs-team__group-header {
+  padding: 4px 20px 2px;
+}
+
+[data-density="compact"] .fs-safety-flag-row {
+  padding: var(--density-row-py) var(--density-row-px);
+}
+
+[data-density="compact"] .fs-safety__group {
+  gap: var(--density-list-gap);
+}
+
+[data-density="compact"] .fs-safety__group-rows {
+  gap: var(--density-list-gap);
+}
+
+[data-density="compact"] .fs-safety__groups {
+  gap: var(--density-group-gap);
+}
+
+[data-density="compact"] .fs-action-item-row {
+  padding: var(--density-row-py) var(--density-row-px);
+}
+
+[data-density="compact"] .fs-quality__group {
+  gap: var(--density-list-gap);
+}
+
+[data-density="compact"] .fs-quality__groups {
+  gap: var(--density-group-gap);
+}
+
+/* ---- Card internal padding -------------------------------------------- */
+
+[data-density="compact"] .fs-card__header {
+  padding: var(--density-card-header-p);
+}
+
+[data-density="compact"] .fs-card__body {
+  padding: var(--density-card-body-p);
+}
+
+[data-density="compact"] .fs-card__body:first-child {
+  padding-top: 10px;
+}
+
+[data-density="compact"] .fs-card__body:last-child {
+  padding-bottom: 10px;
+}
+
+[data-density="compact"] .fs-card__footer {
+  padding: 8px 12px 10px;
+}
+
+/* ---- Topic cards (timeline) ------------------------------------------- */
+
+[data-density="compact"] .fs-topic-card__header {
+  padding: 10px 12px 12px;
+}
+
+[data-density="compact"] .fs-topic-card__body {
+  padding: 0 14px 10px;
+}
+
+[data-density="compact"] .fs-timeline-page__topics {
+  gap: var(--density-list-gap);
+}
+
+/* ---- Today page task list --------------------------------------------- */
+
+[data-density="compact"] .fs-morning-brief-card__bullet {
+  margin-bottom: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* no new animations in §DC — nothing to zero out */
+}

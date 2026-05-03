@@ -1,17 +1,19 @@
 /* ==========================================================================
-   FieldSight Settings Page — Sprint 7.3
+   FieldSight Settings Page — Sprint 7.3 + 7.6
    --------------------------------------------------------------------------
-   /settings — user preferences: theme + default landing override.
+   /settings — user preferences: theme + density + default landing override.
 
    Middle column:
      • Section 1 — Theme: Light / Dark / Auto radio group
        Calls FS.theme.set(mode) instantly; "Auto" shows resolved mode.
-     • Section 2 — Default landing: dropdown of visible nav items.
+     • Section 2 — Density: Comfortable / Compact radio group (Sprint 7.6)
+       Calls FS.density.set(mode) instantly; applies data-density on <html>.
+     • Section 3 — Default landing: dropdown of visible nav items.
        First option unsets the override (role default).
        Persists to localStorage['fs.settings.defaultLanding'].
 
    Right detail:
-     • Static summary card: current theme preference + effective landing.
+     • Static summary card: current theme, density, and effective landing.
 
    All prefs are localStorage-only; documented as Sprint 8+ migration
    target when /api/user/prefs lands.
@@ -47,6 +49,10 @@
     return window.FS && window.FS.theme ? window.FS.theme.get() : 'light';
   }
 
+  function readDensityStored() {
+    return window.FS && window.FS.density ? window.FS.density.getStored() : 'comfortable';
+  }
+
   /* ---------- SettingsContext ------------------------------------------ */
 
   var SettingsContext = React.createContext(null);
@@ -56,6 +62,7 @@
       return {
         themeStored:     readThemeStored(),
         themeResolved:   readThemeResolved(),
+        densityStored:   readDensityStored(),
         landingOverride: readLandingOverride(),
       };
     });
@@ -72,6 +79,13 @@
       });
     }
 
+    function handleSetDensity(mode) {
+      if (window.FS && window.FS.density) window.FS.density.set(mode);
+      setState(function (s) {
+        return Object.assign({}, s, { densityStored: readDensityStored() });
+      });
+    }
+
     function handleSetLanding(path) {
       writeLandingOverride(path || null);
       setState(function (s) { return Object.assign({}, s, { landingOverride: path || null }); });
@@ -79,10 +93,11 @@
 
     var user = (window.AuthMock && window.AuthMock.currentUser) || {};
     var ctx = {
-      state:      state,
-      user:       user,
-      setTheme:   handleSetTheme,
-      setLanding: handleSetLanding,
+      state:        state,
+      user:         user,
+      setTheme:     handleSetTheme,
+      setDensity:   handleSetDensity,
+      setLanding:   handleSetLanding,
     };
     return React.createElement(SettingsContext.Provider, { value: ctx }, props.children);
   }
@@ -93,10 +108,11 @@
     var ctx = React.useContext(SettingsContext);
     if (!ctx) return null;
 
-    var state      = ctx.state;
-    var user       = ctx.user;
-    var setTheme   = ctx.setTheme;
-    var setLanding = ctx.setLanding;
+    var state        = ctx.state;
+    var user         = ctx.user;
+    var setTheme     = ctx.setTheme;
+    var setDensity   = ctx.setDensity;
+    var setLanding   = ctx.setLanding;
 
     var visibleItems = window.FS && window.FS.getVisibleNavItems
       ? window.FS.getVisibleNavItems(user)
@@ -112,6 +128,19 @@
         value:   'auto',
         label:   'Auto',
         caption: 'Matches your system, currently ' + state.themeResolved,
+      },
+    ];
+
+    var densityOptions = [
+      {
+        value:   'comfortable',
+        label:   'Comfortable',
+        caption: 'Default spacing — optimised for field use with gloves.',
+      },
+      {
+        value:   'compact',
+        label:   'Compact',
+        caption: 'Reduced row height and padding — fits more on screen.',
       },
     ];
 
@@ -153,7 +182,36 @@
         ),
       ),
 
-      /* ---- Section 2: Default landing ---- */
+      /* ---- Section 2: Density ---- */
+      React.createElement('section', { className: 'fs-settings__section' },
+        React.createElement('div', { className: 'fs-settings__section-title' }, 'Display density'),
+        React.createElement('div', { className: 'fs-settings__section-desc' },
+          'Control how much information fits on screen at once.'),
+        React.createElement('div', { className: 'fs-settings__radio-group', role: 'radiogroup', 'aria-label': 'Display density' },
+          densityOptions.map(function (opt) {
+            var checked = state.densityStored === opt.value;
+            return React.createElement('label', {
+              key:       opt.value,
+              className: 'fs-settings__radio-row' + (checked ? ' fs-settings__radio-row--checked' : ''),
+            },
+              React.createElement('input', {
+                type:     'radio',
+                name:     'fs-density',
+                value:    opt.value,
+                checked:  checked,
+                onChange: function () { setDensity(opt.value); },
+                className: 'fs-settings__radio-input',
+              }),
+              React.createElement('div', { className: 'fs-settings__radio-text' },
+                React.createElement('span', { className: 'fs-settings__radio-label' }, opt.label),
+                React.createElement('span', { className: 'fs-settings__radio-caption' }, opt.caption),
+              ),
+            );
+          }),
+        ),
+      ),
+
+      /* ---- Section 3: Default landing ---- */
       React.createElement('section', { className: 'fs-settings__section' },
         React.createElement('div', { className: 'fs-settings__section-title' }, 'Default landing page'),
         React.createElement('div', { className: 'fs-settings__section-desc' },
@@ -210,10 +268,12 @@
       });
     }
 
-    var themeStoredLabel = { light: 'Light', dark: 'Dark', auto: 'Auto' }[state.themeStored]
+    var themeStoredLabel   = { light: 'Light', dark: 'Dark', auto: 'Auto' }[state.themeStored]
       || state.themeStored;
     var themeResolvedLabel = state.themeResolved.charAt(0).toUpperCase()
       + state.themeResolved.slice(1);
+    var densityLabel       = { comfortable: 'Comfortable', compact: 'Compact' }[state.densityStored]
+      || state.densityStored;
 
     function Row(label, value) {
       return React.createElement('div', { className: 'fs-settings-summary__row' },
@@ -229,6 +289,7 @@
       React.createElement('div', { className: 'fs-settings-summary__rows' },
         Row('Theme preference', themeStoredLabel),
         Row('Resolved to',      themeResolvedLabel),
+        Row('Display density',  densityLabel),
         Row('Default landing',
           state.landingOverride
             ? landingLabel + ' (override)'

@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="styles/tokens.css" />
   <link rel="stylesheet" href="styles/app-shell.css?v=4" />
   <link rel="stylesheet" href="styles/components.css?v=4" />
-  <link rel="stylesheet" href="styles/composites.css?v=31" />
+  <link rel="stylesheet" href="styles/composites.css?v=32" />
 
   <style>
     /* Ensure full-bleed with no scroll */
@@ -37,6 +37,8 @@
   <script src="scripts/fs-globals.js"></script>
   <!-- Sprint 7.0 — theme module (must load after fs-globals, before app-shell) -->
   <script src="scripts/theme.js?v=1"></script>
+  <!-- Sprint 7.6 — density module (must load after fs-globals, before app-shell) -->
+  <script src="scripts/density.js?v=1"></script>
 
   <!-- Router + Auth -->
   <script src="scripts/router.js"></script>
@@ -172,11 +174,11 @@
   <script type="text/babel" src="scripts/pages/quality.js?v=4"></script>
   <!-- Sprint 7.1+7.2 — /team page -->
   <script type="text/babel" src="scripts/pages/team.js?v=1"></script>
-  <!-- Sprint 7.3 — /settings page -->
-  <script type="text/babel" src="scripts/pages/settings.js?v=1"></script>
+  <!-- Sprint 7.3 + 7.6 — /settings page (density toggle added in 7.6) -->
+  <script type="text/babel" src="scripts/pages/settings.js?v=2"></script>
 
   <script type="text/babel" src="scripts/dev-role-switcher.js?v=4"></script>
-  <script type="text/babel" src="scripts/app-shell.js?v=10"></script>
+  <script type="text/babel" src="scripts/app-shell.js?v=11"></script>
 
   <!-- Bootstrap: set default route then mount -->
   <script>
