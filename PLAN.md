@@ -1043,6 +1043,97 @@ while dark mode pairs better with `/settings` in Sprint 7.
     quality_manager, admin: full visibility.
   - Sprint 6 entries above flipped to ✅ done.
 
+### Sprint 6.6 polish round (post browser-verification feedback)
+
+User ran the merged Sprint 6 in the browser and reported four
+issues. All four addressed in a single PR-additive batch:
+
+- **Sprint 6.6.1 · DatePicker `inline` mode** ✅ done
+
+  Bug: clicking the < or > arrows on the 7-day strip in /safety +
+  /quality date-picker committed a single-day selection instead of
+  sliding the visible window. Fix: extend DatePicker with an
+  `inline` prop. When set: skip the strip entirely, render the
+  month grid + month-nav header inline (not modal), arrows nav
+  months without committing, cell click commits. Timeline page
+  unchanged — keeps its original strip + modal flow.
+
+- **Sprint 6.6.2 · /safety KPI Closed/Open swap** ✅ done
+
+  Reorder of the open/closed StatCard. Closed reads first
+  (desirable end-state), open second. Tone still keys on
+  `totals.open` so colour semantics unchanged.
+
+- **Sprint 6.6.3 · Inline photo carousel** ✅ done
+
+  Eliminates the round-trip to /timeline that users hit when they
+  want to see "what does this flag actually look like." Three
+  pieces: (a) compliance-aggregator surfaces `related_photos` on
+  topic_flag + topic_quality rows; (b) PhotoGrid gains
+  `variant='carousel'` (flex + scroll-snap, default 2 cells
+  visible at right-panel widths, 4:3 aspect-ratio thumbs);
+  (c) safety + quality right panels render <PhotoGrid
+  variant='carousel'> below field rows when present. Report-level
+  rows (observation, qc_item) skip — no specific topic to lift
+  photos from.
+
+- **Sprint 6.6.4 · Deep-link to topic + focus mode + flash** ✅ done
+
+  "Open source report" now appends `&topic=N`, timeline reads it
+  and force-opens just the target topic (others auto-collapse =
+  focus mode), scrolls the topic into view, runs a 3-pulse accent
+  flash. TopicCard gained `highlight` and made `defaultOpen`
+  reactive to prop changes (was: read once at mount); also wrapped
+  in a transparent <div> for ref / scrollIntoView since L4 Card
+  doesn't forwardRef. New @keyframes `fs-topic-card-flash`
+  (1800ms, ease-out, accent-100 pulse). prefers-reduced-motion
+  fallback: animation:none + steady accent background — affordance
+  preserved.
+
+  Sprint 6 audit note: Sprint 6.0–6.5 was 0 new @keyframes; 6.6.4
+  adds 1. Acceptable — explicit user-requested UX with motion
+  fallback in place.
+
+### Sprint 6.7 polish round (post-6.6 verification feedback)
+
+After the 6.6 round shipped, user identified two more refinements:
+
+- **Sprint 6.7.1 · Action checkbox sync (middle ↔ right)** ✅ done
+
+  Bug: same action_item rendered twice on /timeline (middle
+  TopicCard + right OverviewTab) didn't sync — toggling one didn't
+  strike-through the other. Each ActionItemRow held its own local
+  React state seeded from a parent state slot that never crossed
+  the middle/right boundary.
+
+  Fix: tiny pub/sub bus. New `scripts/api/actions-bus.js` (~30
+  LoC) exposes `window.FS.actionsBus.{ emit, subscribe }`. No
+  React context, no AppShell prop drilling. ActionItemRow:
+  (a) syncs local state when `initialChecked` prop changes
+  (skipped while pendingRef set, so no clobber of in-flight
+  optimistic updates), (b) subscribes to bus, on matching key
+  syncs to server-truth payload, (c) emits on toggleAction
+  success. timeline.js MiddleColumn + RightDetail both subscribe
+  to mirror events into their own state slots so subsequent
+  re-mounts see fresh data.
+
+- **Sprint 6.7.2 · Precision spotlight — flag-level highlight** ✅ done
+
+  Refines 6.6.4: when /safety opens a `topic_flag` row, the
+  spotlight now lands on the exact flag inside that topic's
+  `safety_flags[]` (not the whole topic card). Solves "topic has
+  3 flags, which one was I looking at?" ambiguity.
+
+  Five-piece change: SafetyFlagRow gains `highlight` prop with
+  the same scrollIntoView + flash treatment; TopicCard gains
+  `flagHighlight` (number index) prop that drills into one
+  SafetyFlagRow; CSS adds `.fs-safety-flag-row--flash` selector
+  to the existing 6.6.4 keyframes (no new keyframes); timeline.js
+  parses `&flag=<idx>` from URL; safety.js extracts flag idx from
+  `sel.id` via `/_flag_(\d+)$/` regex (verified against all 6 row
+  id shapes — only topic_flag matches). Topic-quality +
+  observation + qc_item keep 6.6.4 / no-anchor behaviour.
+
 ### Critical files
 
 | Path | Role | Status |
