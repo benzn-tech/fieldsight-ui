@@ -567,7 +567,7 @@
 
 .fs-topic-card--selected {
   border-color: var(--color-accent-400) !important;
-  box-shadow: 0 0 0 2px var(--color-accent-100);
+  background: var(--surface-selected);
 }
 
 /* Sprint 6.6.4 — deep-link spotlight. Three soft pulses then settle.
@@ -606,7 +606,10 @@
   user-select: none;
 }
 .fs-topic-card__header:hover { background: var(--surface-panel-muted); }
-.fs-topic-card__header:focus { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+/* :focus-visible only — mouse clicks shouldn't paint the inset outline,
+   which previously stacked with the parent's --selected border to look
+   like a double border. Keyboard focus still paints normally. */
+.fs-topic-card__header:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
 
 .fs-topic-card__time {
   font-family: var(--font-mono);
@@ -4586,7 +4589,7 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 }
 .fs-safety__row-btn--active {
   border-color: var(--color-accent-400);
-  background: var(--color-accent-50);
+  background: var(--surface-selected);
 }
 .fs-safety__row-meta {
   padding: 0 12px 8px;
@@ -4854,7 +4857,7 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-quality__row-btn:hover { background: var(--surface-panel-muted); }
 .fs-quality__row-btn--active {
   border-color: var(--color-accent-400);
-  background: var(--color-accent-50);
+  background: var(--surface-selected);
 }
 
 .fs-quality__row {
@@ -5654,4 +5657,70 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 
 @media (prefers-reduced-motion: reduce) {
   /* no new animations in §DC — nothing to zero out */
+}
+
+
+/* ==========================================================================
+   §SEL · UNIFIED SELECTION (Sprint 7 follow-up)
+   --------------------------------------------------------------------------
+   Selectable rows on /today + /tasks now match the /quality + /safety
+   pattern: 1px accent border + light --surface-selected background. The
+   token is theme-aware (light pastel in light mode, soft orange tint
+   on dark) so dark-mode selections no longer read as "salmon" on a
+   near-black page.
+   ========================================================================== */
+
+.fs-task-card.fs-card.fs-card--selected,
+.fs-urgent-card.fs-card.fs-card--selected {
+  border-color: var(--color-accent-400);
+  background: var(--surface-selected);
+}
+
+
+/* ==========================================================================
+   §PROG-DARK · PROGRAMME — pin foreground on light status backgrounds
+   --------------------------------------------------------------------------
+   Status backgrounds (success/info/warning/danger -50/-100) are
+   intentionally not theme-flipped — they're brand semantic colours,
+   like badge tints. In dark mode the global text token flips to white,
+   which is unreadable on these light pastels. Pin descendant text to
+   a fixed dark colour for the affected variants only.
+   ========================================================================== */
+
+[data-theme="dark"] .fs-gantt-bar--completed,
+[data-theme="dark"] .fs-gantt-bar--in_progress,
+[data-theme="dark"] .fs-gantt-bar--blocked,
+[data-theme="dark"] .fs-gantt-bar--delayed,
+[data-theme="dark"] .fs-gantt-bar--completed   .fs-gantt-bar__label,
+[data-theme="dark"] .fs-gantt-bar--in_progress .fs-gantt-bar__label,
+[data-theme="dark"] .fs-gantt-bar--blocked     .fs-gantt-bar__label,
+[data-theme="dark"] .fs-gantt-bar--delayed     .fs-gantt-bar__label {
+  color: var(--color-neutral-900);
+}
+
+[data-theme="dark"] .fs-prog-kanban-card--in_progress,
+[data-theme="dark"] .fs-prog-kanban-card--blocked,
+[data-theme="dark"] .fs-prog-kanban-card--done,
+[data-theme="dark"] .fs-prog-kanban-card--in_progress .fs-prog-kanban-card__name,
+[data-theme="dark"] .fs-prog-kanban-card--blocked     .fs-prog-kanban-card__name,
+[data-theme="dark"] .fs-prog-kanban-card--done        .fs-prog-kanban-card__name {
+  color: var(--color-neutral-900);
+}
+
+[data-theme="dark"] .fs-prog-kanban-card--in_progress .fs-prog-kanban-card__wbs,
+[data-theme="dark"] .fs-prog-kanban-card--blocked     .fs-prog-kanban-card__wbs,
+[data-theme="dark"] .fs-prog-kanban-card--done        .fs-prog-kanban-card__wbs,
+[data-theme="dark"] .fs-prog-kanban-card--in_progress .fs-prog-kanban-card__assignee,
+[data-theme="dark"] .fs-prog-kanban-card--blocked     .fs-prog-kanban-card__assignee,
+[data-theme="dark"] .fs-prog-kanban-card--done        .fs-prog-kanban-card__assignee,
+[data-theme="dark"] .fs-prog-kanban-card--in_progress .fs-prog-kanban-card__dates,
+[data-theme="dark"] .fs-prog-kanban-card--blocked     .fs-prog-kanban-card__dates,
+[data-theme="dark"] .fs-prog-kanban-card--done        .fs-prog-kanban-card__dates {
+  color: var(--color-neutral-700);
+}
+
+[data-theme="dark"] .fs-prog-kanban-card--in_progress .fs-prog-kanban-card__footer,
+[data-theme="dark"] .fs-prog-kanban-card--blocked     .fs-prog-kanban-card__footer,
+[data-theme="dark"] .fs-prog-kanban-card--done        .fs-prog-kanban-card__footer {
+  border-top-color: var(--color-neutral-300);
 }

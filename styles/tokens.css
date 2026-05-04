@@ -346,6 +346,7 @@
   --surface-overlay:        rgba(17, 24, 39, 0.5);
   --surface-tooltip:        var(--color-neutral-900);
   --surface-highlight:      var(--color-accent-50);
+  --surface-selected:       var(--color-accent-50);
 
   /* Borders */
   --border-subtle:  var(--color-neutral-200);
@@ -576,6 +577,7 @@
   --surface-overlay:        rgba(0, 0, 0, 0.75);
   --surface-tooltip:        #1F2937;
   --surface-highlight:      rgba(255, 107, 53, 0.12);
+  --surface-selected:       rgba(255, 107, 53, 0.15);
 
   /* Borders */
   --border-subtle:  #1F2937;

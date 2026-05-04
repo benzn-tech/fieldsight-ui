@@ -306,6 +306,7 @@
                 key:      row.id,
                 task:     task,
                 isMine:   row.responsible === myName,
+                selected: selectedId === row.id,
                 onSelect: function () {
                   onSelect({
                     kind:        'task_row',

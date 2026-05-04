@@ -80,6 +80,7 @@
 
     var className = 'fs-task-card'
       + (isMine ? ' fs-task-card--mine' : '')
+      + (props.selected ? ' fs-card--selected' : '')
       + (checkingOff ? ' fs-task-card--checking-off' : '');
 
     /* Leading slot: avatar by default, circular check button when
