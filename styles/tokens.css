@@ -639,13 +639,13 @@
 }
 
 [data-density="compact"] {
-  --density-row-py:        4px;
+  --density-row-py:        3px;
   --density-row-px:        10px;
-  --density-row-min-h:     2.25rem; /* 36px */
-  --density-card-header-p: 10px 12px 8px;
-  --density-card-body-p:   8px 12px;
-  --density-list-gap:      1px;
-  --density-group-gap:     6px;
+  --density-row-min-h:     2rem;    /* 32px */
+  --density-card-header-p: 8px 12px 6px;
+  --density-card-body-p:   6px 12px;
+  --density-list-gap:      0px;
+  --density-group-gap:     4px;
 }
 
 

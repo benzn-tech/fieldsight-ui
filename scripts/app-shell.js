@@ -168,13 +168,13 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
     ? {
         flex: 1,
         minWidth: 0,
-        background: t.surface.panel,
-        borderRight: '1px solid ' + t.border.subtle,
+        background: 'var(--surface-panel)',
+        borderRight: '1px solid var(--border-subtle)',
       }
     : {
         width: width + 'px',
-        background: t.surface.panel,
-        borderRight: '1px solid ' + t.border.subtle,
+        background: 'var(--surface-panel)',
+        borderRight: '1px solid var(--border-subtle)',
       };
 
   const headerStyle = {
@@ -182,7 +182,7 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
     display: 'flex',
     alignItems: 'center',
     padding: '0 20px',
-    borderBottom: '1px solid ' + t.border.subtle,
+    borderBottom: '1px solid var(--border-subtle)',
     flexShrink: 0,
     gap: '12px',
   };
@@ -206,12 +206,12 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
           style: {
             fontWeight: t.typography.fontWeight.semibold,
             fontSize: t.typography.fontSize.base,
-            color: t.text.primary,
+            color: 'var(--text-primary)',
             lineHeight: 1.2,
           },
         }, title),
         route === '/today' ? React.createElement('span', {
-          style: { fontSize: '11px', color: t.text.tertiary, lineHeight: 1.2 },
+          style: { fontSize: '11px', color: 'var(--text-tertiary)', lineHeight: 1.2 },
         }, formatTodayDate()) : null,
       ),
 
@@ -245,29 +245,29 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
             gap: '12px',
             padding: '40px 24px',
             margin: '24px 0',
-            background: t.surface.panelMuted,
-            border: '1px dashed ' + t.border.subtle,
+            background: 'var(--surface-panel-muted)',
+            border: '1px dashed var(--border-subtle)',
             borderRadius: '12px',
-            color: t.text.tertiary,
+            color: 'var(--text-tertiary)',
           },
         },
           React.createElement('div', {
             style: {
               width: '48px', height: '48px', borderRadius: '50%',
-              background: t.surface.panel,
-              border: '1px solid ' + t.border.subtle,
+              background: 'var(--surface-panel)',
+              border: '1px solid var(--border-subtle)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             },
           },
             NavIcon ? React.createElement(NavIcon, {
-              name: 'hammer', size: 22, color: t.text.disabled,
+              name: 'hammer', size: 22, color: 'var(--text-disabled)',
             }) : null,
           ),
           React.createElement('div', {
             style: {
               fontSize: t.typography.fontSize.base,
               fontWeight: t.typography.fontWeight.semibold,
-              color: t.text.secondary,
+              color: 'var(--text-secondary)',
             },
           }, title),
           React.createElement('div', {
@@ -302,7 +302,7 @@ function RightDetail({ route, selectedItem, onClose }) {
   if (page && page.Right) {
     return React.createElement('div', {
       className: 'right-detail',
-      style: { background: t.surface.app, height: '100%', overflow: 'hidden' },
+      style: { background: 'var(--surface-app)', height: '100%', overflow: 'hidden' },
     },
       React.createElement(page.Right, {
         selectedItem: selectedItem,
@@ -314,20 +314,20 @@ function RightDetail({ route, selectedItem, onClose }) {
   /* Default empty state for unregistered routes */
   const iconWrapStyle = {
     width: '60px', height: '60px', borderRadius: '50%',
-    background: t.surface.panel,
-    border: '1px solid ' + t.border.subtle,
+    background: 'var(--surface-panel)',
+    border: '1px solid var(--border-subtle)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     boxShadow: t.shadow.sm,
   };
 
   return React.createElement('div', {
-    style: { background: t.surface.app, color: t.text.tertiary },
+    style: { background: 'var(--surface-app)', color: 'var(--text-tertiary)' },
     className: 'right-detail',
   },
     React.createElement('div', { style: iconWrapStyle },
       window.FieldSight && window.FieldSight.NavIcon
         ? React.createElement(window.FieldSight.NavIcon, {
-            name: 'panel-right-open', size: 28, color: t.text.disabled,
+            name: 'panel-right-open', size: 28, color: 'var(--text-disabled)',
           })
         : null,
     ),
@@ -335,11 +335,11 @@ function RightDetail({ route, selectedItem, onClose }) {
       style: {
         fontWeight: t.typography.fontWeight.semibold,
         fontSize: t.typography.fontSize.base,
-        color: t.text.secondary,
+        color: 'var(--text-secondary)',
       },
     }, 'Select an item'),
     React.createElement('div', {
-      style: { fontSize: t.typography.fontSize.sm, color: t.text.tertiary },
+      style: { fontSize: t.typography.fontSize.sm, color: 'var(--text-tertiary)' },
     }, 'Choose from the list to view details'),
   );
 }

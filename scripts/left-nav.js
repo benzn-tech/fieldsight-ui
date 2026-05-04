@@ -67,7 +67,8 @@ function NavIcon({ name, size, color, style: extraStyle }) {
     svg.setAttribute('height', String(size));
     svg.setAttribute('viewBox', '0 0 24 24');
     svg.setAttribute('fill', 'none');
-    svg.setAttribute('stroke', color);
+    /* Set stroke via style (not attribute) so CSS var() values resolve. */
+    svg.style.stroke = color;
     svg.setAttribute('stroke-width', '1.75');
     svg.setAttribute('stroke-linecap', 'round');
     svg.setAttribute('stroke-linejoin', 'round');
@@ -119,8 +120,8 @@ function NavItem({ navKey, label, isActive, isCollapsed, onClick, isSubItem }) {
     position: 'relative',
     justifyContent: isCollapsed ? 'center' : 'flex-start',
     background: isActive
-      ? t.surface.sidebarActive
-      : hovered ? t.surface.sidebarHover : 'transparent',
+      ? 'var(--surface-sidebar-active)'
+      : hovered ? 'var(--surface-sidebar-hover)' : 'transparent',
     color: isActive || hovered ? t.colors.neutral[0] : t.colors.neutral[300],
     fontSize: t.typography.fontSize.sm,
     fontWeight: isActive ? t.typography.fontWeight.semibold : t.typography.fontWeight.medium,
@@ -230,8 +231,8 @@ function UserArea({ user, isCollapsed }) {
     bottom: isCollapsed ? 0 : '100%',
     left: isCollapsed ? '64px' : '0',
     right: isCollapsed ? 'auto' : '0',
-    background: t.surface.panelElevated,
-    border: '1px solid ' + t.border.default,
+    background: 'var(--surface-panel-elevated)',
+    border: '1px solid var(--border-default)',
     borderRadius: '8px',
     boxShadow: t.shadow.lg,
     zIndex: t.zIndex.dropdown,
@@ -242,7 +243,7 @@ function UserArea({ user, isCollapsed }) {
   const menuItemStyle = {
     padding: '10px 16px',
     fontSize: t.typography.fontSize.sm,
-    color: t.text.primary,
+    color: 'var(--text-primary)',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
@@ -280,8 +281,8 @@ function UserArea({ user, isCollapsed }) {
       React.createElement('div', { style: menuItemStyle }, 'Profile'),
       React.createElement('div', {
         style: Object.assign({}, menuItemStyle, {
-          borderTop: '1px solid ' + t.border.subtle,
-          color: t.text.danger,
+          borderTop: '1px solid var(--border-subtle)',
+          color: 'var(--text-danger)',
         }),
       }, 'Log out'),
     ) : null,
@@ -303,7 +304,7 @@ function LeftNav({ user, currentRoute, isCollapsed, onToggleCollapse, onNavigate
   // Dynamic width + sidebar background only — layout comes from .left-nav CSS
   const navStyle = {
     width: isCollapsed ? '64px' : '240px',
-    background: t.surface.sidebar,
+    background: 'var(--surface-sidebar)',
     transition: 'width 200ms cubic-bezier(0,0,0.2,1)',
   };
 

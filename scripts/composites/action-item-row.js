@@ -34,6 +34,25 @@
 
   var PRIORITY_TONE = { high: 'danger', medium: 'warning', low: 'info' };
 
+  /* Format ISO timestamp → "3 May, 2:14 pm" in NZ time. Returns '' on
+     missing or unparseable input. Used to show when an action was
+     ticked, as a small audit trail next to "Checked by …". */
+  function fmtCheckedAt(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    try {
+      return d.toLocaleString('en-NZ', {
+        day: 'numeric', month: 'short',
+        hour: 'numeric', minute: '2-digit',
+        hour12: true,
+        timeZone: 'Pacific/Auckland',
+      });
+    } catch (_) {
+      return '';
+    }
+  }
+
   function ActionItemRow(props) {
     var Badge   = window.FieldSight.Badge;
     var date          = props.date;
@@ -140,8 +159,12 @@
                 'Due ' + action.deadline)
             : null,
           checked && checkedBy
-            ? React.createElement('span', { className: 'fs-action-item-row__meta-item fs-action-item-row__meta-item--audit' },
-                'Checked by ' + checkedBy)
+            ? React.createElement('span', {
+                className: 'fs-action-item-row__meta-item fs-action-item-row__meta-item--audit',
+                title:     checkedAt ? new Date(checkedAt).toString() : undefined,
+              },
+                'Checked by ' + checkedBy
+                  + (fmtCheckedAt(checkedAt) ? ' · ' + fmtCheckedAt(checkedAt) : ''))
             : null,
         ),
       ),

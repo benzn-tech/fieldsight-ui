@@ -5635,11 +5635,11 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 /* ---- Topic cards (timeline) ------------------------------------------- */
 
 [data-density="compact"] .fs-topic-card__header {
-  padding: 10px 12px 12px;
+  padding: var(--density-card-header-p);
 }
 
 [data-density="compact"] .fs-topic-card__body {
-  padding: 0 14px 10px;
+  padding: var(--density-card-body-p);
 }
 
 [data-density="compact"] .fs-timeline-page__topics {
