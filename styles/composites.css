@@ -6126,3 +6126,229 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   border-color: var(--border-default);
   color:        var(--text-primary);
 }
+
+
+/* ==========================================================================
+   §SPRINT-8.2-8.3 · Programme deep features + XLSX import
+   ========================================================================== */
+
+/* ---------- §8.3.1 · Gantt float pill ------------------------------------ */
+
+.fs-gantt-float-pill {
+  display:        inline-flex;
+  align-items:    center;
+  padding:        0 6px;
+  height:         20px;
+  border-radius:  10px;
+  font-size:      var(--fs-text-xs, 11px);
+  font-weight:    600;
+  line-height:    1;
+  white-space:    nowrap;
+  margin-left:    6px;
+  vertical-align: middle;
+  flex-shrink:    0;
+}
+
+.fs-gantt-float-pill--critical {
+  background: var(--color-danger-100, #fee2e2);
+  color:      var(--color-danger-700, #b91c1c);
+  border:     1px solid var(--color-danger-300, #fca5a5);
+}
+
+.fs-gantt-float-pill--warn {
+  background: var(--color-warning-100, #fef3c7);
+  color:      var(--color-warning-800, #92400e);
+  border:     1px solid var(--color-warning-300, #fcd34d);
+}
+
+.fs-gantt-float-pill--ok {
+  background: var(--color-success-100, #d1fae5);
+  color:      var(--color-success-700, #047857);
+  border:     1px solid var(--color-success-300, #6ee7b7);
+}
+
+[data-theme="dark"] .fs-gantt-float-pill--critical {
+  background: var(--color-danger-900, #450a0a);
+  color:      var(--color-danger-300, #fca5a5);
+  border-color: var(--color-danger-700, #b91c1c);
+}
+
+[data-theme="dark"] .fs-gantt-float-pill--warn {
+  background: var(--color-warning-900, #451a03);
+  color:      var(--color-warning-300, #fcd34d);
+  border-color: var(--color-warning-700, #b45309);
+}
+
+[data-theme="dark"] .fs-gantt-float-pill--ok {
+  background: var(--color-success-900, #022c22);
+  color:      var(--color-success-300, #6ee7b7);
+  border-color: var(--color-success-700, #047857);
+}
+
+/* ---------- §8.3.3 · Baseline ghost bar ----------------------------------- */
+
+.fs-gantt-bar--baseline {
+  position:    absolute;
+  top:         50%;
+  transform:   translateY(-50%);
+  height:      10px;
+  border-radius: 3px;
+  background:  transparent;
+  border:      2px dashed var(--border-default, #94a3b8);
+  opacity:     0.45;
+  pointer-events: none;
+  z-index:     0;
+}
+
+[data-theme="dark"] .fs-gantt-bar--baseline {
+  border-color: var(--color-neutral-500, #6b7280);
+}
+
+/* ---------- §8.3.2 · Over-allocation banner ------------------------------- */
+
+.fs-over-allocation-banner {
+  display:        flex;
+  align-items:    flex-start;
+  gap:            10px;
+  padding:        10px 14px;
+  margin-bottom:  12px;
+  background:     var(--color-warning-50, #fffbeb);
+  border:         1px solid var(--color-warning-300, #fcd34d);
+  border-radius:  var(--radius-md, 8px);
+  font-size:      var(--fs-text-sm, 13px);
+  line-height:    1.4;
+}
+
+[data-theme="dark"] .fs-over-allocation-banner {
+  background:   var(--color-warning-950, #2a1500);
+  border-color: var(--color-warning-700, #b45309);
+  color:        var(--color-warning-200, #fde68a);
+}
+
+.fs-over-allocation-banner__icon {
+  font-size:  16px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.fs-over-allocation-banner__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.fs-over-allocation-banner__title {
+  display:     block;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.fs-over-allocation-banner__list {
+  margin:  0;
+  padding: 0 0 0 16px;
+}
+
+.fs-over-allocation-banner__list li {
+  margin-bottom: 2px;
+}
+
+.fs-over-allocation-banner__dismiss {
+  flex-shrink: 0;
+  background:  transparent;
+  border:      none;
+  cursor:      pointer;
+  font-size:   18px;
+  line-height: 1;
+  color:       var(--text-subtle, #64748b);
+  padding:     0 2px;
+}
+
+.fs-over-allocation-banner__dismiss:hover {
+  color: var(--text-default, #1e293b);
+}
+
+/* ---------- §8.3.3 · Gantt toolbar additions ------------------------------ */
+
+.fs-programme__toolbar-check {
+  display:     flex;
+  align-items: center;
+  gap:         5px;
+  font-size:   var(--fs-text-sm, 13px);
+  color:       var(--text-subtle, #64748b);
+  cursor:      pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.fs-programme__toolbar-check input[type="checkbox"] {
+  accent-color: var(--color-accent-500, #0ea5e9);
+  cursor: pointer;
+}
+
+/* ---------- §8.2.2 · XLSX column mapper ----------------------------------- */
+
+.fs-prog-import__mapper {
+  padding: 8px 0;
+}
+
+.fs-prog-import__mapper-header {
+  margin-bottom: 12px;
+}
+
+.fs-prog-import__mapper-sub {
+  margin:    4px 0 0;
+  font-size: var(--fs-text-sm, 13px);
+  color:     var(--text-subtle, #64748b);
+}
+
+.fs-prog-import__mapper-table {
+  width:           100%;
+  border-collapse: collapse;
+  font-size:       var(--fs-text-sm, 13px);
+  margin-bottom:   12px;
+}
+
+.fs-prog-import__mapper-table th {
+  text-align:    left;
+  padding:       6px 8px;
+  border-bottom: 1px solid var(--border-subtle, #e2e8f0);
+  font-weight:   600;
+  color:         var(--text-subtle, #64748b);
+}
+
+.fs-prog-import__mapper-table td {
+  padding:        5px 8px;
+  border-bottom:  1px solid var(--border-subtle, #e2e8f0);
+  vertical-align: middle;
+}
+
+.fs-prog-import__mapper-select {
+  width:         100%;
+  padding:       4px 6px;
+  border:        1px solid var(--border-default, #cbd5e1);
+  border-radius: var(--radius-sm, 4px);
+  font-size:     var(--fs-text-sm, 13px);
+  background:    var(--surface-base, #fff);
+  color:         var(--text-default, #1e293b);
+}
+
+[data-theme="dark"] .fs-prog-import__mapper-select {
+  background:   var(--surface-panel, #1e293b);
+  border-color: var(--border-subtle, #334155);
+  color:        var(--text-default, #f1f5f9);
+}
+
+.fs-prog-import__mapper-warn {
+  padding:       8px 12px;
+  background:    var(--color-warning-50, #fffbeb);
+  border:        1px solid var(--color-warning-300, #fcd34d);
+  border-radius: var(--radius-sm, 4px);
+  font-size:     var(--fs-text-sm, 13px);
+  color:         var(--color-warning-800, #92400e);
+  margin-bottom: 12px;
+}
+
+[data-theme="dark"] .fs-prog-import__mapper-warn {
+  background:  var(--color-warning-950, #2a1500);
+  border-color: var(--color-warning-700, #b45309);
+  color:        var(--color-warning-300, #fcd34d);
+}

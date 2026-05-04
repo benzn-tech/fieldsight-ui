@@ -33,6 +33,9 @@
   <!-- Lucide icons (UMD) -->
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 
+  <!-- Sprint 8.2.2 — SheetJS CE (MIT, CDN UMD) for XLSX import -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
   <!-- FieldSight globals: tokens + roles (load order matters) -->
   <script src="scripts/fs-globals.js"></script>
   <!-- Sprint 7.0 — theme module (must load after fs-globals, before app-shell) -->
@@ -90,8 +93,8 @@
   <script type="text/babel" src="scripts/composites/modal-overlay.js?v=2"></script>
   <!-- Sprint 5.1 — Programme task editor (modal form for editing a leaf) -->
   <script type="text/babel" src="scripts/composites/programme-task-editor.js?v=4"></script>
-  <!-- Sprint 5.4/5.5 — CSV + MS Project XML import modal -->
-  <script type="text/babel" src="scripts/composites/programme-import-modal.js?v=2"></script>
+  <!-- Sprint 5.4/5.5/8.2.2 — CSV + XML + XLSX import modal -->
+  <script type="text/babel" src="scripts/composites/programme-import-modal.js?v=3"></script>
   <!-- Sprint 8.0.3 — ErrorBanner (used by all page providers on fetch failure) -->
   <script type="text/babel" src="scripts/composites/error-banner.js?v=1"></script>
   <!-- Sprint 8.1.4 — Toast notification stack (vanilla JS, no React) -->
@@ -111,7 +114,9 @@
   <!-- Sprint 4.4 — Programme MVP composites (Gantt + TO-DO) -->
   <script type="text/babel" src="scripts/composites/gantt-strip.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/task-tree-cell.js?v=1"></script>
-  <script type="text/babel" src="scripts/composites/gantt-row.js?v=2"></script>
+  <script type="text/babel" src="scripts/composites/gantt-row.js?v=3"></script>
+  <!-- Sprint 8.3.2 — Over-allocation banner (above Gantt) -->
+  <script type="text/babel" src="scripts/composites/over-allocation-banner.js?v=1"></script>
   <!-- Sprint 4.8 — replaces 4.4's programme-todo-list with a Jira-style board -->
   <script type="text/babel" src="scripts/composites/programme-kanban-board.js?v=2"></script>
   <!-- Sprint 4.10 — Today's My-tasks variant for programme-sourced rows -->
@@ -156,12 +161,12 @@
   <script src="scripts/api/tasks-aggregator.js?v=1"></script>
   <!-- Sprint 6.0 — Compliance aggregator (cross-day fan-out for /safety + /quality) -->
   <script src="scripts/api/compliance-aggregator.js?v=2"></script>
-  <!-- Sprint 4.4 — Programme api -->
-  <script src="scripts/api/programme.js?v=1"></script>
-  <!-- Sprint 5.6 — Cascade + CPM engine (pure module, node-importable) -->
-  <script src="scripts/api/programme-schedule.js?v=1"></script>
-  <!-- Sprint 5.4 — CSV programme importer (pure parser, no Babel needed) -->
-  <script src="scripts/api/programme-import.js?v=2"></script>
+  <!-- Sprint 4.4 / 8.2.1 — Programme api + write operations -->
+  <script src="scripts/api/programme.js?v=2"></script>
+  <!-- Sprint 5.6 / 8.3.1–8.3.2 — Cascade + CPM + floats + over-alloc engine -->
+  <script src="scripts/api/programme-schedule.js?v=2"></script>
+  <!-- Sprint 5.4 / 8.2.2 — CSV + XML + XLSX programme importer -->
+  <script src="scripts/api/programme-import.js?v=3"></script>
   <!-- Sprint 4.6 — User-activity aggregator -->
   <script src="scripts/api/user-activity-aggregator.js?v=1"></script>
   <!-- Sprint 4.10 — Today-Programme adapter (today's programme tasks for caller) -->

@@ -126,6 +126,25 @@
     var tier      = refTier[0];
     var setTier   = refTier[1];
 
+    /* Sprint 8.3.1 — "Show float" toggle */
+    var refShowFloat = React.useState(false);
+    var showFloat    = refShowFloat[0];
+    var setShowFloat = refShowFloat[1];
+
+    /* Sprint 8.3.2 — Over-allocation dismissal flag (per session) */
+    var refOverAllocDismissed = React.useState(false);
+    var overAllocDismissed    = refOverAllocDismissed[0];
+    var setOverAllocDismissed = refOverAllocDismissed[1];
+
+    /* Sprint 8.3.3 — "Compare baseline" toggle + loaded baseline data */
+    var refShowBaseline  = React.useState(false);
+    var showBaseline     = refShowBaseline[0];
+    var setShowBaseline  = refShowBaseline[1];
+
+    var refBaselineData  = React.useState(null); /* { saved_at, tasks[] } | null */
+    var baselineData     = refBaselineData[0];
+    var setBaselineData  = refBaselineData[1];
+
     /* Set of task_ids whose group is collapsed (children hidden). */
     var refCollapsed = React.useState(new Set());
     var collapsed    = refCollapsed[0];
@@ -167,6 +186,9 @@
           critical: critical,
           today:    window.FS.api.todayNZDT(),
         });
+        /* Sprint 8.3.3 — restore saved baseline from localStorage */
+        var saved = window.FS.api.programme.getBaseline(p.programme_id);
+        if (saved) setBaselineData(saved);
       }).catch(function (err) {
         if (cancelled) return;
         setState({ status: 'error', error: { code: (err && err.status) || 0, message: (err && err.message) || 'Could not load programme', retryable: true }, retry: function () { setRetry(function (n) { return n + 1; }); } });
@@ -379,6 +401,15 @@
     var canWrite = !!(window.FS && window.FS.can
                       && window.FS.can(caller, 'programme:manage'));
 
+    /* Sprint 8.3.3 — save baseline to localStorage + update local state */
+    function doSaveBaseline() {
+      var s = state;
+      if (s.status !== 'ok') return;
+      var snapshot = window.FS.api.programme.saveBaseline(
+        s.programme.programme_id, s.leaves);
+      setBaselineData({ saved_at: new Date().toISOString(), tasks: snapshot });
+    }
+
     var ctx = {
       state:        state,
       view:         view,    setView:    setView,
@@ -391,6 +422,17 @@
       deleteTask:   deleteTask,
       replaceTasks: replaceTasks,
       canWrite:     canWrite,
+      /* Sprint 8.3.1 */
+      showFloat:    showFloat,
+      setShowFloat: setShowFloat,
+      /* Sprint 8.3.2 */
+      overAllocDismissed:    overAllocDismissed,
+      setOverAllocDismissed: setOverAllocDismissed,
+      /* Sprint 8.3.3 */
+      showBaseline:   showBaseline,
+      setShowBaseline: setShowBaseline,
+      baselineData:    baselineData,
+      doSaveBaseline:  doSaveBaseline,
     };
     return React.createElement(ProgrammeContext.Provider, { value: ctx },
       props.children);
@@ -399,14 +441,36 @@
   /* ---------- Gantt sub-view ------------------------------------------ */
 
   function GanttView(props) {
-    var fs           = window.FieldSight;
-    var GanttStrip   = fs.GanttStrip;
-    var GanttRow     = fs.GanttRow;
-    var TaskTreeCell = fs.TaskTreeCell;
+    var fs                   = window.FieldSight;
+    var GanttStrip           = fs.GanttStrip;
+    var GanttRow             = fs.GanttRow;
+    var TaskTreeCell         = fs.TaskTreeCell;
+    var OverAllocationBanner = fs.OverAllocationBanner;
 
     var ctx = React.useContext(ProgrammeContext);
     var s   = ctx.state;
     var prog = s.programme;
+
+    /* Sprint 8.3.1 — compute float map when showFloat is on */
+    var floatMap = React.useMemo(function () {
+      if (!ctx.showFloat) return {};
+      var sched = window.FieldSight && window.FieldSight.programmeSchedule;
+      return sched ? sched.computeFloats(s.leaves) : {};
+    }, [ctx.showFloat, s.leaves]);
+
+    /* Sprint 8.3.2 — detect over-allocations whenever leaves change */
+    var overAllocationMap = React.useMemo(function () {
+      var sched = window.FieldSight && window.FieldSight.programmeSchedule;
+      return sched ? sched.detectOverAllocations(s.leaves) : {};
+    }, [s.leaves]);
+
+    /* Sprint 8.3.3 — build a lookup: task_id → { start, end } from saved baseline */
+    var baselineLookup = React.useMemo(function () {
+      if (!ctx.baselineData || !ctx.baselineData.tasks) return {};
+      var map = {};
+      ctx.baselineData.tasks.forEach(function (b) { map[b.task_id] = b; });
+      return map;
+    }, [ctx.baselineData]);
 
     /* Build the visible rows in WBS order: each parent followed by its
        leaves (unless collapsed). */
@@ -512,61 +576,36 @@
                      origStart: '', origEnd: '', start: '', end: '' });
     }
 
-    return React.createElement('div', { className: 'fs-gantt' },
+    var showOverAllocBanner = ctx.canWrite
+      && !ctx.overAllocDismissed
+      && Object.keys(overAllocationMap).length > 0;
 
-      /* Sticky left tree */
-      React.createElement('div', { className: 'fs-gantt__tree' },
-        React.createElement('div', { className: 'fs-gantt__tree-head' }, 'WBS · Task'),
-        rows.map(function (r) {
-          return React.createElement(TaskTreeCell, {
-            key:        r.task.task_id,
-            task:       r.task,
-            isGroup:    r.kind === 'group',
-            expanded:   r.kind === 'group' && !ctx.collapsed.has(r.task.task_id),
-            indent:     r.indent,
-            critical:   r.kind === 'leaf' && s.critical.has(r.task.task_id),
-            selected:   selectedId === r.task.task_id,
-            onToggle:   function () { ctx.toggleGroup(r.task.task_id); },
-            onSelect:   function () {
-              if (r.kind === 'group') return;
-              props.onSelect({
-                kind:     'programme_task',
-                id:       'task_' + r.task.task_id,
-                task_id:  r.task.task_id,
-                task:     r.task,
-              });
-            },
-          });
-        }),
-      ),
+    return React.createElement('div', { className: 'fs-gantt-wrap' },
 
-      /* Right scrollable timeline */
-      React.createElement('div', { className: 'fs-gantt__timeline' },
-        React.createElement('div', {
-          className: 'fs-gantt__timeline-inner',
-          style:     { width: totalWidth + 'px' },
-        },
-          React.createElement(GanttStrip, {
-            from: prog.start_date, to: prog.end_date,
-            pixelsPerDay: ppd, tier: ctx.tier,
-          }),
+      /* Sprint 8.3.2 — Over-allocation banner above Gantt */
+      showOverAllocBanner && OverAllocationBanner
+        ? React.createElement(OverAllocationBanner, {
+            overAllocationMap: overAllocationMap,
+            onDismiss:         function () { ctx.setOverAllocDismissed(true); },
+          })
+        : null,
 
+      React.createElement('div', { className: 'fs-gantt' },
+
+        /* Sticky left tree */
+        React.createElement('div', { className: 'fs-gantt__tree' },
+          React.createElement('div', { className: 'fs-gantt__tree-head' }, 'WBS · Task'),
           rows.map(function (r) {
-            var isDragging = dragState.taskId === r.task.task_id;
-            return React.createElement(GanttRow, {
-              key:            r.task.task_id,
-              task:           r.task,
-              programmeStart: prog.start_date,
-              pixelsPerDay:   ppd,
-              critical:       r.kind === 'leaf' && s.critical.has(r.task.task_id),
-              selected:       selectedId === r.task.task_id,
-              dragPreview:    isDragging
-                                ? { start: dragState.start, end: dragState.end }
-                                : null,
-              onDragStart:    r.kind === 'leaf' ? dragStart : null,
-              onDragMove:     r.kind === 'leaf' ? dragMove  : null,
-              onDragEnd:      r.kind === 'leaf' ? dragEnd   : null,
-              onSelect:       function () {
+            return React.createElement(TaskTreeCell, {
+              key:        r.task.task_id,
+              task:       r.task,
+              isGroup:    r.kind === 'group',
+              expanded:   r.kind === 'group' && !ctx.collapsed.has(r.task.task_id),
+              indent:     r.indent,
+              critical:   r.kind === 'leaf' && s.critical.has(r.task.task_id),
+              selected:   selectedId === r.task.task_id,
+              onToggle:   function () { ctx.toggleGroup(r.task.task_id); },
+              onSelect:   function () {
                 if (r.kind === 'group') return;
                 props.onSelect({
                   kind:     'programme_task',
@@ -577,14 +616,64 @@
               },
             });
           }),
+        ),
 
-          todayOffset != null
-            ? React.createElement('div', {
-                className: 'fs-gantt__today',
-                style:     { left: todayOffset + 'px' },
-                title:     'Today: ' + s.today,
-              })
-            : null,
+        /* Right scrollable timeline */
+        React.createElement('div', { className: 'fs-gantt__timeline' },
+          React.createElement('div', {
+            className: 'fs-gantt__timeline-inner',
+            style:     { width: totalWidth + 'px' },
+          },
+            React.createElement(GanttStrip, {
+              from: prog.start_date, to: prog.end_date,
+              pixelsPerDay: ppd, tier: ctx.tier,
+            }),
+
+            rows.map(function (r) {
+              var isDragging = dragState.taskId === r.task.task_id;
+              var bLine = (r.kind === 'leaf') ? (baselineLookup[r.task.task_id] || null) : null;
+              return React.createElement(GanttRow, {
+                key:            r.task.task_id,
+                task:           r.task,
+                programmeStart: prog.start_date,
+                pixelsPerDay:   ppd,
+                critical:       r.kind === 'leaf' && s.critical.has(r.task.task_id),
+                selected:       selectedId === r.task.task_id,
+                dragPreview:    isDragging
+                                  ? { start: dragState.start, end: dragState.end }
+                                  : null,
+                onDragStart:    r.kind === 'leaf' ? dragStart : null,
+                onDragMove:     r.kind === 'leaf' ? dragMove  : null,
+                onDragEnd:      r.kind === 'leaf' ? dragEnd   : null,
+                /* Sprint 8.3.1 — float */
+                showFloat:  ctx.showFloat && r.kind === 'leaf',
+                floatDays:  ctx.showFloat && r.kind === 'leaf'
+                              ? floatMap[r.task.task_id]
+                              : undefined,
+                /* Sprint 8.3.3 — baseline */
+                showBaseline:  ctx.showBaseline && !!bLine,
+                baselineStart: bLine ? bLine.start : null,
+                baselineEnd:   bLine ? bLine.end   : null,
+                onSelect:      function () {
+                  if (r.kind === 'group') return;
+                  props.onSelect({
+                    kind:     'programme_task',
+                    id:       'task_' + r.task.task_id,
+                    task_id:  r.task.task_id,
+                    task:     r.task,
+                  });
+                },
+              });
+            }),
+
+            todayOffset != null
+              ? React.createElement('div', {
+                  className: 'fs-gantt__today',
+                  style:     { left: todayOffset + 'px' },
+                  title:     'Today: ' + s.today,
+                })
+              : null,
+          ),
         ),
       ),
     );
@@ -724,6 +813,37 @@
               )
             : null,
 
+          /* Sprint 8.3.1 — Show float toggle (Gantt only) */
+          ctx.view === 'gantt'
+            ? React.createElement('label', { className: 'fs-programme__toolbar-check', title: 'Show total float (slack) per task' },
+                React.createElement('input', {
+                  type:     'checkbox',
+                  checked:  ctx.showFloat,
+                  onChange: function (e) { ctx.setShowFloat(e.target.checked); },
+                }),
+                'Show float'
+              )
+            : null,
+
+          /* Sprint 8.3.3 — Save baseline / Compare baseline (gated: canWrite) */
+          ctx.canWrite && ctx.view === 'gantt'
+            ? React.createElement(Button || 'button', Object.assign(
+                Button ? { variant: 'secondary', size: 'sm' } : { type: 'button' },
+                { onClick: ctx.doSaveBaseline, title: 'Save current schedule as baseline' }
+              ), 'Save baseline')
+            : null,
+
+          ctx.canWrite && ctx.view === 'gantt' && ctx.baselineData
+            ? React.createElement('label', { className: 'fs-programme__toolbar-check', title: 'Compare against saved baseline (' + (ctx.baselineData.saved_at ? ctx.baselineData.saved_at.slice(0, 10) : '') + ')' },
+                React.createElement('input', {
+                  type:     'checkbox',
+                  checked:  ctx.showBaseline,
+                  onChange: function (e) { ctx.setShowBaseline(e.target.checked); },
+                }),
+                'Compare baseline'
+              )
+            : null,
+
           /* Sprint 5.2 — Add task button (gated 5.7.1: PM / CM / admin) */
           Button && ctx.canWrite
             ? React.createElement(Button, {
@@ -732,7 +852,7 @@
               }, '+ Add task')
             : null,
 
-          /* Sprint 5.4 — Import CSV button (gated 5.7.1: PM / CM / admin) */
+          /* Sprint 5.4 — Import CSV/XML/XLSX button (gated 5.7.1: PM / CM / admin) */
           Button && ctx.canWrite
             ? React.createElement(Button, {
                 variant: 'secondary', size: 'sm',

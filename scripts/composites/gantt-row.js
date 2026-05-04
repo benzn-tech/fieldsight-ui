@@ -16,6 +16,10 @@
 
    Snapping is implicit: deltaPx / pixelsPerDay → Math.round → days.
 
+   Sprint 8.3.1 — optional float pill (total slack) shown when showFloat=true.
+   Sprint 8.3.3 — optional baseline ghost bar shown when showBaseline=true
+                  and baselineStart / baselineEnd are provided.
+
    Bar visual:
      • Status colour (completed / in_progress / blocked / delayed /
        not_started / group)
@@ -36,6 +40,11 @@
      onDragEnd       () => void
      dragPreview     { start, end } | null  — overrides bar position
                                               while a drag is in flight
+     showFloat       boolean — render the float pill (Sprint 8.3.1)
+     floatDays       number  — total slack in days (0 = critical)
+     showBaseline    boolean — render baseline ghost bar (Sprint 8.3.3)
+     baselineStart   ISO date | null
+     baselineEnd     ISO date | null
 
    Exported to:
      window.FieldSight.GanttRow
@@ -54,16 +63,36 @@
     return Math.round((b - a) / 86400000);
   }
 
+  /* Float pill: 0d = critical/danger, 1–3d = amber warning, >3d = success */
+  function FloatPill(props) {
+    var days = props.days;
+    if (days == null) return null;
+    var tone = days === 0  ? 'critical'
+             : days <= 3  ? 'warn'
+             :               'ok';
+    return React.createElement('span', {
+      className: 'fs-gantt-float-pill fs-gantt-float-pill--' + tone,
+      title:     days === 0
+                   ? 'Critical path — zero float'
+                   : days + ' day' + (days === 1 ? '' : 's') + ' float',
+    }, days + 'd');
+  }
+
   function GanttRow(props) {
-    var t           = props.task;
-    var origin      = props.programmeStart;
-    var ppd         = props.pixelsPerDay || 24;
-    var critical    = !!props.critical;
-    var selected    = !!props.selected;
-    var dragPreview = props.dragPreview;
-    var onDragStart = props.onDragStart;
-    var onDragMove  = props.onDragMove;
-    var onDragEnd   = props.onDragEnd;
+    var t             = props.task;
+    var origin        = props.programmeStart;
+    var ppd           = props.pixelsPerDay || 24;
+    var critical      = !!props.critical;
+    var selected      = !!props.selected;
+    var dragPreview   = props.dragPreview;
+    var onDragStart   = props.onDragStart;
+    var onDragMove    = props.onDragMove;
+    var onDragEnd     = props.onDragEnd;
+    var showFloat     = !!props.showFloat;
+    var floatDays     = props.floatDays;
+    var showBaseline  = !!props.showBaseline;
+    var baselineStart = props.baselineStart || null;
+    var baselineEnd   = props.baselineEnd   || null;
 
     if (!t || !t.start || !t.end) {
       return React.createElement('div', { className: 'fs-gantt-row' });
@@ -91,6 +120,18 @@
       + (isGroup     ? ' fs-gantt-bar--group'     : '')
       + (dragPreview ? ' fs-gantt-bar--dragging'  : '')
       + (draggable   ? ' fs-gantt-bar--draggable' : '');
+
+    /* Baseline ghost bar geometry (Sprint 8.3.3) */
+    var baselineBar = null;
+    if (showBaseline && !isGroup && baselineStart && baselineEnd) {
+      var bOffset = Math.max(0, diffDays(origin, baselineStart)) * ppd;
+      var bWidth  = Math.max(ppd * 0.5, (diffDays(baselineStart, baselineEnd) + 1) * ppd);
+      baselineBar = React.createElement('div', {
+        className: 'fs-gantt-bar--baseline',
+        style:     { left: bOffset + 'px', width: bWidth + 'px' },
+        title:     'Planned: ' + baselineStart + ' → ' + baselineEnd,
+      });
+    }
 
     /* Decide drag mode by where on the bar the pointer landed —
        offsetX from the bar's own left edge. */
@@ -142,6 +183,10 @@
     return React.createElement('div', {
       className: 'fs-gantt-row',
     },
+      /* Baseline ghost bar behind the current bar (Sprint 8.3.3) */
+      baselineBar,
+
+      /* Current bar */
       React.createElement('div', {
         className:    barClass,
         style:        { left: startOffset + 'px', width: width + 'px' },
@@ -159,6 +204,14 @@
           className: 'fs-gantt-bar__label',
         }, t.name) : null,
       ),
+
+      /* Float pill (Sprint 8.3.1) — rendered to the right of the bar */
+      showFloat && !isGroup && floatDays != null
+        ? React.createElement(FloatPill, {
+            days: floatDays,
+            key:  'float-' + t.task_id,
+          })
+        : null,
     );
   }
 

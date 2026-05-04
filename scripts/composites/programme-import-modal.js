@@ -58,8 +58,8 @@
       var f = fileList && fileList[0];
       if (!f) return;
       var ext = f.name.split('.').pop().toLowerCase();
-      if (ext !== 'csv' && ext !== 'xml') {
-        alert('Unsupported file type. Please select a .csv or .xml (MS Project) file.');
+      if (ext !== 'csv' && ext !== 'xml' && ext !== 'xlsx' && ext !== 'xls') {
+        alert('Unsupported file type. Please select a .csv, .xml (MS Project), .xlsx, or .xls file.');
         return;
       }
       onFile(f);
@@ -97,7 +97,7 @@
       React.createElement('input', {
         ref:      inputRef,
         type:     'file',
-        accept:   '.csv,text/csv,.xml,text/xml,application/xml',
+        accept:   '.csv,text/csv,.xml,text/xml,application/xml,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel',
         style:    { display: 'none' },
         onChange: onInputChange,
       }),
@@ -105,12 +105,112 @@
       React.createElement('div', { className: 'fs-prog-import__drop-title' },
         dragOver ? 'Drop to import' : 'Drag & drop a file here'),
       React.createElement('div', { className: 'fs-prog-import__drop-sub' },
-        'or click to browse · .csv or .xml (MS Project)'),
+        'or click to browse · .csv · .xml (MS Project) · .xlsx / .xls'),
       React.createElement('div', { className: 'fs-prog-import__drop-formats' },
-        React.createElement('span', { className: 'fs-prog-import__drop-format-label' }, 'CSV columns:'),
+        React.createElement('span', { className: 'fs-prog-import__drop-format-label' }, 'CSV / XLSX columns:'),
         React.createElement('code', null, 'task_id, wbs, parent_id, name, start, end, progress_pct, status, depends_on, assignees'),
         React.createElement('span', { className: 'fs-prog-import__drop-format-label' }, 'MS Project XML:'),
         'File → Save As → XML Format in MS Project 2016+',
+      ),
+    );
+  }
+
+  /* ---- ColumnMapper ------------------------------------------------------- */
+  /* Shown when an XLSX file's first-row headers don't match the CSV contract. */
+
+  var CSV_COLUMNS = ['task_id', 'wbs', 'parent_id', 'name', 'start', 'end',
+                     'progress_pct', 'status', 'depends_on', 'assignees'];
+  var REQUIRED_MAP_COLS = ['task_id', 'wbs', 'name', 'start', 'end', 'status'];
+
+  function ColumnMapper(props) {
+    var headers   = props.headers  || [];
+    var onConfirm = props.onConfirm || function () {};
+    var onBack    = props.onBack    || function () {};
+
+    var Button = window.FieldSight && window.FieldSight.Button;
+
+    /* mapping: { xlsxHeader → csvColumn | '' } */
+    var initialMap = {};
+    headers.forEach(function (h) {
+      /* Auto-match exact names */
+      initialMap[h] = CSV_COLUMNS.indexOf(h) !== -1 ? h : '';
+    });
+
+    var refMap = React.useState(initialMap);
+    var mapping = refMap[0];
+    var setMapping = refMap[1];
+
+    function setCol(header, csvCol) {
+      setMapping(function (prev) {
+        var next = Object.assign({}, prev);
+        next[header] = csvCol;
+        return next;
+      });
+    }
+
+    var missingRequired = REQUIRED_MAP_COLS.filter(function (col) {
+      return Object.values(mapping).indexOf(col) === -1;
+    });
+
+    function handleConfirm() {
+      /* Build columnMap: only include mappings with a destination */
+      var columnMap = {};
+      Object.keys(mapping).forEach(function (h) {
+        if (mapping[h]) columnMap[h] = mapping[h];
+      });
+      onConfirm(columnMap);
+    }
+
+    return React.createElement('div', { className: 'fs-prog-import__mapper' },
+      React.createElement('div', { className: 'fs-prog-import__mapper-header' },
+        React.createElement('strong', null, 'Map columns'),
+        React.createElement('p', { className: 'fs-prog-import__mapper-sub' },
+          'The file headers don\'t exactly match the expected column names. Map each source column to a FieldSight field.'),
+      ),
+      React.createElement('table', { className: 'fs-prog-import__mapper-table' },
+        React.createElement('thead', null,
+          React.createElement('tr', null,
+            React.createElement('th', null, 'File column'),
+            React.createElement('th', null, 'Maps to'),
+          ),
+        ),
+        React.createElement('tbody', null,
+          headers.map(function (h) {
+            return React.createElement('tr', { key: h },
+              React.createElement('td', { className: 'fs-prog-import__td-mono' }, h),
+              React.createElement('td', null,
+                React.createElement('select', {
+                  className: 'fs-prog-import__mapper-select',
+                  value:     mapping[h] || '',
+                  onChange:  function (e) { setCol(h, e.target.value); },
+                },
+                  React.createElement('option', { value: '' }, '— ignore —'),
+                  CSV_COLUMNS.map(function (col) {
+                    return React.createElement('option', { key: col, value: col }, col);
+                  }),
+                ),
+              ),
+            );
+          }),
+        ),
+      ),
+      missingRequired.length > 0 && React.createElement('div', {
+        className: 'fs-prog-import__mapper-warn',
+      }, 'Required columns not yet mapped: ' + missingRequired.join(', ')),
+      React.createElement('div', { className: 'fs-prog-import__footer' },
+        Button
+          ? React.createElement(Button, { variant: 'secondary', size: 'sm', onClick: onBack }, '← Back')
+          : React.createElement('button', { type: 'button', onClick: onBack }, 'Back'),
+        Button
+          ? React.createElement(Button, {
+              variant: 'primary', size: 'sm',
+              disabled: missingRequired.length > 0,
+              onClick:  handleConfirm,
+            }, 'Apply mapping')
+          : React.createElement('button', {
+              type: 'button', disabled: missingRequired.length > 0,
+              onClick: handleConfirm,
+            }, 'Apply mapping'),
       ),
     );
   }
@@ -224,7 +324,7 @@
     var ModalOverlay = window.FieldSight && window.FieldSight.ModalOverlay;
     var Button       = window.FieldSight && window.FieldSight.Button;
 
-    /* phase: 'pick' | 'preview' */
+    /* phase: 'pick' | 'mapping' | 'preview' */
     var phaseHook  = React.useState('pick');
     var phase      = phaseHook[0];
     var setPhase   = phaseHook[1];
@@ -233,17 +333,37 @@
     var fileName     = fileNameHook[0];
     var setFileName  = fileNameHook[1];
 
+    /* pendingXlsx holds { file, headers, rows } while column-mapper is shown */
+    var pendingHook = React.useState(null);
+    var pending     = pendingHook[0];
+    var setPending  = pendingHook[1];
+
     var resultHook = React.useState(null);
     var result     = resultHook[0];
     var setResult  = resultHook[1];
 
     /* Reset state when modal is opened fresh */
     React.useEffect(function () {
-      if (open) { setPhase('pick'); setFileName(''); setResult(null); }
+      if (open) { setPhase('pick'); setFileName(''); setResult(null); setPending(null); }
     }, [open]);
 
     function handleFile(f) {
       setFileName(f.name);
+      var ext = f.name.split('.').pop().toLowerCase();
+
+      if (ext === 'xlsx' || ext === 'xls') {
+        window.FS.api.programmeImport.parseXLSX(f).then(function (parsed) {
+          if (parsed.needsMapping) {
+            setPending({ file: f, headers: parsed.headers, rows: parsed.rows });
+            setPhase('mapping');
+          } else {
+            setResult(parsed);
+            setPhase('preview');
+          }
+        });
+        return;
+      }
+
       var isXML = /\.xml$/i.test(f.name);
       var reader = new FileReader();
       reader.onload = function (e) {
@@ -255,6 +375,15 @@
         setPhase('preview');
       };
       reader.readAsText(f, 'utf-8');
+    }
+
+    function handleColumnMap(columnMap) {
+      if (!pending) return;
+      window.FS.api.programmeImport.parseXLSXWithMap(pending.file, columnMap).then(function (parsed) {
+        setResult(parsed);
+        setPending(null);
+        setPhase('preview');
+      });
     }
 
     function handleConfirm() {
@@ -271,16 +400,26 @@
       ? pluralise(result.parents.length, 'group') + ', ' + pluralise(result.leaves.length, 'task')
       : '';
 
+    var modalTitle = phase === 'pick'    ? 'Import programme — CSV · XML · XLSX'
+                   : phase === 'mapping' ? 'Map columns — ' + fileName
+                   :                       'Preview import — ' + fileName;
+
     return ModalOverlay
       ? React.createElement(ModalOverlay, {
           open:            open,
           onClose:         onClose,
-          title:           phase === 'pick' ? 'Import programme — CSV or MS Project XML' : 'Preview import — ' + fileName,
+          title:           modalTitle,
           size:            'lg',
           closeOnBackdrop: phase === 'pick',
         },
           phase === 'pick'
             ? React.createElement(DropZone, { onFile: handleFile })
+          : phase === 'mapping' && pending
+            ? React.createElement(ColumnMapper, {
+                headers:   pending.headers,
+                onConfirm: handleColumnMap,
+                onBack:    function () { setPhase('pick'); setPending(null); },
+              })
             : React.createElement('div', { className: 'fs-prog-import__preview' },
 
                 /* Summary bar */
