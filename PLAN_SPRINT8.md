@@ -871,4 +871,31 @@ Before closing Sprint 8:
 
 ---
 
+## Pending — deferred work
+
+### 8.4.3 — Mobile breakpoint deep audit (375 / 414 px) → superseded
+
+**Status:** Pending, on hold for a dedicated mobile app.
+
+The Sprint 8.4 scope landed bottom-nav + a single `767px` breakpoint
+that makes all 12 pages technically "usable" on a small screen. The
+finer-grained 375 / 414 px polish across every page was never
+attempted.
+
+**Why deferred:** the user is planning a **purpose-built mobile app**
+focused only on **today's to-do-list**, to reduce on-site reliance on
+the full web shell. Spending a sprint hand-tuning every page for
+phone-width when the canonical mobile surface will be a different
+codebase / smaller scope is wasted polish.
+
+**When to revisit:** if the mobile-app idea is dropped or postponed
+beyond ~3 sprints, reopen this and audit each page at 375 px.
+
+**Other Sprint 8 items left as known follow-ups:**
+- §8.5.1 colour-contrast pairs — needs an axe-core run (or manual
+  WCAG calc) on every text/surface combination introduced since
+  Sprint 7's dark-mode work
+- §8.5.6 screen-reader smoke test — manual NVDA / VoiceOver pass on
+  `/today` and `/programme`
+
 *Generated: 2026-05-03 · Branch: `plan/sprint-8` · FieldSight UI prototype*
