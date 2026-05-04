@@ -115,8 +115,11 @@ function NavItem({ navKey, label, isActive, isCollapsed, onClick, isSubItem }) {
     height: '40px',
     cursor: 'pointer',
     borderRadius: '6px',
+    /* Sub-items share the top-level icon column rather than indenting
+       further — the SubgroupLabel above already establishes hierarchy
+       (uppercase, dim, smaller font) so an extra indent here just
+       pushed sub-item icons out of alignment with their siblings. */
     margin: '1px 8px',
-    marginLeft: isSubItem ? '20px' : '8px',
     position: 'relative',
     justifyContent: isCollapsed ? 'center' : 'flex-start',
     background: isActive

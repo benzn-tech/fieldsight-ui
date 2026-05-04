@@ -5724,3 +5724,39 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 [data-theme="dark"] .fs-prog-kanban-card--done        .fs-prog-kanban-card__footer {
   border-top-color: var(--color-neutral-300);
 }
+
+
+/* ==========================================================================
+   §DARK-EDGES · DARK-MODE EDGE FIXES (Sprint 7 follow-up 3)
+   --------------------------------------------------------------------------
+   Sprint 7 polish issues caught in browser walkthrough:
+
+   (1) Elevated cards (e.g. .fs-morning-brief-card) rely on box-shadow
+       for their edge. On a near-black panel the shadow is invisible —
+       the card vanishes. Add a thin border in dark mode only so the
+       edge reads.
+
+   (2) /quality rows had no resting border (vs /safety where the inner
+       fs-safety-flag-row carries one). Quality rows now sit on a
+       light card edge so they read as discrete items at rest, while
+       still flipping to accent-400 on --active without layout shift.
+
+   (3) Selecting a fs-safety__row-btn previously left the inner
+       fs-safety-flag-row painted with --surface-panel, hiding the
+       parent's --surface-selected tint. Swap the inner row's bg +
+       border-color when the parent is active so the selection
+       actually reads inside the row.
+   ========================================================================== */
+
+[data-theme="dark"] .fs-card--elevated {
+  border-color: var(--border-subtle);
+}
+
+.fs-quality__row-btn {
+  border-color: var(--border-subtle);
+}
+
+.fs-safety__row-btn--active .fs-safety-flag-row {
+  background: var(--surface-selected);
+  border-color: var(--color-accent-400);
+}
