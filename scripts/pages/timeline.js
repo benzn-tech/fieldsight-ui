@@ -582,10 +582,14 @@
             actionState: actionState,
             selected:    selectedTopicId === topic.topic_id,
             defaultOpen: defaultOpenProp,
-            highlight:   isTarget,
+            /* Sprint 7 follow-up — when &flag= is present, suppress
+               the topic-level flash entirely; SafetyFlagRow owns the
+               scroll + flash so the spotlight lands on one row, not
+               the whole topic card. defaultOpen still fires so the
+               flag row is in the DOM for the row's own scrollIntoView. */
+            highlight:   isTarget && targetFlagIdx === null,
             /* Sprint 6.7.2 — only the matched topic gets a flagHighlight;
-               others ignore. When targetFlagIdx is null, the topic-level
-               flash from 6.6.4 owns the spotlight. */
+               others ignore. */
             flagHighlight: isTarget ? targetFlagIdx : null,
             onSelect:    function () {
               if (props.onSelect) {

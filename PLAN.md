@@ -1157,6 +1157,332 @@ After the 6.6 round shipped, user identified two more refinements:
 | Trend/heatmap views (flags-per-site over time) | Needs >7 day fixture data; revisit when backend lands |
 | Vocabulary-aware tagging (Q-2 backend) | Already in §Q-2; not blocking Sprint 6 |
 
+## Sprint 7 — Team + Settings + Dark mode 🟡 active
+
+### Context
+
+Sprint 6 (compliance pair) is merged via PR #16 with two polish
+rounds (6.6 + 6.7). The remaining nav slots from CLAUDE.md's
+original Sprint 6 charter — `/team` and `/settings` plus the dark
+mode polish — are next up. Per user decision Sprint 7 deliberately
+**does not include mobile / responsive** work; that's a
+cross-cutting effort touching every page and earns its own Sprint 8.
+
+Why these three together: they're tightly coupled by a single
+piece of new infrastructure — the `/settings` page is where the
+dark-mode toggle lives, and dark mode itself needs the toggle UI
+to be useful. `/team` is largely independent but ships in the same
+sprint because it's small (data fixture and patterns all exist)
+and it closes the last open nav slot from Sprint 6's nav charter.
+
+### User decisions captured
+
+| Question | Choice |
+|---|---|
+| Sprint 7 scope | `/team` + `/settings` + dark mode (mobile → Sprint 8) |
+| `/settings` v1 widgets | Default landing override + Theme toggle |
+| `/team` right detail | Profile + cross-page link buttons |
+| Theme toggle UI lives in | `/settings` page |
+| Dark mode polish strategy | Wire toggle + one-shot audit across all pages |
+
+### Strategy
+
+**6 sub-sprints, single branch** following the Sprint 6 cadence.
+The order is: theme infrastructure first (unblocks 7.3 + 7.4),
+then `/team` (independent), then `/settings` (consumes theme
+infra), then dark-mode audit across existing pages, then wrap-up.
+
+Critical invariants:
+- **No build step** (UMD/CDN only).
+- **localStorage only for prefs** — no backend prefs API yet.
+  `defaultLanding` override + theme persist client-side; documented
+  as Sprint 8+ migration target when a real `/api/user/prefs`
+  lands.
+- **No new L4 atoms** — every input/control comes from Sprint 1
+  primitives + Sprint 4–6 composites.
+- **Reuse, don't rebuild** — the existing dev `setTheme()` in
+  `tokens-reference.js:495-515` is the model for the new theme
+  module; `/sites` page is the architectural template for
+  `/team`; `/safety` is the template for `/settings` (range
+  toolbar pattern → settings sections).
+
+### 6 sub-sprints
+
+#### 7.0 — Theme infrastructure + app-shell wiring
+
+New `scripts/theme.js` (~80 LoC). Public API:
+
+```js
+window.FS.theme = {
+  init()              // call once at app boot
+  set(mode)           // 'light' | 'dark' | 'auto'
+  get()               // → resolved mode (auto → resolved current)
+  getStored()         // → stored preference verbatim
+}
+```
+
+Behaviour:
+- `init()` reads `localStorage.fs.settings.theme` (default `'auto'`),
+  applies `data-theme` attribute on `<html>`. In auto mode,
+  consults `prefers-color-scheme` and listens for changes via
+  `matchMedia(...).addEventListener('change')`.
+- `set(mode)` writes localStorage, applies `data-theme`,
+  re-evaluates auto if relevant.
+- AppShell (`scripts/app-shell.js`) calls `FS.theme.init()` once
+  after mount.
+- Add `theme` to existing `STORAGE_KEYS` in `app-shell.js` for
+  consistency.
+
+Reference: `scripts/tokens-reference.js:495-515` already does this
+for the demo page — extract + generalise. No need to remove the
+demo wiring; the new module supersedes it everywhere else.
+
+#### 7.1 — `/team` middle column
+
+New `scripts/pages/team.js` (~280 LoC). Provider state:
+`{ status, usersBySite, totals }`. Fetches via existing
+`FS.api.sites.getUsers()` (no aggregation needed — single fetch).
+
+Middle column structure:
+- Header: title "Team" + meta line (N users · M sites)
+- KPI strip: total users · active sites · roles represented
+  (count of distinct roles)
+- Body: grouped by `primary_site` (descending by user count),
+  each group is a site header + N user rows. Each row:
+  `Avatar` (initials variant, deterministic colour) + name +
+  role badge + secondary sites pill (if `user.sites.length > 1`)
+
+Permission gate (defense-in-depth): Provider checks
+`FS.can(caller, 'user:manage')` and surfaces AccessDenied if
+false. Nav already gates this, but a direct URL hit could land
+unauthorised users on the page.
+
+CSS: append `.fs-team-*` block to `composites.css` (~70 LoC,
+mirrors `.fs-safety` group structure).
+
+#### 7.2 — `/team` right detail + `/tasks?user=` extension
+
+Right column shows the selected user's profile:
+- Header: large Avatar + name + role badge + scope pill
+  (e.g., "Site Manager · Ellesmere College")
+- Field rows: Primary site · All sites · Device ID
+- Footer: two action buttons —
+  - "View their reports" → `/timeline?date=<today>&user=<folder>`
+    (timeline page already reads `params.user`,
+    `scripts/pages/timeline.js:241`)
+  - "View their tasks" → `/tasks?user=<folder>`
+
+Tasks-side wiring (~15 LoC in `scripts/pages/tasks.js`):
+- Add `readRouteParams()` helper (mirror timeline.js:37-40)
+- TasksProvider reads `params.user` and passes it to
+  `FS.api.tasks.getActionsResolvedRange({user})`
+- `resolveUser` in `tasks-aggregator.js:46-55` already accepts
+  explicit user — no aggregator change
+
+#### 7.3 — `/settings` page ✅ done
+
+New `scripts/pages/settings.js` (~230 LoC). Provider holds prefs
+state, syncs to localStorage on change.
+
+Middle column has two sections:
+
+1. **Theme** — Light / Dark / Auto radio group.
+   - Calls `FS.theme.set(mode)` on change → instant visual
+     feedback
+   - "Auto" option captioned with current resolved mode
+     (e.g., "Auto · matches your system, currently dark")
+
+2. **Default landing** — Dropdown of nav items the current user
+   can see (uses existing `FS.getVisibleNavItems(user)`).
+   - First option: "Use my role's default
+     (`<role.defaultLanding>`)" → unsets the override
+   - Persists to `localStorage.fs.settings.defaultLanding`
+   - Bootstrap block in `app-shell-preview.html` extended: on
+     initial navigation (when route is empty), prefers the stored
+     override over `FS.getDefaultLanding(user)`. ~5 LoC.
+
+Right column: static "Your preferences" summary card showing
+theme preference, resolved theme, and effective landing page.
+
+CSS: `.fs-settings-*` + `.fs-settings-summary` appended to
+`composites.css` (~160 LoC, sections layout + form rows +
+summary card + reduced-motion block).
+
+`app-shell-preview.html` updated: `settings.js?v=1` registered,
+`composites.css?v=31`, `app-shell.css?v=4` cache-busted.
+
+#### 7.4 — Dark mode polish audit (per-page) ✅ done
+
+Audit method (grep-based, no headless browser):
+1. Grepped `composites.css` + `components.css` + `app-shell.css`
+   for `#[0-9a-f]{3,6}`, `rgb(`, `rgba(`.
+2. Grepped inline `style=` with colour values in
+   `scripts/composites/` and `scripts/pages/` — no hits.
+3. For each find: replaced with `var(--*)` token, or categorised
+   and documented below.
+
+**Fixed:**
+- `composites.css` `.fs-modal__backdrop` — `rgba(15, 23, 42, 0.5)`
+  → `var(--surface-overlay)` (uses the dark-aware token).
+- `app-shell.css` `.fs-right-drawer__backdrop` — `rgba(15, 23, 42, 0.4)`
+  → `var(--surface-overlay)`.
+- `app-shell.css` `.fs-dev-switcher select option` — `#1a1a1a` / `#fff`
+  → `var(--surface-tooltip)` / `var(--text-primary)`.
+
+**Intentional / kept as-is:**
+- `color: #fff` on solid badge + button variants — white text on
+  coloured backgrounds; correct in both modes.
+- `background: #000` on `.fs-video-player__media` — video
+  letterbox; intentional.
+- `rgba(0, 0, 0, ...)` shadows and overlays (gantt bar progress,
+  kanban card hover, dragging) — alpha-transparent, theme-neutral.
+- `rgba(255, 255, 255, 0.06)` sidebar borders in `app-shell.css`
+  — sidebar background is always dark navy (`--surface-sidebar`),
+  so translucent white borders are correct in both themes.
+- `rgba(255, 107, 53, ...)` accent tints — accent colour is fixed
+  across themes; no change needed.
+
+**Skipped / deferred to Sprint 8:**
+- `scripts/composites/transcript-list.js` speaker palette
+  (`#1E40AF/#DBEAFE`, `#15803D/#DCFCE7`, etc.) — no design-system
+  token set for arbitrary speaker slots; needs Sprint 8 token
+  additions (`--color-speaker-{1..6}-{fg,bg}`).
+
+#### 7.5 — Wrap-up ✅ done
+
+- Cache busters bumped: `composites.css?v=31`, `app-shell.css?v=4`,
+  `settings.js?v=1` (new file).
+- `node --check` sweep across all ~95 JS files — zero errors.
+- Reduced-motion audit: two new `@media (prefers-reduced-motion)`
+  blocks added in `composites.css` (one for `.fs-settings__radio-row`
+  + `.fs-settings__select` transitions).
+- No new keyframe animations introduced in Sprint 7.3–7.5.
+- Browser walkthrough deferred to user — note role expectations:
+  - **worker** — no /team in nav, /settings accessible, theme
+    toggle works.
+  - **site_manager** — same as worker.
+  - **gm** / **admin** — /team visible in nav, /settings shows
+    all nav items in the landing dropdown.
+
+#### 7.6 — Density toggle (Comfortable / Compact) ✅ done
+
+New `scripts/density.js` (~55 LoC) — mirrors `theme.js` pattern
+exactly. Public API: `window.FS.density = { init(), set(mode),
+get(), getStored() }`. Two modes: `'comfortable'` (default, no
+`data-density` attribute) | `'compact'` (sets
+`[data-density="compact"]` on `<html>`). Storage key:
+`'fs.settings.density'`.
+
+`styles/tokens.css` §16 (renumbered to §17 for reduced-motion):
+new `§16 · DENSITY` section with `:root` comfortable defaults
+(`--density-row-py`, `--density-row-px`, `--density-row-min-h`,
+`--density-card-header-p`, `--density-card-body-p`,
+`--density-list-gap`, `--density-group-gap`) and
+`[data-density="compact"]` overrides that tighten each.
+
+`styles/composites.css` new `§DC · DENSITY — compact overrides`
+block at end (~65 LoC): flat `[data-density="compact"] .selector`
+rules targeting highest-ROI rows — team user rows (padding +
+min-height), safety flag rows, action item rows, card
+header/body/footer padding, topic card body, timeline topic list
+gap. No existing rules modified — purely additive.
+
+`scripts/pages/settings.js` updated: new Section 2 "Display
+density" radio group (Comfortable / Compact) between Theme and
+Default landing. `handleSetDensity` in Provider, `densityStored`
+in state, density row in RightDetail summary. Old Theme +
+landing sections shift to Sections 1 + 3 with no functional
+change. Cache buster: `settings.js?v=1 → v=2`.
+
+`scripts/app-shell.js`: `STORAGE_KEYS.density` added;
+`FS.density.init()` called alongside `FS.theme.init()` in
+`mountAppShell`. Cache buster: `app-shell.js?v=10 → v=11`.
+
+`app-shell-preview.html`: `density.js?v=1` script tag added
+after `theme.js?v=1`; `composites.css?v=31 → v=32`.
+
+Reduced-motion audit: density.js and the §DC CSS block introduce
+zero new `@keyframes` — no new entry needed in the animation
+registry. `node --check` clean across all modified JS files.
+
+### Recommended execution order
+
+`7.0 → 7.1 → 7.2 → 7.3 → 7.4 → 7.5 → 7.6`
+
+7.0 must come first (7.3 + 7.4 depend on the theme module). 7.1
+and 7.2 can swap places without consequence but conventionally
+"middle then right" matches Sprint 6 cadence. 7.4 must come last
+of the build phase (audits the work of 7.1–7.3 plus all earlier
+sprints).
+
+### Critical files
+
+| Path | Role | New / Modified |
+|---|---|---|
+| `scripts/theme.js` | Theme apply + persist + auto-mode listener | NEW (7.0) |
+| `scripts/density.js` | Density apply + persist | NEW (7.6) |
+| `scripts/app-shell.js` | Add `FS.theme.init()` + `FS.density.init()` calls + `STORAGE_KEYS` | MODIFIED (7.0, 7.3, 7.6) |
+| `scripts/pages/team.js` | Provider + Middle + Right | NEW (7.1, 7.2) |
+| `scripts/pages/settings.js` | Provider + Middle + Right | NEW (7.3) |
+| `scripts/pages/tasks.js` | Read `?user=` from URL | MODIFIED (7.2) |
+| `app-shell-preview.html` | Script registrations + cache-buster bumps | MODIFIED each sub-sprint |
+| `styles/composites.css` | New `.fs-team-*` and `.fs-settings-*` blocks + dark-mode fixes | MODIFIED |
+| `styles/components.css` | Possible dark-mode fixes for L4 atoms | MODIFIED (7.4) |
+| `styles/app-shell.css` | Possible dark-mode fixes | MODIFIED (7.4) |
+| `scripts/mock/sites.fixture.js` | Existing 8-user fixture | READ-ONLY |
+| `scripts/api/sites.js` | `getUsers()` / `getSiteUsers()` | READ-ONLY |
+| `scripts/components/avatar.js` | Used as-is for /team + /settings header | READ-ONLY |
+| `scripts/composites/{kpi-strip,stat-card,card,badge}.js` | Reused | READ-ONLY |
+| `scripts/roles.js` + `scripts/fs-globals.js` | `getVisibleNavItems`, `getDefaultLanding`, `can` | READ-ONLY |
+| `styles/tokens.css:564-618` | Dark token set; verify completeness during 7.4 | READ-ONLY |
+| `scripts/tokens-reference.js:495-515` | Reference implementation for theme persist | READ-ONLY |
+| `PLAN.md` | Status entries flipped to ✅ as each sub-sprint lands | MODIFIED |
+
+### Verification
+
+Per sub-sprint, before commit:
+1. `for f in $(find scripts -name '*.js'); do node --check "$f" || exit 1; done` — must remain clean.
+2. Smoke test for 7.0: in node, run `theme.js` against a stubbed
+   `localStorage` + `matchMedia`, verify init / set / auto behaviour.
+3. Cache busters bumped only on touched files.
+
+After 7.5 lands:
+4. Browser walkthrough at 4 roles — verify nav gating and
+   per-role behaviour. Log any dark-mode regression as a Sprint
+   8 follow-up.
+5. No regressions on the 11 existing pages from Sprints 4–6.
+
+### Branch + PR strategy
+
+Single branch `claude/sprint7-team-settings-dark`, all sub-sprints
+stacked. PR title rolls forward at each push. Final PR rename
+happens at 7.5 close. Same convention as Sprint 5 + Sprint 6.
+
+### Deferred to Sprint 8+
+
+| Item | Why deferred |
+|---|---|
+| Mobile / responsive | Cross-cutting work touching every page; deserves its own sprint |
+| User profile editing (email, phone) | AuthMock doesn't have these fields; no `PATCH /api/users/me` endpoint |
+| Notification preferences (real) | No toast/snack composite + no `/api/notifications` endpoint |
+| ~~Density toggle (Comfortable / Compact)~~ | ✅ **Shipped in Sprint 7.6** — scoped density CSS block; no full token rework needed |
+| `/team` write actions (invite user, deactivate) | Read-only by user decision; needs `POST /api/users` + audit |
+| `/settings` backend persistence | All prefs land in localStorage; migrate when `/api/user/prefs` exists |
+| Per-user defaultLanding stored server-side | Currently localStorage; Sprint 8 if backend prefs ship |
+| Sprint 7 audit for any token additions | If 7.4 finds gaps that need new tokens, those are Sprint 8 micro-sprints |
+
+### Range estimate
+
+| Bracket | Sub-sprints | What ships |
+|---|---|---|
+| Minimum | 7.0, 7.1, 7.3 | Theme + /team middle only + /settings. 3 commits. Punts /team right detail and dark audit. |
+| **Nominal (chosen)** | 7.0–7.5 | Full /team + /settings + dark audit. 6 commits. |
+| Maximum (extended) | + 7.6 density toggle ✅ + 7.7 notification stub | 7.6 shipped; 7.7 still deferred (no toast/snack composite + no API). |
+
+Estimated total: **~5 working days** at sub-sprint-per-day pace.
+7.4's audit is the wild card — could be 1 day if existing pages
+are clean, 2 days if there's significant hardcoded-colour debt.
+
 ## Sprint 4+ — Open product questions
 
 Surfaced during the second-pass review of merged main. These aren't

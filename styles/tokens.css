@@ -346,6 +346,7 @@
   --surface-overlay:        rgba(17, 24, 39, 0.5);
   --surface-tooltip:        var(--color-neutral-900);
   --surface-highlight:      var(--color-accent-50);
+  --surface-selected:       var(--color-accent-50);
 
   /* Borders */
   --border-subtle:  var(--color-neutral-200);
@@ -576,6 +577,7 @@
   --surface-overlay:        rgba(0, 0, 0, 0.75);
   --surface-tooltip:        #1F2937;
   --surface-highlight:      rgba(255, 107, 53, 0.12);
+  --surface-selected:       rgba(255, 107, 53, 0.15);
 
   /* Borders */
   --border-subtle:  #1F2937;
@@ -619,7 +621,38 @@
 
 
 /* ==========================================================================
-   §16 · REDUCED MOTION
+   §16 · DENSITY
+   --------------------------------------------------------------------------
+   Two density tiers. 'comfortable' is the default (no attribute on <html>).
+   'compact' applies [data-density="compact"] — see composites.css §DC.
+   These tokens are the source of truth for compact overrides; composites.css
+   reads them via [data-density="compact"] selector blocks.
+   ========================================================================== */
+
+:root {
+  /* Comfortable defaults (match existing hardcoded values) */
+  --density-row-py:        8px;    /* vertical padding of interactive rows */
+  --density-row-px:        12px;   /* horizontal padding of interactive rows */
+  --density-row-min-h:     3rem;   /* 48px — gloved-hand safe touch target  */
+  --density-card-header-p: 16px 16px 12px;
+  --density-card-body-p:   12px 16px;
+  --density-list-gap:      4px;    /* gap between adjacent list rows */
+  --density-group-gap:     12px;   /* gap between date/site groups */
+}
+
+[data-density="compact"] {
+  --density-row-py:        3px;
+  --density-row-px:        10px;
+  --density-row-min-h:     2rem;    /* 32px */
+  --density-card-header-p: 8px 12px 6px;
+  --density-card-body-p:   6px 12px;
+  --density-list-gap:      0px;
+  --density-group-gap:     4px;
+}
+
+
+/* ==========================================================================
+   §17 · REDUCED MOTION
    --------------------------------------------------------------------------
    Some field workers have vestibular disorders. Non-negotiable support.
    ========================================================================== */

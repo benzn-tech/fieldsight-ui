@@ -54,7 +54,9 @@
       variant: 'default',
       padding: 'sm',
       onClick: onSelect ? function() { onSelect(item); } : undefined,
-      className: 'fs-urgent-card' + (hasRisk ? ' fs-urgent-card--risk-' + item.riskLevel : ''),
+      className: 'fs-urgent-card'
+        + (hasRisk ? ' fs-urgent-card--risk-' + item.riskLevel : '')
+        + (props.selected ? ' fs-card--selected' : ''),
     },
       React.createElement(Card.Header, {
         title:   item.title,

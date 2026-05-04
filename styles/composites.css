@@ -567,7 +567,7 @@
 
 .fs-topic-card--selected {
   border-color: var(--color-accent-400) !important;
-  box-shadow: 0 0 0 2px var(--color-accent-100);
+  background: var(--surface-selected);
 }
 
 /* Sprint 6.6.4 — deep-link spotlight. Three soft pulses then settle.
@@ -606,7 +606,10 @@
   user-select: none;
 }
 .fs-topic-card__header:hover { background: var(--surface-panel-muted); }
-.fs-topic-card__header:focus { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+/* :focus-visible only — mouse clicks shouldn't paint the inset outline,
+   which previously stacked with the parent's --selected border to look
+   like a double border. Keyboard focus still paints normally. */
+.fs-topic-card__header:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
 
 .fs-topic-card__time {
   font-family: var(--font-mono);
@@ -2444,8 +2447,8 @@
 /* UserActivityCard --------------------------------------------------------- */
 .fs-user-activity-card { cursor: pointer; }
 .fs-user-activity-card--selected {
-  border-color: var(--color-accent-500);
-  box-shadow: 0 0 0 2px var(--color-accent-100);
+  border-color: var(--color-accent-400);
+  background: var(--surface-selected);
 }
 .fs-user-activity-card--quiet { opacity: 0.7; }
 
@@ -3982,7 +3985,7 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-modal__backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.5);
+  background: var(--surface-overlay);
   z-index: var(--z-backdrop);
   opacity: 0;
   pointer-events: none;
@@ -4586,7 +4589,7 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 }
 .fs-safety__row-btn--active {
   border-color: var(--color-accent-400);
-  background: var(--color-accent-50);
+  background: var(--surface-selected);
 }
 .fs-safety__row-meta {
   padding: 0 12px 8px;
@@ -4854,7 +4857,7 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-quality__row-btn:hover { background: var(--surface-panel-muted); }
 .fs-quality__row-btn--active {
   border-color: var(--color-accent-400);
-  background: var(--color-accent-50);
+  background: var(--surface-selected);
 }
 
 .fs-quality__row {
@@ -5014,4 +5017,746 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   flex-wrap: wrap;
   padding-top: 12px;
   border-top: 1px solid var(--border-subtle);
+}
+
+/* ==========================================================================
+   Team page — Sprint 7.1 + 7.2
+   .fs-team        — middle column
+   .fs-team-detail — right detail
+   ========================================================================== */
+
+/* ---------- Middle column ------------------------------------------------- */
+
+.fs-team {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.fs-team__loading,
+.fs-team__empty {
+  padding: 32px 20px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  text-align: center;
+}
+
+.fs-team__header {
+  padding: 20px 20px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.fs-team__title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 2px;
+}
+
+.fs-team__subtitle {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* KPI strip */
+.fs-team__kpi-strip {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.fs-team__kpi {
+  flex: 1;
+  padding: 12px 0;
+  text-align: center;
+  border-right: 1px solid var(--border-subtle);
+}
+
+.fs-team__kpi:last-child {
+  border-right: none;
+}
+
+.fs-team__kpi-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.fs-team__kpi-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+
+/* Groups */
+.fs-team__groups {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0 16px;
+}
+
+.fs-team__group {
+  margin-bottom: 4px;
+}
+
+.fs-team__group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 20px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+.fs-team__group-count {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--surface-subtle);
+  border-radius: 10px;
+  padding: 1px 7px;
+}
+
+.fs-team__user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.fs-team__user-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 20px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: background 120ms;
+  min-height: 48px;
+}
+
+.fs-team__user-row:hover {
+  background: var(--surface-hover);
+}
+
+.fs-team__user-row--selected {
+  background: var(--surface-selected);
+}
+
+.fs-team__user-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.fs-team__user-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fs-team__user-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.fs-team__extra-sites {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--surface-subtle);
+  border-radius: 10px;
+  padding: 1px 6px;
+}
+
+/* ---------- Right detail -------------------------------------------------- */
+
+.fs-team-detail {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.fs-team-detail__placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 32px 24px;
+  text-align: center;
+  gap: 8px;
+}
+
+.fs-team-detail__placeholder-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.fs-team-detail__placeholder-body {
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.fs-team-detail__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.fs-team-detail__header-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+}
+
+.fs-team-detail__header-text {
+  flex: 1;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.fs-team-detail__name {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 6px;
+}
+
+.fs-team-detail__badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.fs-team-detail__scope {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* Field rows */
+.fs-team-detail__fields {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.fs-team-detail__field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fs-team-detail__field-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+.fs-team-detail__field-value {
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.fs-team-detail__field-value--mono {
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* Action footer */
+.fs-team-detail__actions {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.fs-team-detail__action-btn {
+  padding: 10px 16px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: background 120ms, border-color 120ms;
+  min-height: 44px;
+}
+
+.fs-team-detail__action-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+}
+
+.fs-team-detail__action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fs-team__user-row,
+  .fs-team-detail__action-btn {
+    transition: none;
+  }
+}
+
+
+/* ==========================================================================
+   Sprint 7.3 · Settings page
+   --------------------------------------------------------------------------
+   .fs-settings       — middle column
+   .fs-settings-summary — right detail (static summary card)
+   ========================================================================== */
+
+.fs-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: var(--space-4) var(--space-5);
+}
+
+.fs-settings__header {
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: var(--space-2);
+}
+
+.fs-settings__title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+  margin: 0 0 var(--space-1);
+}
+
+.fs-settings__subtitle {
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+}
+
+/* ---- Sections ---- */
+
+.fs-settings__section {
+  padding: var(--space-5) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.fs-settings__section:last-child {
+  border-bottom: none;
+}
+
+.fs-settings__section-title {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  margin-bottom: var(--space-1);
+}
+
+.fs-settings__section-desc {
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-4);
+}
+
+/* ---- Theme radio group ---- */
+
+.fs-settings__radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.fs-settings__radio-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  background: var(--surface-panel);
+  transition: border-color var(--duration-fast) var(--easing-out),
+              background  var(--duration-fast) var(--easing-out);
+}
+
+.fs-settings__radio-row:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.fs-settings__radio-row--checked {
+  border-color: var(--color-accent-500);
+  background: var(--surface-highlight);
+}
+
+.fs-settings__radio-input {
+  margin-top: 2px;
+  flex-shrink: 0;
+  accent-color: var(--color-accent-500);
+}
+
+.fs-settings__radio-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fs-settings__radio-label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.fs-settings__radio-caption {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+/* ---- Default landing field ---- */
+
+.fs-settings__field-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.fs-settings__label {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+}
+
+.fs-settings__select {
+  appearance: none;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  background: var(--surface-input) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%239CA3AF' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right var(--space-3) center;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--easing-out);
+  min-height: 40px;
+}
+
+.fs-settings__select:hover {
+  border-color: var(--border-strong);
+}
+
+.fs-settings__select:focus {
+  outline: none;
+  border-color: var(--color-accent-500);
+  box-shadow: var(--focus-ring);
+}
+
+.fs-settings__field-hint {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  margin-top: var(--space-1);
+}
+
+/* ==========================================================================
+   Settings right detail — summary card
+   ========================================================================== */
+
+.fs-settings-summary {
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.fs-settings-summary--empty {
+  color: var(--text-tertiary);
+  font-size: var(--font-size-sm);
+}
+
+.fs-settings-summary__title {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.fs-settings-summary__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.fs-settings-summary__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border-subtle);
+  gap: var(--space-3);
+}
+
+.fs-settings-summary__row:last-child {
+  border-bottom: none;
+}
+
+.fs-settings-summary__label {
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.fs-settings-summary__value {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  text-align: right;
+}
+
+.fs-settings-summary__note {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  line-height: var(--line-height-relaxed);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fs-settings__radio-row,
+  .fs-settings__select {
+    transition: none;
+  }
+}
+
+
+/* ==========================================================================
+   §DC · DENSITY — compact overrides
+   --------------------------------------------------------------------------
+   Applied when [data-density="compact"] is set on <html> by density.js.
+   Targets only the highest-ROI list rows; layout, nav, and shell are
+   unchanged. Each selector mirrors an existing rule and overrides only the
+   spacing properties — nothing else changes.
+   ========================================================================== */
+
+/* ---- Interactive row rows (team, safety, action items) ----------------- */
+
+[data-density="compact"] .fs-team__user-row {
+  padding: var(--density-row-py) 20px;
+  min-height: var(--density-row-min-h);
+}
+
+[data-density="compact"] .fs-team__user-list {
+  gap: 0;
+}
+
+[data-density="compact"] .fs-team__groups {
+  padding: 4px 0 8px;
+}
+
+[data-density="compact"] .fs-team__group-header {
+  padding: 4px 20px 2px;
+}
+
+[data-density="compact"] .fs-safety-flag-row {
+  padding: var(--density-row-py) var(--density-row-px);
+}
+
+[data-density="compact"] .fs-safety__group {
+  gap: var(--density-list-gap);
+}
+
+[data-density="compact"] .fs-safety__group-rows {
+  gap: var(--density-list-gap);
+}
+
+[data-density="compact"] .fs-safety__groups {
+  gap: var(--density-group-gap);
+}
+
+[data-density="compact"] .fs-action-item-row {
+  padding: var(--density-row-py) var(--density-row-px);
+}
+
+[data-density="compact"] .fs-quality__group {
+  gap: var(--density-list-gap);
+}
+
+[data-density="compact"] .fs-quality__groups {
+  gap: var(--density-group-gap);
+}
+
+/* ---- Card internal padding -------------------------------------------- */
+
+[data-density="compact"] .fs-card__header {
+  padding: var(--density-card-header-p);
+}
+
+[data-density="compact"] .fs-card__body {
+  padding: var(--density-card-body-p);
+}
+
+[data-density="compact"] .fs-card__body:first-child {
+  padding-top: 10px;
+}
+
+[data-density="compact"] .fs-card__body:last-child {
+  padding-bottom: 10px;
+}
+
+[data-density="compact"] .fs-card__footer {
+  padding: 8px 12px 10px;
+}
+
+/* ---- Topic cards (timeline) ------------------------------------------- */
+
+[data-density="compact"] .fs-topic-card__header {
+  padding: var(--density-card-header-p);
+}
+
+[data-density="compact"] .fs-topic-card__body {
+  padding: var(--density-card-body-p);
+}
+
+[data-density="compact"] .fs-timeline-page__topics {
+  gap: var(--density-list-gap);
+}
+
+/* ---- Today page task list --------------------------------------------- */
+
+[data-density="compact"] .fs-morning-brief-card__bullet {
+  margin-bottom: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* no new animations in §DC — nothing to zero out */
+}
+
+
+/* ==========================================================================
+   §SEL · UNIFIED SELECTION (Sprint 7 follow-up)
+   --------------------------------------------------------------------------
+   Selectable rows on /today + /tasks now match the /quality + /safety
+   pattern: 1px accent border + light --surface-selected background. The
+   token is theme-aware (light pastel in light mode, soft orange tint
+   on dark) so dark-mode selections no longer read as "salmon" on a
+   near-black page.
+   ========================================================================== */
+
+.fs-task-card.fs-card.fs-card--selected,
+.fs-urgent-card.fs-card.fs-card--selected {
+  border-color: var(--color-accent-400);
+  background: var(--surface-selected);
+}
+
+
+/* ==========================================================================
+   §PROG-DARK · PROGRAMME — pin foreground on light status backgrounds
+   --------------------------------------------------------------------------
+   Status backgrounds (success/info/warning/danger -50/-100) are
+   intentionally not theme-flipped — they're brand semantic colours,
+   like badge tints. In dark mode the global text token flips to white,
+   which is unreadable on these light pastels. Pin descendant text to
+   a fixed dark colour for the affected variants only.
+   ========================================================================== */
+
+[data-theme="dark"] .fs-gantt-bar--completed,
+[data-theme="dark"] .fs-gantt-bar--in_progress,
+[data-theme="dark"] .fs-gantt-bar--blocked,
+[data-theme="dark"] .fs-gantt-bar--delayed,
+[data-theme="dark"] .fs-gantt-bar--completed   .fs-gantt-bar__label,
+[data-theme="dark"] .fs-gantt-bar--in_progress .fs-gantt-bar__label,
+[data-theme="dark"] .fs-gantt-bar--blocked     .fs-gantt-bar__label,
+[data-theme="dark"] .fs-gantt-bar--delayed     .fs-gantt-bar__label {
+  color: var(--color-neutral-900);
+}
+
+[data-theme="dark"] .fs-prog-kanban-card--in_progress,
+[data-theme="dark"] .fs-prog-kanban-card--blocked,
+[data-theme="dark"] .fs-prog-kanban-card--done,
+[data-theme="dark"] .fs-prog-kanban-card--in_progress .fs-prog-kanban-card__name,
+[data-theme="dark"] .fs-prog-kanban-card--blocked     .fs-prog-kanban-card__name,
+[data-theme="dark"] .fs-prog-kanban-card--done        .fs-prog-kanban-card__name {
+  color: var(--color-neutral-900);
+}
+
+[data-theme="dark"] .fs-prog-kanban-card--in_progress .fs-prog-kanban-card__wbs,
+[data-theme="dark"] .fs-prog-kanban-card--blocked     .fs-prog-kanban-card__wbs,
+[data-theme="dark"] .fs-prog-kanban-card--done        .fs-prog-kanban-card__wbs,
+[data-theme="dark"] .fs-prog-kanban-card--in_progress .fs-prog-kanban-card__assignee,
+[data-theme="dark"] .fs-prog-kanban-card--blocked     .fs-prog-kanban-card__assignee,
+[data-theme="dark"] .fs-prog-kanban-card--done        .fs-prog-kanban-card__assignee,
+[data-theme="dark"] .fs-prog-kanban-card--in_progress .fs-prog-kanban-card__dates,
+[data-theme="dark"] .fs-prog-kanban-card--blocked     .fs-prog-kanban-card__dates,
+[data-theme="dark"] .fs-prog-kanban-card--done        .fs-prog-kanban-card__dates {
+  color: var(--color-neutral-700);
+}
+
+[data-theme="dark"] .fs-prog-kanban-card--in_progress .fs-prog-kanban-card__footer,
+[data-theme="dark"] .fs-prog-kanban-card--blocked     .fs-prog-kanban-card__footer,
+[data-theme="dark"] .fs-prog-kanban-card--done        .fs-prog-kanban-card__footer {
+  border-top-color: var(--color-neutral-300);
+}
+
+
+/* ==========================================================================
+   §DARK-EDGES · DARK-MODE EDGE FIXES (Sprint 7 follow-up 3)
+   --------------------------------------------------------------------------
+   Sprint 7 polish issues caught in browser walkthrough:
+
+   (1) Elevated cards (e.g. .fs-morning-brief-card) rely on box-shadow
+       for their edge. On a near-black panel the shadow is invisible —
+       the card vanishes. Add a thin border in dark mode only so the
+       edge reads.
+
+   (2) /quality rows had no resting border (vs /safety where the inner
+       fs-safety-flag-row carries one). Quality rows now sit on a
+       light card edge so they read as discrete items at rest, while
+       still flipping to accent-400 on --active without layout shift.
+
+   (3) Selecting a fs-safety__row-btn previously left the inner
+       fs-safety-flag-row painted with --surface-panel, hiding the
+       parent's --surface-selected tint. Swap the inner row's bg +
+       border-color when the parent is active so the selection
+       actually reads inside the row.
+   ========================================================================== */
+
+[data-theme="dark"] .fs-card--elevated {
+  border-color: var(--border-subtle);
+}
+
+.fs-quality__row-btn {
+  border-color: var(--border-subtle);
+}
+
+.fs-safety__row-btn--active .fs-safety-flag-row {
+  background: var(--surface-selected);
+  border-color: var(--color-accent-400);
 }

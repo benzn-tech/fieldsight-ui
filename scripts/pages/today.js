@@ -352,6 +352,10 @@
   function TodayMiddleColumn(props) {
     var fs       = window.FieldSight;
     var onSelect = props.onSelect || function () {};
+    /* Sprint 7 follow-up — track current selection so cards can paint
+       a --selected modifier. AppShell holds the canonical selectedItem
+       and passes it through; we only read the id for matching. */
+    var selectedId = props.selectedItem && props.selectedItem.id;
 
     var ctx = React.useContext(TodayContext);
     if (!ctx) {
@@ -472,7 +476,10 @@
             },
               data.urgent.map(function (item) {
                 return React.createElement(fs.UrgentCard, {
-                  key: item.id, item: item, onSelect: onSelect,
+                  key:      item.id,
+                  item:     item,
+                  onSelect: onSelect,
+                  selected: selectedId === item.id,
                 });
               })
             ),
@@ -527,6 +534,7 @@
                   task:          task,
                   onSelect:      onSelect,
                   isMine:        true,
+                  selected:      selectedId === task.id,
                   checkable:     task.topic_id != null && task.actionIndex != null,
                   date:          effectiveDate,
                   onCheckedOff:  onCheckedOff,
@@ -544,7 +552,11 @@
         },
           data.teamTasks.map(function (task) {
             return React.createElement(fs.TaskCard, {
-              key: task.id, task: task, onSelect: onSelect, isMine: false,
+              key:      task.id,
+              task:     task,
+              onSelect: onSelect,
+              isMine:   false,
+              selected: selectedId === task.id,
             });
           })
         ),
