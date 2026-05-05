@@ -174,6 +174,23 @@ re-introducing one is the most common way to break the prototype.
   backgrounds with global white text are unreadable. Pin
   foreground via `[data-theme="dark"] .fs-X { color:
   var(--color-neutral-900) }`.
+- **SAFETY = red, QUALITY = blue** is the canonical semantic
+  pairing across the app (`/safety`, `/quality`, `/insights`
+  insights tags, badges, KPI tiles). Don't break it by re-paletting
+  one of those domains. Specifically:
+  - All safety-domain chart fills + tag colours pull from
+    `--color-danger-700` (light) / `--color-danger-300` (dark)
+    via the `--fs-tag-{slug}` and `--fs-chart-danger` tokens.
+  - All quality-domain chart fills + tag colours pull from
+    `--color-info-700` / `--color-info-300`.
+  - **Never pair red with deep-orange in the same chart** — they
+    fail at `<= 1024px` widths and confuse colour-blind viewers.
+    Sprint 9.5.7's 12-hue categorical experiment failed this and
+    was reverted in 9.5.8.
+  - "Other" categories (subcontractors, projects, regions,
+    programme tasks) are free to use varied hues from the
+    `--fs-chart-{tone}` token family, since they aren't bound
+    to safety/quality semantics.
 
 ### Selection / focus
 

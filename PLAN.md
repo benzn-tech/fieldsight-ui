@@ -68,12 +68,15 @@ review. Recommended sequence executed: Track A → B → C → 9.5.
 - ✅ **A.5 + C.6 wrap-up** — `6615a84`
   - 5 new composites registered in `components-preview.html`
   - DemoTour `?demo=1` adds `/insights` step
-- 🟡 **9.5 · Dashboard redesign pass** (the user-mandated rework)
-  - 9.5.1 layout swap → all 4 dashboards full-width 2-panel (matches `/programme`); drill-down moves to RightDrawer
-  - 9.5.2 font-size pass: shrink `.fs-stat-card__value` 28→22, page titles 22→18, drawer names 18→15, executive banner 24→20
-  - 9.5.3 three new chart composites — `word-cloud.js` (frequency-sized tag cloud), `column-chart.js` (vertical bar), `heatmap-grid.js` (sub × tag matrix)
-  - 9.5.4 12-color tag palette — extend `TAG_VOCAB` with explicit `color` field per tag (12 unique shades from existing tone tokens)
-  - 9.5.5 per-page redesigns: `/insights` 2×2 chart grid + word cloud + heatmap; `/portfolio` adds health-grade column chart; `/regional` mirrors; `/executive` slims banner + adds region health column chart
+- ✅ **9.5 · Dashboard redesign pass**
+  - 9.5.1 layout swap (`a2504c4`) → all 4 dashboards full-width 2-panel (matches `/programme`); drill-down moves to RightDrawer
+  - 9.5.2 font-size pass (`a2504c4`): `.fs-stat-card__value` 28→22, page titles 22→18, drawer names 18→15, executive banner 24→20
+  - 9.5.3 three new chart composites (`bd8d4ed`) — `word-cloud.js` / `column-chart.js` / `heatmap-grid.js` (vanilla SVG/HTML, no CDN)
+  - 9.5.4 first-pass 12-color tag palette (`bd8d4ed`) — explicit `color` field per `TAG_VOCAB` entry
+  - 9.5.5 per-page redesigns (`4f33ace`): `/insights` 2×2 chart grid + WordCloud + HeatmapGrid; `/portfolio` `/regional` `/executive` add ColumnChart for health-grade distribution
+  - 9.5.6 theme-aware chart palette + monochrome WordCloud (`e567d18`) — `--fs-chart-{tone}` + `--fs-tag-{slug}` tokens, deep light / soft dark
+  - 9.5.7 categorical 12-hue palette (`9accf09`) — paired red+orange, FAILED user review (unreadable)
+  - 9.5.8 SEMANTIC palette (this commit): SAFETY tags → red (danger-700/300), QUALITY tags → blue (info-700/300). Convention codified in CLAUDE.md.
 
 
 Sprint 9 decision points (Q-S9-1 … Q-S9-7) are tracked in §4. Strong
@@ -147,6 +150,16 @@ synchronised.
     subtle, range chip --active, activity-card count): swap the bg
     to a translucent `rgba(...)` tint and bump text to
     `var(--color-{tone}-200/300)`. See `composites.css §DARK-BADGES`.
+- **SAFETY = red, QUALITY = blue is canonical** across the app.
+  All safety-domain chart fills + tag colours pull from
+  `--color-danger-700/300` (via `--fs-tag-{safety-slug}` and
+  `--fs-chart-danger`). All quality-domain ones pull from
+  `--color-info-700/300`. **Never pair red with deep-orange in the
+  same chart** — Sprint 9.5.7 tried 12 categorical hues and
+  failed user review (unreadable at narrow widths). "Other"
+  categories — subcontractors, projects, regions, programme tasks
+  — are free to vary their palette since they aren't tied to
+  safety/quality semantics. Mirrored to CLAUDE.md.
 
 ### Selection / focus
 
