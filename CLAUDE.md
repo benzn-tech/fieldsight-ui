@@ -130,14 +130,15 @@ supported are evergreen).
 | **5** | Programme operability — drag/edit, kanban, CSV/MS-Project XML import, role gates | ✅ done (PR #15) |
 | **6** | Compliance pair — `/safety` + `/quality` + deep-link spotlight + photo carousel | ✅ done (PR #16) |
 | **7** | `/team` + `/settings` + dark-mode polish (theme + density + default-landing prefs) | ✅ done (PR #17) |
-| **8** | Backend integration foundation, write flows, programme deep features, mobile bottom-nav, a11y, search, error/offline, performance, fixture expansion, demo tour, print/share, onboarding | 🟡 on `claude/sprint8` |
+| **8** | Backend integration foundation, write flows, programme deep features, mobile bottom-nav, a11y, search, error/offline, performance, fixture expansion, demo tour, print/share, onboarding | ✅ done (PR #18) |
+| **9** | Insights dashboard (PM-facing safety/quality analytics) + PM-scoped Team page + Strategic dashboards (Portfolio / Regional / Executive) | 🟡 on `claude/sprint9-insights-strategic` |
 
 Detailed completed/pending/next-phase tracking lives in **`PLAN.md`**.
 
 ## Current State
 
-- **Active branch**: `claude/sprint8` (8.0 → 8.11 shipped + audit follow-up)
-- **Open PRs**: none — Sprint 8 ready to PR when user calls it
+- **Active branch**: `claude/sprint9-insights-strategic` (Track A → B → C)
+- **Open PRs**: none — Sprint 9 in flight
 - **Next**: see `PLAN.md` §6 Next phase candidates
 
 ## Known traps & guardrails
