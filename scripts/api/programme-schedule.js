@@ -204,13 +204,119 @@
     return topo.filter(function (id) { return ES[id] === LS[id]; });
   }
 
+  /* ---------- computeFloats (Sprint 8.3.1) -------------------------------- */
+
+  /* Re-runs the CPM forward + backward pass and returns a plain object
+     { [task_id]: totalFloat } where totalFloat = LS - ES (days).
+     Zero float = critical. Shares the same algorithm as
+     computeCriticalPath but also exposes the non-zero values. */
+  function computeFloats(leaves) {
+    if (!leaves || !leaves.length) return {};
+
+    var sort = topoSort(leaves);
+    if (sort.hasCycle) {
+      console.warn('[programme-schedule] cycle detected; floats skipped');
+      return {};
+    }
+    var topo = sort.topo;
+    var byId = {};
+    leaves.forEach(function (t) { byId[t.task_id] = t; });
+
+    var ES = {}, EF = {};
+    topo.forEach(function (id) {
+      var t    = byId[id];
+      var deps = (t.depends_on || []).filter(function (d) { return byId[d]; });
+      ES[id] = deps.length === 0
+        ? 0
+        : Math.max.apply(null, deps.map(function (d) { return EF[d] + 1; }));
+      EF[id] = ES[id] + (t.duration_days || 1) - 1;
+    });
+
+    var hasSucc = {};
+    leaves.forEach(function (t) {
+      (t.depends_on || []).forEach(function (d) { hasSucc[d] = true; });
+    });
+    var projectFinish = Math.max.apply(null,
+      topo.filter(function (id) { return !hasSucc[id]; })
+          .map(function (id) { return EF[id]; })
+    );
+
+    var successors = {};
+    leaves.forEach(function (t) {
+      (t.depends_on || []).forEach(function (d) {
+        (successors[d] = successors[d] || []).push(t.task_id);
+      });
+    });
+
+    var LS = {}, LF = {};
+    topo.slice().reverse().forEach(function (id) {
+      var t    = byId[id];
+      var succ = successors[id] || [];
+      LF[id] = succ.length === 0
+        ? projectFinish
+        : Math.min.apply(null, succ.map(function (s) { return LS[s] - 1; }));
+      LS[id] = LF[id] - (t.duration_days || 1) + 1;
+    });
+
+    var floats = {};
+    topo.forEach(function (id) {
+      floats[id] = Math.max(0, LS[id] - ES[id]);
+    });
+    return floats;
+  }
+
+  /* ---------- detectOverAllocations (Sprint 8.3.2) ----------------------- */
+
+  /* Returns { [userId]: [dateISO, ...] } for every user+date pair where
+     more than one in-progress task is assigned to the same person on the
+     same calendar day (regardless of weekend / holidays — prototype
+     scope). Only leaf tasks (status !== 'group') are considered. */
+  function detectOverAllocations(tasks) {
+    var leafTasks = (tasks || []).filter(function (t) {
+      return t.status !== 'group' && t.start && t.end && t.status !== 'completed';
+    });
+
+    /* userDates: { userId: { dateISO: count } } */
+    var userDates = {};
+
+    leafTasks.forEach(function (t) {
+      var assignees = t.assignees || [];
+      if (!assignees.length) return;
+
+      var cur = t.start;
+      /* Limit enumeration to protect against runaway loops on bad data */
+      var safety = 0;
+      while (cur <= t.end && safety < 1000) {
+        safety++;
+        assignees.forEach(function (userId) {
+          if (!userDates[userId]) userDates[userId] = {};
+          userDates[userId][cur] = (userDates[userId][cur] || 0) + 1;
+        });
+        var d = new Date(cur + 'T00:00:00Z');
+        d.setUTCDate(d.getUTCDate() + 1);
+        cur = d.toISOString().slice(0, 10);
+      }
+    });
+
+    var result = {};
+    Object.keys(userDates).forEach(function (userId) {
+      var overloaded = Object.keys(userDates[userId]).filter(function (date) {
+        return userDates[userId][date] > 1;
+      }).sort();
+      if (overloaded.length > 0) result[userId] = overloaded;
+    });
+    return result;
+  }
+
   /* ---------- Register --------------------------------------------------- */
 
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.programmeSchedule = {
-    cascadeFromTask:     cascadeFromTask,
-    computeCriticalPath: computeCriticalPath,
-    addDaysISO:          addDaysISO,
-    diffDaysISO:         diffDaysISO,
+    cascadeFromTask:        cascadeFromTask,
+    computeCriticalPath:    computeCriticalPath,
+    computeFloats:          computeFloats,
+    detectOverAllocations:  detectOverAllocations,
+    addDaysISO:             addDaysISO,
+    diffDaysISO:            diffDaysISO,
   };
 })();

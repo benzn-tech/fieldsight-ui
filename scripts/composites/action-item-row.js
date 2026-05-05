@@ -112,6 +112,13 @@
 
       p.then(function (res) {
         pendingRef.current = false;
+        /* Sprint 8.5.4 — announce to screen readers via the global
+           polite live region. Skip when the toggle came from a sibling
+           bus event (no UI interaction → no announce needed). */
+        var region = document.getElementById('fs-live-region');
+        if (region) {
+          region.textContent = next ? 'Marked complete' : 'Marked incomplete';
+        }
         /* Sprint 6.7.1 — broadcast server truth so sibling
            ActionItemRows + parent state slots can sync. */
         var bus = window.FS && window.FS.actionsBus;

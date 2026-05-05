@@ -97,11 +97,93 @@
     };
   }
 
+  /* =========================================================================
+     Sprint 8.2.1 — Write operations (PATCH / POST / DELETE)
+     When useMocks=false these fire real HTTP; in mock mode they return a
+     resolved-success object immediately (mutations live in page state).
+     ========================================================================= */
+
+  async function updateTask(programmeId, taskId, patch) {
+    if (!window.FS.api.useMocks) {
+      return window.FS.api.request(
+        '/programmes/' + encodeURIComponent(programmeId) +
+        '/tasks/' + encodeURIComponent(taskId),
+        { method: 'PATCH', body: JSON.stringify(patch) });
+    }
+    await window.FS.api.delay();
+    return { ok: true, task_id: taskId };
+  }
+
+  async function createTask(programmeId, payload) {
+    if (!window.FS.api.useMocks) {
+      return window.FS.api.request(
+        '/programmes/' + encodeURIComponent(programmeId) + '/tasks',
+        { method: 'POST', body: JSON.stringify(payload) });
+    }
+    await window.FS.api.delay();
+    return { ok: true };
+  }
+
+  async function deleteTask(programmeId, taskId) {
+    if (!window.FS.api.useMocks) {
+      return window.FS.api.request(
+        '/programmes/' + encodeURIComponent(programmeId) +
+        '/tasks/' + encodeURIComponent(taskId),
+        { method: 'DELETE' });
+    }
+    await window.FS.api.delay();
+    return { ok: true };
+  }
+
+  async function importTasks(programmeId, tasks) {
+    if (!window.FS.api.useMocks) {
+      return window.FS.api.request(
+        '/programmes/' + encodeURIComponent(programmeId) + '/tasks/bulk',
+        { method: 'POST', body: JSON.stringify({ tasks: tasks }) });
+    }
+    await window.FS.api.delay();
+    return { ok: true, imported: tasks.length };
+  }
+
+  /* =========================================================================
+     Sprint 8.3.3 — Baseline snapshot (localStorage, keyed by programmeId)
+     ========================================================================= */
+
+  function saveBaseline(programmeId, tasks) {
+    var key = 'fs.baseline.' + programmeId;
+    var snapshot = tasks.map(function (t) {
+      return { task_id: t.task_id, start: t.start, end: t.end, status: t.status };
+    });
+    try {
+      localStorage.setItem(key, JSON.stringify({
+        saved_at: new Date().toISOString(),
+        tasks:    snapshot,
+      }));
+    } catch (_) {}
+    return snapshot;
+  }
+
+  function getBaseline(programmeId) {
+    var key = 'fs.baseline.' + programmeId;
+    try {
+      var raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   if (!window.FS) window.FS = {};
   if (!window.FS.api) window.FS.api = {};
   window.FS.api.programme = {
     getProgramme:               getProgramme,
     getProgrammeTasksForRange:  getProgrammeTasksForRange,
+    updateTask:                 updateTask,
+    createTask:                 createTask,
+    deleteTask:                 deleteTask,
+    importTasks:                importTasks,
+    saveBaseline:               saveBaseline,
+    getBaseline:                getBaseline,
   };
 
 })();

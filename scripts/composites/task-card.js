@@ -57,6 +57,10 @@
       if (checkingOff) return;
       setCheckingOff(true);
 
+      /* Sprint 8.5.4 — announce to the global polite live region. */
+      var region = document.getElementById('fs-live-region');
+      if (region) region.textContent = 'Marked complete';
+
       var api = window.FS && window.FS.api && window.FS.api.actions;
       if (!api) return;
 

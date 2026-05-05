@@ -77,11 +77,34 @@
     }
 
     /* 2) Fan out timeline (action source) AND actions (audit) per day,
-       in parallel. */
-    var timelinePromise = Promise.all(datesInRange.map(function (d) {
-      return window.FS.api.timeline.getTimeline({ date: d, user: user })
-        .then(function (r) { return { date: d, report: r }; });
-    }));
+       in parallel.
+       Sprint 8 follow-up — admin fan-out across all known users when
+       no explicit user is provided, matching compliance-aggregator. */
+    var caller  = (window.AuthMock && window.AuthMock.currentUser) || {};
+    var isAdmin = caller.role === 'admin' || caller.role === 'gm' || !!caller.isAdmin;
+    var folders = (!user && isAdmin)
+      ? ((window.FieldSight && window.FieldSight.fixtures
+          && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [])
+          .map(function (u) { return u.folder_name; }).filter(Boolean)
+      : null;
+
+    var timelinePromise;
+    if (folders && folders.length > 0) {
+      timelinePromise = Promise.all(
+        datesInRange.reduce(function (acc, d) {
+          folders.forEach(function (f) {
+            acc.push(window.FS.api.timeline.getTimeline({ date: d, user: f })
+              .then(function (r) { return { date: d, report: r }; }));
+          });
+          return acc;
+        }, [])
+      );
+    } else {
+      timelinePromise = Promise.all(datesInRange.map(function (d) {
+        return window.FS.api.timeline.getTimeline({ date: d, user: user })
+          .then(function (r) { return { date: d, report: r }; });
+      }));
+    }
     var auditPromise = window.FS.api.actions.getActionsRange({
       from: datesInRange[0], to: datesInRange[datesInRange.length - 1],
     });

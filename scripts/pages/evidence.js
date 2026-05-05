@@ -35,8 +35,8 @@
 (function () {
   'use strict';
 
-  var DEFAULT_DAYS = 7;
-  var LOAD_STEP    = 7;
+  var DEFAULT_DAYS = 3;  /* Sprint 8.8.2 — start with 3 days; load-more adds 3 more */
+  var LOAD_STEP    = 3;
 
   /* ---------- Helpers --------------------------------------------------- */
 
@@ -92,6 +92,10 @@
     var state    = refState[0];
     var setState = refState[1];
 
+    var retryRef   = React.useState(0);
+    var retryCount = retryRef[0];
+    var setRetry   = retryRef[1];
+
     /* Photos cache — populated when the Photos tab activates (first
        open) and shared with the right-pane summary. */
     var refPhotos = React.useState({ status: 'idle', perDay: [], totalCount: 0 });
@@ -123,11 +127,11 @@
         setState({ status: 'ok', dates: dates, user: user });
       }).catch(function (err) {
         if (cancelled) return;
-        setState({ status: 'error', error: err });
+        setState({ status: 'error', error: { code: (err && err.status) || 0, message: (err && err.message) || 'Could not load evidence', retryable: true }, retry: function () { setRetry(function (n) { return n + 1; }); } });
       });
 
       return function () { cancelled = true; };
-    }, [depKey, daysToLoad]);
+    }, [depKey, daysToLoad, retryCount]);
 
     /* Lazy-load photos when the Photos tab is the active one and we
        don't yet have data for it. Other tabs are populated by their
@@ -139,10 +143,21 @@
       var cancelled = false;
       setPhotos({ status: 'loading', perDay: [], totalCount: 0 });
 
-      Promise.all((state.dates || []).map(function (d) {
-        return window.FS.api.timeline.getTimeline({ date: d, user: state.user })
-          .then(function (r) { return { date: d, report: r }; });
-      })).then(function (perDay) {
+      /* Sprint 8 follow-up — admin fan-out across all known users so
+         /evidence Photos tab isn't blank when running as admin. */
+      var fanoutFolders = state.user ? [state.user] : null;
+      if (!fanoutFolders) {
+        var fxUsers = (window.FieldSight && window.FieldSight.fixtures
+          && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [];
+        fanoutFolders = fxUsers.map(function (u) { return u.folder_name; }).filter(Boolean);
+      }
+      Promise.all((state.dates || []).reduce(function (acc, d) {
+        fanoutFolders.forEach(function (f) {
+          acc.push(window.FS.api.timeline.getTimeline({ date: d, user: f })
+            .then(function (r) { return { date: d, report: r }; }));
+        });
+        return acc;
+      }, [])).then(function (perDay) {
         if (cancelled) return;
         var rows = [];
         var total = 0;
@@ -287,9 +302,16 @@
       );
     }
     if (state.status === 'error') {
+      var ErrorBanner = window.FieldSight.ErrorBanner;
       return React.createElement('div', { className: 'fs-evidence' },
-        React.createElement('div', { className: 'fs-evidence__empty' },
-          'Could not load evidence. ' + (state.error && state.error.message || '')),
+        ErrorBanner
+          ? React.createElement(ErrorBanner, {
+              message:   (state.error && state.error.message) || 'Could not load evidence',
+              retryable: true,
+              onRetry:   state.retry,
+            })
+          : React.createElement('div', { className: 'fs-evidence__empty' },
+              (state.error && state.error.message) || 'Could not load evidence'),
       );
     }
     if (state.status === 'access_denied') {

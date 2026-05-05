@@ -30,28 +30,41 @@ higher ones:
 ```
 .
 ├── CLAUDE.md                           ← this file
+├── PLAN.md                             single-source action ledger (completed/pending/traps/questions)
 ├── README.md                           (placeholder)
 ├── tokens-reference.html               L1 token doc with live demos
-├── components-preview.html             L4 component showcase
-├── app-shell-preview.html              L3 + L6 full-app preview
+├── components-preview.html             L4 + L5 component showcase
+├── app-shell-preview.html              L3 + L6 full-app preview (also `?dev=1`, `?demo=1`, `?mocks=0`)
 ├── styles/
 │   ├── tokens.css                      L1 — CSS custom properties (single source of truth)
 │   ├── components.css                  L4 — `.fs-{name}` BEM
-│   └── app-shell.css                   L3 — shell + utility + popover styling
+│   └── app-shell.css                   L3 — shell + utility + popover + bottom-nav + print
 └── scripts/
-    ├── fs-globals.js                   L1 mirror to JS — tokens + roles + nav items + canSeeNav
-    ├── router.js                       hash routing
+    ├── fs-globals.js                   L1 mirror to JS — tokens + roles + nav + canSeeNav
+    ├── theme.js                        Sprint 7 — Light / Dark / Auto persistence
+    ├── density.js                      Sprint 7.6 — Comfortable / Compact persistence
+    ├── router.js                       hash routing + Sprint 8.4.4 swipe-back
     ├── auth-mock.js                    mock current-user
+    ├── auth/                           Sprint 8.0 — Cognito + session
     ├── roles.js                        7 hierarchy + 3 specialist roles, perms, canDo
-    ├── mock-data.js                    fixture data for Today (myTasks/teamTasks/urgent/activity/onSite + WEATHER)
+    ├── api/                            backend-shaped data layer (Sprint 2 onwards)
+    ├── mock/                           fixtures: sites · daily-report · dates · programme · media · …
     ├── drag-divider.js                 middle-column resize
     ├── left-nav.js                     L3 — sidebar with sections/subgroups
-    ├── app-shell.js                    L3 — shell, MiddleColumn, RightDetail, WeatherIndicator+Popover
-    ├── dev-role-switcher.js            dev-only role switcher (?dev=1)
-    ├── components/                     L4 — button.js, input.js, card.js, badge.js, avatar.js
+    ├── app-shell.js                    L3 — shell, MiddleColumn, RightDetail, BottomNav, Weather, offline banner
+    ├── dev-role-switcher.js            dev-only role switcher (?dev=1) + MOCK/LIVE badge
+    ├── components/                     L4 — button, input, card, badge, avatar
+    ├── composites/                     L5 — task-card, urgent-card, kpi-strip, topic-card, gantt-row,
+    │                                       safety-flag-row, action-item-row, modal-overlay, right-drawer,
+    │                                       date-picker, photo-grid, evidence-tabs, programme-task-editor,
+    │                                       programme-import-modal, programme-kanban-board, demo-tour,
+    │                                       error-banner, over-allocation-banner, tooltip, toast,
+    │                                       safety-create-modal, quality-create-modal, search-palette,
+    │                                       onboarding-overlay, …
     └── pages/
-        ├── _page-registry.js           route → { Middle, Right }
-        └── today.js                    L6 Today page
+        ├── _page-registry.js           route → { Provider, Middle, Right }
+        └── today / timeline / tasks / sites / programme / safety / quality / reports / evidence /
+            activity / team / settings
 ```
 
 ## Conventions
@@ -109,35 +122,113 @@ supported are evergreen).
 
 | Sprint | Theme | Status |
 |---|---|---|
-| **0** | Foundation — L1 tokens + L2 visual language + tokens-reference.html | ✅ done |
-| **1** | Core components — L4 atoms + L3 AppShell + Today lo-fi (1.5 hotfix → 1.5.5 nav restructure → 1.6 lo-fi → 1.6 hotfix) | ✅ done |
-| **2** | Today page hi-fi — L5 composites (TaskCard / StatCard / Timeline) + L7 task check-off animation | 🟡 next |
-| **3** | Secondary core pages — Tasks page, Safety page, supporting composites | ⏳ pending |
-| **4** | Remaining core pages — Sites, Programme, Evidence, Reports + Weather integration UI | ⏳ pending |
-| **5** | Flows + polish — core user flows, micro-interactions, empty/error/loading states | ⏳ pending |
-| **6** | Mobile + dark mode — responsive design, dark-mode variants | ⏳ pending |
+| **0** | L1 tokens + L2 visual language + `tokens-reference.html` | ✅ done |
+| **1** | L4 atoms + L3 AppShell + Today lo-fi (1.5–1.6 hotfixes) | ✅ done |
+| **2** | Backend-shaped data layer (Phase A–I); Today derived from real `DailyReport`; Ask agent | ✅ done |
+| **3** | Polish backlog after Phase-I review (P-01 … P-12) | ✅ done |
+| **4** | Core operational pages — Sites, Programme MVP, Tasks aggregator, Reports, Evidence, Activity, Weather UI | ✅ done |
+| **5** | Programme operability — drag/edit, kanban, CSV/MS-Project XML import, role gates | ✅ done (PR #15) |
+| **6** | Compliance pair — `/safety` + `/quality` + deep-link spotlight + photo carousel | ✅ done (PR #16) |
+| **7** | `/team` + `/settings` + dark-mode polish (theme + density + default-landing prefs) | ✅ done (PR #17) |
+| **8** | Backend integration foundation, write flows, programme deep features, mobile bottom-nav, a11y, search, error/offline, performance, fixture expansion, demo tour, print/share, onboarding | 🟡 on `claude/sprint8` |
 
-### Sprint 2 sub-sprints (planned)
-
-- **2.0 — L5 component extraction**: pull TaskCard / StatCard / Timeline /
-  UrgentCard / ActivityCard / MorningBriefCard / KpiStrip out of `today.js`
-  into `scripts/composites/`; new `styles/composites.css`; show in
-  `components-preview.html`.
-- **2.1 — Today hi-fi composition**: KpiStrip at top, time-aware greeting,
-  Brief truly collapses, polished spacing/hierarchy.
-- **2.2 — Task check-off animation**: checkbox on TaskCard, border pulse +
-  line-through + fade-out, respects `prefers-reduced-motion`.
-- **2.3 — Wire deferred stubs + role variants**: Reassign popover, Mark
-  complete triggers animation, Related item nav, worker-role hides
-  `teamTasks` via `window.FS.canDo`.
+Detailed completed/pending/next-phase tracking lives in **`PLAN.md`**.
 
 ## Current State
 
-- **Branch**: `claude/review-project-PO2L5`
-- **Open PR**: [#3](https://github.com/benzn-tech/fieldsight-ui/pull/3) —
-  Sprint 1.6 hotfix (task grouping, weather popover, detail panel
-  refinements). `mergeable_state: clean`, no CI configured.
-- **Next**: Sprint 2.0 (L5 component extraction) when user gives the go.
+- **Active branch**: `claude/sprint8` (8.0 → 8.11 shipped + audit follow-up)
+- **Open PRs**: none — Sprint 8 ready to PR when user calls it
+- **Next**: see `PLAN.md` §6 Next phase candidates
+
+## Known traps & guardrails
+
+Mirrors `PLAN.md` §3. Each is a real bug that shipped and got fixed;
+re-introducing one is the most common way to break the prototype.
+
+### Date math
+
+- **BUG-19 NZDT**: never `new Date('YYYY-MM-DD')` (parses as UTC,
+  drifts a day in NZ). Use `FS.api.todayNZDT()` /
+  `FS.api.addDaysISO()` / `FS.api.folderName()`.
+
+### Network
+
+- **BUG-20 CloudFront SPA fallback**: a 200 with `text/html` body is
+  the SPA shell, not JSON. `_fetch.js:isJsonResponse()` guards it;
+  never bypass.
+- **BUG-21 audio paused-ref**: don't read `audioRef.current.paused`
+  — track play state in React state.
+
+### Theming
+
+- **JS-mirrored hex tokens bypass `[data-theme]`**. `t.surface.X` /
+  `t.border.X` / `t.text.X` from `fs-globals.js` are baked
+  light-mode hex. In React `style={{ ... }}` use string literals:
+  `style={{ background: 'var(--surface-panel)' }}` — never
+  `t.surface.panel`.
+- **NavIcon SVG `var()` resolution**: `svg.setAttribute('stroke',
+  'var(...)')` does **not** resolve. Use `svg.style.stroke = color`.
+- **Status colour tokens are not theme-flipped** (`--color-{success,
+  info, warning, danger}-{50,100}`). On dark mode their light-pastel
+  backgrounds with global white text are unreadable. Pin
+  foreground via `[data-theme="dark"] .fs-X { color:
+  var(--color-neutral-900) }`.
+
+### Selection / focus
+
+- **`:focus` paints on mouse click**; produces "double-border" with
+  `--selected`. Use `:focus-visible` for inset outlines.
+- **`.fs-card--clickable:focus-visible` halo + `--selected`** also
+  stack. Suppress halo when also selected.
+- **Unified selection token**: `--surface-selected` (theme-aware) is
+  the canonical "selected row bg". Don't reach for
+  `--color-accent-50` directly — it reads as salmon on dark.
+
+### Persistence / mocks
+
+- **Don't ship UI write actions before the matching backend exists**
+  (Sprint 5 lesson). Mocks lie; integration bites. Sprint 8 gates
+  writes on `useMocks` and ships real PATCH/POST/DELETE shapes.
+
+### Token / cache hygiene
+
+- **Token sync**: `tokens.css` and `fs-globals.js` are mirrored
+  manually. Edit one → edit the other.
+- **Cache busters**: bump `?v=N` in preview HTMLs whenever a loaded
+  `.js` / `.css` changes.
+
+### Mobile-only floating UI clusters
+
+- **Wrap a React.Fragment of `position: fixed` siblings in a single
+  portal `<div>`** (`display: none` desktop, `display: contents`
+  mobile). BottomNav was a Fragment of backdrop + sheet + nav;
+  hiding only the `<nav>` left the sheet visibly leaking into the
+  desktop sidebar. One container = one toggle = no gaps.
+
+### Admin permission flow
+
+- **Aggregator pages must explicitly fan out across all users when
+  the caller is admin.** `getTimeline(date, user=null)` for
+  admin returns the `available_users` disambiguation envelope, NOT
+  data — naive `.map(date => getTimeline(date, null))` then drops
+  every report. Pattern lives in `compliance-aggregator.fanoutDates`
+  and `tasks-aggregator.getActionsResolvedRange`: when admin + no
+  user, build `(date × fixtures.sites.users)` cross-product.
+- **Modal `siteId` falls back to `fixtures.sites.sites[0].site_id`**
+  when `state.user` is null (admin path), otherwise the modal mounts
+  with `siteId=''` and silently no-ops on submit.
+
+### Showcase
+
+- **`components-preview.html` lag**: every new L5 composite must be
+  registered there with at least a smoke render or trigger button.
+  Easy to forget; check before claiming a sprint complete.
+
+### Animation
+
+- **Reduced motion is non-negotiable**. Every `@keyframes` needs a
+  `@media (prefers-reduced-motion: reduce)` override — field workers
+  with vestibular disorders are a real audience.
 
 ## Working with this Project
 

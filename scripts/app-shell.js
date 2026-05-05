@@ -14,6 +14,124 @@ const STORAGE_KEYS = {
 
 const MIDDLE_WIDTH_DEFAULT = 320;
 
+/* ---------- Mobile bottom-nav item icons (mirrors NAV_ICONS in left-nav.js) */
+const NAV_ICONS_BOTTOM = {
+  today:     'calendar-check',
+  timeline:  'gantt-chart',
+  tasks:     'check-square',
+  safety:    'shield-alert',
+  programme: 'gantt-chart',
+  quality:   'badge-check',
+  evidence:  'folder-open',
+  reports:   'file-text',
+  sites:     'map-pin',
+  team:      'users',
+  activity:  'activity',
+  settings:  'settings',
+  portfolio: 'layout-dashboard',
+  regional:  'map',
+  executive: 'briefcase',
+};
+
+/* ---------- BottomNav (mobile only — rendered by AppShell) -------------- */
+/* Top 5 visible nav items shown as tabs; remainder accessible via More drawer. */
+function BottomNav({ user, currentRoute, onNavigate }) {
+  const NavIcon   = window.FieldSight && window.FieldSight.NavIcon;
+  const [moreOpen, setMoreOpen] = React.useState(false);
+
+  const visibleItems = (window.FS.getVisibleNavItems ? window.FS.getVisibleNavItems(user) : [])
+    .filter(function (i) { return i.key !== 'settings'; });
+
+  const primary = visibleItems.slice(0, 4);
+  const overflow = visibleItems.slice(4);
+  const anyOverflowActive = overflow.some(function (i) { return i.path === currentRoute; });
+
+  function closeMore() { setMoreOpen(false); }
+
+  /* Sprint 8 follow-up — wrap entire bottom-nav stack (sheet + backdrop +
+     bar) in a single portal div so we can hide the whole thing on desktop
+     via one CSS rule. The previous Fragment leaked `__more-sheet` content
+     into desktop layout in some cases (Programme item showing below
+     Settings). One container = one display toggle. */
+  return React.createElement('div', { className: 'fs-bottom-nav-portal' },
+    /* Backdrop for more-sheet */
+    React.createElement('div', {
+      className: 'fs-bottom-nav__more-sheet-backdrop' + (moreOpen ? ' fs-bottom-nav__more-sheet-backdrop--open' : ''),
+      onClick:   closeMore,
+      'aria-hidden': true,
+    }),
+
+    /* More sheet */
+    React.createElement('div', {
+      className:    'fs-bottom-nav__more-sheet' + (moreOpen ? ' fs-bottom-nav__more-sheet--open' : ''),
+      role:         'menu',
+      'aria-label': 'More navigation items',
+    },
+      overflow.map(function (item) {
+        var active = currentRoute === item.path;
+        return React.createElement('button', {
+          key:          item.key,
+          type:         'button',
+          className:    'fs-bottom-nav__more-item' + (active ? ' fs-bottom-nav__more-item--active' : ''),
+          role:         'menuitem',
+          onClick:      function () { onNavigate(item.path); closeMore(); },
+        },
+          NavIcon ? React.createElement(NavIcon, {
+            name: NAV_ICONS_BOTTOM[item.key] || 'circle',
+            size: 18,
+            color: active ? 'var(--color-accent-500)' : 'rgba(255,255,255,0.65)',
+          }) : null,
+          item.label,
+        );
+      }),
+    ),
+
+    /* Bottom tab bar */
+    React.createElement('nav', {
+      className:    'fs-bottom-nav',
+      role:         'navigation',
+      'aria-label': 'Main navigation',
+    },
+      primary.map(function (item) {
+        var active = currentRoute === item.path;
+        return React.createElement('button', {
+          key:          item.key,
+          type:         'button',
+          className:    'fs-bottom-nav__item' + (active ? ' fs-bottom-nav__item--active' : ''),
+          'aria-label': item.label,
+          'aria-current': active ? 'page' : undefined,
+          onClick:      function () { onNavigate(item.path); },
+        },
+          NavIcon ? React.createElement(NavIcon, {
+            name: NAV_ICONS_BOTTOM[item.key] || 'circle',
+            size: 20,
+            color: active ? 'var(--color-accent-500)' : 'rgba(255,255,255,0.55)',
+          }) : null,
+          React.createElement('span', null, item.label),
+        );
+      }),
+
+      /* More button — only if there are overflow items */
+      overflow.length > 0
+        ? React.createElement('button', {
+            type:         'button',
+            className:    'fs-bottom-nav__item' + (anyOverflowActive ? ' fs-bottom-nav__item--active' : ''),
+            'aria-label': 'More navigation items',
+            'aria-expanded': moreOpen,
+            onClick:      function () { setMoreOpen(function (o) { return !o; }); },
+          },
+            NavIcon ? React.createElement(NavIcon, {
+              name: 'more-horizontal',
+              size: 20,
+              color: anyOverflowActive ? 'var(--color-accent-500)' : 'rgba(255,255,255,0.55)',
+            }) : null,
+            React.createElement('span', null, 'More'),
+          )
+        : null,
+    ),
+  );
+}
+
 /* ---------- Weather Indicator + Popover -------------------------------- */
 /* Click reveals a popover with current conditions, next 12h hourly,
    and a 7-day daily forecast. Mock data only — Sprint 2 wires the
@@ -151,8 +269,34 @@ function formatTodayDate() {
   return days[d.getDay()] + ' · ' + d.getDate() + ' ' + months[d.getMonth()];
 }
 
+/* ---------- Share / copy-link helper (Sprint 8.10.2) -------------------- */
+async function shareCurrentLink() {
+  var url = window.location.href;
+  /* Prefer Web Share API on mobile when available. */
+  if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent || '')) {
+    try {
+      await navigator.share({ title: document.title, url: url });
+      return;
+    } catch (_) { /* user dismissed — fall through to clipboard */ }
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    if (window.FS && window.FS.toast) {
+      window.FS.toast.show({ message: 'Link copied to clipboard', tone: 'success' });
+    }
+  } catch (_) {
+    if (window.FS && window.FS.toast) {
+      window.FS.toast.show({
+        message: 'Copy failed — URL: ' + url,
+        tone:    'warning',
+        duration: 8000,
+      });
+    }
+  }
+}
+
 /* ---------- MiddleColumn -------------------------------------------------- */
-function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, fullWidth }) {
+function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, fullWidth, onSearchOpen }) {
   const t = window.FS.tokens;
 
   const routeLabel = (route || '/').replace(/^\//, '') || 'today';
@@ -196,7 +340,11 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
     gap: '8px',
   };
 
-  return React.createElement('div', { style: style, className: 'middle-column' },
+  return React.createElement('div', {
+    style: style, className: 'middle-column',
+    id: 'fs-main-content',   /* Sprint 8.5.3 — skip-nav target */
+    tabIndex: -1,
+  },
 
     React.createElement('div', { style: headerStyle, className: 'middle-column__header' },
       React.createElement('div', {
@@ -215,8 +363,31 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
         }, formatTodayDate()) : null,
       ),
 
-      /* Right-side utility area: weather + future bell etc. */
+      /* Right-side utility area: search + share + weather */
       React.createElement('div', { className: 'middle-column__utility' },
+        onSearchOpen ? React.createElement('button', {
+          type:         'button',
+          className:    'fs-utility-item fs-search-btn',
+          onClick:      onSearchOpen,
+          title:        'Search  (⌘K)',
+          'aria-label': 'Open search (Cmd+K)',
+        },
+          window.FieldSight.NavIcon && React.createElement(window.FieldSight.NavIcon, {
+            name: 'search', size: 16,
+          }),
+        ) : null,
+        /* Sprint 8.10.2 — copy-link / share button */
+        React.createElement('button', {
+          type:         'button',
+          className:    'fs-utility-item fs-share-btn',
+          onClick:      shareCurrentLink,
+          title:        'Copy link to this view',
+          'aria-label': 'Copy link to this view',
+        },
+          window.FieldSight.NavIcon && React.createElement(window.FieldSight.NavIcon, {
+            name: 'share-2', size: 16,
+          }),
+        ),
         React.createElement(WeatherIndicator),
       ),
     ),
@@ -294,6 +465,20 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
   );
 }
 
+/* ---------- MobileBack — ← Back button shown inside right-detail on mobile */
+function MobileBack({ onClose }) {
+  var NavIcon = window.FieldSight && window.FieldSight.NavIcon;
+  return React.createElement('button', {
+    type:      'button',
+    className: 'fs-mobile-back',
+    onClick:   onClose,
+    'aria-label': 'Back to list',
+  },
+    NavIcon ? React.createElement(NavIcon, { name: 'chevron-left', size: 16, color: 'var(--color-accent-500)' }) : null,
+    'Back',
+  );
+}
+
 /* ---------- RightDetail --------------------------------------------------- */
 function RightDetail({ route, selectedItem, onClose }) {
   const t = window.FS.tokens;
@@ -302,12 +487,16 @@ function RightDetail({ route, selectedItem, onClose }) {
   if (page && page.Right) {
     return React.createElement('div', {
       className: 'right-detail',
-      style: { background: 'var(--surface-app)', height: '100%', overflow: 'hidden' },
+      style: { background: 'var(--surface-app)', height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' },
     },
-      React.createElement(page.Right, {
-        selectedItem: selectedItem,
-        onClose: onClose,
-      }),
+      /* Sprint 8.4.1 — back button visible only on mobile via CSS */
+      React.createElement(MobileBack, { onClose: onClose }),
+      React.createElement('div', { style: { flex: 1, overflow: 'hidden' } },
+        React.createElement(page.Right, {
+          selectedItem: selectedItem,
+          onClose: onClose,
+        }),
+      ),
     );
   }
 
@@ -368,9 +557,52 @@ function AppShell({ showDevSwitcher = false }) {
   /* Selected item for right detail panel */
   const [selectedItem, setSelectedItem] = React.useState(null);
 
+  /* Sprint 8.6 — global search palette */
+  const [searchOpen, setSearchOpen] = React.useState(false);
+
+  /* Sprint 8.11.2 — keyboard shortcut reference modal */
+  const [shortcutsOpen, setShortcutsOpen] = React.useState(false);
+
+  /* Sprint 8.11.1 — first-run onboarding overlay */
+  const [onboardingOpen, setOnboardingOpen] = React.useState(function () {
+    try {
+      var p = new URLSearchParams(window.location.search);
+      if (p.get('onboarding') === '1') return true;        /* dev override */
+      return localStorage.getItem('fs.onboarded') !== '1';
+    } catch (_) { return false; }
+  });
+
+  /* Sprint 8.9.2 — product tour */
+  const [demoTourOpen, setDemoTourOpen] = React.useState(function () {
+    return !!(window.FieldSight && window.FieldSight.shouldRunDemoTour
+              && window.FieldSight.shouldRunDemoTour());
+  });
+
+  /* Sprint 8.7 — offline detection */
+  const [isOnline, setIsOnline] = React.useState(function () {
+    return typeof navigator !== 'undefined' ? navigator.onLine !== false : true;
+  });
+
   /* Clear selection on route change — different page = fresh selection */
   React.useEffect(function() {
     setSelectedItem(null);
+  }, [route]);
+
+  /* Sprint 8.5.4 — announce page title to screen readers + update document.title.
+     Sprint 8.10.1 — also expose printable date on #fs-main-content for @media print. */
+  React.useEffect(function() {
+    var label = (route || '/').replace(/^\//, '') || 'today';
+    var title = label.split('-').map(function(w) { return w[0].toUpperCase() + w.slice(1); }).join(' ');
+    document.title = title + ' · FieldSight';
+    var region = document.getElementById('fs-live-region');
+    if (region) region.textContent = 'Navigated to ' + title;
+    var main = document.getElementById('fs-main-content');
+    if (main) {
+      var d = new Date();
+      main.setAttribute('data-print-date',
+        d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+        + '-' + String(d.getDate()).padStart(2, '0'));
+    }
   }, [route]);
 
   React.useEffect(function() {
@@ -393,20 +625,54 @@ function AppShell({ showDevSwitcher = false }) {
     }
   }, [user, route]);
 
-  /* Keyboard shortcut ⌘/Ctrl+B — ignored when typing in text fields */
+  /* Keyboard shortcuts — ignored when typing in text fields */
   React.useEffect(function() {
     function onKey(e) {
       var target = e.target;
       var tag = target && target.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || (target && target.isContentEditable)) return;
+      var inInput = tag === 'INPUT' || tag === 'TEXTAREA' || (target && target.isContentEditable);
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
+        if (inInput) return;
         e.preventDefault();
         toggleCollapse();
+      }
+      /* Sprint 8.6 — ⌘K / Ctrl+K opens search palette */
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+      /* Sprint 8.11.2 — single-key navigation + help (skipped in inputs) */
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (inInput) return;
+      if (e.key === '?') {
+        e.preventDefault();
+        setShortcutsOpen(function (s) { return !s; });
+      } else if (e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        window.FS.Router.navigate('/today');
+      } else if (e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        window.FS.Router.navigate('/safety');
+      } else if (e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        window.FS.Router.navigate('/programme');
       }
     }
     window.addEventListener('keydown', onKey);
     return function() { window.removeEventListener('keydown', onKey); };
   });
+
+  /* Sprint 8.7 — online / offline detection */
+  React.useEffect(function () {
+    function onOnline()  { setIsOnline(true); }
+    function onOffline() { setIsOnline(false); }
+    window.addEventListener('online',  onOnline);
+    window.addEventListener('offline', onOffline);
+    return function () {
+      window.removeEventListener('online',  onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
 
   /* Auto-collapse on viewport changes — only if user has no stored preference */
   React.useEffect(function() {
@@ -463,7 +729,29 @@ function AppShell({ showDevSwitcher = false }) {
     + ((selectedItem && !fullWidth) ? ' has-selection' : '')
     + (fullWidth ? ' app-shell--full-width' : '');
 
+  /* Expose closeDetail globally so MobileBack button (and swipe handler)
+     can close the right-detail panel without prop-drilling. */
+  React.useEffect(function () {
+    if (!window.FS) window.FS = {};
+    window.FS.shell = { closeDetail: function () { setSelectedItem(null); } };
+    return function () { delete window.FS.shell; };
+  });
+
   return React.createElement('div', { style: shellStyle, className: shellClassName },
+
+    /* Sprint 8.5.3 — skip navigation link (visually hidden until focused) */
+    React.createElement('a', {
+      href:      '#fs-main-content',
+      className: 'fs-skip-nav',
+    }, 'Skip to main content'),
+
+    /* Sprint 8.5.4 — polite live region for route + action announcements */
+    React.createElement('div', {
+      id:           'fs-live-region',
+      className:    'fs-live-region',
+      'aria-live':  'polite',
+      'aria-atomic': true,
+    }),
 
     React.createElement(window.FieldSight.LeftNav, {
       user: user,
@@ -481,6 +769,7 @@ function AppShell({ showDevSwitcher = false }) {
         onSelect: setSelectedItem,
         selectedItem: selectedItem,
         fullWidth: fullWidth,
+        onSearchOpen: function () { setSearchOpen(true); },
       }),
 
       /* Static right pane only in normal (3-pane) mode. */
@@ -503,8 +792,78 @@ function AppShell({ showDevSwitcher = false }) {
         : null,
     ),
 
+    /* Sprint 8.4.1 — bottom navigation bar (rendered outside PageProvider
+       so it's always present regardless of page layout mode). */
+    React.createElement(BottomNav, {
+      user:         user,
+      currentRoute: route,
+      onNavigate:   navigate,
+    }),
+
     showDevSwitcher && window.FieldSight.DevRoleSwitcher
       ? React.createElement(window.FieldSight.DevRoleSwitcher)
+      : null,
+
+    /* Sprint 8.7 — offline banner (fixed, above all content) */
+    !isOnline
+      ? React.createElement('div', {
+          className:   'fs-offline-banner',
+          role:        'status',
+          'aria-live': 'polite',
+        }, '⚠️ You’re offline — changes won’t sync')
+      : null,
+
+    /* Sprint 8.6 — global search palette */
+    searchOpen && window.FieldSight.SearchPalette
+      ? React.createElement(window.FieldSight.SearchPalette, {
+          onClose: function () { setSearchOpen(false); },
+        })
+      : null,
+
+    /* Sprint 8.11.2 — keyboard shortcut reference modal */
+    shortcutsOpen && window.FieldSight.ModalOverlay
+      ? React.createElement(window.FieldSight.ModalOverlay, {
+          open:    true,
+          onClose: function () { setShortcutsOpen(false); },
+          title:   'Keyboard shortcuts',
+          size:    'sm',
+        },
+          React.createElement('table', { className: 'fs-shortcuts' },
+            React.createElement('tbody', null,
+              [
+                ['Cmd / Ctrl + K', 'Open search palette'],
+                ['?',              'Show this shortcut reference'],
+                ['Escape',         'Close modal / drawer / detail'],
+                ['T',              'Go to Today'],
+                ['S',              'Go to Safety'],
+                ['P',              'Go to Programme'],
+                ['Cmd / Ctrl + B', 'Toggle the navigation sidebar'],
+                ['← / →',          'Shift Gantt task date (when bar focused)'],
+              ].map(function (row, i) {
+                return React.createElement('tr', { key: i },
+                  React.createElement('th', { scope: 'row' },
+                    React.createElement('kbd', { className: 'fs-shortcuts__key' }, row[0])),
+                  React.createElement('td', null, row[1]),
+                );
+              }),
+            ),
+          ),
+        )
+      : null,
+
+    /* Sprint 8.11.1 — first-run onboarding overlay */
+    onboardingOpen && window.FieldSight.OnboardingOverlay
+      ? React.createElement(window.FieldSight.OnboardingOverlay, {
+          user:    user,
+          onClose: function () { setOnboardingOpen(false); },
+        })
+      : null,
+
+    /* Sprint 8.9.2 — product tour (?demo=1) */
+    demoTourOpen && window.FieldSight.DemoTour
+      ? React.createElement(window.FieldSight.DemoTour, {
+          onClose: function () { setDemoTourOpen(false); },
+        })
       : null,
   );
 }

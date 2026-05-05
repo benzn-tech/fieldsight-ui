@@ -75,6 +75,46 @@
     }
   }
 
+  /* Sprint 8.10.3 — Batch export.
+     Iterates the current month's reports, fetches presigned URLs, and
+     triggers each download with a short stagger so the browser doesn't
+     drop concurrent navigations. Caps at MAX_BATCH; otherwise we'd
+     hammer the presign endpoint. */
+  var MAX_BATCH = 10;
+  async function batchExport(rows) {
+    if (!rows || !rows.length) return;
+    var capped = rows.slice(0, MAX_BATCH);
+    if (rows.length > MAX_BATCH && window.FS && window.FS.toast) {
+      window.FS.toast.show({
+        message: 'Exporting first ' + MAX_BATCH + ' of ' + rows.length + ' reports',
+        tone:    'warning',
+      });
+    } else if (window.FS && window.FS.toast) {
+      window.FS.toast.show({
+        message: 'Exporting ' + capped.length + ' report' + (capped.length === 1 ? '' : 's') + '…',
+        tone:    'info',
+      });
+    }
+    for (var i = 0; i < capped.length; i++) {
+      try {
+        await downloadReport(capped[i]);
+      } catch (e) { /* individual failure already logged in downloadReport */ }
+      /* 250 ms stagger keeps Chrome/Safari happy with many a.click()s */
+      await new Promise(function (resolve) { setTimeout(resolve, 250); });
+    }
+    if (window.FS && window.FS.toast) {
+      window.FS.toast.show({ message: 'Export complete', tone: 'success' });
+    }
+  }
+
+  /* Filter rows down to the current calendar month (YYYY-MM). */
+  function thisMonthRows(rows) {
+    var prefix = (new Date()).toISOString().slice(0, 7);   /* e.g. "2026-05" */
+    return rows.filter(function (r) {
+      return r.date && r.date.slice(0, 7) === prefix;
+    });
+  }
+
   /* =====================================================================
      ReportsMiddleColumn
      ===================================================================== */
@@ -90,6 +130,10 @@
     var refState = React.useState({ status: 'loading', rows: [] });
     var state    = refState[0];
     var setState = refState[1];
+
+    var retryRef   = React.useState(0);
+    var retryCount = retryRef[0];
+    var setRetry   = retryRef[1];
 
     var refFilter = React.useState('all');
     var filter    = refFilter[0];
@@ -117,10 +161,10 @@
         setState({ status: 'ok', rows: sorted });
       }).catch(function (err) {
         if (cancelled) return;
-        setState({ status: 'error', error: err, rows: [] });
+        setState({ status: 'error', error: { code: (err && err.status) || 0, message: (err && err.message) || 'Could not load reports', retryable: true }, retry: function () { setRetry(function (n) { return n + 1; }); }, rows: [] });
       });
       return function () { cancelled = true; };
-    }, []);
+    }, [retryCount]);
 
     function regenerate(type) {
       setReg({ phase: 'submitting', type: type });
@@ -163,13 +207,42 @@
       ? props.selectedItem.key
       : null;
 
+    /* Sprint 8.10.3 — batch export state */
+    var refExport = React.useState({ phase: 'idle' });
+    var exp = refExport[0];
+    var setExp = refExport[1];
+
+    var monthRows = thisMonthRows(state.rows || []);
+
+    function onBatchExport() {
+      if (exp.phase === 'submitting') return;
+      setExp({ phase: 'submitting' });
+      batchExport(monthRows).finally(function () {
+        setExp({ phase: 'idle' });
+      });
+    }
+
     return React.createElement('div', { className: 'fs-reports' },
 
       /* Header */
       React.createElement('div', { className: 'fs-reports__header' },
-        React.createElement('h2', { className: 'fs-reports__title' }, 'Reports archive'),
-        React.createElement('div', { className: 'fs-reports__subtitle' },
-          'Daily, weekly and monthly report history. Click a row to download.'),
+        React.createElement('div', { className: 'fs-reports__header-main' },
+          React.createElement('h2', { className: 'fs-reports__title' }, 'Reports archive'),
+          React.createElement('div', { className: 'fs-reports__subtitle' },
+            'Daily, weekly and monthly report history. Click a row to download.'),
+        ),
+        /* Sprint 8.10.3 — batch export trigger */
+        monthRows.length > 0
+          ? React.createElement(Button, {
+              size:      'sm',
+              variant:   'secondary',
+              leftIcon:  'download',
+              onClick:   onBatchExport,
+              disabled:  exp.phase === 'submitting',
+            }, exp.phase === 'submitting'
+                ? 'Exporting…'
+                : 'Export all (this month, ' + monthRows.length + ')')
+          : null,
       ),
 
       /* Filter chips */
@@ -226,7 +299,13 @@
       state.status === 'loading'
         ? React.createElement('div', { className: 'fs-reports__loading' }, 'Loading reports…')
         : state.status === 'error'
-        ? React.createElement('div', { className: 'fs-reports__empty' }, 'Could not load reports.')
+        ? (window.FieldSight.ErrorBanner
+            ? React.createElement(window.FieldSight.ErrorBanner, {
+                message:   (state.error && state.error.message) || 'Could not load reports',
+                retryable: true,
+                onRetry:   state.retry,
+              })
+            : React.createElement('div', { className: 'fs-reports__empty' }, 'Could not load reports.'))
         : state.status === 'access_denied'
         ? (window.FieldSight.AccessDenied
             ? React.createElement(window.FieldSight.AccessDenied, {

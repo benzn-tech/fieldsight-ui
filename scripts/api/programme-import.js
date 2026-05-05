@@ -556,10 +556,198 @@
     return { parents: parents, leaves: leaves, errors: errors, warnings: warnings };
   }
 
+  /* =========================================================================
+     Sprint 8.2.2 — XLSX import via SheetJS CE (CDN UMD, MIT licence)
+     parseXLSX is async (FileReader returns a Promise).
+
+     Column contract: same as CSV (task_id, wbs, name, start, end, status …).
+     When first-row headers don't match the required columns and no
+     columnMap is provided, resolves with { needsMapping: true, headers, rows }
+     so the caller can render a column-mapper step.
+
+     parseXLSXWithMap(file, columnMap) — same, but applies the caller-
+     supplied mapping before delegating to parseCSV.
+     ========================================================================= */
+
+  var XLSX_REQUIRED_COLS = ['task_id', 'wbs', 'name', 'start', 'end', 'status'];
+
+  function _xlsxRowsToCsv(headers, rows) {
+    /* Convert SheetJS rows (arrays) to a CSV text string reusing parseCSV. */
+    var lines = [headers.map(function (h) {
+      return h.indexOf(',') !== -1 || h.indexOf('"') !== -1
+        ? '"' + h.replace(/"/g, '""') + '"' : h;
+    }).join(',')];
+
+    for (var i = 1; i < rows.length; i++) {
+      var cells = rows[i] || [];
+      var csvCells = headers.map(function (_, j) {
+        var c = String(cells[j] == null ? '' : cells[j]);
+        if (c.indexOf(',') !== -1 || c.indexOf('"') !== -1) {
+          c = '"' + c.replace(/"/g, '""') + '"';
+        }
+        return c;
+      });
+      lines.push(csvCells.join(','));
+    }
+    return lines.join('\n');
+  }
+
+  function parseXLSX(file) {
+    /* Returns Promise resolving to one of:
+         { parents, leaves, errors, warnings, needsMapping: false }
+         { needsMapping: true, headers, rows, errors: [], warnings: [] } */
+    return new Promise(function (resolve) {
+      if (typeof window.XLSX === 'undefined') {
+        resolve({
+          parents: [], leaves: [], needsMapping: false,
+          errors:   [{ row: 0, field: null, message: 'SheetJS (XLSX) library is not loaded. Ensure the CDN script is present in the page.' }],
+          warnings: [],
+        });
+        return;
+      }
+
+      var reader = new FileReader();
+      reader.onload = function (e) {
+        var wb;
+        try {
+          wb = window.XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+        } catch (ex) {
+          resolve({
+            parents: [], leaves: [], needsMapping: false,
+            errors:   [{ row: 0, field: null, message: 'Failed to parse XLSX file: ' + ex.message }],
+            warnings: [],
+          });
+          return;
+        }
+
+        var sheetName = wb.SheetNames && wb.SheetNames[0];
+        if (!sheetName) {
+          resolve({
+            parents: [], leaves: [], needsMapping: false,
+            errors:   [{ row: 0, field: null, message: 'Workbook contains no sheets.' }],
+            warnings: [],
+          });
+          return;
+        }
+
+        var sheet = wb.Sheets[sheetName];
+        /* raw: false → all values as formatted strings; header: 1 → 2-D array */
+        var rows  = window.XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+
+        if (!rows.length) {
+          resolve({
+            parents: [], leaves: [], needsMapping: false,
+            errors:   [{ row: 0, field: null, message: 'Sheet "' + sheetName + '" is empty.' }],
+            warnings: [],
+          });
+          return;
+        }
+
+        var headers = (rows[0] || []).map(function (h) { return String(h || '').trim(); });
+
+        var hasRequired = XLSX_REQUIRED_COLS.every(function (c) {
+          return headers.indexOf(c) !== -1;
+        });
+
+        if (!hasRequired) {
+          /* Return raw data for the column-mapper UI */
+          resolve({ needsMapping: true, headers: headers, rows: rows, errors: [], warnings: [] });
+          return;
+        }
+
+        var csvText = _xlsxRowsToCsv(headers, rows);
+        var result  = parseCSV(csvText);
+        result.needsMapping = false;
+        resolve(result);
+      };
+      reader.onerror = function () {
+        resolve({
+          parents: [], leaves: [], needsMapping: false,
+          errors:   [{ row: 0, field: null, message: 'FileReader error reading XLSX file.' }],
+          warnings: [],
+        });
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  function parseXLSXWithMap(file, columnMap) {
+    /* columnMap: { originalHeader: csvColumnName } */
+    return new Promise(function (resolve) {
+      if (typeof window.XLSX === 'undefined') {
+        resolve({
+          parents: [], leaves: [], needsMapping: false,
+          errors:   [{ row: 0, field: null, message: 'SheetJS (XLSX) library is not loaded.' }],
+          warnings: [],
+        });
+        return;
+      }
+
+      var reader = new FileReader();
+      reader.onload = function (e) {
+        var wb;
+        try {
+          wb = window.XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+        } catch (ex) {
+          resolve({
+            parents: [], leaves: [], needsMapping: false,
+            errors:   [{ row: 0, field: null, message: 'Failed to parse XLSX: ' + ex.message }],
+            warnings: [],
+          });
+          return;
+        }
+
+        var sheetName = wb.SheetNames && wb.SheetNames[0];
+        if (!sheetName) {
+          resolve({
+            parents: [], leaves: [], needsMapping: false,
+            errors:   [{ row: 0, field: null, message: 'Workbook contains no sheets.' }],
+            warnings: [],
+          });
+          return;
+        }
+
+        var sheet = wb.Sheets[sheetName];
+        var rows  = window.XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+        if (!rows.length) {
+          resolve({
+            parents: [], leaves: [], needsMapping: false,
+            errors:   [{ row: 0, field: null, message: 'Sheet is empty.' }],
+            warnings: [],
+          });
+          return;
+        }
+
+        var origHeaders = (rows[0] || []).map(function (h) { return String(h || '').trim(); });
+        var mappedHeaders = origHeaders.map(function (h) {
+          return (columnMap && columnMap[h]) ? columnMap[h] : h;
+        });
+
+        var csvText = _xlsxRowsToCsv(mappedHeaders, rows);
+        var result  = parseCSV(csvText);
+        result.needsMapping = false;
+        resolve(result);
+      };
+      reader.onerror = function () {
+        resolve({
+          parents: [], leaves: [], needsMapping: false,
+          errors:   [{ row: 0, field: null, message: 'FileReader error.' }],
+          warnings: [],
+        });
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
   /* --- attach -------------------------------------------------------------- */
 
   window.FS = window.FS || {};
   window.FS.api = window.FS.api || {};
-  window.FS.api.programmeImport = { parseCSV: parseCSV, parseMSProjectXML: parseMSProjectXML };
+  window.FS.api.programmeImport = {
+    parseCSV:          parseCSV,
+    parseMSProjectXML: parseMSProjectXML,
+    parseXLSX:         parseXLSX,
+    parseXLSXWithMap:  parseXLSXWithMap,
+  };
 
 }());

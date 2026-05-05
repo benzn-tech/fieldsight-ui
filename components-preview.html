@@ -95,11 +95,27 @@
   <script type="text/babel" src="scripts/composites/stat-card.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/kpi-strip.js?v=1"></script>
 
+  <!-- Sprint 8 — new L5 composites -->
+  <script type="text/babel" src="scripts/composites/error-banner.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/over-allocation-banner.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/tooltip.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/toast.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/modal-overlay.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/safety-create-modal.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/quality-create-modal.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/search-palette.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/onboarding-overlay.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/demo-tour.js?v=1"></script>
+
   <script type="text/babel">
     const { Button, IconButton, Input, Textarea, Select, Card,
             Badge, NotificationDot, Avatar, AvatarGroup,
             TaskCard, UrgentCard, ActivityCard, MorningBriefCard,
-            OnSiteCard, Timeline, StatCard, KpiStrip } = window.FieldSight;
+            OnSiteCard, Timeline, StatCard, KpiStrip,
+            /* Sprint 8 — new L5 composites */
+            ErrorBanner, OverAllocationBanner, Tooltip,
+            SafetyCreateModal, QualityCreateModal, SearchPalette,
+            OnboardingOverlay, DemoTour } = window.FieldSight;
 
     function Section({ title, children }) {
       return (
@@ -1106,6 +1122,96 @@
             </Row>
           </Section>
 
+          {/* ========================================================== */}
+          {/* Sprint 8 — new L5 composites                              */}
+          {/* ========================================================== */}
+
+          <Section title="Sprint 8 · ErrorBanner">
+            <Row label="full">
+              <div style={{ flex: 1 }}>
+                {ErrorBanner && <ErrorBanner
+                  message="Could not load today's report"
+                  retryable={true}
+                  onRetry={() => alert('retry fired')}
+                />}
+              </div>
+            </Row>
+            <Row label="mini">
+              <div style={{ flex: 1 }}>
+                {ErrorBanner && <ErrorBanner
+                  message="Detail fetch failed"
+                  retryable={true}
+                  onRetry={() => alert('retry fired')}
+                  mini={true}
+                />}
+              </div>
+            </Row>
+          </Section>
+
+          <Section title="Sprint 8 · OverAllocationBanner">
+            <Row label="2 conflicts">
+              <div style={{ flex: 1 }}>
+                {OverAllocationBanner && <OverAllocationBanner
+                  conflicts={[
+                    { user: 'Maria Chen', dates: ['2026-05-03', '2026-05-04', '2026-05-05'] },
+                    { user: 'Ben Lin',    dates: ['2026-05-08'] },
+                  ]}
+                />}
+              </div>
+            </Row>
+          </Section>
+
+          <Section title="Sprint 8 · Tooltip">
+            <Row label="hover / focus">
+              {Tooltip && <Tooltip content="Press ⌘K to search" placement="top">
+                <Button variant="ghost">Hover me</Button>
+              </Tooltip>}
+              {Tooltip && <Tooltip content="Saves a snapshot of current task dates" placement="bottom">
+                <Button variant="secondary" leftIcon="bookmark">Save baseline</Button>
+              </Tooltip>}
+            </Row>
+          </Section>
+
+          <Section title="Sprint 8 · Toast (FS.toast.show)">
+            <Row label="tones">
+              <Button onClick={() => window.FS.toast.show({ message: 'Saved', tone: 'success' })}>Success</Button>
+              <Button onClick={() => window.FS.toast.show({ message: 'Could not save', tone: 'error' })}>Error</Button>
+              <Button onClick={() => window.FS.toast.show({ message: 'Network slow', tone: 'warning' })}>Warning</Button>
+              <Button onClick={() => window.FS.toast.show({ message: 'Link copied', tone: 'info' })}>Info</Button>
+            </Row>
+          </Section>
+
+          <Section title="Sprint 8 · Modals & overlays (live triggers)">
+            <Row label="open">
+              <ModalTrigger label="Safety create" Modal={SafetyCreateModal} props={{ siteId: 'sb1108-ellesmere' }} />
+              <ModalTrigger label="Quality create" Modal={QualityCreateModal} props={{ siteId: 'sb1108-ellesmere' }} />
+              <ModalTrigger label="Search palette" Modal={SearchPalette} />
+              <ModalTrigger label="Onboarding"     Modal={OnboardingOverlay} />
+            </Row>
+            <Row label="note">
+              <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
+                DemoTour is page-level — activate via <code>?demo=1</code> on app-shell-preview.html.
+              </span>
+            </Row>
+          </Section>
+
+        </React.Fragment>
+      );
+    }
+
+    /* Small helper for the Sprint 8 modal showcase row. Renders a button
+       that opens the supplied Modal component on click; closes on the
+       modal's onClose / onCancel / onSuccess callbacks. */
+    function ModalTrigger({ label, Modal, props }) {
+      const [open, setOpen] = React.useState(false);
+      const close = () => setOpen(false);
+      if (!Modal) {
+        return <span style={{ fontSize: '12px', color: 'var(--text-disabled)' }}>{label} (not loaded)</span>;
+      }
+      return (
+        <React.Fragment>
+          <Button variant="secondary" onClick={() => setOpen(true)}>{label}</Button>
+          {open && <Modal {...(props || {})} onCancel={close} onClose={close} onSuccess={close} />}
         </React.Fragment>
       );
     }
