@@ -7916,3 +7916,252 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color: var(--text-tertiary);
   font-size: 12px;
 }
+
+
+/* ==========================================================================
+   §WORD-CLOUD · Frequency-sized tag cloud (Sprint 9.5.3)
+   --------------------------------------------------------------------------
+   Pure flex-wrap; each <li> declares its own font-size inline (driven
+   by data). Letter-spacing slightly tightened so larger sizes don't
+   look airy. Colors come from per-tag `color` field on TAG_VOCAB.
+   ========================================================================== */
+
+.fs-word-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: baseline;
+  margin: 0;
+  padding: 12px 4px;
+  list-style: none;
+  line-height: 1.15;
+}
+.fs-word-cloud__empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  padding: 14px 4px;
+  font-style: italic;
+}
+.fs-word-cloud__item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: -0.01em;
+  cursor: default;
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+  transition: opacity var(--duration-fast) var(--easing-out),
+              background var(--duration-fast) var(--easing-out);
+}
+.fs-word-cloud__item--clickable {
+  cursor: pointer;
+}
+.fs-word-cloud__item--clickable:hover,
+.fs-word-cloud__item--clickable:focus-visible {
+  background: var(--surface-panel-muted);
+  outline: none;
+}
+.fs-word-cloud__item--selected {
+  background: var(--surface-selected);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+.fs-word-cloud__item--faded {
+  opacity: 0.35;
+}
+.fs-word-cloud__count {
+  font-size: 0.6em;
+  font-weight: var(--font-weight-medium);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+  margin-left: 1px;
+  vertical-align: super;
+}
+
+
+/* ==========================================================================
+   §COLUMN-CHART · Vertical bar chart (Sprint 9.5.3)
+   --------------------------------------------------------------------------
+   Flex-row of equal-width columns. Each column = numeric value above,
+   bar (flex-column with stacked segments) in the middle, label below.
+   Tone tokens map to existing --color-{tone}-500.
+   ========================================================================== */
+
+.fs-column-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 4px;
+}
+.fs-column-chart__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-style: italic;
+  background: var(--surface-panel-muted);
+  border-radius: var(--radius-md);
+}
+.fs-column-chart__col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  border-radius: var(--radius-sm);
+  transition: background var(--duration-fast) var(--easing-out);
+}
+.fs-column-chart__col--clickable { cursor: pointer; }
+.fs-column-chart__col--clickable:hover,
+.fs-column-chart__col--clickable:focus-visible {
+  background: var(--surface-panel-muted);
+  outline: none;
+}
+.fs-column-chart__col--selected { background: var(--surface-selected); }
+.fs-column-chart__value {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  width: 100%;
+}
+.fs-column-chart__bar-wrap {
+  width: 70%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+}
+.fs-column-chart__bar {
+  width: 100%;
+  display: flex;
+  flex-direction: column-reverse;       /* segments stack from bottom */
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  transition: height var(--duration-base) var(--easing-out);
+}
+.fs-column-chart__seg {
+  display: block;
+  width: 100%;
+}
+.fs-column-chart__label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  width: 100%;
+  padding-top: 4px;
+}
+
+
+/* ==========================================================================
+   §HEATMAP-GRID · Sub × tag matrix (Sprint 9.5.3)
+   --------------------------------------------------------------------------
+   CSS-grid layout with one row per subcontractor and one column per
+   tag, plus row-label + total. Cell background = per-column tone
+   colour at opacity = (count / maxCount). Empty cells render
+   transparent. Click any non-zero cell to filter.
+   ========================================================================== */
+
+.fs-heatmap-grid {
+  display: grid;
+  gap: 2px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  padding: 4px;
+  background: var(--surface-panel-muted);
+  border-radius: var(--radius-md);
+}
+.fs-heatmap-grid__empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  padding: 14px 4px;
+  font-style: italic;
+}
+.fs-heatmap-grid__corner {
+  background: transparent;
+}
+.fs-heatmap-grid__col-label {
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  text-align: center;
+  padding: 2px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fs-heatmap-grid__col-label--total {
+  color: var(--text-secondary);
+}
+.fs-heatmap-grid__row-label {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 8px 0 4px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--surface-panel);
+  border-radius: var(--radius-sm);
+}
+.fs-heatmap-grid__row-name {
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fs-heatmap-grid__row-sub {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+.fs-heatmap-grid__cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  cursor: default;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+}
+.fs-heatmap-grid__cell--empty { color: var(--text-disabled); }
+.fs-heatmap-grid__cell--clickable { cursor: pointer; }
+.fs-heatmap-grid__cell--clickable:hover,
+.fs-heatmap-grid__cell--clickable:focus-visible {
+  outline: 2px solid var(--color-accent-400);
+  outline-offset: -2px;
+}
+[data-theme="dark"] .fs-heatmap-grid__cell { color: var(--color-neutral-100); }
+.fs-heatmap-grid__row-total {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  background: var(--surface-panel);
+  border-radius: var(--radius-sm);
+  padding: 0 8px;
+  font-size: 12px;
+}

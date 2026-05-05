@@ -24,20 +24,27 @@
   'use strict';
 
   /* The closed 12 — labels are PM-facing strings; slugs are stable
-     keys for filtering / persistence / backend handoff. */
+     keys for filtering / persistence / backend handoff.
+
+     Sprint 9.5.4 — `color` field added so each tag has a UNIQUE
+     fill (the WordCloud + HeatmapGrid composites need 12 distinct
+     hues; the previous 5/5/2 collision across danger/warning/info
+     made everything visually merge). All shades come from existing
+     tone tokens — no new palette tokens needed; dark mode already
+     theme-pairs them. */
   var TAG_VOCAB = [
-    { slug: 'ppe',                  label: 'PPE',                       tone: 'danger'   },
-    { slug: 'fall_from_height',     label: 'Fall from height',          tone: 'danger'   },
-    { slug: 'housekeeping',         label: 'Housekeeping',              tone: 'warning'  },
-    { slug: 'electrical',           label: 'Electrical',                tone: 'danger'   },
-    { slug: 'plant_machinery',      label: 'Plant & machinery',         tone: 'warning'  },
-    { slug: 'lifting',              label: 'Lifting operations',        tone: 'warning'  },
-    { slug: 'hazardous_substances', label: 'Hazardous substances',      tone: 'danger'   },
-    { slug: 'traffic_pedestrian',   label: 'Traffic / pedestrian',      tone: 'warning'  },
-    { slug: 'lockout_tagout',       label: 'Lockout / tagout',          tone: 'danger'   },
-    { slug: 'working_hot',          label: 'Hot works',                 tone: 'warning'  },
-    { slug: 'quality_workmanship',  label: 'Workmanship',               tone: 'info'     },
-    { slug: 'quality_compliance',   label: 'Compliance / spec',         tone: 'info'     },
+    { slug: 'ppe',                  label: 'PPE',                       tone: 'danger',  color: 'var(--color-danger-700)'  },
+    { slug: 'fall_from_height',     label: 'Fall from height',          tone: 'danger',  color: 'var(--color-danger-500)'  },
+    { slug: 'electrical',           label: 'Electrical',                tone: 'danger',  color: 'var(--color-danger-400)'  },
+    { slug: 'hazardous_substances', label: 'Hazardous substances',      tone: 'danger',  color: 'var(--color-danger-600)'  },
+    { slug: 'lockout_tagout',       label: 'Lockout / tagout',          tone: 'danger',  color: 'var(--color-danger-300)'  },
+    { slug: 'housekeeping',         label: 'Housekeeping',              tone: 'warning', color: 'var(--color-warning-500)' },
+    { slug: 'plant_machinery',      label: 'Plant & machinery',         tone: 'warning', color: 'var(--color-warning-700)' },
+    { slug: 'lifting',              label: 'Lifting operations',        tone: 'warning', color: 'var(--color-warning-600)' },
+    { slug: 'traffic_pedestrian',   label: 'Traffic / pedestrian',      tone: 'warning', color: 'var(--color-warning-400)' },
+    { slug: 'working_hot',          label: 'Hot works',                 tone: 'warning', color: 'var(--color-warning-300)' },
+    { slug: 'quality_workmanship',  label: 'Workmanship',               tone: 'info',    color: 'var(--color-info-500)'    },
+    { slug: 'quality_compliance',   label: 'Compliance / spec',         tone: 'info',    color: 'var(--color-info-700)'    },
   ];
 
   /* Lookup table for the inference heuristic. Each row: keyword

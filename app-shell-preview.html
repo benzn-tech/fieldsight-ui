@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="styles/tokens.css" />
   <link rel="stylesheet" href="styles/app-shell.css?v=8" />
   <link rel="stylesheet" href="styles/components.css?v=6" />
-  <link rel="stylesheet" href="styles/composites.css?v=45" />
+  <link rel="stylesheet" href="styles/composites.css?v=46" />
 
   <style>
     /* Ensure full-bleed with no scroll */
@@ -137,6 +137,10 @@
   <!-- Sprint 9 Track C.2 — strategic dashboard composites -->
   <script type="text/babel" src="scripts/composites/health-score.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/rollup-table.js?v=1"></script>
+  <!-- Sprint 9.5.3 — dashboard-redesign chart primitives -->
+  <script type="text/babel" src="scripts/composites/word-cloud.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/column-chart.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/heatmap-grid.js?v=1"></script>
 
   <!-- Auth scaffolding (Phase I) — Cognito IDP wrapper + session store.
        Loaded before FS.api so api/_fetch.js can use FS.session for
@@ -151,7 +155,7 @@
   <!--   2. Fixtures populate window.FieldSight.fixtures.* -->
   <script src="scripts/mock/sites.fixture.js?v=3"></script>
   <!-- Sprint 9 Track A.0 — closed 12-tag vocabulary + tag inference + subcontractor lookup -->
-  <script src="scripts/mock/insights-tags.js?v=1"></script>
+  <script src="scripts/mock/insights-tags.js?v=2"></script>
   <script src="scripts/mock/dates.fixture.js?v=2"></script>
   <script src="scripts/mock/actions.fixture.js?v=1"></script>
   <script src="scripts/mock/daily-report.fixture.js?v=2"></script>
