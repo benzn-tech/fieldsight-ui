@@ -7426,3 +7426,145 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   background: rgba(220, 38, 38, 0.20);
   color: var(--color-danger-300);
 }
+
+
+/* ==========================================================================
+   §TEAM-PM · Sprint 9 Track B — PM-scoped /team additions
+   --------------------------------------------------------------------------
+   Scope caption pill above the user list (visible to PM only) +
+   the inline ReassignModal styling. Modal piggybacks on the
+   existing .fs-modal-overlay scaffold (Sprint 8.5.2 a11y), so
+   focus trap + aria-modal come for free.
+   ========================================================================== */
+
+.fs-team__scope-caption {
+  margin-top: 6px;
+  display: inline-block;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  background: var(--surface-selected);
+  color: var(--color-accent-700);
+  border: 1px solid var(--color-accent-200);
+}
+[data-theme="dark"] .fs-team__scope-caption {
+  color:        var(--color-accent-300);
+  border-color: rgba(255, 107, 53, 0.30);
+}
+
+.fs-team-detail__action-btn--primary {
+  background: var(--color-accent-500);
+  color: #fff;
+  border: 1px solid var(--color-accent-500);
+}
+.fs-team-detail__action-btn--primary:hover {
+  background: var(--color-accent-600);
+  border-color: var(--color-accent-600);
+}
+
+/* ── ReassignModal ─────────────────────────────────────────────────── */
+
+.fs-team-reassign__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 320px;
+}
+.fs-team-reassign__lead {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.fs-team-reassign__options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fs-team-reassign__option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  background: var(--surface-panel);
+  transition: border-color var(--duration-fast) var(--easing-out),
+              background var(--duration-fast) var(--easing-out);
+}
+.fs-team-reassign__option:hover {
+  background: var(--surface-panel-muted);
+}
+.fs-team-reassign__option--checked {
+  border-color: var(--color-accent-400);
+  background: var(--surface-selected);
+}
+.fs-team-reassign__option input[type="radio"] {
+  flex-shrink: 0;
+  accent-color: var(--color-accent-500);
+}
+.fs-team-reassign__option-text {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.fs-team-reassign__option-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: var(--radius-full);
+  background: var(--surface-panel-muted);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.fs-team-reassign__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.fs-team-reassign__btn {
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--easing-out);
+}
+.fs-team-reassign__btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.fs-team-reassign__btn--ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-default);
+}
+.fs-team-reassign__btn--ghost:hover:not(:disabled) {
+  background: var(--surface-panel-muted);
+}
+.fs-team-reassign__btn--primary {
+  background: var(--color-accent-500);
+  color: #fff;
+  border: 1px solid var(--color-accent-500);
+}
+.fs-team-reassign__btn--primary:hover:not(:disabled) {
+  background: var(--color-accent-600);
+  border-color: var(--color-accent-600);
+}
+
+/* Bare fallback (no ModalOverlay loaded) */
+.fs-team-reassign__inline {
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+  margin-top: 12px;
+}
+.fs-team-reassign__title {
+  font-size: 15px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
