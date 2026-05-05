@@ -254,7 +254,9 @@
         P('pre_start','manage',SCOPES.SITE), P('evidence','view',SCOPES.SITE),
         P('safety','view',SCOPES.SITE), P('quality','view',SCOPES.SITE),
         P('incident','capture',SCOPES.SITE),
-        P('programme','view',SCOPES.SITE), P('settings','view',SCOPES.SELF),
+        P('programme','view',SCOPES.SITE),
+        P('insights','view',SCOPES.SITE),  /* Sprint 9 Track A */
+        P('settings','view',SCOPES.SELF),
       ],
     },
     project_manager: {
@@ -266,7 +268,10 @@
         P('report','approve',SCOPES.PROJECT), P('programme','manage',SCOPES.PROJECT),
         P('variance','view',SCOPES.PROJECT), P('task','assign',SCOPES.PROJECT),
         P('pattern','view',SCOPES.PROJECT), P('pm_brief','view',SCOPES.PROJECT),
-        P('sites','view',SCOPES.PROJECT), P('settings','view',SCOPES.SELF),
+        P('sites','view',SCOPES.PROJECT),
+        P('insights','view',SCOPES.PROJECT),  /* Sprint 9 Track A */
+        P('user','manage',SCOPES.PROJECT),    /* Sprint 9 Track B */
+        P('settings','view',SCOPES.SELF),
       ],
     },
     construction_manager: {
@@ -276,7 +281,9 @@
         P('dashboard','view',SCOPES.MULTI_PROJECT), P('report','view',SCOPES.MULTI_PROJECT),
         P('escalation','view',SCOPES.MULTI_PROJECT), P('pattern','view',SCOPES.MULTI_PROJECT),
         P('commercial','view',SCOPES.MULTI_PROJECT), P('evidence','export',SCOPES.MULTI_PROJECT),
-        P('portfolio','view',SCOPES.MULTI_PROJECT), P('settings','view',SCOPES.SELF),
+        P('portfolio','view',SCOPES.MULTI_PROJECT),
+        P('insights','view',SCOPES.MULTI_PROJECT),  /* Sprint 9 Track A */
+        P('settings','view',SCOPES.SELF),
       ],
     },
     gm: {
@@ -287,6 +294,7 @@
         P('client','view',SCOPES.REGION), P('risk','view',SCOPES.REGION),
         P('safety','view',SCOPES.REGION), P('user','manage',SCOPES.REGION),
         P('report','export',SCOPES.REGION), P('regional','view',SCOPES.REGION),
+        P('insights','view',SCOPES.REGION),  /* Sprint 9 Track A */
         P('settings','view',SCOPES.SELF),
       ],
     },
@@ -298,6 +306,7 @@
         P('compliance','view',SCOPES.ORG), P('risk','view',SCOPES.ORG),
         P('audit','view',SCOPES.ORG), P('user','manage',SCOPES.ORG),
         P('report','export',SCOPES.ORG), P('executive','view',SCOPES.ORG),
+        P('insights','view',SCOPES.ORG),  /* Sprint 9 Track A */
         P('settings','view',SCOPES.SELF),
       ],
     },
@@ -311,6 +320,7 @@
         P('compliance','view',SCOPES.ORG), P('audit','view',SCOPES.ORG),
         P('report','view',SCOPES.ORG), P('evidence','view',SCOPES.ORG),
         P('evidence','export',SCOPES.ORG), P('dashboard','view',SCOPES.ORG),
+        P('insights','view',SCOPES.ORG),  /* Sprint 9 Track A */
         P('settings','view',SCOPES.SELF),
       ],
     },
@@ -321,6 +331,7 @@
         P('quality','view',SCOPES.ORG), P('quality','manage',SCOPES.ORG),
         P('report','view',SCOPES.ORG), P('evidence','view',SCOPES.ORG),
         P('evidence','export',SCOPES.ORG), P('dashboard','view',SCOPES.ORG),
+        P('insights','view',SCOPES.ORG),  /* Sprint 9 Track A */
         P('settings','view',SCOPES.SELF),
       ],
     },
@@ -349,6 +360,9 @@
     quality:    { permission: P('quality','view'),    label: 'Quality',    path: '/quality' },
     evidence:   { permission: P('evidence','view'),   label: 'Evidence',   path: '/evidence' },
     reports:    { permission: P('report','view'),     label: 'Reports',    path: '/reports' },
+
+    /* INSIGHTS — Sprint 9 Track A */
+    insights:   { permission: P('insights','view'),   label: 'Insights',   path: '/insights' },
 
     /* MANAGEMENT */
     sites:      { permission: P('sites','view'),      label: 'Sites',      path: '/sites' },

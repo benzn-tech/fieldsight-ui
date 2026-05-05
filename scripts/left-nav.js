@@ -17,6 +17,7 @@ const NAV_ICONS = {
   quality:    'badge-check',
   evidence:   'folder-open',
   reports:    'file-text',
+  insights:   'bar-chart-3',
   sites:      'map-pin',
   team:       'users',
   settings:   'settings',
@@ -37,8 +38,12 @@ const NAV_SECTIONS = [
     subgroups: [
       { key: 'COMPLIANCE', label: 'Compliance', items: ['safety', 'quality'] },
     ],
-    /* trailing items appear after the subgroup */
-    trailingItems: ['evidence', 'reports'],
+    /* trailing items appear after the subgroup.
+       Sprint 9 Track A — `insights` lives in WORKSPACE because PMs
+       reach for it during the same morning-routine flow as
+       safety/quality/reports. Permission-gated separately so
+       workers don't see it. */
+    trailingItems: ['evidence', 'reports', 'insights'],
   },
   {
     key: 'MANAGEMENT',
