@@ -26,15 +26,15 @@
 (function () {
   'use strict';
 
-  /* Tone slug → CSS variable for fill. Anything unrecognised falls
-     back to the neutral surface tone. */
+  /* Tone slug → theme-aware chart fill (deeper in light mode,
+     softer in dark; see tokens.css §"Chart fills + per-tag palette"). */
   function toneVar(tone) {
     switch (tone) {
-      case 'danger':  return 'var(--color-danger-500)';
-      case 'warning': return 'var(--color-warning-500)';
-      case 'success': return 'var(--color-success-500)';
-      case 'info':    return 'var(--color-info-500)';
-      case 'accent':  return 'var(--color-accent-500)';
+      case 'danger':  return 'var(--fs-chart-danger)';
+      case 'warning': return 'var(--fs-chart-warning)';
+      case 'success': return 'var(--fs-chart-success)';
+      case 'info':    return 'var(--fs-chart-info)';
+      case 'accent':  return 'var(--fs-chart-accent)';
       default:        return 'var(--border-strong)';
     }
   }

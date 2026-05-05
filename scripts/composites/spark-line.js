@@ -24,13 +24,14 @@
 (function () {
   'use strict';
 
+  /* Theme-aware chart fill — see tokens.css §"Chart fills". */
   function toneVar(tone) {
     switch (tone) {
-      case 'danger':  return 'var(--color-danger-500)';
-      case 'warning': return 'var(--color-warning-500)';
-      case 'success': return 'var(--color-success-500)';
-      case 'info':    return 'var(--color-info-500)';
-      default:        return 'var(--color-accent-500)';
+      case 'danger':  return 'var(--fs-chart-danger)';
+      case 'warning': return 'var(--fs-chart-warning)';
+      case 'success': return 'var(--fs-chart-success)';
+      case 'info':    return 'var(--fs-chart-info)';
+      default:        return 'var(--fs-chart-accent)';
     }
   }
 

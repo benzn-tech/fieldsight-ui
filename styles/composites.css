@@ -7923,7 +7923,14 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
    --------------------------------------------------------------------------
    Pure flex-wrap; each <li> declares its own font-size inline (driven
    by data). Letter-spacing slightly tightened so larger sizes don't
-   look airy. Colors come from per-tag `color` field on TAG_VOCAB.
+   look airy.
+
+   Sprint 9.5.6 — words now use the page's normal text colour
+   (theme-aware). Frequency communicates via font-size + the
+   sup-script count digit alone. The 12-tag color field on
+   TAG_VOCAB is still consumed by HeatmapGrid (where one column =
+   one tag and unique hues add information density) but ignored
+   by WordCloud (where 12 hues felt jarring per user review).
    ========================================================================== */
 
 .fs-word-cloud {
@@ -7935,6 +7942,10 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   padding: 12px 4px;
   list-style: none;
   line-height: 1.15;
+  /* Pin children to the normal text colour; per-tag colours from
+     the JS-level `color` field are intentionally NOT applied — see
+     §9.5.6 note above. */
+  color: var(--text-primary);
 }
 .fs-word-cloud__empty {
   font-size: 12px;
@@ -7972,11 +7983,14 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   opacity: 0.35;
 }
 .fs-word-cloud__count {
-  font-size: 0.6em;
-  font-weight: var(--font-weight-medium);
+  /* Sprint 9.5.6 — bumped from 0.6em → 0.65em so the frequency
+     number stays legible even on the smallest tags; tertiary
+     text colour keeps the count subordinate to the label. */
+  font-size: 0.65em;
+  font-weight: var(--font-weight-semibold);
   font-variant-numeric: tabular-nums;
   color: var(--text-tertiary);
-  margin-left: 1px;
+  margin-left: 2px;
   vertical-align: super;
 }
 

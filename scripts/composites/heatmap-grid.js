@@ -25,10 +25,12 @@
 (function () {
   'use strict';
 
+  /* Per-column fill — prefer explicit `color` (e.g., per-tag hue
+     from TAG_VOCAB) and fall back to theme-aware chart tone. */
   function colColor(col) {
     if (col.color) return col.color;
-    if (col.tone)  return 'var(--color-' + col.tone + '-500)';
-    return 'var(--color-accent-500)';
+    if (col.tone)  return 'var(--fs-chart-' + col.tone + ')';
+    return 'var(--fs-chart-accent)';
   }
 
   function HeatmapGrid(props) {

@@ -10,12 +10,18 @@
    No SVG, no canvas, no library — vanilla HTML + inline style. Auto
    re-flows to fill the available canvas width. Click-to-filter.
 
+   Sprint 9.5.6 update: rendered tags now use the page's normal
+   text colour (not the per-tag colour) — frequency is communicated
+   by font-size + the sup-script count number alone, which reads
+   calmer on dashboards than 12 separate hues. The `color` prop
+   on each tag is still accepted but ignored by render; downstream
+   composites (HeatmapGrid) continue to use it.
+
    Props:
-     data       [{ slug, label, count, color, tone }]
+     data       [{ slug, label, count, color?, tone? }]
                   count: number — drives font-size
-                  color: optional CSS colour string (defaults to
-                         var(--color-{tone}-500) when tone set,
-                         else var(--text-primary))
+                  color/tone: now ignored visually (kept on shape
+                              for compatibility with TAG_VOCAB)
      onSelect   (slug) => void  — click handler per tag
      selected   string — slug currently filtering (renders bold +
                   underlined for selected; opacity-faded for others)
@@ -59,12 +65,6 @@
       return Math.round(minFontPx + ratio * (maxFontPx - minFontPx));
     }
 
-    function colorFor(tag) {
-      if (tag.color) return tag.color;
-      if (tag.tone)  return 'var(--color-' + tag.tone + '-500)';
-      return 'var(--text-primary)';
-    }
-
     /* Sort by count descending so the eye lands on the biggest first;
        within same count, alpha by label for stability. */
     var sorted = data.slice().sort(function (a, b) {
@@ -88,8 +88,10 @@
             + (isSelected ? ' fs-word-cloud__item--selected' : '')
             + (anySelected && !isSelected ? ' fs-word-cloud__item--faded' : ''),
           style: {
+            /* Sprint 9.5.6 — only font-size is per-tag; colour is
+               inherited from .fs-word-cloud (var(--text-primary))
+               so the cloud reads as a calm size-encoded list. */
             fontSize: fontFor(tag.count) + 'px',
-            color:    colorFor(tag),
           },
           onClick:   clickable ? function () { onSelect(tag.slug); } : undefined,
           tabIndex:  clickable ? 0 : undefined,

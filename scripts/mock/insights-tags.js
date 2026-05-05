@@ -26,25 +26,26 @@
   /* The closed 12 — labels are PM-facing strings; slugs are stable
      keys for filtering / persistence / backend handoff.
 
-     Sprint 9.5.4 — `color` field added so each tag has a UNIQUE
-     fill (the WordCloud + HeatmapGrid composites need 12 distinct
-     hues; the previous 5/5/2 collision across danger/warning/info
-     made everything visually merge). All shades come from existing
-     tone tokens — no new palette tokens needed; dark mode already
-     theme-pairs them. */
+     Sprint 9.5.4 introduced per-tag colors. Sprint 9.5.6 swapped
+     the raw status shades for theme-aware --fs-tag-{slug} tokens
+     defined in tokens.css: deeper shades in light mode (less
+     saturated → more sophisticated for dashboards) and softer
+     pastels in dark mode (less stimulating against near-black
+     surfaces). Each tag still has a UNIQUE hue across both
+     themes. */
   var TAG_VOCAB = [
-    { slug: 'ppe',                  label: 'PPE',                       tone: 'danger',  color: 'var(--color-danger-700)'  },
-    { slug: 'fall_from_height',     label: 'Fall from height',          tone: 'danger',  color: 'var(--color-danger-500)'  },
-    { slug: 'electrical',           label: 'Electrical',                tone: 'danger',  color: 'var(--color-danger-400)'  },
-    { slug: 'hazardous_substances', label: 'Hazardous substances',      tone: 'danger',  color: 'var(--color-danger-600)'  },
-    { slug: 'lockout_tagout',       label: 'Lockout / tagout',          tone: 'danger',  color: 'var(--color-danger-300)'  },
-    { slug: 'housekeeping',         label: 'Housekeeping',              tone: 'warning', color: 'var(--color-warning-500)' },
-    { slug: 'plant_machinery',      label: 'Plant & machinery',         tone: 'warning', color: 'var(--color-warning-700)' },
-    { slug: 'lifting',              label: 'Lifting operations',        tone: 'warning', color: 'var(--color-warning-600)' },
-    { slug: 'traffic_pedestrian',   label: 'Traffic / pedestrian',      tone: 'warning', color: 'var(--color-warning-400)' },
-    { slug: 'working_hot',          label: 'Hot works',                 tone: 'warning', color: 'var(--color-warning-300)' },
-    { slug: 'quality_workmanship',  label: 'Workmanship',               tone: 'info',    color: 'var(--color-info-500)'    },
-    { slug: 'quality_compliance',   label: 'Compliance / spec',         tone: 'info',    color: 'var(--color-info-700)'    },
+    { slug: 'ppe',                  label: 'PPE',                       tone: 'danger',  color: 'var(--fs-tag-ppe)'                  },
+    { slug: 'fall_from_height',     label: 'Fall from height',          tone: 'danger',  color: 'var(--fs-tag-fall_from_height)'     },
+    { slug: 'electrical',           label: 'Electrical',                tone: 'danger',  color: 'var(--fs-tag-electrical)'           },
+    { slug: 'hazardous_substances', label: 'Hazardous substances',      tone: 'danger',  color: 'var(--fs-tag-hazardous_substances)' },
+    { slug: 'lockout_tagout',       label: 'Lockout / tagout',          tone: 'danger',  color: 'var(--fs-tag-lockout_tagout)'       },
+    { slug: 'housekeeping',         label: 'Housekeeping',              tone: 'warning', color: 'var(--fs-tag-housekeeping)'         },
+    { slug: 'plant_machinery',      label: 'Plant & machinery',         tone: 'warning', color: 'var(--fs-tag-plant_machinery)'      },
+    { slug: 'lifting',              label: 'Lifting operations',        tone: 'warning', color: 'var(--fs-tag-lifting)'              },
+    { slug: 'traffic_pedestrian',   label: 'Traffic / pedestrian',      tone: 'warning', color: 'var(--fs-tag-traffic_pedestrian)'   },
+    { slug: 'working_hot',          label: 'Hot works',                 tone: 'warning', color: 'var(--fs-tag-working_hot)'          },
+    { slug: 'quality_workmanship',  label: 'Workmanship',               tone: 'info',    color: 'var(--fs-tag-quality_workmanship)'  },
+    { slug: 'quality_compliance',   label: 'Compliance / spec',         tone: 'info',    color: 'var(--fs-tag-quality_compliance)'   },
   ];
 
   /* Lookup table for the inference heuristic. Each row: keyword
