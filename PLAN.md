@@ -45,28 +45,36 @@ ledger.
 
 **Sprint 9 sub-sprint coverage** (in flight on `claude/sprint9-insights-strategic`):
 
-Three independent tracks, executable in any order. Recommended
-sequence: Track A → Track B → Track C.
+Three tracks landed, then a cross-cutting redesign pass after browser
+review. Recommended sequence executed: Track A → B → C → 9.5.
 
-- 🟡 **Track A · Insights dashboard** (PM-facing analytics)
+- ✅ **Track A · Insights dashboard** (PM-facing analytics) — `ae7cf29`
   - A.0 fixture extension: `subcontractor_id` + closed 12-tag vocabulary on safety/quality records
   - A.1 `/insights` route + permission + provider + KPI strip
   - A.2 chart composites: `bar-stack.js` + `spark-line.js` + `trend-pill.js` (vanilla SVG, no CDN dep)
   - A.3 top-5 subcontractors panel + top-5 tags panel + 14-day trendline
   - A.4 drill-down filter (click sub or tag → filter rows) + right-detail profile
-  - A.5 wrap-up: cache busters, components-preview registration, DemoTour entry
-- ⏳ **Track B · PM Team scope**
-  - B.1 add `P('user','manage',SCOPES.PROJECT)` to project_manager role
-  - B.2 site-scoping filter in `/team` (intersect user.sites with PM.managed_sites)
-  - B.3 PM-only "reassign to another site" right-detail action
-- ⏳ **Track C · Strategic dashboards**
-  - C.0 product spec lock — 3 separate pages (vs 1 dashboard with role-aware scope)
-  - C.1 `portfolio-aggregator.js` — `(date × user)` fan-out grouped by site/project/region (zero backend dep)
+- ✅ **Track B · PM Team scope** — `499f550`
+  - B.1 `P('user','manage',SCOPES.PROJECT)` on project_manager (shipped in Track A commit as prerequisite)
+  - B.2 `getCallerManagedSites()` + `userOnSites()` filter in `/team`
+  - B.3 PM-only `ReassignModal` right-detail action with site override map
+- ✅ **Track C · Strategic dashboards** — `415798d`
+  - C.0 spec lock — 3 separate pages (Q-S9-4 default)
+  - C.1 `strategic-aggregator.js` — `(date × user)` fan-out grouped by site/region/org
   - C.2 `health-score.js` + `rollup-table.js` composites
-  - C.3 `/portfolio` page (construction_manager scope)
-  - C.4 `/regional` page (gm scope, ~50% reuse)
-  - C.5 `/executive` page (director scope, ~50% reuse)
-  - C.6 wrap-up
+  - C.3 `/portfolio` (CM, last 30d)
+  - C.4 `/regional` (GM, last 90d)
+  - C.5 `/executive` (Director, last 90d, org banner + region rollup)
+- ✅ **A.5 + C.6 wrap-up** — `6615a84`
+  - 5 new composites registered in `components-preview.html`
+  - DemoTour `?demo=1` adds `/insights` step
+- 🟡 **9.5 · Dashboard redesign pass** (the user-mandated rework)
+  - 9.5.1 layout swap → all 4 dashboards full-width 2-panel (matches `/programme`); drill-down moves to RightDrawer
+  - 9.5.2 font-size pass: shrink `.fs-stat-card__value` 28→22, page titles 22→18, drawer names 18→15, executive banner 24→20
+  - 9.5.3 three new chart composites — `word-cloud.js` (frequency-sized tag cloud), `column-chart.js` (vertical bar), `heatmap-grid.js` (sub × tag matrix)
+  - 9.5.4 12-color tag palette — extend `TAG_VOCAB` with explicit `color` field per tag (12 unique shades from existing tone tokens)
+  - 9.5.5 per-page redesigns: `/insights` 2×2 chart grid + word cloud + heatmap; `/portfolio` adds health-grade column chart; `/regional` mirrors; `/executive` slims banner + adds region health column chart
+
 
 Sprint 9 decision points (Q-S9-1 … Q-S9-7) are tracked in §4. Strong
 defaults documented; locked at Track-A start.
