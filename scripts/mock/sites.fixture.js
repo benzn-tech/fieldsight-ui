@@ -27,23 +27,38 @@
       site_id:    'sb1108-ellesmere',
       name:       'SB1108 Ellesmere College',
       location:   'Christchurch',
+      region:     'south-island',          /* Sprint 9 C — strategic grouping */
       client:     'Ministry of Education',
+      project_value_nzd: 12_400_000,        /* used by /executive KPI rollup */
+      planned_completion: '2026-09-30',
       user_count: 4,
     },
     {
       site_id:    'mpi',
       name:       'MPI',
       location:   'Auckland',
+      region:     'north-island',
       client:     'Ministry for Primary Industries',
+      project_value_nzd: 8_900_000,
+      planned_completion: '2026-08-15',
       user_count: 2,
     },
     {
       site_id:    'sb1131-northbrook-wanaka',
       name:       'SB1131 - Northbrook Wanaka',
       location:   'Wanaka',
+      region:     'south-island',
       client:     'Northbrook Group',
+      project_value_nzd: 6_700_000,
+      planned_completion: '2026-11-20',
       user_count: 2,
     },
+  ];
+
+  /* Sprint 9 C — region directory (lookup for /regional + /executive). */
+  var REGIONS = [
+    { id: 'south-island', name: 'South Island', country: 'NZ' },
+    { id: 'north-island', name: 'North Island', country: 'NZ' },
   ];
 
   /* Sprint 9 A.0 — subcontractor directory.
@@ -115,6 +130,7 @@
     sites:          SITES,
     users:          USERS,
     subcontractors: SUBCONTRACTORS,
+    regions:        REGIONS,
   };
 
 })();

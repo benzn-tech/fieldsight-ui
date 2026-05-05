@@ -7568,3 +7568,349 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color: var(--text-primary);
   margin-bottom: 12px;
 }
+
+
+/* ==========================================================================
+   §STRATEGIC · /portfolio /regional /executive (Sprint 9 Track C)
+   --------------------------------------------------------------------------
+   Three pages share the .fs-strategic__* shell — header / toolbar /
+   trend / section. Two new L5 composites: HealthScore + RollupTable.
+   ========================================================================== */
+
+.fs-strategic {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 0;
+}
+.fs-strategic__header { padding: 0 4px; }
+.fs-strategic__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+}
+.fs-strategic__subtitle {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.fs-strategic__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 4px;
+}
+.fs-strategic__chip {
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--easing-out),
+              background var(--duration-fast) var(--easing-out);
+}
+.fs-strategic__chip:hover { background: var(--surface-panel-muted); }
+.fs-strategic__chip--active {
+  border-color: var(--color-accent-400);
+  background: var(--surface-selected);
+  color: var(--color-accent-700);
+}
+[data-theme="dark"] .fs-strategic__chip--active { color: var(--color-accent-300); }
+
+.fs-strategic__loading,
+.fs-strategic__empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.fs-strategic__trend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+}
+.fs-strategic__trend-label {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.fs-strategic__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+}
+.fs-strategic__section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fs-strategic__section-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.fs-strategic__section-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* ── Right-detail shared shell ─────────────────────────────────────── */
+
+.fs-strategic-detail {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+.fs-strategic-detail__placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 6px;
+  padding: 40px 24px;
+  color: var(--text-tertiary);
+}
+.fs-strategic-detail__placeholder-title {
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+}
+.fs-strategic-detail__placeholder-body { font-size: 12px; }
+.fs-strategic-detail__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.fs-strategic-detail__header-text { display: flex; flex-direction: column; gap: 4px; }
+.fs-strategic-detail__name {
+  margin: 0;
+  font-size: 18px;
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+}
+.fs-strategic-detail__sub {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.fs-strategic-detail__health-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.fs-strategic-detail__rows {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 8px;
+}
+.fs-strategic-detail__rows-header {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  padding: 4px 0 8px;
+}
+.fs-strategic-detail__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+}
+.fs-strategic-detail__row:last-child { border-bottom: none; }
+.fs-strategic-detail__row-label { color: var(--text-tertiary); }
+.fs-strategic-detail__row-value { color: var(--text-primary); font-weight: var(--font-weight-medium); }
+
+.fs-strategic-detail__projects { gap: 6px; padding-top: 12px; }
+.fs-strategic-detail__project {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.fs-strategic-detail__project:last-child { border-bottom: none; }
+.fs-strategic-detail__project-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.fs-strategic-detail__project-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.fs-strategic-detail__actions { margin-top: 4px; }
+.fs-strategic-detail__action-btn {
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-accent-600);
+  border: 1px solid var(--color-accent-400);
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--easing-out);
+}
+.fs-strategic-detail__action-btn:hover {
+  background: var(--surface-selected);
+}
+[data-theme="dark"] .fs-strategic-detail__action-btn { color: var(--color-accent-300); }
+
+/* ── Executive-specific banner ─────────────────────────────────────── */
+
+.fs-executive__banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--surface-panel) 0%, var(--surface-panel-muted) 100%);
+}
+.fs-executive__banner-meta { display: flex; flex-direction: column; gap: 2px; }
+.fs-executive__banner-value {
+  font-family: var(--font-mono);
+  font-size: 24px;
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.fs-executive__banner-caption {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.fs-executive__notes {
+  padding: 12px 16px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel-muted);
+}
+.fs-executive__notes-title {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  margin-bottom: 6px;
+}
+.fs-executive__notes-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+/* ── HealthScore composite ─────────────────────────────────────────── */
+
+.fs-health-score {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.fs-health-score__ring {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px solid;
+  font-weight: var(--font-weight-bold);
+  font-family: var(--font-sans);
+}
+.fs-health-score__label {
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+
+/* ── RollupTable composite ─────────────────────────────────────────── */
+
+.fs-rollup-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-family: var(--font-sans);
+}
+.fs-rollup-table__th {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-default);
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  user-select: none;
+  white-space: nowrap;
+}
+.fs-rollup-table__th--sortable { cursor: pointer; }
+.fs-rollup-table__th--sortable:hover { color: var(--text-secondary); }
+.fs-rollup-table__th--sortable:focus-visible {
+  outline: none;
+  color: var(--color-accent-500);
+}
+.fs-rollup-table__th--sorted-asc,
+.fs-rollup-table__th--sorted-desc { color: var(--color-accent-600); }
+[data-theme="dark"] .fs-rollup-table__th--sorted-asc,
+[data-theme="dark"] .fs-rollup-table__th--sorted-desc { color: var(--color-accent-300); }
+.fs-rollup-table__th--right,
+.fs-rollup-table__td--right { text-align: right; font-variant-numeric: tabular-nums; }
+.fs-rollup-table__th--center,
+.fs-rollup-table__td--center { text-align: center; }
+.fs-rollup-table__sort-arrow { font-size: 10px; }
+
+.fs-rollup-table__row { transition: background var(--duration-fast) var(--easing-out); }
+.fs-rollup-table__row--clickable { cursor: pointer; }
+.fs-rollup-table__row--clickable:hover,
+.fs-rollup-table__row--clickable:focus-visible {
+  background: var(--surface-panel-muted);
+  outline: none;
+}
+.fs-rollup-table__row--selected { background: var(--surface-selected); }
+.fs-rollup-table__td {
+  padding: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+.fs-rollup-table__row:last-child .fs-rollup-table__td { border-bottom: none; }
+.fs-rollup-table__cell-empty { color: var(--text-tertiary); }
+.fs-rollup-table__empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
