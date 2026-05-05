@@ -470,6 +470,13 @@ button:not([class*="fs-"]):focus-visible,
    Sprint 8.4.1 — Bottom navigation bar (mobile ≤ 767px)
    ========================================================================= */
 
+/* Sprint 8 follow-up — single portal toggle. Hidden by default on
+   desktop; the mobile media query at 767px flips to display:contents
+   so the inner sheet/backdrop/nav participate in layout normally. */
+.fs-bottom-nav-portal {
+  display: none;
+}
+
 .fs-bottom-nav {
   display: none; /* shown only on mobile via media query below */
   position: fixed;
@@ -620,6 +627,7 @@ button:not([class*="fs-"]):focus-visible,
   .left-nav { display: none !important; }
 
   /* Show bottom nav */
+  .fs-bottom-nav-portal { display: contents; }
   .fs-bottom-nav { display: flex; }
 
   /* Middle column fills full viewport height minus bottom nav */

@@ -329,10 +329,17 @@
       header,
       toolbar,
 
-      /* Create observation modal (Sprint 8.1.2) */
+      /* Create observation modal (Sprint 8.1.2)
+         Sprint 8 follow-up — admin has state.user=null; fall back to
+         the first site from fixtures so the modal mounts with a valid
+         siteId rather than ''. */
       ctx.showCreate && SafetyCreateModal
         ? React.createElement(SafetyCreateModal, {
-            siteId:    state.user || '',
+            siteId:    state.user
+                       || (((window.FieldSight && window.FieldSight.fixtures
+                            && window.FieldSight.fixtures.sites
+                            && window.FieldSight.fixtures.sites.sites) || [])[0] || {}).site_id
+                       || '',
             onSuccess: handleNewFlag,
             onCancel:  function () { ctx.setShowCreate(false); },
           })

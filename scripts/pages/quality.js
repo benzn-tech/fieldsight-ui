@@ -324,10 +324,17 @@
       header,
       toolbar,
 
-      /* Create item modal (Sprint 8.1.3) */
+      /* Create item modal (Sprint 8.1.3)
+         Sprint 8 follow-up — admin has state.user=null; fall back to
+         the first site from fixtures so the modal mounts with a valid
+         siteId. */
       ctx.showCreate && QualityCreateModal
         ? React.createElement(QualityCreateModal, {
-            siteId:    state.user || '',
+            siteId:    state.user
+                       || (((window.FieldSight && window.FieldSight.fixtures
+                            && window.FieldSight.fixtures.sites
+                            && window.FieldSight.fixtures.sites.sites) || [])[0] || {}).site_id
+                       || '',
             onSuccess: handleNewItem,
             onCancel:  function () { ctx.setShowCreate(false); },
           })

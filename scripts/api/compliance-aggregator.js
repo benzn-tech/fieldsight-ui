@@ -115,6 +115,22 @@
     return explicitUser || null;
   }
 
+  /* Sprint 8 follow-up — admin fan-out across all known users when no
+     explicit user is provided. Without this, getTimeline(date, user=null)
+     for admin returns the available_users disambiguation envelope, which
+     downstream loops skip — yielding empty Tasks/Safety/Quality/Evidence
+     pages for admin. We materialise (date × user) cross-product instead. */
+  function adminUserFolders() {
+    var fx = (window.FieldSight && window.FieldSight.fixtures
+      && window.FieldSight.fixtures.sites) || {};
+    return (fx.users || []).map(function (u) { return u.folder_name; })
+      .filter(Boolean);
+  }
+  function isAdminCaller() {
+    var c = (window.AuthMock && window.AuthMock.currentUser) || {};
+    return c.role === 'admin' || c.role === 'gm' || !!c.isAdmin;
+  }
+
   /* Internal: discover dates with reports in [from, to], then fan out
      getTimeline for each. Returns { perDay: [{date, report}], denied? }. */
   async function fanoutDates(from, to, user) {
@@ -129,6 +145,29 @@
 
     if (datesInRange.length === 0) {
       return { perDay: [], dates: [] };
+    }
+
+    /* Admin path: cross-product (date × all users) so every report in
+       the window gets included rather than being short-circuited by
+       the available_users envelope. */
+    if (!user && isAdminCaller()) {
+      var folders = adminUserFolders();
+      var perDayAdmin = await Promise.all(
+        datesInRange.reduce(function (acc, d) {
+          folders.forEach(function (f) {
+            acc.push(window.FS.api.timeline.getTimeline({ date: d, user: f })
+              .then(function (r) { return { date: d, report: r }; }));
+          });
+          return acc;
+        }, [])
+      );
+      var deniedAdmin = perDayAdmin.filter(function (x) {
+        return x.report && x.report._accessDenied;
+      })[0];
+      if (deniedAdmin) {
+        return { _accessDenied: true, error: deniedAdmin.report.error };
+      }
+      return { perDay: perDayAdmin, dates: datesInRange };
     }
 
     var perDay = await Promise.all(datesInRange.map(function (d) {

@@ -48,7 +48,12 @@ function BottomNav({ user, currentRoute, onNavigate }) {
 
   function closeMore() { setMoreOpen(false); }
 
-  return React.createElement(React.Fragment, null,
+  /* Sprint 8 follow-up — wrap entire bottom-nav stack (sheet + backdrop +
+     bar) in a single portal div so we can hide the whole thing on desktop
+     via one CSS rule. The previous Fragment leaked `__more-sheet` content
+     into desktop layout in some cases (Programme item showing below
+     Settings). One container = one display toggle. */
+  return React.createElement('div', { className: 'fs-bottom-nav-portal' },
     /* Backdrop for more-sheet */
     React.createElement('div', {
       className: 'fs-bottom-nav__more-sheet-backdrop' + (moreOpen ? ' fs-bottom-nav__more-sheet-backdrop--open' : ''),

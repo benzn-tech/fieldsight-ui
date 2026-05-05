@@ -6973,3 +6973,58 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 @media (prefers-reduced-motion: reduce) {
   .fs-tooltip { transition: none; }
 }
+
+
+/* ==========================================================================
+   §DARK-BADGES · DARK-MODE BADGE / CHIP / COUNT TINT FIXES (Sprint 8 follow-up)
+   --------------------------------------------------------------------------
+   Subtle-variant badges + safety chips + user-activity counters use the
+   semantic --color-{tone}-50 backgrounds (intentionally not theme-flipped).
+   On a near-black panel those light pastels read as glaring white. Replace
+   with translucent tints + bumped-light text tokens for legibility.
+   ========================================================================== */
+
+[data-theme="dark"] .fs-badge--subtle.fs-badge--neutral {
+  background: rgba(255, 255, 255, 0.08);
+  color:      var(--color-neutral-200);
+}
+[data-theme="dark"] .fs-badge--subtle.fs-badge--accent {
+  background: rgba(255, 107, 53, 0.18);
+  color:      var(--color-accent-300);
+}
+[data-theme="dark"] .fs-badge--subtle.fs-badge--danger {
+  background: rgba(220, 38, 38, 0.20);
+  color:      var(--color-danger-300);
+}
+[data-theme="dark"] .fs-badge--subtle.fs-badge--warning {
+  background: rgba(217, 119, 6, 0.20);
+  color:      var(--color-warning-300);
+}
+[data-theme="dark"] .fs-badge--subtle.fs-badge--success {
+  background: rgba(22, 163, 74, 0.20);
+  color:      var(--color-success-300);
+}
+[data-theme="dark"] .fs-badge--subtle.fs-badge--info {
+  background: rgba(37, 99, 235, 0.20);
+  color:      var(--color-info-300);
+}
+
+/* Safety/quality range chips' --active state also rode --color-accent-50
+   directly, ignoring the theme-aware --surface-selected token. */
+[data-theme="dark"] .fs-safety__chip--active,
+[data-theme="dark"] .fs-quality__chip--active {
+  background: var(--surface-selected);
+  color:      var(--color-accent-300);
+}
+
+/* Activity-card counter pills sit on the dark panel and need the same
+   transparent-tint treatment as badges to avoid the salmon strip. */
+[data-theme="dark"] .fs-user-activity-card__count--danger {
+  background: rgba(220, 38, 38, 0.15);
+}
+[data-theme="dark"] .fs-user-activity-card__count--warning {
+  background: rgba(217, 119, 6, 0.15);
+}
+[data-theme="dark"] .fs-user-activity-card__count--info {
+  background: rgba(37, 99, 235, 0.15);
+}

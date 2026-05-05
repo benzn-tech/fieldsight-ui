@@ -143,10 +143,21 @@
       var cancelled = false;
       setPhotos({ status: 'loading', perDay: [], totalCount: 0 });
 
-      Promise.all((state.dates || []).map(function (d) {
-        return window.FS.api.timeline.getTimeline({ date: d, user: state.user })
-          .then(function (r) { return { date: d, report: r }; });
-      })).then(function (perDay) {
+      /* Sprint 8 follow-up — admin fan-out across all known users so
+         /evidence Photos tab isn't blank when running as admin. */
+      var fanoutFolders = state.user ? [state.user] : null;
+      if (!fanoutFolders) {
+        var fxUsers = (window.FieldSight && window.FieldSight.fixtures
+          && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [];
+        fanoutFolders = fxUsers.map(function (u) { return u.folder_name; }).filter(Boolean);
+      }
+      Promise.all((state.dates || []).reduce(function (acc, d) {
+        fanoutFolders.forEach(function (f) {
+          acc.push(window.FS.api.timeline.getTimeline({ date: d, user: f })
+            .then(function (r) { return { date: d, report: r }; }));
+        });
+        return acc;
+      }, [])).then(function (perDay) {
         if (cancelled) return;
         var rows = [];
         var total = 0;
