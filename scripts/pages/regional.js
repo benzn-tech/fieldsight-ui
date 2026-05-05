@@ -41,6 +41,7 @@
     var KpiStrip     = fs.KpiStrip;
     var StatCard     = fs.StatCard;
     var SparkLine    = fs.SparkLine;
+    var ColumnChart  = fs.ColumnChart;     /* Sprint 9.5.5 */
     var RollupTable  = fs.RollupTable;
     var AccessDenied = fs.AccessDenied;
     var ErrorBanner  = fs.ErrorBanner;
@@ -119,13 +120,30 @@
         }),
       ),
 
-      SparkLine ? React.createElement('div', { className: 'fs-strategic__trend' },
-        React.createElement('div', { className: 'fs-strategic__trend-label' },
-          'Safety incidents — last ' + (range === 'last90d' ? '90' : '30') + ' days, all regions'),
-        React.createElement(SparkLine, {
-          points: totalTrend, tone: 'danger', width: 480, height: 56, showLastValue: true,
-        }),
-      ) : null,
+      /* Sprint 9.5.5 — 2-col row: aggregated trend on the left,
+         per-region health distribution on the right. */
+      React.createElement('div', { className: 'fs-strategic__row-2col' },
+        SparkLine ? React.createElement('div', { className: 'fs-strategic__trend' },
+          React.createElement('div', { className: 'fs-strategic__trend-label' },
+            'Safety — last ' + (range === 'last90d' ? '90' : '30') + ' days, all regions'),
+          React.createElement(SparkLine, {
+            points: totalTrend, tone: 'danger', width: 360, height: 56, showLastValue: true,
+          }),
+        ) : null,
+        ColumnChart ? React.createElement('div', { className: 'fs-strategic__chart-card' },
+          React.createElement('div', { className: 'fs-strategic__chart-card-label' },
+            'Region health distribution'),
+          React.createElement(ColumnChart, {
+            data: ['A','B','C','D'].map(function (g) {
+              var n = regions.filter(function (r) { return r.health === g; }).length;
+              var tone = g === 'A' ? 'success' : g === 'B' ? 'info'
+                       : g === 'C' ? 'warning' : 'danger';
+              return { key: g, label: g, value: n, tone: tone };
+            }),
+            height: 120,
+          }),
+        ) : null,
+      ),
 
       React.createElement('div', { className: 'fs-strategic__section' },
         React.createElement('div', { className: 'fs-strategic__section-header' },

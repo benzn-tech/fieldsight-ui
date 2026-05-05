@@ -8165,3 +8165,84 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   padding: 0 8px;
   font-size: 12px;
 }
+
+
+/* ==========================================================================
+   §INSIGHTS-LAYOUT · Sprint 9.5.5 full-width 2-column layout
+   --------------------------------------------------------------------------
+   Now that /insights runs full-width (no static right panel), we get
+   the canvas to put related charts side-by-side. .fs-insights__row-2col
+   is a flex grid that wraps to single column on narrow widths; each
+   child is a .fs-insights__section that owns its own card frame.
+   Trend sparklines stack inside their own column to make room for the
+   bar list on the left.
+   ========================================================================== */
+
+.fs-insights__row-2col {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+@media (max-width: 1024px) {
+  .fs-insights__row-2col {
+    grid-template-columns: 1fr;
+  }
+}
+.fs-insights__row-2col > .fs-insights__section { min-width: 0; }
+
+.fs-insights__trend-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+}
+.fs-insights__trend-stack .fs-insights__section--inline {
+  border: none;
+  padding: 6px 0;
+  background: transparent;
+}
+.fs-insights__trend-stack .fs-insights__section--inline:not(:last-child) {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+
+/* ==========================================================================
+   §STRATEGIC-LAYOUT · Sprint 9.5.5 full-width 2-column (portfolio /
+   regional / executive)
+   --------------------------------------------------------------------------
+   Same pattern as §INSIGHTS-LAYOUT — flex grid that wraps to single
+   column at < 1024px. Includes a generic .fs-strategic__chart-card
+   wrapper for inline ColumnChart placements next to a sparkline.
+   ========================================================================== */
+
+.fs-strategic__row-2col {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 12px;
+}
+@media (max-width: 1024px) {
+  .fs-strategic__row-2col {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fs-strategic__chart-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+  min-width: 0;
+}
+.fs-strategic__chart-card-label {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}

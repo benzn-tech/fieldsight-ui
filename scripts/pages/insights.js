@@ -336,6 +336,138 @@
     );
   }
 
+  /* ─── Section · Hot word cloud (Sprint 9.5.5) ───────────────────── */
+
+  function HotWordCloud(props) {
+    var fs        = window.FieldSight;
+    var WordCloud = fs.WordCloud;
+    var ins       = window.FS && window.FS.insights;
+    var ctx       = props.ctx;
+    var safety    = props.safety;
+    var quality   = props.quality;
+    if (!WordCloud || !ins) return null;
+
+    /* Combine safety + quality tag counts into a single frequency
+       map. Each tag pulled from TAG_VOCAB so we get its colour +
+       label even when count is 0 (renders at minFontPx). */
+    var counts = {};
+    [safety.byTag, quality.byTag].forEach(function (arr) {
+      (arr || []).forEach(function (b) {
+        counts[b.tag] = (counts[b.tag] || 0) + (b.count || 0);
+      });
+    });
+    var data = ins.TAG_VOCAB.map(function (v) {
+      return {
+        slug:  v.slug,
+        label: v.label,
+        count: counts[v.slug] || 0,
+        color: v.color,
+        tone:  v.tone,
+      };
+    }).filter(function (t) { return t.count > 0; });
+    /* If everything is zero, render a placeholder via WordCloud's
+       emptyText. */
+    var sel = ctx.selection && ctx.selection.kind === 'tag'
+      ? ctx.selection.id : null;
+
+    return React.createElement('section', { className: 'fs-insights__section' },
+      React.createElement('div', { className: 'fs-insights__section-header' },
+        React.createElement('h3', { className: 'fs-insights__section-title' },
+          'Hot tags'),
+        React.createElement('div', { className: 'fs-insights__section-meta' },
+          data.length + ' tag' + (data.length === 1 ? '' : 's') + ' active'),
+      ),
+      React.createElement(WordCloud, {
+        data:     data,
+        selected: sel,
+        onSelect: function (slug) {
+          ctx.setSelection(
+            ctx.selection && ctx.selection.kind === 'tag' && ctx.selection.id === slug
+              ? null
+              : { kind: 'tag', id: slug }
+          );
+        },
+        emptyText: 'No tagged issues in this range.',
+      }),
+    );
+  }
+
+  /* ─── Section · Sub × tag heatmap (Sprint 9.5.5) ─────────────────── */
+
+  function SubTagHeatmap(props) {
+    var fs          = window.FieldSight;
+    var HeatmapGrid = fs.HeatmapGrid;
+    var ins         = window.FS && window.FS.insights;
+    var ctx         = props.ctx;
+    var safety      = props.safety;
+    var quality     = props.quality;
+    if (!HeatmapGrid || !ins) return null;
+
+    /* Walk every row across safety + quality, build sub→tag matrix.
+       Skip rows without subcontractor_id (otherwise the matrix has
+       a useless 'unknown' bucket dominating the visual). */
+    var subRowsBySub = {};        /* { subId: { subId, name, total } } */
+    var matrix       = {};
+    function visit(rows) {
+      (rows || []).forEach(function (r) {
+        var subId = r.subcontractor_id;
+        if (!subId) return;
+        if (!subRowsBySub[subId]) {
+          var sub = ins.subcontractorById(subId);
+          subRowsBySub[subId] = {
+            id:    subId,
+            label: sub ? sub.name  : subId,
+            sub:   sub ? sub.trade : null,
+            total: 0,
+          };
+        }
+        subRowsBySub[subId].total += 1;
+        if (!matrix[subId]) matrix[subId] = {};
+        (r.tags || []).forEach(function (slug) {
+          matrix[subId][slug] = (matrix[subId][slug] || 0) + 1;
+        });
+      });
+    }
+    visit(safety.rows);
+    visit(quality.rows);
+
+    /* Top 8 subs by total — keeps the matrix scannable. */
+    var rowList = Object.keys(subRowsBySub)
+      .map(function (k) { return subRowsBySub[k]; })
+      .sort(function (a, b) { return b.total - a.total; })
+      .slice(0, 8);
+
+    var colList = ins.TAG_VOCAB.map(function (v) {
+      return { id: v.slug, label: v.label, color: v.color, tone: v.tone };
+    });
+
+    function onCell(subId, tagSlug) {
+      /* Toggle filter: clicking the same selection clears it. */
+      var cur = ctx.selection;
+      if (cur && cur.kind === 'sub' && cur.id === subId) {
+        ctx.setSelection({ kind: 'tag', id: tagSlug });
+      } else {
+        ctx.setSelection({ kind: 'sub', id: subId });
+      }
+    }
+
+    return React.createElement('section', { className: 'fs-insights__section' },
+      React.createElement('div', { className: 'fs-insights__section-header' },
+        React.createElement('h3', { className: 'fs-insights__section-title' },
+          'Subcontractor × tag heatmap'),
+        React.createElement('div', { className: 'fs-insights__section-meta' },
+          rowList.length + ' sub' + (rowList.length === 1 ? '' : 's') + ' shown'),
+      ),
+      React.createElement(HeatmapGrid, {
+        rows:     rowList,
+        cols:     colList,
+        matrix:   matrix,
+        onSelect: onCell,
+        emptyText: 'No attributed issues in this range.',
+      }),
+    );
+  }
+
   /* ─── Section · Drill-down rows ──────────────────────────────────── */
 
   function DrillDown(props) {
@@ -454,6 +586,12 @@
     var prevSafety  = state.previous.safety;
     var prevQuality = state.previous.quality;
 
+    /* Sprint 9.5.5 — full-width 2-column dashboard layout. The
+       previous stacked-panel layout (4 separate top-N panels) is
+       replaced with a 2×2 grid of charts that share a unified
+       drill-down filter. Quality top-N panels were dropped since
+       quality data still surfaces via word cloud + heatmap +
+       trend; carrying separate quality bars below was duplicative. */
     return React.createElement('div', { className: 'fs-insights' },
       header,
       React.createElement(RangeToolbar, { ctx: ctx }),
@@ -461,24 +599,33 @@
         safety:      safety,      quality:      quality,
         prevSafety:  prevSafety,  prevQuality:  prevQuality,
       }),
-      /* Trend sparklines side-by-side */
-      React.createElement('div', { className: 'fs-insights__trend-row' },
-        React.createElement(DailyTrend, { section: safety,  kindLabel: 'Safety'  }),
-        React.createElement(DailyTrend, { section: quality, kindLabel: 'Quality' }),
+
+      /* Row 1 — top-5 subs (left) | hot word cloud (right) */
+      React.createElement('div', { className: 'fs-insights__row-2col' },
+        React.createElement(TopSubcontractors, {
+          ctx: ctx, section: safety, kindLabel: 'Safety',
+        }),
+        React.createElement(HotWordCloud, {
+          ctx: ctx, safety: safety, quality: quality,
+        }),
       ),
-      /* Top-5 subcontractors — safety only by default; quality follows */
-      React.createElement(TopSubcontractors, {
-        ctx: ctx, section: safety,  kindLabel: 'Safety',
+
+      /* Row 2 — top-5 tags (left) | trend pair (right) */
+      React.createElement('div', { className: 'fs-insights__row-2col' },
+        React.createElement(TopTags, {
+          ctx: ctx, section: safety, kindLabel: 'Safety',
+        }),
+        React.createElement('div', { className: 'fs-insights__trend-stack' },
+          React.createElement(DailyTrend, { section: safety,  kindLabel: 'Safety'  }),
+          React.createElement(DailyTrend, { section: quality, kindLabel: 'Quality' }),
+        ),
+      ),
+
+      /* Full width — subcontractor × tag heatmap */
+      React.createElement(SubTagHeatmap, {
+        ctx: ctx, safety: safety, quality: quality,
       }),
-      React.createElement(TopTags, {
-        ctx: ctx, section: safety,  kindLabel: 'Safety',
-      }),
-      React.createElement(TopSubcontractors, {
-        ctx: ctx, section: quality, kindLabel: 'Quality',
-      }),
-      React.createElement(TopTags, {
-        ctx: ctx, section: quality, kindLabel: 'Quality',
-      }),
+
       /* Drill-down (only when something is selected) */
       React.createElement(DrillDown, {
         ctx: ctx, safety: safety, quality: quality,
