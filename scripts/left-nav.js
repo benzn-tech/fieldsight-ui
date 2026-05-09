@@ -17,6 +17,7 @@ const NAV_ICONS = {
   quality:    'badge-check',
   evidence:   'folder-open',
   reports:    'file-text',
+  library:    'book-open',            /* Sprint 10 B.1 */
   insights:   'bar-chart-3',
   sites:      'map-pin',
   team:       'users',
@@ -43,7 +44,7 @@ const NAV_SECTIONS = [
        reach for it during the same morning-routine flow as
        safety/quality/reports. Permission-gated separately so
        workers don't see it. */
-    trailingItems: ['evidence', 'reports', 'insights'],
+    trailingItems: ['evidence', 'reports', 'library', 'insights'],  /* Sprint 10 B.1 */
   },
   {
     key: 'MANAGEMENT',

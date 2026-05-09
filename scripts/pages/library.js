@@ -1,0 +1,542 @@
+/* ==========================================================================
+   FieldSight /library — Sprint 10 B.1 + B.3
+   --------------------------------------------------------------------------
+   Per-company report template library. Each organisation maintains an
+   Org library (admin/gm/director manage) and every user has a Personal
+   library for their own formats. The All tab is a read-only union.
+
+   Sprint 10 scope:
+     B.0  Stores + permissions (template-store.js / roles.js)
+     B.1  This page — route + scaffold + tabs + list + right detail
+     B.2  TemplateUploadModal composite (template-upload-modal.js)
+     B.3  Skip-edit primary path: source vs extracted schema side-by-side
+          + Test render panel + "✓ Use this template" CTA
+
+   Middle column:
+     • Tab strip — Org / Personal / All
+     • Template list rows: title, report_type badge, active indicator,
+       extraction status
+     • Permission-gated "+ Upload template" button
+
+   Right detail (B.3 skip-edit primary path):
+     • While extracting: spinner + progress note
+     • Once ready: 2-col "Source" vs "Extracted schema" review
+       + Test-render panel (fills schema sections with sample content)
+       + "✓ Use this template" CTA (activates in one click)
+
+   Permission gate: template:manage:self  (all roles — see roles.js B.0)
+   Upload button:   template:manage:org   (admin/gm/director for org scope)
+                    template:manage:self  (anyone for personal scope)
+
+   Registers as window.FieldSight.PAGES['/library']
+   ========================================================================== */
+
+/* global React, window */
+
+(function () {
+  'use strict';
+
+  /* ── Constants ─────────────────────────────────────────────────────── */
+
+  var TABS = [
+    { key: 'org',      label: 'Org' },
+    { key: 'personal', label: 'Personal' },
+    { key: 'all',      label: 'All' },
+  ];
+
+  var RT_LABEL = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', incident: 'Incident' };
+  var RT_TONE  = { daily: 'info', weekly: 'success', monthly: 'accent', incident: 'danger' };
+
+  var KIND_LABEL = { narrative: 'Narrative', list: 'List', table: 'Table', kpi: 'KPIs', photos: 'Photos' };
+  var KIND_ICON  = { narrative: '¶', list: '•', table: '⊞', kpi: '◆', photos: '🖼' };
+
+  /* ── Helpers ───────────────────────────────────────────────────────── */
+
+  function fmtDate(iso) {
+    if (!iso) return '';
+    var p = iso.slice(0, 10).split('-').map(Number);
+    var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return d.getUTCDate() + ' ' + months[d.getUTCMonth()] + ' ' + p[0];
+  }
+
+  function activeSchema(tpl) {
+    if (!tpl || !tpl.versions || !tpl.versions.length) return null;
+    var vers = tpl.versions;
+    return vers[vers.length - 1].schema;
+  }
+
+  /* Sample content for each section kind used in the Test Render panel */
+  var SAMPLE = {
+    narrative: 'Concrete pours for Grid C foundations completed ahead of schedule. Subcontractor coordination for electrical rough-in confirmed for tomorrow morning. Weather held — no delays.',
+    list:      ['Agreed revised sequence for Block B roofing with Coastline Roofing — start Friday', 'Client approved variation VO-14 ($8,400) for additional drainage run', 'Defect list from 2 May inspection signed off by SM'],
+    kpi:       { headcount: 24, subcontractors: 3, visitors: 1, completion_pct: '62%', days_variance: '+2', rfi_open: 4, budget_pct: '58%' },
+    table:     [
+      { action: 'Issue revised IFC drawings for Block B roof', owner: 'James Lamb',    due_date: '12 May 2026' },
+      { action: 'Confirm crane availability w/c 18 May',        owner: 'Jarley Trainor', due_date: '10 May 2026' },
+      { action: 'Submit VO-15 for approval',                    owner: 'James Lamb',    due_date: '15 May 2026' },
+    ],
+    photos:    ['Progress photo 1', 'Progress photo 2', 'Progress photo 3'],
+  };
+
+  /* ── Context ───────────────────────────────────────────────────────── */
+
+  var LibraryContext = React.createContext(null);
+
+  /* ── Provider ──────────────────────────────────────────────────────── */
+
+  function LibraryProvider(props) {
+    var caller    = (window.AuthMock && window.AuthMock.currentUser) || {};
+    var canManageOrg = window.FS && window.FS.can && window.FS.can(caller, 'template:manage:org');
+
+    var tabRef    = React.useState('org');
+    var tab       = tabRef[0]; var setTab = tabRef[1];
+
+    var stateRef  = React.useState({ status: 'loading', rows: [] });
+    var state     = stateRef[0]; var setState = stateRef[1];
+
+    var selRef    = React.useState(null);
+    var sel       = selRef[0]; var setSel = selRef[1];
+
+    var uploadRef = React.useState(null);  /* null | 'org' | 'personal' */
+    var uploadFor = uploadRef[0]; var setUploadFor = uploadRef[1];
+
+    var retryRef  = React.useState(0);
+    var retry     = retryRef[0]; var setRetry = retryRef[1];
+
+    function load() {
+      setState(function (s) { return Object.assign({}, s, { status: 'loading' }); });
+      var scope = (tab === 'org' || tab === 'personal') ? tab : 'all';
+      window.FS.api.templates.list(scope === 'all' ? undefined : scope).then(function (res) {
+        setState({ status: 'ok', rows: res.templates || [] });
+      }).catch(function (err) {
+        setState({ status: 'error', rows: [], error: (err && err.message) || 'Could not load templates.' });
+      });
+    }
+
+    /* Initial load + re-load when tab or retry changes */
+    React.useEffect(function () { load(); }, [tab, retry]);
+
+    /* Listen for ADE extraction completions to auto-refresh */
+    React.useEffect(function () {
+      if (!window.FS.templateStore) return;
+      var unsub = window.FS.templateStore.onExtracted(function () {
+        /* Small delay so the store write settles before we re-read */
+        setTimeout(function () { setRetry(function (n) { return n + 1; }); }, 100);
+      });
+      return unsub;
+    }, []);
+
+    function handleUploadComplete(stub) {
+      setUploadFor(null);
+      setRetry(function (n) { return n + 1; });
+      setSel(stub);
+      if (window.FS && window.FS.toast) {
+        window.FS.toast.show({ message: 'Template uploaded — extracting schema…', tone: 'info' });
+      }
+    }
+
+    function handleActivate(tpl) {
+      window.FS.api.templates.activate(tpl.id).then(function (updated) {
+        setRetry(function (n) { return n + 1; });
+        setSel(updated);
+        if (window.FS && window.FS.toast) {
+          window.FS.toast.show({ message: '"' + updated.title + '" set as active template', tone: 'success' });
+        }
+      }).catch(function () {
+        if (window.FS && window.FS.toast) window.FS.toast.show({ message: 'Could not activate template', tone: 'error' });
+      });
+    }
+
+    return React.createElement(LibraryContext.Provider, {
+      value: { caller, canManageOrg, tab, setTab, state, sel, setSel, uploadFor, setUploadFor, handleUploadComplete, handleActivate },
+    }, props.children);
+  }
+
+  /* ── Middle column ─────────────────────────────────────────────────── */
+
+  function LibraryMiddle() {
+    var ctx = React.useContext(LibraryContext);
+
+    if (!ctx) return null;
+
+    var tab          = ctx.tab;
+    var setTab       = ctx.setTab;
+    var state        = ctx.state;
+    var sel          = ctx.sel;
+    var setSel       = ctx.setSel;
+    var canManageOrg = ctx.canManageOrg;
+    var setUploadFor = ctx.setUploadFor;
+    var caller       = ctx.caller;
+
+    var Badge  = window.FieldSight.Badge;
+    var Button = window.FieldSight.Button;
+    var ErrorBanner = window.FieldSight.ErrorBanner;
+
+    /* Can user upload to the current tab's scope? */
+    var canUploadHere = tab === 'personal'
+      ? !!(window.FS && window.FS.can && window.FS.can(caller, 'template:manage:self'))
+      : (tab === 'org' && canManageOrg) || (tab === 'all' && canManageOrg);
+
+    /* Group rows by report_type for the list */
+    var rows = state.rows || [];
+
+    return React.createElement('div', { className: 'fs-library__middle' },
+
+      /* Header */
+      React.createElement('div', { className: 'fs-library__header' },
+        React.createElement('h1', { className: 'fs-library__title' }, 'Template Library'),
+        canUploadHere && React.createElement(Button, {
+          variant:  'primary',
+          size:     'sm',
+          onClick:  function () { setUploadFor(tab === 'personal' ? 'personal' : 'org'); },
+        }, '+ Upload template'),
+      ),
+
+      /* Tab strip */
+      React.createElement('div', { className: 'fs-library__tabs', role: 'tablist' },
+        TABS.map(function (t) {
+          return React.createElement('button', {
+            key:           t.key,
+            role:          'tab',
+            'aria-selected': tab === t.key,
+            className:     'fs-library__tab' + (tab === t.key ? ' fs-library__tab--active' : ''),
+            onClick:       function () { setTab(t.key); setSel(null); },
+          }, t.label);
+        }),
+      ),
+
+      /* Body */
+      state.status === 'loading' && React.createElement('div', { className: 'fs-library__loading' },
+        React.createElement('div', { className: 'fs-library__skeleton' }),
+        React.createElement('div', { className: 'fs-library__skeleton' }),
+        React.createElement('div', { className: 'fs-library__skeleton' }),
+      ),
+
+      state.status === 'error' && ErrorBanner
+        ? React.createElement(ErrorBanner, { message: state.error || 'Failed to load templates.' })
+        : null,
+
+      state.status === 'ok' && rows.length === 0 && React.createElement('div', { className: 'fs-library__empty' },
+        React.createElement('p', null, tab === 'personal'
+          ? 'No personal templates yet. Upload one to get started.'
+          : 'No org templates yet.' + (canManageOrg ? ' Upload one to make it available to all users.' : '')
+        ),
+      ),
+
+      state.status === 'ok' && rows.length > 0 && React.createElement('div', { className: 'fs-library__list', role: 'list' },
+        rows.map(function (tpl) {
+          var isSelected   = sel && sel.id === tpl.id;
+          var isExtracting = tpl._status === 'extracting';
+          var hasSchema    = tpl.versions && tpl.versions.length > 0;
+
+          return React.createElement('div', {
+            key:          tpl.id,
+            role:         'listitem',
+            className:    'fs-library__row' + (isSelected ? ' fs-library__row--selected' : ''),
+            onClick:      function () { setSel(tpl); },
+            tabIndex:     0,
+            onKeyDown:    function (e) { if (e.key === 'Enter' || e.key === ' ') setSel(tpl); },
+            'aria-current': isSelected ? 'true' : undefined,
+          },
+            React.createElement('div', { className: 'fs-library__row-main' },
+              React.createElement('span', { className: 'fs-library__row-title' }, tpl.title),
+              tpl.active && React.createElement('span', { className: 'fs-library__active-badge' }, 'Active'),
+            ),
+            React.createElement('div', { className: 'fs-library__row-meta' },
+              Badge && React.createElement(Badge, {
+                tone:  RT_TONE[tpl.report_type] || 'neutral',
+                label: RT_LABEL[tpl.report_type] || tpl.report_type,
+                size:  'xs',
+              }),
+              tpl.scope === 'personal' && React.createElement('span', { className: 'fs-library__personal-tag' }, 'Personal'),
+              isExtracting && React.createElement('span', { className: 'fs-library__extracting-tag' }, 'Extracting…'),
+              !isExtracting && hasSchema && React.createElement('span', { className: 'fs-library__sections-count' },
+                activeSchema(tpl) ? activeSchema(tpl).sections.length + ' sections' : '',
+              ),
+            ),
+          );
+        }),
+      ),
+
+      /* Upload modal */
+      ctx.uploadFor && window.FieldSight.TemplateUploadModal && React.createElement(
+        window.FieldSight.TemplateUploadModal,
+        {
+          scope:      ctx.uploadFor,
+          onComplete: ctx.handleUploadComplete,
+          onCancel:   function () { ctx.setUploadFor(null); },
+        },
+      ),
+
+    );
+  }
+
+  /* ── Right detail (B.3 skip-edit primary path) ─────────────────────── */
+
+  function LibraryRight() {
+    var ctx = React.useContext(LibraryContext);
+    if (!ctx) return null;
+
+    var sel             = ctx.sel;
+    var handleActivate  = ctx.handleActivate;
+    var canManageOrg    = ctx.canManageOrg;
+    var caller          = ctx.caller;
+    var Badge           = window.FieldSight.Badge;
+    var Button          = window.FieldSight.Button;
+
+    /* Empty state */
+    if (!sel) {
+      return React.createElement('div', { className: 'fs-library__right fs-library__right--empty' },
+        React.createElement('p', { className: 'fs-library__right-hint' }, 'Select a template to preview it.'),
+      );
+    }
+
+    var schema   = activeSchema(sel);
+    var ver      = sel.versions && sel.versions.length ? sel.versions[sel.versions.length - 1] : null;
+    var isExtracting = sel._status === 'extracting';
+
+    /* Can this user activate / manage this template? */
+    var canActivate = sel.scope === 'org'
+      ? canManageOrg
+      : !!(window.FS && window.FS.can && window.FS.can(caller, 'template:manage:self'));
+
+    /* ── Extracting state ── */
+    if (isExtracting) {
+      return React.createElement('div', { className: 'fs-library__right' },
+        React.createElement('div', { className: 'fs-library__right-header' },
+          React.createElement('h2', { className: 'fs-library__right-title' }, sel.title),
+          Badge && React.createElement(Badge, { tone: RT_TONE[sel.report_type] || 'neutral', label: RT_LABEL[sel.report_type] || sel.report_type }),
+        ),
+        React.createElement('div', { className: 'fs-library__extracting' },
+          React.createElement('div', { className: 'fs-library__extracting-spinner' }),
+          React.createElement('p', { className: 'fs-library__extracting-label' }, 'AI is extracting the template schema…'),
+          React.createElement('p', { className: 'fs-library__extracting-sub' }, 'This usually takes a few seconds. The page will update automatically.'),
+        ),
+      );
+    }
+
+    /* ── No schema yet (should not normally render post-extraction) ── */
+    if (!schema) {
+      return React.createElement('div', { className: 'fs-library__right' },
+        React.createElement('div', { className: 'fs-library__right-header' },
+          React.createElement('h2', { className: 'fs-library__right-title' }, sel.title),
+        ),
+        React.createElement('p', { style: { color: 'var(--text-secondary)', padding: '16px' } }, 'No schema available yet.'),
+      );
+    }
+
+    /* ── B.3 Skip-edit primary path ── */
+    return React.createElement('div', { className: 'fs-library__right' },
+
+      /* Header */
+      React.createElement('div', { className: 'fs-library__right-header' },
+        React.createElement('div', { className: 'fs-library__right-title-row' },
+          React.createElement('h2', { className: 'fs-library__right-title' }, sel.title),
+          sel.active && React.createElement('span', { className: 'fs-library__active-badge' }, 'Active'),
+        ),
+        React.createElement('div', { className: 'fs-library__right-meta' },
+          Badge && React.createElement(Badge, { tone: RT_TONE[sel.report_type] || 'neutral', label: RT_LABEL[sel.report_type] || sel.report_type }),
+          React.createElement('span', { className: 'fs-library__scope-tag' }, sel.scope === 'org' ? 'Org' : 'Personal'),
+        ),
+        sel.description && React.createElement('p', { className: 'fs-library__right-desc' }, sel.description),
+        ver && React.createElement('p', { className: 'fs-library__right-version-note' },
+          'Version ' + sel.versions.length + ' · updated ' + fmtDate(ver.created_at),
+        ),
+      ),
+
+      /* ── Side-by-side: Source vs Extracted schema ── */
+      React.createElement('div', { className: 'fs-library__review-grid' },
+
+        /* Left — source summary (file placeholder since we're mock-only) */
+        React.createElement('div', { className: 'fs-library__review-panel' },
+          React.createElement('h3', { className: 'fs-library__review-panel-title' }, 'Your file'),
+          React.createElement('div', { className: 'fs-library__source-card' },
+            React.createElement('div', { className: 'fs-library__source-icon' }, '📄'),
+            React.createElement('div', { className: 'fs-library__source-info' },
+              React.createElement('span', { className: 'fs-library__source-filename' }, sel.title + '.docx'),
+              React.createElement('span', { className: 'fs-library__source-meta' }, RT_LABEL[sel.report_type] + ' · uploaded ' + fmtDate(sel.created_at)),
+            ),
+          ),
+          React.createElement('p', { className: 'fs-library__review-note' },
+            'AI read your file and identified ' + schema.sections.length + ' section' + (schema.sections.length === 1 ? '' : 's') + ' below.',
+          ),
+        ),
+
+        /* Right — extracted schema */
+        React.createElement('div', { className: 'fs-library__review-panel' },
+          React.createElement('h3', { className: 'fs-library__review-panel-title' }, 'Extracted schema'),
+          React.createElement('ol', { className: 'fs-library__schema-list' },
+            schema.sections.map(function (s, i) {
+              return React.createElement('li', { key: i, className: 'fs-library__schema-item' },
+                React.createElement('span', { className: 'fs-library__schema-kind-icon', title: KIND_LABEL[s.kind] }, KIND_ICON[s.kind] || '•'),
+                React.createElement('div', { className: 'fs-library__schema-item-body' },
+                  React.createElement('span', { className: 'fs-library__schema-item-title' }, s.title),
+                  React.createElement('span', { className: 'fs-library__schema-item-hint' }, s.prompt_hint),
+                ),
+              );
+            }),
+          ),
+        ),
+      ),
+
+      /* ── Test render panel ── */
+      React.createElement(TestRenderPanel, { schema: schema, reportType: sel.report_type }),
+
+      /* ── CTA footer ── */
+      canActivate && !sel.active && React.createElement('div', { className: 'fs-library__cta-footer' },
+        React.createElement(Button, {
+          variant: 'primary',
+          onClick: function () { handleActivate(sel); },
+        }, '✓ Use this template'),
+        React.createElement('p', { className: 'fs-library__cta-note' },
+          'Sets this as the active default for ' + (RT_LABEL[sel.report_type] || sel.report_type).toLowerCase() + ' reports in the ' + sel.scope + ' library.',
+        ),
+      ),
+
+      sel.active && React.createElement('div', { className: 'fs-library__cta-footer fs-library__cta-footer--active' },
+        React.createElement('div', { className: 'fs-library__active-confirm' },
+          React.createElement('span', { className: 'fs-library__active-confirm-icon' }, '✓'),
+          React.createElement('span', null, 'Active default for ' + (RT_LABEL[sel.report_type] || sel.report_type).toLowerCase() + ' reports'),
+        ),
+      ),
+
+    );
+  }
+
+  /* ── Test Render Panel ─────────────────────────────────────────────── */
+
+  function TestRenderPanel(props) {
+    var schema     = props.schema;
+    var expandRef  = React.useState(false);
+    var expanded   = expandRef[0]; var setExpanded = expandRef[1];
+    var Button     = window.FieldSight.Button;
+
+    if (!schema || !schema.sections) return null;
+
+    return React.createElement('div', { className: 'fs-library__test-render' },
+      React.createElement('div', { className: 'fs-library__test-render-header' },
+        React.createElement('span', { className: 'fs-library__test-render-title' }, 'Test render'),
+        React.createElement('span', { className: 'fs-library__test-render-sub' }, 'Preview with sample site data'),
+        React.createElement('button', {
+          className: 'fs-library__test-render-toggle',
+          onClick:   function () { setExpanded(function (e) { return !e; }); },
+          'aria-expanded': expanded,
+        }, expanded ? 'Collapse ▲' : 'Expand ▼'),
+      ),
+
+      expanded && React.createElement('div', { className: 'fs-library__test-render-body' },
+        schema.sections.map(function (sec, i) {
+          return React.createElement('div', { key: i, className: 'fs-library__render-section' },
+            React.createElement('h4', { className: 'fs-library__render-section-title' },
+              React.createElement('span', { className: 'fs-library__render-kind-badge' }, KIND_LABEL[sec.kind] || sec.kind),
+              sec.title,
+            ),
+            renderSectionSample(sec),
+          );
+        }),
+      ),
+    );
+  }
+
+  function renderSectionSample(sec) {
+    switch (sec.kind) {
+      case 'narrative':
+        return React.createElement('p', { className: 'fs-library__render-narrative' }, SAMPLE.narrative);
+
+      case 'list':
+        return React.createElement('ul', { className: 'fs-library__render-list' },
+          SAMPLE.list.map(function (item, i) {
+            return React.createElement('li', { key: i }, item);
+          }),
+        );
+
+      case 'kpi':
+        var fields = sec.fields && sec.fields.length ? sec.fields : Object.keys(SAMPLE.kpi).slice(0, 3);
+        return React.createElement('div', { className: 'fs-library__render-kpi-row' },
+          fields.map(function (f) {
+            return React.createElement('div', { key: f, className: 'fs-library__render-kpi-tile' },
+              React.createElement('span', { className: 'fs-library__render-kpi-value' }, SAMPLE.kpi[f] || '—'),
+              React.createElement('span', { className: 'fs-library__render-kpi-label' }, f.replace(/_/g, ' ')),
+            );
+          }),
+        );
+
+      case 'table':
+        var cols = sec.fields && sec.fields.length ? sec.fields : ['action', 'owner', 'due_date'];
+        return React.createElement('table', { className: 'fs-library__render-table' },
+          React.createElement('thead', null,
+            React.createElement('tr', null,
+              cols.map(function (c) {
+                return React.createElement('th', { key: c }, c.replace(/_/g, ' '));
+              }),
+            ),
+          ),
+          React.createElement('tbody', null,
+            SAMPLE.table.map(function (row, i) {
+              return React.createElement('tr', { key: i },
+                cols.map(function (c) {
+                  return React.createElement('td', { key: c }, row[c] || '—');
+                }),
+              );
+            }),
+          ),
+        );
+
+      case 'photos':
+        return React.createElement('div', { className: 'fs-library__render-photos' },
+          SAMPLE.photos.map(function (label, i) {
+            return React.createElement('div', { key: i, className: 'fs-library__render-photo-thumb' },
+              React.createElement('span', { className: 'fs-library__render-photo-icon' }, '🖼'),
+              React.createElement('span', { className: 'fs-library__render-photo-label' }, label),
+            );
+          }),
+        );
+
+      default:
+        return null;
+    }
+  }
+
+  /* ── Page wrappers ─────────────────────────────────────────────────── */
+
+  function LibraryMiddleWithProvider() {
+    return React.createElement(LibraryProvider, null,
+      React.createElement(LibraryMiddle, null),
+    );
+  }
+
+  function LibraryRightWithProvider() {
+    return React.createElement(LibraryProvider, null,
+      React.createElement(LibraryRight, null),
+    );
+  }
+
+  /* The AppShell instantiates Middle and Right in separate subtrees, so we
+     need a shared context. The pattern used by insights.js is a single
+     Provider wrapping both. AppShell's 3-panel renderer must therefore
+     use the Provider variant. We expose a combined wrapper. */
+
+  function LibraryPage() {
+    return React.createElement(LibraryProvider, null,
+      React.createElement('div', { style: { display: 'contents' } },
+        React.createElement(LibraryMiddle, null),
+        React.createElement(LibraryRight, null),
+      ),
+    );
+  }
+
+  /* AppShell expects { Middle, Right } components that share context via
+     a Provider prop. Follow the pattern of team.js / insights.js:
+     expose Provider, Middle, Right separately so AppShell can wrap them. */
+
+  if (!window.FieldSight)       window.FieldSight = {};
+  if (!window.FieldSight.PAGES) window.FieldSight.PAGES = {};
+
+  window.FieldSight.PAGES['/library'] = {
+    Provider: LibraryProvider,
+    Middle:   LibraryMiddle,
+    Right:    LibraryRight,
+  };
+
+})();

@@ -233,6 +233,8 @@
         P('hazard','create',SCOPES.SELF), P('evidence','view',SCOPES.SELF),
         P('report','view',SCOPES.SELF), P('dashboard','view',SCOPES.SELF),
         P('settings','view',SCOPES.SELF),
+        P('template','manage',SCOPES.SELF),  /* Sprint 10 B.0 — personal library */
+        P('template','view',SCOPES.ORG),     /* Sprint 10 B.0 — view org library */
       ],
     },
     foreman: {
@@ -295,6 +297,7 @@
         P('safety','view',SCOPES.REGION), P('user','manage',SCOPES.REGION),
         P('report','export',SCOPES.REGION), P('regional','view',SCOPES.REGION),
         P('insights','view',SCOPES.REGION),  /* Sprint 9 Track A */
+        P('template','manage',SCOPES.ORG),   /* Sprint 10 B.0 — org library management */
         P('settings','view',SCOPES.SELF),
       ],
     },
@@ -360,6 +363,7 @@
     quality:    { permission: P('quality','view'),    label: 'Quality',    path: '/quality' },
     evidence:   { permission: P('evidence','view'),   label: 'Evidence',   path: '/evidence' },
     reports:    { permission: P('report','view'),     label: 'Reports',    path: '/reports' },
+    library:    { permission: P('template','manage',SCOPES.SELF), label: 'Library', path: '/library' },  /* Sprint 10 B.0 */
 
     /* INSIGHTS — Sprint 9 Track A */
     insights:   { permission: P('insights','view'),   label: 'Insights',   path: '/insights' },

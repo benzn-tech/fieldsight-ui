@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="styles/tokens.css" />
   <link rel="stylesheet" href="styles/app-shell.css?v=8" />
   <link rel="stylesheet" href="styles/components.css?v=6" />
-  <link rel="stylesheet" href="styles/composites.css?v=48" />
+  <link rel="stylesheet" href="styles/composites.css?v=49" />
 
   <style>
     /* Ensure full-bleed with no scroll */
@@ -37,7 +37,7 @@
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 
   <!-- FieldSight globals: tokens + roles (load order matters) -->
-  <script src="scripts/fs-globals.js"></script>
+  <script src="scripts/fs-globals.js?v=2"></script>
   <!-- Sprint 7.0 — theme module (must load after fs-globals, before app-shell) -->
   <script src="scripts/theme.js?v=1"></script>
   <!-- Sprint 7.6 — density module (must load after fs-globals, before app-shell) -->
@@ -48,7 +48,7 @@
   <script src="scripts/auth-mock.js"></script>
 
   <!-- React components (Babel transpiles JSX in-browser) -->
-  <script type="text/babel" src="scripts/left-nav.js?v=8"></script>
+  <script type="text/babel" src="scripts/left-nav.js?v=9"></script>
   <script type="text/babel" src="scripts/drag-divider.js?v=1"></script>
   <script type="text/babel" src="scripts/components/button.js?v=1"></script>
   <script type="text/babel" src="scripts/components/input.js?v=1"></script>
@@ -163,6 +163,8 @@
   <script src="scripts/mock/meeting-minutes.fixture.js?v=1"></script>
   <!-- Sprint 4.4 — Programme MVP fixture -->
   <script src="scripts/mock/programme.fixture.js?v=2"></script>
+  <!-- Sprint 10 B.0 — Template library fixture -->
+  <script src="scripts/mock/templates.fixture.js?v=1"></script>
   <!--   3. Per-endpoint api modules (read fixtures via FS.api.*) -->
   <script src="scripts/api/sites.js?v=1"></script>
   <script src="scripts/api/dates.js?v=1"></script>
@@ -197,6 +199,8 @@
   <script src="scripts/api/user-activity-aggregator.js?v=1"></script>
   <!-- Sprint 4.10 — Today-Programme adapter (today's programme tasks for caller) -->
   <script src="scripts/api/today-programme-adapter.js?v=1"></script>
+  <!-- Sprint 10 B.0 — Template store (LocalStorage-backed template API) -->
+  <script src="scripts/api/template-store.js?v=1"></script>
 
   <!-- Mock data shim (weather only) + page registry + pages -->
   <script type="text/babel" src="scripts/mock-data.js?v=4"></script>
@@ -215,6 +219,10 @@
   <script type="text/babel" src="scripts/pages/team.js?v=3"></script>
   <!-- Sprint 7.3 + 7.6 — /settings page (density toggle added in 7.6) -->
   <script type="text/babel" src="scripts/pages/settings.js?v=4"></script>
+  <!-- Sprint 10 B.2 — Template upload modal composite -->
+  <script type="text/babel" src="scripts/composites/template-upload-modal.js?v=1"></script>
+  <!-- Sprint 10 B.1+B.3 — /library page (template library + skip-edit preview) -->
+  <script type="text/babel" src="scripts/pages/library.js?v=1"></script>
   <!-- Sprint 9 Track A — /insights dashboard (subcontractor + tag analytics) -->
   <script type="text/babel" src="scripts/pages/insights.js?v=4"></script>
   <!-- Sprint 9 Track C — strategic dashboards (Portfolio / Regional / Executive) -->
