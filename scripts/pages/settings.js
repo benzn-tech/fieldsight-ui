@@ -330,6 +330,7 @@
     Middle:   SettingsMiddleColumn,
     Right:    SettingsRightDetail,
     Provider: SettingsProvider,
+    layout:   'full-width',   /* Sprint 10 A — form page; summary panel via RightDrawer */
   };
 
 })();

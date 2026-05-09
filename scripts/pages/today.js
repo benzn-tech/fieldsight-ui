@@ -828,6 +828,7 @@
        so they share TodayContext. Pages without page-level state simply
        omit this and AppShell falls back to React.Fragment. */
     Provider: TodayProvider,
+    layout:   'full-width',   /* Sprint 10 A — feed page; detail via RightDrawer */
   };
 
 })();
