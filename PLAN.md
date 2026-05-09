@@ -104,7 +104,7 @@ not-yet-started carry-overs.
 | **Q-2 vocabulary fold-in for Sprint 9 tag system** | Sprint 9 ships a hard-coded 12-tag vocab. When Q-2 admin-editable vocab system materialises, Insights can swap to a fetched list. Two-sprint stretch; not in Sprint 9. |
 | **Backend per-site timeline endpoint** (`GET /api/timeline?site_id=`) | Sprint 9 Track C aggregator uses `(date × user)` cross-product then groups by `r.site` (option C.1.a). Migrate to per-site fetch when backend exposes; one-aggregator swap, no page rewrite. |
 | **Subcontractor management surface** (CRUD UI for the new subcontractor directory) | Out of Sprint 9 scope; would gate behind a new `subcontractor_admin:manage` permission. |
-| **Library / Template — AI schema-extraction (L-3)** | The `PDF/DOCX → section tree` AI pipeline is held back from the initial Library UI sprint. User has alternative approach in mind; revisit at Sprint 10 kickoff. UI prototype (L-1 + L-2) ships against fixture-stubbed schemas in the meantime — see §6 candidate. |
+| **Library / Template — backend ADE integration (L-3)** | LandingAI ADE chosen at Sprint 10 kickoff (single-API extraction with chunk → section mapping; org-level account; ~50 calls/month cap). Backend-only work: receive multipart upload → proxy to ADE → store original in S3 + parsed schema in DynamoDB → expose to frontend via the API surface defined in §6 candidate B. UI ships in Sprint 10 against fixture-stubbed schemas that mirror ADE shape, so this swap-in is a backend-only change. |
 
 ---
 
@@ -335,55 +335,106 @@ the list visible is the value-prop.
 (it'll render inside RightDrawer), tighten font sizes to match. ~20
 lines × 4 pages.
 
-#### B · Library / Template — UI prototype (L-1 + L-2)
+#### B · Library / Template — UI prototype
 
 Per-company report templates. Each construction firm has its own daily
 report / weekly progress / incident report format. They upload their
 template; future generated reports fit their format. Heidi-Health-style
 clinical-note pattern, applied to construction reporting.
 
-**Architecture (4 layers — see "Sprint 9.5 follow-up · analysis"
-session notes for the full diagram):**
+**Architecture (4 layers):**
 
-1. **L-1 Source upload** — drag-drop `.docx` / `.md` (skip PDF for
-   v1; layout extraction too dirty), original file stored S3-side.
+1. **L-1 Source upload** — drag-drop `.docx` / `.md` / `.pdf` /
+   scanned image, original file stored S3-side.
 2. **L-2 Parsed schema** — `{ sections: [{ title, kind, fields,
    prompt_hint }] }` where `kind ∈ { narrative, list, table, kpi,
-   photos }`. **For L-1/L-2 the parsed schema is fixture-stubbed
-   per uploaded file** — no real AI yet.
-3. **L-3 Mapping layer** — canonical DailyReport → template sections.
-   *Pending; user has alternative approach.* See §2 deferred.
-4. **L-4 Rendered output** — preserve company's logo, footer, page
-   layout. PDF/DOCX export.
+   photos }`. Schema shape mirrors LandingAI ADE chunk output so
+   the L-3 swap-in is a backend-only change.
+3. **L-3 Mapping + extraction** — file → schema via **LandingAI ADE**
+   API (chosen Sprint 10 kickoff). Backend-only integration; key
+   never leaves server. *Sprint 10 ships against fixture-stubbed
+   schemas; real ADE wiring tracked in §2 as a backend follow-up.*
+4. **L-4 Rendered output** — render canonical DailyReport into the
+   chosen template (preserve logo, footer, page layout). PDF/DOCX
+   export.
 
-**Sprint 10 (this branch) ships L-1 + L-2 only**:
-- new `/library` route + page (perm gate `template:manage`,
-  default-on for org admin + gm)
-- `TemplateUploadModal` (drag-drop, file-type detection,
-  fixture-resolved schema preview)
-- `TemplateSchemaEditor` — list of detected sections, user can
-  rename / merge / split / reorder; key UX (Heidi's strongest beat)
-- `TemplateVersionList` — versions per template, last-used date,
-  "set as default" toggle
-- localStorage-backed mock persistence (matches Sprint 8.1 mock-
-  mutation pattern; gated behind `useMocks`)
-- Render preview stub (renders mock template with current daily
-  report's data — proves the data-flow concept works)
+**Two-tier library scope** (decided Sprint 10 kickoff):
 
-**Open product questions to lock at Sprint 10 kickoff:**
-- Q-S10-1 Per-report-type templates (daily / weekly / monthly /
-  incident) or one master? **Default**: per-report-type with
-  `template.report_type` field.
-- Q-S10-2 Multi-version retention — every edit = new version, or
-  overwrite latest? **Default**: new version, immutable history,
-  for old reports' reproducibility.
-- Q-S10-3 Cross-org template sharing? **Default**: NO for v1 (IP
-  + privacy; revisit if community asks).
-- Q-S10-4 Inline AI instructions in template (e.g. "summarise this
-  section in ≤200 words")? **Default**: NO for v1; v2 feature.
+- **Org library** — admin-uploaded templates, visible to every user
+  in the org. Org pays the ADE cost. Has an org-wide "active default"
+  per report-type.
+- **Personal library** — user-uploaded templates, visible only to
+  the uploader. Personal active default overrides org default for
+  that user. Lets a PM keep their own preferred summary format
+  without polluting the org-wide list.
 
-**Size:** One sprint for L-1, half-sprint for L-2. Total ~1.5
-sprints UI-only.
+**Skip-edit UX (cognitive-load mitigation — users may NOT want to
+edit schema):**
+
+The flow is designed so that 90% of users never touch the editor.
+Three-tier fallback:
+1. **Primary path** — after upload + ADE parse, show a side-by-side
+   "your file" vs "what we extracted" preview, then a **Test render**
+   panel that fills the schema with the latest daily-report data.
+   If it reads right, single button "✓ Use this template" saves
+   directly. Done.
+2. **Simple editor** (secondary path) — only three actions: rename
+   section, reorder, delete. No split / merge / nested hierarchy
+   editing in v1 (those are the actions that confuse non-technical
+   users most).
+3. **Start blank fallback** — when ADE fails or returns empty, "Start
+   blank" creates an empty template with 4 generic sections (Summary
+   / Decisions / Actions / Safety) the user can rename. Lets the
+   feature work even when AI extraction breaks.
+
+### Sprint 10 sub-sprint plan (Candidate B = 7 sub-sprints)
+
+| # | Sub-sprint | What ships | Size |
+|---|---|---|---|
+| **B.0** | Stores + perm + scope model | LocalStorage layers for `org_library` + `personal_library`; `template:manage:org` for admin/gm/director; everyone gets `template:manage:self` for personal lib. Template fixture shape: `{ id, scope: 'org'|'personal', report_type, active, versions[] }`. Mock 3 org templates + 1 personal per role. | 0.5 day |
+| **B.1** | `/library` route + page scaffold | Tabs (Org / Personal / All — All is read-only union). 3-panel layout (sidebar nav | template list | template detail). "Active default" badge per report-type. Permission-gated upload button. | 1 day |
+| **B.2** | Upload modal + fixture-stubbed schema | Drag-drop modal with file-type + size validation. Async progress UX (toast + library row marked "Extracting…" during the simulated ADE wait). Stubbed schema response matches ADE shape so L-3 lands without UI rework. | 1 day |
+| **B.3** | Skip-edit primary path + render preview | Side-by-side "source vs extracted schema" view + Test-render panel that fills mock schema with latest DailyReport data. "✓ Use this template" CTA saves + activates in one click. | 1 day |
+| **B.4** | Simple editor (rename / reorder / delete) | Secondary path for users who want to tweak. Only those 3 actions; no split / merge / nesting. | 0.5 day |
+| **B.5** | Version history + author attribution | Each version: `{ id, schema, created_at, created_by_user_id, change_note? }`. Version list view with diff preview. "Restore as new version" creates new entry; old versions read-only. Reports rendered before a version change keep referencing their original version (reproducibility). | 1 day |
+| **B.6** | Output-format selector in `/reports` + DemoTour + components-preview wrap-up | "Output format" dropdown in `/reports` shows Personal first then Org, defaults to whichever has the active flag. New L5 composites registered. DemoTour gains a `/library` step. | 0.5 day |
+
+**Total UI work**: ~5.5 days. Half a sprint, since most of B.* is
+declarative rendering + localStorage state.
+
+### Frontend API surface (mock-only in Sprint 10; backend lands later)
+
+Sprint 10 stubs all of these against localStorage. Backend wiring
+is the Sprint 11+ follow-up tracked in §2.
+
+```
+GET    /api/templates?scope=org|personal|all      list, optionally filtered
+POST   /api/templates                              upload (multipart) → schema parse
+GET    /api/templates/{id}                        full template + active version
+PATCH  /api/templates/{id}/schema                 edit (creates new version)
+POST   /api/templates/{id}/activate               set as default for {scope, report_type}
+DELETE /api/templates/{id}                        soft-delete; versions preserved
+GET    /api/templates/{id}/versions               list versions (id, author, date)
+GET    /api/templates/{id}/versions/{vid}         specific version snapshot
+POST   /api/templates/{id}/versions/{vid}/restore restore (creates new version from old)
+GET    /api/templates/usage?from=&to=             ADE call count for cost cap UI
+```
+
+**Sprint 10 decision points (all locked at kickoff):**
+
+| # | Question | Locked default |
+|---|---|---|
+| Q-S10-1 | Per-report-type templates? | Yes — `template.report_type ∈ {daily, weekly, monthly, incident}` |
+| Q-S10-2 | Version retention? | Every edit = new version, immutable history, for reproducibility |
+| Q-S10-3 | Cross-org sharing? | No for v1 (IP + privacy) |
+| Q-S10-4 | Inline AI instructions in template? | No for v1; v2 feature |
+| Q-S10-5 | ADE API key + cost ownership? | Org-level account; FieldSight-managed key; cost billed to org |
+| Q-S10-6 | Cost cap | 50 ADE calls per org per month (one-off-style use, not steady-state); over-cap shows warning, not auto-charge |
+| Q-S10-7 | Sync vs async UI? | Async + toast notifications; user can leave page during extraction |
+| Q-S10-8 | ADE failure / extraction empty? | Three-tier mitigation (skip-edit primary path, simple editor secondary, "Start blank" fallback). Users may not edit schema; UX must tolerate that. |
+| Q-S10-9 | File types? | Full ADE support: `.pdf`, `.docx`, `.md`, scanned images |
+| Q-S10-10 | Re-run ADE on edit? | No — once user confirms / edits, schema is truth. Re-upload file = new template version. |
+| Q-S10-11 | Personal lib vs org lib precedence? | Both visible side-by-side in `/library`. Personal active default overrides org default for that user; otherwise org default wins. Tracking who uploaded each version is mandatory (`created_by_user_id`). |
 
 ### Backlog (post-primary)
 
