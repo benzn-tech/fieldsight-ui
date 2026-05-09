@@ -131,14 +131,14 @@ supported are evergreen).
 | **6** | Compliance pair — `/safety` + `/quality` + deep-link spotlight + photo carousel | ✅ done (PR #16) |
 | **7** | `/team` + `/settings` + dark-mode polish (theme + density + default-landing prefs) | ✅ done (PR #17) |
 | **8** | Backend integration foundation, write flows, programme deep features, mobile bottom-nav, a11y, search, error/offline, performance, fixture expansion, demo tour, print/share, onboarding | ✅ done (PR #18) |
-| **9** | Insights dashboard (PM-facing safety/quality analytics) + PM-scoped Team page + Strategic dashboards (Portfolio / Regional / Executive) | 🟡 on `claude/sprint9-insights-strategic` |
+| **9** | Insights dashboard (PM-facing safety/quality analytics) + PM-scoped Team page + Strategic dashboards (Portfolio / Regional / Executive) | ✅ done (PR #19) |
 
 Detailed completed/pending/next-phase tracking lives in **`PLAN.md`**.
 
 ## Current State
 
-- **Active branch**: `claude/sprint9-insights-strategic` (Track A → B → C)
-- **Open PRs**: none — Sprint 9 in flight
+- **Active branch**: `claude/sprint10-prep` — planning Sprint 10 (3-panel→2-panel migration + Library/Template UI prototype)
+- **Open PRs**: none — Sprint 9 merged via PR #19; Sprint 10 not yet started
 - **Next**: see `PLAN.md` §6 Next phase candidates
 
 ## Known traps & guardrails

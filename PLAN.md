@@ -104,6 +104,7 @@ not-yet-started carry-overs.
 | **Q-2 vocabulary fold-in for Sprint 9 tag system** | Sprint 9 ships a hard-coded 12-tag vocab. When Q-2 admin-editable vocab system materialises, Insights can swap to a fetched list. Two-sprint stretch; not in Sprint 9. |
 | **Backend per-site timeline endpoint** (`GET /api/timeline?site_id=`) | Sprint 9 Track C aggregator uses `(date × user)` cross-product then groups by `r.site` (option C.1.a). Migrate to per-site fetch when backend exposes; one-aggregator swap, no page rewrite. |
 | **Subcontractor management surface** (CRUD UI for the new subcontractor directory) | Out of Sprint 9 scope; would gate behind a new `subcontractor_admin:manage` permission. |
+| **Library / Template — AI schema-extraction (L-3)** | The `PDF/DOCX → section tree` AI pipeline is held back from the initial Library UI sprint. User has alternative approach in mind; revisit at Sprint 10 kickoff. UI prototype (L-1 + L-2) ships against fixture-stubbed schemas in the meantime — see §6 candidate. |
 
 ---
 
@@ -306,9 +307,85 @@ The two alternatives below were rejected for now, but kept on file:
 
 ## 6 · Next phase candidates
 
-Sprint 9 is now active (see §1 sub-sprint coverage). The list below
-is the post-Sprint-9 menu — threads that could fund Sprint 10+ once
-the current branch lands.
+Sprint 9 merged via PR #19 (Insights + PM Team scope + Strategic
+dashboards + 9.5 redesign pass). Sprint 10 candidates below — primary
+contenders at the top, longer-tail items below.
+
+### Primary candidates (front-of-queue for Sprint 10)
+
+#### A · 3-panel → 2-panel migration (4 pages)
+
+Sprint 9.5 proved the full-width 2-panel pattern (matches `/programme`)
+works well for canvas-heavy pages. The same migration is high-ROI on
+4 more pages where the static right-detail rail is wasted space:
+
+| Page | Why 2-panel wins |
+|---|---|
+| **`/today`** | Today is a feed (brief → urgent → tasks → on-site), not list-detail. Right pane shows placeholder most of the time. |
+| **`/activity`** | User activity stream is read-mostly; per-user drill is a secondary path → RightDrawer fits better. |
+| **`/settings`** | Form, not list-detail. Current right "summary" panel just echoes selected values. |
+| **`/evidence`** | Photo grid lives in middle; lightbox already covers drill-down. 70%-wide grid renders much better than the cramped 4-col right-pane variant. |
+
+**Why keep 3-panel** on `/timeline /tasks /safety /quality /reports
+/sites /team` — all have frequent list↔detail switching where keeping
+the list visible is the value-prop.
+
+**Size:** Half-day. Same Sprint 9.5 commit pattern: add `layout:
+'full-width'` to each page registry, keep existing `Right` component
+(it'll render inside RightDrawer), tighten font sizes to match. ~20
+lines × 4 pages.
+
+#### B · Library / Template — UI prototype (L-1 + L-2)
+
+Per-company report templates. Each construction firm has its own daily
+report / weekly progress / incident report format. They upload their
+template; future generated reports fit their format. Heidi-Health-style
+clinical-note pattern, applied to construction reporting.
+
+**Architecture (4 layers — see "Sprint 9.5 follow-up · analysis"
+session notes for the full diagram):**
+
+1. **L-1 Source upload** — drag-drop `.docx` / `.md` (skip PDF for
+   v1; layout extraction too dirty), original file stored S3-side.
+2. **L-2 Parsed schema** — `{ sections: [{ title, kind, fields,
+   prompt_hint }] }` where `kind ∈ { narrative, list, table, kpi,
+   photos }`. **For L-1/L-2 the parsed schema is fixture-stubbed
+   per uploaded file** — no real AI yet.
+3. **L-3 Mapping layer** — canonical DailyReport → template sections.
+   *Pending; user has alternative approach.* See §2 deferred.
+4. **L-4 Rendered output** — preserve company's logo, footer, page
+   layout. PDF/DOCX export.
+
+**Sprint 10 (this branch) ships L-1 + L-2 only**:
+- new `/library` route + page (perm gate `template:manage`,
+  default-on for org admin + gm)
+- `TemplateUploadModal` (drag-drop, file-type detection,
+  fixture-resolved schema preview)
+- `TemplateSchemaEditor` — list of detected sections, user can
+  rename / merge / split / reorder; key UX (Heidi's strongest beat)
+- `TemplateVersionList` — versions per template, last-used date,
+  "set as default" toggle
+- localStorage-backed mock persistence (matches Sprint 8.1 mock-
+  mutation pattern; gated behind `useMocks`)
+- Render preview stub (renders mock template with current daily
+  report's data — proves the data-flow concept works)
+
+**Open product questions to lock at Sprint 10 kickoff:**
+- Q-S10-1 Per-report-type templates (daily / weekly / monthly /
+  incident) or one master? **Default**: per-report-type with
+  `template.report_type` field.
+- Q-S10-2 Multi-version retention — every edit = new version, or
+  overwrite latest? **Default**: new version, immutable history,
+  for old reports' reproducibility.
+- Q-S10-3 Cross-org template sharing? **Default**: NO for v1 (IP
+  + privacy; revisit if community asks).
+- Q-S10-4 Inline AI instructions in template (e.g. "summarise this
+  section in ≤200 words")? **Default**: NO for v1; v2 feature.
+
+**Size:** One sprint for L-1, half-sprint for L-2. Total ~1.5
+sprints UI-only.
+
+### Backlog (post-primary)
 
 | Candidate | One-liner | Size |
 |---|---|---|
