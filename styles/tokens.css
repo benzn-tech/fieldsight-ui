@@ -547,6 +547,82 @@
                 0 0 0 calc(var(--focus-ring-offset) + var(--focus-ring-width)) var(--focus-ring-color);
 }
 
+/* ==========================================================================
+   Sprint 9.5.6 — Chart fills + per-tag palette (theme-aware)
+   --------------------------------------------------------------------------
+   Chart fills are intentionally deeper than the raw status -500 in
+   light mode (less saturated → more sophisticated for dashboards)
+   and shifted to softer pastels in dark mode (less stimulating
+   against near-black surfaces). Reuses the existing tone shades —
+   no new hex values; just per-theme remap.
+
+   - --fs-chart-{tone}: generic chart fill (used by bar-stack +
+     column-chart + heatmap fallback when col.color is unset)
+   - --fs-tag-{slug}:   per-tag fill for the 12-tag insights vocab
+     (used by heatmap columns + WordCloud's optional color field).
+     Shades shift 200 deeper in light mode, 200 lighter in dark.
+   ========================================================================== */
+
+:root {
+  /* Generic chart fills — light mode: deepened from -500 → -700 */
+  --fs-chart-danger:  var(--color-danger-700);
+  --fs-chart-warning: var(--color-warning-700);
+  --fs-chart-success: var(--color-success-700);
+  --fs-chart-info:    var(--color-info-700);
+  --fs-chart-accent:  var(--color-accent-700);
+
+  /* Per-tag palette — Sprint 9.5.8: SEMANTIC palette.
+     SAFETY tags → all use the canonical safety red (the same
+     red /safety has used since Sprint 6).
+     QUALITY tags → all use the canonical quality blue (the same
+     blue /quality has used since Sprint 6).
+     The 9.5.7 categorical 12-hue experiment was reverted because
+     pairing red + dark-orange in the same chart proved unreadable;
+     and per the SAFETY=red / QUALITY=blue convention now codified
+     in CLAUDE.md, tag-level hue variation under those two
+     semantic anchors hurts more than it helps. Distinct subcontractor
+     fills (bar-stack risk-segmentation, sub-list charts, etc.)
+     stay free to vary their palette ("others random"). */
+  --fs-tag-ppe:                  var(--color-danger-700);
+  --fs-tag-fall_from_height:     var(--color-danger-700);
+  --fs-tag-electrical:           var(--color-danger-700);
+  --fs-tag-hazardous_substances: var(--color-danger-700);
+  --fs-tag-lockout_tagout:       var(--color-danger-700);
+  --fs-tag-housekeeping:         var(--color-danger-700);
+  --fs-tag-plant_machinery:      var(--color-danger-700);
+  --fs-tag-lifting:              var(--color-danger-700);
+  --fs-tag-traffic_pedestrian:   var(--color-danger-700);
+  --fs-tag-working_hot:          var(--color-danger-700);
+  --fs-tag-quality_workmanship:  var(--color-info-700);
+  --fs-tag-quality_compliance:   var(--color-info-700);
+}
+
+[data-theme="dark"] {
+  /* Generic chart fills — dark mode: softer pastels at -300 to
+     keep the canvas calm rather than vivid */
+  --fs-chart-danger:  var(--color-danger-300);
+  --fs-chart-warning: var(--color-warning-300);
+  --fs-chart-success: var(--color-success-300);
+  --fs-chart-info:    var(--color-info-300);
+  --fs-chart-accent:  var(--color-accent-300);
+
+  /* Per-tag palette — dark mode: SAFETY → soft red, QUALITY →
+     soft blue. Same semantic mapping as light, lighter shade for
+     dark-bg readability. */
+  --fs-tag-ppe:                  var(--color-danger-300);
+  --fs-tag-fall_from_height:     var(--color-danger-300);
+  --fs-tag-electrical:           var(--color-danger-300);
+  --fs-tag-hazardous_substances: var(--color-danger-300);
+  --fs-tag-lockout_tagout:       var(--color-danger-300);
+  --fs-tag-housekeeping:         var(--color-danger-300);
+  --fs-tag-plant_machinery:      var(--color-danger-300);
+  --fs-tag-lifting:              var(--color-danger-300);
+  --fs-tag-traffic_pedestrian:   var(--color-danger-300);
+  --fs-tag-working_hot:          var(--color-danger-300);
+  --fs-tag-quality_workmanship:  var(--color-info-300);
+  --fs-tag-quality_compliance:   var(--color-info-300);
+}
+
 .interactive:focus-visible,
 [data-focus-ring]:focus-visible {
   outline: none;

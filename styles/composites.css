@@ -367,7 +367,9 @@
 }
 
 .fs-stat-card__value {
-  font-size: 28px;
+  /* Sprint 9.5.2 — shrunk 28→22 for dense dashboards (still
+     prominent via bold + tabular-nums; 28 was shouting). */
+  font-size: 22px;
   font-weight: var(--font-weight-bold);
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
@@ -390,6 +392,16 @@
 }
 .fs-stat-card__trend--up   { color: var(--color-success-600); }
 .fs-stat-card__trend--down { color: var(--color-danger-600); }
+
+/* Sprint 9 A.1 — generic footer slot for inserting a TrendPill /
+   SparkLine / etc. instead of the built-in arrow caption. */
+.fs-stat-card__footer {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
 
 /* Tone variants colour the headline value */
 .fs-stat-card--tone-accent  .fs-stat-card__value { color: var(--color-accent-600); }
@@ -7027,4 +7039,1224 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 }
 [data-theme="dark"] .fs-user-activity-card__count--info {
   background: rgba(37, 99, 235, 0.15);
+}
+
+
+/* ==========================================================================
+   §INSIGHTS · /insights dashboard + new chart composites (Sprint 9 Track A)
+   --------------------------------------------------------------------------
+   Three new L5 chart primitives (`bar-stack`, `spark-line`,
+   `trend-pill`) + page-level `.fs-insights-*` blocks. All dimensions
+   sized in tokens so dark/density modes inherit cleanly. No CDN
+   dependency — vanilla SVG (Q-S9-5 default).
+   ========================================================================== */
+
+/* ── Page shell ─────────────────────────────────────────────────────── */
+
+.fs-insights {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 0;
+}
+.fs-insights__header {
+  padding: 0 4px;
+}
+.fs-insights__title {
+  margin: 0;
+  font-size: 18px;             /* Sprint 9.5.2 — shrunk 22→18 */
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+}
+.fs-insights__subtitle {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.fs-insights__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 4px;
+}
+.fs-insights__chip {
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--easing-out),
+              background var(--duration-fast) var(--easing-out);
+}
+.fs-insights__chip:hover {
+  background: var(--surface-panel-muted);
+}
+.fs-insights__chip--active {
+  border-color: var(--color-accent-400);
+  background: var(--surface-selected);
+  color: var(--color-accent-700);
+}
+[data-theme="dark"] .fs-insights__chip--active {
+  color: var(--color-accent-300);
+}
+
+.fs-insights__loading,
+.fs-insights__empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.fs-insights__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+}
+.fs-insights__section--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+.fs-insights__section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fs-insights__section-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.fs-insights__section-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.fs-insights__inline-label {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.fs-insights__trend-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.fs-insights__trend-row .fs-insights__section--inline {
+  flex: 1 1 320px;
+}
+
+.fs-insights__clear {
+  background: transparent;
+  border: none;
+  color: var(--color-accent-500);
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  padding: 0;
+}
+.fs-insights__clear:hover {
+  text-decoration: underline;
+}
+
+/* Drill-down rows */
+.fs-insights__rows {
+  list-style: none;
+  margin: 0; padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fs-insights__row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+.fs-insights__row--safety {
+  border-left: 3px solid var(--color-danger-500);
+}
+.fs-insights__row--quality {
+  border-left: 3px solid var(--color-info-500);
+}
+.fs-insights__row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.fs-insights__row-date {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.fs-insights__row-text {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+.fs-insights__row-attrib {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* ── Right detail ──────────────────────────────────────────────────── */
+
+.fs-insights-detail {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+.fs-insights-detail__placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 6px;
+  padding: 40px 24px;
+  color: var(--text-tertiary);
+}
+.fs-insights-detail__placeholder-title {
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+}
+.fs-insights-detail__placeholder-body {
+  font-size: 12px;
+}
+.fs-insights-detail__header { display: flex; flex-direction: column; gap: 4px; }
+.fs-insights-detail__name {
+  margin: 0;
+  font-size: 15px;             /* Sprint 9.5.2 — shrunk 18→15 (drawer is narrow) */
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+}
+.fs-insights-detail__sub {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.fs-insights-detail__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 8px;
+}
+.fs-insights-detail__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+}
+.fs-insights-detail__row:last-child { border-bottom: none; }
+.fs-insights-detail__row-label { color: var(--text-tertiary); }
+.fs-insights-detail__row-value { color: var(--text-primary); font-weight: var(--font-weight-medium); }
+
+
+/* ── BarStack composite ────────────────────────────────────────────── */
+
+.fs-bar-stack {
+  list-style: none;
+  margin: 0; padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fs-bar-stack__empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  padding: 10px 4px;
+  font-style: italic;
+}
+.fs-bar-stack__row {
+  display: grid;
+  grid-template-columns: minmax(140px, 30%) 1fr 56px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  transition: background var(--duration-fast) var(--easing-out);
+}
+.fs-bar-stack__row--clickable {
+  cursor: pointer;
+}
+.fs-bar-stack__row--clickable:hover,
+.fs-bar-stack__row--clickable:focus-visible {
+  background: var(--surface-panel-muted);
+  outline: none;
+}
+.fs-bar-stack__row--selected {
+  background: var(--surface-selected);
+}
+.fs-bar-stack__label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.fs-bar-stack__name {
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.fs-bar-stack__meta {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.fs-bar-stack__track {
+  height: 12px;
+  background: var(--surface-panel-muted);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  position: relative;
+}
+.fs-bar-stack__bar {
+  height: 100%;
+  display: flex;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  transition: width var(--duration-base) var(--easing-out);
+}
+.fs-bar-stack__seg {
+  display: block;
+  height: 100%;
+}
+.fs-bar-stack__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  text-align: right;
+  color: var(--text-secondary);
+}
+
+
+/* ── SparkLine composite ───────────────────────────────────────────── */
+
+.fs-spark-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+.fs-spark-line svg {
+  display: block;
+}
+.fs-spark-line__last {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  flex-shrink: 0;
+}
+.fs-spark-line--empty {
+  background: var(--surface-panel-muted);
+  border-radius: var(--radius-sm);
+}
+
+
+/* ── TrendPill composite ───────────────────────────────────────────── */
+
+.fs-trend-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  background: var(--surface-panel-muted);
+  color: var(--text-secondary);
+}
+.fs-trend-pill__arrow {
+  font-size: 10px;
+  font-weight: var(--font-weight-bold);
+}
+.fs-trend-pill__compare {
+  color: var(--text-tertiary);
+  font-weight: var(--font-weight-normal);
+}
+.fs-trend-pill--success {
+  background: rgba(22, 163, 74, 0.12);
+  color: var(--color-success-700);
+}
+.fs-trend-pill--danger {
+  background: rgba(220, 38, 38, 0.12);
+  color: var(--color-danger-700);
+}
+.fs-trend-pill--neutral {
+  background: var(--surface-panel-muted);
+  color: var(--text-tertiary);
+}
+[data-theme="dark"] .fs-trend-pill--success {
+  background: rgba(22, 163, 74, 0.20);
+  color: var(--color-success-300);
+}
+[data-theme="dark"] .fs-trend-pill--danger {
+  background: rgba(220, 38, 38, 0.20);
+  color: var(--color-danger-300);
+}
+
+
+/* ==========================================================================
+   §TEAM-PM · Sprint 9 Track B — PM-scoped /team additions
+   --------------------------------------------------------------------------
+   Scope caption pill above the user list (visible to PM only) +
+   the inline ReassignModal styling. Modal piggybacks on the
+   existing .fs-modal-overlay scaffold (Sprint 8.5.2 a11y), so
+   focus trap + aria-modal come for free.
+   ========================================================================== */
+
+.fs-team__scope-caption {
+  margin-top: 6px;
+  display: inline-block;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  background: var(--surface-selected);
+  color: var(--color-accent-700);
+  border: 1px solid var(--color-accent-200);
+}
+[data-theme="dark"] .fs-team__scope-caption {
+  color:        var(--color-accent-300);
+  border-color: rgba(255, 107, 53, 0.30);
+}
+
+.fs-team-detail__action-btn--primary {
+  background: var(--color-accent-500);
+  color: #fff;
+  border: 1px solid var(--color-accent-500);
+}
+.fs-team-detail__action-btn--primary:hover {
+  background: var(--color-accent-600);
+  border-color: var(--color-accent-600);
+}
+
+/* ── ReassignModal ─────────────────────────────────────────────────── */
+
+.fs-team-reassign__form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 320px;
+}
+.fs-team-reassign__lead {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.fs-team-reassign__options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fs-team-reassign__option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  background: var(--surface-panel);
+  transition: border-color var(--duration-fast) var(--easing-out),
+              background var(--duration-fast) var(--easing-out);
+}
+.fs-team-reassign__option:hover {
+  background: var(--surface-panel-muted);
+}
+.fs-team-reassign__option--checked {
+  border-color: var(--color-accent-400);
+  background: var(--surface-selected);
+}
+.fs-team-reassign__option input[type="radio"] {
+  flex-shrink: 0;
+  accent-color: var(--color-accent-500);
+}
+.fs-team-reassign__option-text {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.fs-team-reassign__option-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: var(--radius-full);
+  background: var(--surface-panel-muted);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.fs-team-reassign__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.fs-team-reassign__btn {
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--easing-out);
+}
+.fs-team-reassign__btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.fs-team-reassign__btn--ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-default);
+}
+.fs-team-reassign__btn--ghost:hover:not(:disabled) {
+  background: var(--surface-panel-muted);
+}
+.fs-team-reassign__btn--primary {
+  background: var(--color-accent-500);
+  color: #fff;
+  border: 1px solid var(--color-accent-500);
+}
+.fs-team-reassign__btn--primary:hover:not(:disabled) {
+  background: var(--color-accent-600);
+  border-color: var(--color-accent-600);
+}
+
+/* Bare fallback (no ModalOverlay loaded) */
+.fs-team-reassign__inline {
+  padding: 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+  margin-top: 12px;
+}
+.fs-team-reassign__title {
+  font-size: 15px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+
+/* ==========================================================================
+   §STRATEGIC · /portfolio /regional /executive (Sprint 9 Track C)
+   --------------------------------------------------------------------------
+   Three pages share the .fs-strategic__* shell — header / toolbar /
+   trend / section. Two new L5 composites: HealthScore + RollupTable.
+   ========================================================================== */
+
+.fs-strategic {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px 0;
+}
+.fs-strategic__header { padding: 0 4px; }
+.fs-strategic__title {
+  margin: 0;
+  font-size: 18px;             /* Sprint 9.5.2 — shrunk 22→18 */
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+}
+.fs-strategic__subtitle {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.fs-strategic__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 4px;
+}
+.fs-strategic__chip {
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--easing-out),
+              background var(--duration-fast) var(--easing-out);
+}
+.fs-strategic__chip:hover { background: var(--surface-panel-muted); }
+.fs-strategic__chip--active {
+  border-color: var(--color-accent-400);
+  background: var(--surface-selected);
+  color: var(--color-accent-700);
+}
+[data-theme="dark"] .fs-strategic__chip--active { color: var(--color-accent-300); }
+
+.fs-strategic__loading,
+.fs-strategic__empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.fs-strategic__trend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+}
+.fs-strategic__trend-label {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.fs-strategic__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+}
+.fs-strategic__section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fs-strategic__section-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.fs-strategic__section-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* ── Right-detail shared shell ─────────────────────────────────────── */
+
+.fs-strategic-detail {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
+}
+.fs-strategic-detail__placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 6px;
+  padding: 40px 24px;
+  color: var(--text-tertiary);
+}
+.fs-strategic-detail__placeholder-title {
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+}
+.fs-strategic-detail__placeholder-body { font-size: 12px; }
+.fs-strategic-detail__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.fs-strategic-detail__header-text { display: flex; flex-direction: column; gap: 4px; }
+.fs-strategic-detail__name {
+  margin: 0;
+  font-size: 15px;             /* Sprint 9.5.2 — shrunk 18→15 */
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+}
+.fs-strategic-detail__sub {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.fs-strategic-detail__health-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.fs-strategic-detail__rows {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 8px;
+}
+.fs-strategic-detail__rows-header {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  padding: 4px 0 8px;
+}
+.fs-strategic-detail__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+}
+.fs-strategic-detail__row:last-child { border-bottom: none; }
+.fs-strategic-detail__row-label { color: var(--text-tertiary); }
+.fs-strategic-detail__row-value { color: var(--text-primary); font-weight: var(--font-weight-medium); }
+
+.fs-strategic-detail__projects { gap: 6px; padding-top: 12px; }
+.fs-strategic-detail__project {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.fs-strategic-detail__project:last-child { border-bottom: none; }
+.fs-strategic-detail__project-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.fs-strategic-detail__project-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.fs-strategic-detail__actions { margin-top: 4px; }
+.fs-strategic-detail__action-btn {
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-accent-600);
+  border: 1px solid var(--color-accent-400);
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--easing-out);
+}
+.fs-strategic-detail__action-btn:hover {
+  background: var(--surface-selected);
+}
+[data-theme="dark"] .fs-strategic-detail__action-btn { color: var(--color-accent-300); }
+
+/* ── Executive-specific banner ─────────────────────────────────────── */
+
+.fs-executive__banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--surface-panel) 0%, var(--surface-panel-muted) 100%);
+}
+.fs-executive__banner-meta { display: flex; flex-direction: column; gap: 2px; }
+.fs-executive__banner-value {
+  font-family: var(--font-mono);
+  font-size: 20px;             /* Sprint 9.5.2 — shrunk 24→20 */
+  font-weight: var(--font-weight-bold);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.fs-executive__banner-caption {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.fs-executive__notes {
+  padding: 12px 16px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel-muted);
+}
+.fs-executive__notes-title {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  margin-bottom: 6px;
+}
+.fs-executive__notes-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+/* ── HealthScore composite ─────────────────────────────────────────── */
+
+.fs-health-score {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.fs-health-score__ring {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 2px solid;
+  font-weight: var(--font-weight-bold);
+  font-family: var(--font-sans);
+}
+.fs-health-score__label {
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+
+/* ── RollupTable composite ─────────────────────────────────────────── */
+
+.fs-rollup-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-family: var(--font-sans);
+}
+.fs-rollup-table__th {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-default);
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  user-select: none;
+  white-space: nowrap;
+}
+.fs-rollup-table__th--sortable { cursor: pointer; }
+.fs-rollup-table__th--sortable:hover { color: var(--text-secondary); }
+.fs-rollup-table__th--sortable:focus-visible {
+  outline: none;
+  color: var(--color-accent-500);
+}
+.fs-rollup-table__th--sorted-asc,
+.fs-rollup-table__th--sorted-desc { color: var(--color-accent-600); }
+[data-theme="dark"] .fs-rollup-table__th--sorted-asc,
+[data-theme="dark"] .fs-rollup-table__th--sorted-desc { color: var(--color-accent-300); }
+.fs-rollup-table__th--right,
+.fs-rollup-table__td--right { text-align: right; font-variant-numeric: tabular-nums; }
+.fs-rollup-table__th--center,
+.fs-rollup-table__td--center { text-align: center; }
+.fs-rollup-table__sort-arrow { font-size: 10px; }
+
+.fs-rollup-table__row { transition: background var(--duration-fast) var(--easing-out); }
+.fs-rollup-table__row--clickable { cursor: pointer; }
+.fs-rollup-table__row--clickable:hover,
+.fs-rollup-table__row--clickable:focus-visible {
+  background: var(--surface-panel-muted);
+  outline: none;
+}
+.fs-rollup-table__row--selected { background: var(--surface-selected); }
+.fs-rollup-table__td {
+  padding: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+.fs-rollup-table__row:last-child .fs-rollup-table__td { border-bottom: none; }
+.fs-rollup-table__cell-empty { color: var(--text-tertiary); }
+.fs-rollup-table__empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+
+/* ==========================================================================
+   §WORD-CLOUD · Frequency-sized tag cloud (Sprint 9.5.3)
+   --------------------------------------------------------------------------
+   Pure flex-wrap; each <li> declares its own font-size inline (driven
+   by data). Letter-spacing slightly tightened so larger sizes don't
+   look airy.
+
+   Sprint 9.5.6 — words now use the page's normal text colour
+   (theme-aware). Frequency communicates via font-size + the
+   sup-script count digit alone. The 12-tag color field on
+   TAG_VOCAB is still consumed by HeatmapGrid (where one column =
+   one tag and unique hues add information density) but ignored
+   by WordCloud (where 12 hues felt jarring per user review).
+   ========================================================================== */
+
+.fs-word-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: baseline;
+  margin: 0;
+  padding: 12px 4px;
+  list-style: none;
+  line-height: 1.15;
+  /* Pin children to the normal text colour; per-tag colours from
+     the JS-level `color` field are intentionally NOT applied — see
+     §9.5.6 note above. */
+  color: var(--text-primary);
+}
+.fs-word-cloud__empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  padding: 14px 4px;
+  font-style: italic;
+}
+.fs-word-cloud__item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: -0.01em;
+  cursor: default;
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+  transition: opacity var(--duration-fast) var(--easing-out),
+              background var(--duration-fast) var(--easing-out);
+}
+.fs-word-cloud__item--clickable {
+  cursor: pointer;
+}
+.fs-word-cloud__item--clickable:hover,
+.fs-word-cloud__item--clickable:focus-visible {
+  background: var(--surface-panel-muted);
+  outline: none;
+}
+.fs-word-cloud__item--selected {
+  background: var(--surface-selected);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
+.fs-word-cloud__item--faded {
+  opacity: 0.35;
+}
+.fs-word-cloud__count {
+  /* Sprint 9.5.6 — bumped from 0.6em → 0.65em so the frequency
+     number stays legible even on the smallest tags; tertiary
+     text colour keeps the count subordinate to the label. */
+  font-size: 0.65em;
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+  margin-left: 2px;
+  vertical-align: super;
+}
+
+
+/* ==========================================================================
+   §COLUMN-CHART · Vertical bar chart (Sprint 9.5.3)
+   --------------------------------------------------------------------------
+   Flex-row of equal-width columns. Each column = numeric value above,
+   bar (flex-column with stacked segments) in the middle, label below.
+   Tone tokens map to existing --color-{tone}-500.
+   ========================================================================== */
+
+.fs-column-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 4px;
+}
+.fs-column-chart__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-style: italic;
+  background: var(--surface-panel-muted);
+  border-radius: var(--radius-md);
+}
+.fs-column-chart__col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  border-radius: var(--radius-sm);
+  transition: background var(--duration-fast) var(--easing-out);
+}
+.fs-column-chart__col--clickable { cursor: pointer; }
+.fs-column-chart__col--clickable:hover,
+.fs-column-chart__col--clickable:focus-visible {
+  background: var(--surface-panel-muted);
+  outline: none;
+}
+.fs-column-chart__col--selected { background: var(--surface-selected); }
+.fs-column-chart__value {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  width: 100%;
+}
+.fs-column-chart__bar-wrap {
+  width: 70%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+}
+.fs-column-chart__bar {
+  width: 100%;
+  display: flex;
+  flex-direction: column-reverse;       /* segments stack from bottom */
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  transition: height var(--duration-base) var(--easing-out);
+}
+.fs-column-chart__seg {
+  display: block;
+  width: 100%;
+}
+.fs-column-chart__label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  width: 100%;
+  padding-top: 4px;
+}
+
+
+/* ==========================================================================
+   §HEATMAP-GRID · Sub × tag matrix (Sprint 9.5.3)
+   --------------------------------------------------------------------------
+   CSS-grid layout with one row per subcontractor and one column per
+   tag, plus row-label + total. Cell background = per-column tone
+   colour at opacity = (count / maxCount). Empty cells render
+   transparent. Click any non-zero cell to filter.
+   ========================================================================== */
+
+.fs-heatmap-grid {
+  display: grid;
+  gap: 2px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  padding: 4px;
+  background: var(--surface-panel-muted);
+  border-radius: var(--radius-md);
+}
+.fs-heatmap-grid__empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  padding: 14px 4px;
+  font-style: italic;
+}
+.fs-heatmap-grid__corner {
+  background: transparent;
+}
+.fs-heatmap-grid__col-label {
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  text-align: center;
+  padding: 2px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fs-heatmap-grid__col-label--total {
+  color: var(--text-secondary);
+}
+.fs-heatmap-grid__row-label {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 8px 0 4px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--surface-panel);
+  border-radius: var(--radius-sm);
+}
+.fs-heatmap-grid__row-name {
+  font-weight: var(--font-weight-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fs-heatmap-grid__row-sub {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+.fs-heatmap-grid__cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  cursor: default;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+}
+.fs-heatmap-grid__cell--empty { color: var(--text-disabled); }
+.fs-heatmap-grid__cell--clickable { cursor: pointer; }
+.fs-heatmap-grid__cell--clickable:hover,
+.fs-heatmap-grid__cell--clickable:focus-visible {
+  outline: 2px solid var(--color-accent-400);
+  outline-offset: -2px;
+}
+[data-theme="dark"] .fs-heatmap-grid__cell { color: var(--color-neutral-100); }
+.fs-heatmap-grid__row-total {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  background: var(--surface-panel);
+  border-radius: var(--radius-sm);
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+
+/* ==========================================================================
+   §INSIGHTS-LAYOUT · Sprint 9.5.5 full-width 2-column layout
+   --------------------------------------------------------------------------
+   Now that /insights runs full-width (no static right panel), we get
+   the canvas to put related charts side-by-side. .fs-insights__row-2col
+   is a flex grid that wraps to single column on narrow widths; each
+   child is a .fs-insights__section that owns its own card frame.
+   Trend sparklines stack inside their own column to make room for the
+   bar list on the left.
+   ========================================================================== */
+
+.fs-insights__row-2col {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+@media (max-width: 1024px) {
+  .fs-insights__row-2col {
+    grid-template-columns: 1fr;
+  }
+}
+.fs-insights__row-2col > .fs-insights__section { min-width: 0; }
+
+.fs-insights__trend-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+}
+.fs-insights__trend-stack .fs-insights__section--inline {
+  border: none;
+  padding: 6px 0;
+  background: transparent;
+}
+.fs-insights__trend-stack .fs-insights__section--inline:not(:last-child) {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+
+/* ==========================================================================
+   §STRATEGIC-LAYOUT · Sprint 9.5.5 full-width 2-column (portfolio /
+   regional / executive)
+   --------------------------------------------------------------------------
+   Same pattern as §INSIGHTS-LAYOUT — flex grid that wraps to single
+   column at < 1024px. Includes a generic .fs-strategic__chart-card
+   wrapper for inline ColumnChart placements next to a sparkline.
+   ========================================================================== */
+
+.fs-strategic__row-2col {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 12px;
+}
+@media (max-width: 1024px) {
+  .fs-strategic__row-2col {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fs-strategic__chart-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+  min-width: 0;
+}
+.fs-strategic__chart-card-label {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
 }

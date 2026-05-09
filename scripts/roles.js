@@ -176,6 +176,7 @@ export const ROLES = {
       P('quality',   'view',    SCOPES.SITE),
       P('incident',  'capture', SCOPES.SITE),
       P('programme', 'view',    SCOPES.SITE),  // SM views but doesn't manage programme
+      P('insights',  'view',    SCOPES.SITE),  // Sprint 9 Track A — site-scoped insights dashboard
       P('settings',  'view',    SCOPES.SELF),
     ],
   },
@@ -199,6 +200,8 @@ export const ROLES = {
       P('pattern',   'view',    SCOPES.PROJECT),
       P('pm_brief',  'view',    SCOPES.PROJECT),
       P('sites',     'view',    SCOPES.PROJECT),
+      P('insights',  'view',    SCOPES.PROJECT),  // Sprint 9 Track A — project-scoped insights
+      P('user',      'manage',  SCOPES.PROJECT),  // Sprint 9 Track B — PM can see /team for managed sites
       P('settings',  'view',    SCOPES.SELF),
     ],
   },
@@ -219,6 +222,7 @@ export const ROLES = {
       P('commercial', 'view',  SCOPES.MULTI_PROJECT),
       P('evidence',   'export',SCOPES.MULTI_PROJECT),
       P('portfolio',  'view',  SCOPES.MULTI_PROJECT),
+      P('insights',   'view',  SCOPES.MULTI_PROJECT),  // Sprint 9 Track A
       P('settings',   'view',  SCOPES.SELF),
     ],
   },
@@ -239,6 +243,7 @@ export const ROLES = {
       P('user',      'manage', SCOPES.REGION),
       P('report',    'export', SCOPES.REGION),
       P('regional',  'view',   SCOPES.REGION),
+      P('insights',  'view',   SCOPES.REGION),  // Sprint 9 Track A
       P('settings',  'view',   SCOPES.SELF),
     ],
   },
@@ -260,6 +265,7 @@ export const ROLES = {
       P('user',       'manage', SCOPES.ORG),
       P('report',     'export', SCOPES.ORG),
       P('executive',  'view',   SCOPES.ORG),
+      P('insights',   'view',   SCOPES.ORG),    // Sprint 9 Track A
       P('settings',   'view',   SCOPES.SELF),
     ],
   },
@@ -285,6 +291,7 @@ export const ROLES = {
       P('evidence',  'view',    SCOPES.ORG),
       P('evidence',  'export',  SCOPES.ORG),
       P('dashboard', 'view',    SCOPES.ORG),
+      P('insights',  'view',    SCOPES.ORG),    // Sprint 9 Track A — HSE eats their own dog food
       P('settings',  'view',    SCOPES.SELF),
       // NOT pm_brief, portfolio, regional, executive, sites
     ],
@@ -303,6 +310,7 @@ export const ROLES = {
       P('evidence', 'view',   SCOPES.ORG),
       P('evidence', 'export', SCOPES.ORG),
       P('dashboard','view',   SCOPES.ORG),
+      P('insights', 'view',   SCOPES.ORG),     // Sprint 9 Track A
       P('settings', 'view',   SCOPES.SELF),
       // NOT pm_brief, portfolio, regional, executive, sites
     ],

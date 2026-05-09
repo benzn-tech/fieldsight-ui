@@ -24,6 +24,7 @@ const NAV_ICONS_BOTTOM = {
   quality:   'badge-check',
   evidence:  'folder-open',
   reports:   'file-text',
+  insights:  'bar-chart-3',
   sites:     'map-pin',
   team:      'users',
   activity:  'activity',

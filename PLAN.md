@@ -21,7 +21,8 @@ ledger.
 | **5** | Programme operability — drag/edit, kanban, CSV/MS-Project XML import, role gates | ✅ | PR [#15](https://github.com/benzn-tech/fieldsight-ui/pull/15) |
 | **6** | Compliance pair — `/safety` + `/quality` cross-day rollups, deep-link spotlight, photo carousel | ✅ | PR [#16](https://github.com/benzn-tech/fieldsight-ui/pull/16) |
 | **7** | `/team` + `/settings` + dark-mode polish (theme + density + default-landing prefs) | ✅ | PR [#17](https://github.com/benzn-tech/fieldsight-ui/pull/17) |
-| **8** | Backend integration foundation, write flows, programme deep features, mobile bottom-nav, a11y, search, error/offline, performance, fixture expansion, demo tour, print/share, onboarding | 🟡 | branch `claude/sprint8` |
+| **8** | Backend integration foundation, write flows, programme deep features, mobile bottom-nav, a11y, search, error/offline, performance, fixture expansion, demo tour, print/share, onboarding | ✅ | PR [#18](https://github.com/benzn-tech/fieldsight-ui/pull/18) |
+| **9** | Insights dashboard (PM-facing safety/quality analytics) + PM-scoped Team page + Strategic dashboards (Portfolio / Regional / Executive) | 🟡 | branch `claude/sprint9-insights-strategic` |
 
 **Sprint 8 sub-sprint coverage** (audit on `claude/sprint8`):
 
@@ -42,6 +43,45 @@ ledger.
   - Round 2 (`4b43615`): BottomNav portal wrap (kills Programme leak in desktop sidebar); admin fan-out across all users for `/tasks` `/safety` `/quality` `/evidence`; modal `siteId` fallback to first fixture site so admin's "+ Raise Observation" / "+ Log Item" buttons actually open; dark-mode tint overrides for badge subtle / safety+quality range chips / activity-card counters
 - 📋 **Pending** — see §2 below
 
+**Sprint 9 sub-sprint coverage** (in flight on `claude/sprint9-insights-strategic`):
+
+Three tracks landed, then a cross-cutting redesign pass after browser
+review. Recommended sequence executed: Track A → B → C → 9.5.
+
+- ✅ **Track A · Insights dashboard** (PM-facing analytics) — `ae7cf29`
+  - A.0 fixture extension: `subcontractor_id` + closed 12-tag vocabulary on safety/quality records
+  - A.1 `/insights` route + permission + provider + KPI strip
+  - A.2 chart composites: `bar-stack.js` + `spark-line.js` + `trend-pill.js` (vanilla SVG, no CDN dep)
+  - A.3 top-5 subcontractors panel + top-5 tags panel + 14-day trendline
+  - A.4 drill-down filter (click sub or tag → filter rows) + right-detail profile
+- ✅ **Track B · PM Team scope** — `499f550`
+  - B.1 `P('user','manage',SCOPES.PROJECT)` on project_manager (shipped in Track A commit as prerequisite)
+  - B.2 `getCallerManagedSites()` + `userOnSites()` filter in `/team`
+  - B.3 PM-only `ReassignModal` right-detail action with site override map
+- ✅ **Track C · Strategic dashboards** — `415798d`
+  - C.0 spec lock — 3 separate pages (Q-S9-4 default)
+  - C.1 `strategic-aggregator.js` — `(date × user)` fan-out grouped by site/region/org
+  - C.2 `health-score.js` + `rollup-table.js` composites
+  - C.3 `/portfolio` (CM, last 30d)
+  - C.4 `/regional` (GM, last 90d)
+  - C.5 `/executive` (Director, last 90d, org banner + region rollup)
+- ✅ **A.5 + C.6 wrap-up** — `6615a84`
+  - 5 new composites registered in `components-preview.html`
+  - DemoTour `?demo=1` adds `/insights` step
+- ✅ **9.5 · Dashboard redesign pass**
+  - 9.5.1 layout swap (`a2504c4`) → all 4 dashboards full-width 2-panel (matches `/programme`); drill-down moves to RightDrawer
+  - 9.5.2 font-size pass (`a2504c4`): `.fs-stat-card__value` 28→22, page titles 22→18, drawer names 18→15, executive banner 24→20
+  - 9.5.3 three new chart composites (`bd8d4ed`) — `word-cloud.js` / `column-chart.js` / `heatmap-grid.js` (vanilla SVG/HTML, no CDN)
+  - 9.5.4 first-pass 12-color tag palette (`bd8d4ed`) — explicit `color` field per `TAG_VOCAB` entry
+  - 9.5.5 per-page redesigns (`4f33ace`): `/insights` 2×2 chart grid + WordCloud + HeatmapGrid; `/portfolio` `/regional` `/executive` add ColumnChart for health-grade distribution
+  - 9.5.6 theme-aware chart palette + monochrome WordCloud (`e567d18`) — `--fs-chart-{tone}` + `--fs-tag-{slug}` tokens, deep light / soft dark
+  - 9.5.7 categorical 12-hue palette (`9accf09`) — paired red+orange, FAILED user review (unreadable)
+  - 9.5.8 SEMANTIC palette (this commit): SAFETY tags → red (danger-700/300), QUALITY tags → blue (info-700/300). Convention codified in CLAUDE.md.
+
+
+Sprint 9 decision points (Q-S9-1 … Q-S9-7) are tracked in §4. Strong
+defaults documented; locked at Track-A start.
+
 ---
 
 ## 2 · Pending / deferred
@@ -60,6 +100,10 @@ not-yet-started carry-overs.
 | Reverse linking: action-done → programme-progress nudge | Field-test 4.10 first — UX not yet validated. |
 | MS Project `.mpp` binary import | No pure-JS parser exists; either backend conversion service or accept `.xml` only. |
 | Resource-pool conflict detection (beyond per-user over-allocation) | Domain-rule heavy; revisit after over-allocation banner gets real-world feedback. |
+| **BI tool embed** (Looker / Metabase / Power BI on `/insights`) | Sprint 9 Track A ships native vanilla-SVG charts; embedded BI is overkill for the ~15-cell rollup the PM dashboard renders. Reconsider when cross-month / cross-portfolio "regression of weather-vs-safety"–style asks land. |
+| **Q-2 vocabulary fold-in for Sprint 9 tag system** | Sprint 9 ships a hard-coded 12-tag vocab. When Q-2 admin-editable vocab system materialises, Insights can swap to a fetched list. Two-sprint stretch; not in Sprint 9. |
+| **Backend per-site timeline endpoint** (`GET /api/timeline?site_id=`) | Sprint 9 Track C aggregator uses `(date × user)` cross-product then groups by `r.site` (option C.1.a). Migrate to per-site fetch when backend exposes; one-aggregator swap, no page rewrite. |
+| **Subcontractor management surface** (CRUD UI for the new subcontractor directory) | Out of Sprint 9 scope; would gate behind a new `subcontractor_admin:manage` permission. |
 
 ---
 
@@ -106,6 +150,16 @@ synchronised.
     subtle, range chip --active, activity-card count): swap the bg
     to a translucent `rgba(...)` tint and bump text to
     `var(--color-{tone}-200/300)`. See `composites.css §DARK-BADGES`.
+- **SAFETY = red, QUALITY = blue is canonical** across the app.
+  All safety-domain chart fills + tag colours pull from
+  `--color-danger-700/300` (via `--fs-tag-{safety-slug}` and
+  `--fs-chart-danger`). All quality-domain ones pull from
+  `--color-info-700/300`. **Never pair red with deep-orange in the
+  same chart** — Sprint 9.5.7 tried 12 categorical hues and
+  failed user review (unreadable at narrow widths). "Other"
+  categories — subcontractors, projects, regions, programme tasks
+  — are free to vary their palette since they aren't tied to
+  safety/quality semantics. Mirrored to CLAUDE.md.
 
 ### Selection / focus
 
@@ -210,6 +264,21 @@ of UI + a matching backend change.
   scope picker. (Sprint 8.6 added a search palette for entity
   lookup; cross-day Ask is the bigger AI variant.)
 
+### Sprint 9 decision points (lock at Track-A start)
+
+These are "if I get them wrong, I rewrite half the sprint" forks.
+Strong defaults are documented; user can override before A.0 lands.
+
+| # | Question | Default |
+|---|---|---|
+| **Q-S9-1** | Tag taxonomy — closed 12-list now, or pull from Q-2 vocab system later? | Closed 12-list now; Q-2 fold-in is Sprint 10+ |
+| **Q-S9-2** | Subcontractor source — UI-only fixture extension, or wait for backend schema? | UI-only fixture extension; document spec in BACKEND-CONTEXT for later sync |
+| **Q-S9-3** | PM `/team` scope — `managed_sites[]` intersection, or new `project_id` link? | `managed_sites[]` on PM user (simplest path, no new entity) |
+| **Q-S9-4** | Strategic dashboards — 3 separate pages, or 1 page + role-aware scope? | 3 separate pages (matches existing nav slots; clearer audit trail) |
+| **Q-S9-5** | Chart approach — vanilla SVG, or Chart.js UMD? | Vanilla SVG (no build step, theme-token native, ~30 LoC per chart shape) |
+| **Q-S9-6** | BI embed (Looker / Metabase) on `/insights` | Out of Sprint 9; document the future hook |
+| **Q-S9-7** | `/insights` permission — new `insights:view`, or reuse `report:view`? | New `insights:view` (decouples audience from report consumers) |
+
 ---
 
 ## 5 · Design alternatives held for revisit
@@ -237,16 +306,17 @@ The two alternatives below were rejected for now, but kept on file:
 
 ## 6 · Next phase candidates
 
-No active "Sprint 9" plan committed — these are the threads most
-likely to fund the next sprint. The user picks; this section is a
-menu, not a decision.
+Sprint 9 is now active (see §1 sub-sprint coverage). The list below
+is the post-Sprint-9 menu — threads that could fund Sprint 10+ once
+the current branch lands.
 
 | Candidate | One-liner | Size |
 |---|---|---|
 | **Mobile app — today's to-do-list focus** | Purpose-built phone surface, narrower scope than the web shell. Replaces 8.4.3 mobile audit. | Cross-codebase; new repo or sibling tree |
 | **Sprint 8 a11y finishing** | Run axe-core (8.5.1) + manual SR pass (8.5.6); fix anything that fails. | Small-medium; one-off |
+| **Backend wiring for Sprint 9 schema** | Mirror the UI-side `subcontractor_id` + `tags[]` fields (Q-S9-2 default) into the real backend; expose `/api/insights/safety` + `/api/insights/quality` rollup endpoints. | Sprint-sized backend work |
 | **Q-1 Tasks audit aggregation** | Cross-day action tracking + per-action history drawer + completion KPI. | Sprint-sized + backend |
-| **Q-2 Editable reports + vocab** | PATCH `/api/reports`, edit-in-place UI, vocab admin surface. | Two sprints + backend |
+| **Q-2 Editable reports + vocab** | PATCH `/api/reports`, edit-in-place UI, vocab admin surface. Once landed, Sprint 9's hard-coded 12-tag list folds into Q-2. | Two sprints + backend |
 | **Q-3 Photo lifecycle** | Delete + upload, with audit + permission gates. | One sprint + backend |
 | **Q-4 Global Ask** | Cross-day AI query surface; could pair with the Sprint 8.6 search palette. | One sprint + backend |
-| **Sprint 8 PR + merge** | Open PR for `claude/sprint8` and merge into main. | Hours |
+| **BI embed for `/insights`** | Looker / Metabase iframe with Cognito SSO, once cross-month / cross-portfolio analytics needs justify the cost. Hook stays in `/insights` provider state. | One sprint + auth federation |
