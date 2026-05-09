@@ -56,17 +56,20 @@
       title:     'Safety flags with risk levels',
       text:      'Every observation is tagged risk-high / medium / low, and high-risk items are surfaced on Today.',
     },
-    /* Sprint 9 — /insights showcase. Highlights the top-N
-       subcontractors bar so the tour ends on the "spot patterns,
-       not single incidents" pitch. The bar-stack class also exists
-       on /portfolio /regional, but those pages are role-gated;
-       /insights is visible to SM / PM / HSE / QC / GM / director,
-       so it's the safest demo target. */
+    /* Sprint 9 — /insights showcase. */
     {
       route:     '/insights',
       highlight: '.fs-bar-stack',
       title:     'Spot patterns, not single incidents',
       text:      'Insights rolls last-7-day safety + quality issues by subcontractor and tag — PMs spot trends without reading every report.',
+    },
+    /* Sprint 10 B.6 — /library showcase. Every role has template:manage:self so
+       the tab is visible regardless of which role the demo uses. */
+    {
+      route:     '/library',
+      highlight: '.fs-library__list',
+      title:     'Your company\'s report templates',
+      text:      'Upload your own report template — AI extracts the structure so all generated reports match your firm\'s format and branding.',
     },
   ];
 

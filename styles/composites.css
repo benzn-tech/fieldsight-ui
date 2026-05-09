@@ -8953,4 +8953,304 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color: var(--text-tertiary);
   margin: 0;
   max-width: 340px;
+
 }
+
+/* ==========================================================================
+   §LIBRARY-SUBNAV · Sprint 10 B.4/B.5 — Preview / Edit / History sub-nav
+   ========================================================================== */
+
+.fs-library__right-subnav {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  margin-bottom: 2px;
+}
+
+.fs-library__right-tab {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  transition: color var(--duration-fast), border-color var(--duration-fast);
+}
+.fs-library__right-tab:hover { color: var(--text-primary); }
+.fs-library__right-tab--active {
+  color: var(--color-accent-600);
+  border-bottom-color: var(--color-accent-500);
+  font-weight: var(--font-weight-semibold);
+}
+.fs-library__right-tab:focus-visible { outline: 2px solid var(--color-accent-500); outline-offset: -1px; }
+
+/* ==========================================================================
+   §LIBRARY-EDITOR · Sprint 10 B.4 — schema editor (rename / reorder / delete)
+   ========================================================================== */
+
+.fs-library__editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fs-library__editor-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--surface-panelMuted);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--border-default);
+}
+
+.fs-library__editor-section-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fs-library__editor-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  transition: border-color var(--duration-fast);
+}
+.fs-library__editor-section:focus-within { border-color: var(--border-focus); }
+
+.fs-library__editor-kind-tag {
+  font-size: 14px;
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.fs-library__editor-section-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  outline: none;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+}
+.fs-library__editor-section-input:focus { background: var(--surface-input); }
+
+.fs-library__editor-section-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.fs-library__editor-move-btn,
+.fs-library__editor-delete-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-tertiary);
+  transition: background var(--duration-fast), color var(--duration-fast);
+  padding: 0;
+  line-height: 1;
+}
+.fs-library__editor-move-btn:hover:not(:disabled) { background: var(--surface-panelMuted); color: var(--text-secondary); }
+.fs-library__editor-move-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.fs-library__editor-delete-btn:hover:not(:disabled) { background: var(--color-danger-50); color: var(--color-danger-600); }
+.fs-library__editor-delete-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+[data-theme="dark"] .fs-library__editor-delete-btn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--color-danger-300);
+}
+
+.fs-library__editor-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--surface-panelMuted);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.fs-library__editor-change-label {
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+  display: block;
+}
+
+.fs-library__editor-change-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--surface-input);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 5px 8px;
+  outline: none;
+  font-family: inherit;
+  transition: border-color var(--duration-fast);
+}
+.fs-library__editor-change-input:focus { border-color: var(--border-focus); }
+
+.fs-library__editor-error {
+  font-size: 12px;
+  color: var(--text-danger);
+  margin: 0;
+}
+
+.fs-library__editor-actions { display: flex; gap: 8px; align-items: center; }
+
+/* ==========================================================================
+   §LIBRARY-HISTORY · Sprint 10 B.5 — version history + author attribution
+   ========================================================================== */
+
+.fs-library__history {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fs-library__history-intro {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.fs-library__history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fs-library__history-ver {
+  padding: 10px 12px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: background var(--duration-fast);
+}
+.fs-library__history-ver:hover { background: var(--surface-panelMuted); }
+.fs-library__history-ver--selected {
+  background: var(--surface-selected, var(--color-accent-50));
+  border-color: var(--color-accent-200);
+}
+[data-theme="dark"] .fs-library__history-ver--selected {
+  background: rgba(255, 107, 53, 0.08);
+  border-color: rgba(255, 107, 53, 0.25);
+}
+.fs-library__history-ver:focus-visible { outline: 2px solid var(--color-accent-500); outline-offset: 1px; }
+
+.fs-library__history-ver-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fs-library__history-ver-date {
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.fs-library__history-ver-badge {
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-success-700);
+  background: var(--color-success-100);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+}
+[data-theme="dark"] .fs-library__history-ver-badge { color: var(--color-neutral-900); }
+
+.fs-library__history-ver-meta { font-size: 11px; color: var(--text-tertiary); }
+
+.fs-library__history-ver-note { font-size: 11px; color: var(--text-secondary); font-style: italic; }
+
+.fs-library__history-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--surface-panelMuted);
+  border-radius: var(--radius-sm);
+  margin-top: 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.fs-library__history-diff-row { color: var(--text-tertiary); line-height: 1.6; }
+.fs-library__history-diff-removed { color: var(--color-danger-600); }
+.fs-library__history-diff-added   { color: var(--color-success-600); }
+[data-theme="dark"] .fs-library__history-diff-removed { color: var(--color-danger-300); }
+[data-theme="dark"] .fs-library__history-diff-added   { color: var(--color-success-300); }
+
+.fs-library__history-ver-actions { margin-top: 8px; }
+
+/* ==========================================================================
+   §REPORTS-TEMPLATE-SEL · Sprint 10 B.6 — output-format selector in /reports
+   ========================================================================== */
+
+.fs-reports__format {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 4px;
+  flex-wrap: wrap;
+}
+
+.fs-reports__format-label {
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.fs-reports__format-select {
+  flex: 1;
+  min-width: 180px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--surface-input);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 5px 8px;
+  outline: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color var(--duration-fast);
+}
+.fs-reports__format-select:focus { border-color: var(--border-focus); }

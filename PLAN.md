@@ -22,7 +22,8 @@ ledger.
 | **6** | Compliance pair — `/safety` + `/quality` cross-day rollups, deep-link spotlight, photo carousel | ✅ | PR [#16](https://github.com/benzn-tech/fieldsight-ui/pull/16) |
 | **7** | `/team` + `/settings` + dark-mode polish (theme + density + default-landing prefs) | ✅ | PR [#17](https://github.com/benzn-tech/fieldsight-ui/pull/17) |
 | **8** | Backend integration foundation, write flows, programme deep features, mobile bottom-nav, a11y, search, error/offline, performance, fixture expansion, demo tour, print/share, onboarding | ✅ | PR [#18](https://github.com/benzn-tech/fieldsight-ui/pull/18) |
-| **9** | Insights dashboard (PM-facing safety/quality analytics) + PM-scoped Team page + Strategic dashboards (Portfolio / Regional / Executive) | 🟡 | branch `claude/sprint9-insights-strategic` |
+| **9** | Insights dashboard (PM-facing safety/quality analytics) + PM-scoped Team page + Strategic dashboards (Portfolio / Regional / Executive) | ✅ | PR [#19](https://github.com/benzn-tech/fieldsight-ui/pull/19) |
+| **10** | Library / Template UI (B.0–B.6) + 3-panel → 2-panel migration (A) | 🟡 | branch `claude/sprint10-prep` |
 
 **Sprint 8 sub-sprint coverage** (audit on `claude/sprint8`):
 
@@ -81,6 +82,31 @@ review. Recommended sequence executed: Track A → B → C → 9.5.
 
 Sprint 9 decision points (Q-S9-1 … Q-S9-7) are tracked in §4. Strong
 defaults documented; locked at Track-A start.
+
+**Sprint 10 sub-sprint coverage** (in flight on `claude/sprint10-prep`):
+
+- ✅ **Candidate A · 3-panel → 2-panel migration** — `c91e06d`
+  - `/today` `/activity` `/settings` `/evidence` each gain `layout: 'full-width'`; existing Right component moves to RightDrawer; cache busters bumped.
+- ✅ **B.0 Stores + perm + scope model** — `921ff75`
+  - `templates.fixture.js`: 3 org + 1 personal template; ADE schema shape
+  - `template-store.js`: LocalStorage API (list / get / create / updateSchema / activate / delete / listVersions / restore / usageStats); async ADE simulation via `onExtracted` listeners
+  - `roles.js` + `fs-globals.js`: `TEMPLATE` resource; `template:manage:self` (all) / `template:view:org` (all) / `template:manage:org` (gm+)
+- ✅ **B.1 `/library` route + page scaffold** — `921ff75`
+  - `library.js`: LibraryProvider, LibraryMiddle (tabs Org/Personal/All, template list, upload button), LibraryRight
+  - `left-nav.js`: 'library' (book-open icon) in WORKSPACE trailingItems
+- ✅ **B.2 Upload modal + fixture-stubbed schema** — `921ff75`
+  - `template-upload-modal.js`: drag-drop, .pdf/.docx/.md/image, 50 MB cap, idle → uploading → extracting → done phases
+- ✅ **B.3 Skip-edit primary path + render preview** — `921ff75`
+  - Side-by-side "Your file" vs "Extracted schema" grid + Test render panel + "✓ Use this template" CTA
+- ✅ **B.4 Simple editor (rename / reorder / delete)** — this commit
+  - `SchemaEditor` in `library.js`; Preview / Edit / History sub-nav in LibraryRight; Edit tab: rename input, ↑↓ reorder, × delete; save → new version via `updateSchema`; exported as `window.FieldSight.SchemaEditor`
+- ✅ **B.5 Version history + author attribution** — this commit
+  - `VersionHistoryPanel` in `library.js`; History tab: newest-first list, click → diff vs current (= / − / +), "Restore as new version"; exported as `window.FieldSight.VersionHistoryPanel`
+- ✅ **B.6 Output-format selector + DemoTour + wrap-up** — this commit
+  - `TemplateFormatSelector` in `reports.js`: personal first (active ✓), then org; `template_id` included in regenerate payload
+  - DemoTour step 7: `/library` → highlight `.fs-library__list`
+  - `SchemaEditor` + `VersionHistoryPanel` registered in `components-preview.html` with fixture-data demos
+  - composites.css v50; demo-tour.js v3; library.js v2; reports.js v5
 
 ---
 
@@ -395,9 +421,9 @@ Three-tier fallback:
 | **B.1** | `/library` route + page scaffold | Tabs (Org / Personal / All — All is read-only union). 3-panel layout (sidebar nav | template list | template detail). "Active default" badge per report-type. Permission-gated upload button. | 1 day |
 | **B.2** | Upload modal + fixture-stubbed schema | Drag-drop modal with file-type + size validation. Async progress UX (toast + library row marked "Extracting…" during the simulated ADE wait). Stubbed schema response matches ADE shape so L-3 lands without UI rework. | 1 day |
 | **B.3** | Skip-edit primary path + render preview | Side-by-side "source vs extracted schema" view + Test-render panel that fills mock schema with latest DailyReport data. "✓ Use this template" CTA saves + activates in one click. | 1 day |
-| **B.4** | Simple editor (rename / reorder / delete) | Secondary path for users who want to tweak. Only those 3 actions; no split / merge / nesting. | 0.5 day |
-| **B.5** | Version history + author attribution | Each version: `{ id, schema, created_at, created_by_user_id, change_note? }`. Version list view with diff preview. "Restore as new version" creates new entry; old versions read-only. Reports rendered before a version change keep referencing their original version (reproducibility). | 1 day |
-| **B.6** | Output-format selector in `/reports` + DemoTour + components-preview wrap-up | "Output format" dropdown in `/reports` shows Personal first then Org, defaults to whichever has the active flag. New L5 composites registered. DemoTour gains a `/library` step. | 0.5 day |
+| **B.4** ✅ | Simple editor (rename / reorder / delete) | `SchemaEditor` in `library.js` — Preview / Edit / History sub-nav in LibraryRight; Edit tab: rename (text input), reorder (↑↓), delete (×) per section; save creates new version via `updateSchema`; change note input; cancel returns to Preview. Exported as `window.FieldSight.SchemaEditor`. | 0.5 day |
+| **B.5** ✅ | Version history + author attribution | `VersionHistoryPanel` in `library.js` — History tab in LibraryRight; versions displayed newest-first; click to expand diff vs. current schema (= same, − removed, + added later); "Restore as new version" via `restore(id, vid)`; read-only for non-managers. Exported as `window.FieldSight.VersionHistoryPanel`. | 1 day |
+| **B.6** ✅ | Output-format selector in `/reports` + DemoTour + components-preview wrap-up | `TemplateFormatSelector` in `reports.js` — personal templates first (active flagged ✓), then org; default = active template; selected `template_id` included in regenerate payload. DemoTour step 7: `/library` highlighting `.fs-library__list`. `SchemaEditor` + `VersionHistoryPanel` registered in `components-preview.html` with fixture data demos. | 0.5 day |
 
 **Total UI work**: ~5.5 days. Half a sprint, since most of B.* is
 declarative rendering + localStorage state.

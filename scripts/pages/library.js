@@ -148,8 +148,10 @@
       });
     }
 
+    function reload() { setRetry(function (n) { return n + 1; }); }
+
     return React.createElement(LibraryContext.Provider, {
-      value: { caller, canManageOrg, tab, setTab, state, sel, setSel, uploadFor, setUploadFor, handleUploadComplete, handleActivate },
+      value: { caller, canManageOrg, tab, setTab, state, sel, setSel, uploadFor, setUploadFor, handleUploadComplete, handleActivate, reload },
     }, props.children);
   }
 
@@ -272,18 +274,282 @@
     );
   }
 
-  /* ── Right detail (B.3 skip-edit primary path) ─────────────────────── */
+  /* ── B.4 Schema Editor (rename / reorder / delete) ─────────────────── */
+
+  function SchemaEditor(props) {
+    var templateId = props.templateId;
+    var schema     = props.schema;
+    var Button     = window.FieldSight && window.FieldSight.Button;
+
+    var secRef     = React.useState(function () {
+      return (schema.sections || []).map(function (s, i) {
+        return { title: s.title, kind: s.kind, fields: s.fields || [], prompt_hint: s.prompt_hint || '', _key: i };
+      });
+    });
+    var sections    = secRef[0]; var setSections = secRef[1];
+
+    var noteRef     = React.useState('');
+    var changeNote  = noteRef[0]; var setChangeNote = noteRef[1];
+
+    var savingRef   = React.useState(false);
+    var saving      = savingRef[0]; var setSaving = savingRef[1];
+
+    var errRef      = React.useState(null);
+    var saveErr     = errRef[0]; var setSaveErr = errRef[1];
+
+    function moveUp(idx) {
+      if (idx === 0) return;
+      setSections(function (prev) {
+        var next = prev.slice();
+        var t = next[idx - 1]; next[idx - 1] = next[idx]; next[idx] = t;
+        return next;
+      });
+    }
+
+    function moveDown(idx) {
+      setSections(function (prev) {
+        if (idx >= prev.length - 1) return prev;
+        var next = prev.slice();
+        var t = next[idx + 1]; next[idx + 1] = next[idx]; next[idx] = t;
+        return next;
+      });
+    }
+
+    function del(idx) {
+      setSections(function (prev) { return prev.filter(function (_, i) { return i !== idx; }); });
+    }
+
+    function rename(idx, val) {
+      setSections(function (prev) {
+        return prev.map(function (s, i) { return i === idx ? Object.assign({}, s, { title: val }) : s; });
+      });
+    }
+
+    function save() {
+      setSaving(true); setSaveErr(null);
+      var newSchema = { sections: sections.map(function (s) {
+        return { title: s.title, kind: s.kind, fields: s.fields, prompt_hint: s.prompt_hint };
+      })};
+      window.FS.api.templates.updateSchema(templateId, newSchema, changeNote || 'Edited sections').then(function (updated) {
+        setSaving(false);
+        if (props.onSaved) props.onSaved(updated);
+      }).catch(function (err) {
+        setSaving(false);
+        setSaveErr((err && err.message) || 'Could not save');
+      });
+    }
+
+    return React.createElement('div', { className: 'fs-library__editor' },
+
+      React.createElement('p', { className: 'fs-library__editor-hint' },
+        'Rename, reorder, or remove sections. Re-upload to change a section\'s kind or split/merge.'
+      ),
+
+      React.createElement('ol', { className: 'fs-library__editor-section-list' },
+        sections.map(function (sec, idx) {
+          return React.createElement('li', { key: sec._key, className: 'fs-library__editor-section' },
+            React.createElement('span', { className: 'fs-library__editor-kind-tag', title: KIND_LABEL[sec.kind] },
+              KIND_ICON[sec.kind] || '•'
+            ),
+            React.createElement('input', {
+              className:   'fs-library__editor-section-input',
+              value:       sec.title,
+              onChange:    function (e) { rename(idx, e.target.value); },
+              'aria-label': 'Section title',
+              maxLength:   80,
+            }),
+            React.createElement('div', { className: 'fs-library__editor-section-controls' },
+              React.createElement('button', {
+                type: 'button', className: 'fs-library__editor-move-btn',
+                onClick: function () { moveUp(idx); }, disabled: idx === 0,
+                'aria-label': 'Move up', title: 'Move up',
+              }, '↑'),
+              React.createElement('button', {
+                type: 'button', className: 'fs-library__editor-move-btn',
+                onClick: function () { moveDown(idx); }, disabled: idx === sections.length - 1,
+                'aria-label': 'Move down', title: 'Move down',
+              }, '↓'),
+              React.createElement('button', {
+                type: 'button', className: 'fs-library__editor-delete-btn',
+                onClick: function () { del(idx); }, disabled: sections.length <= 1,
+                'aria-label': 'Delete section', title: 'Delete',
+              }, '×'),
+            ),
+          );
+        }),
+      ),
+
+      React.createElement('div', { className: 'fs-library__editor-footer' },
+        React.createElement('label', { className: 'fs-library__editor-change-label' }, 'Change note'),
+        React.createElement('input', {
+          className:   'fs-library__editor-change-input',
+          type:        'text',
+          placeholder: 'e.g. Removed photos section',
+          value:       changeNote,
+          onChange:    function (e) { setChangeNote(e.target.value); },
+          maxLength:   200,
+        }),
+        saveErr && React.createElement('p', { className: 'fs-library__editor-error' }, saveErr),
+        React.createElement('div', { className: 'fs-library__editor-actions' },
+          Button && React.createElement(Button, {
+            variant: 'primary', size: 'sm',
+            onClick: save,
+            disabled: saving || sections.length === 0,
+          }, saving ? 'Saving…' : 'Save changes'),
+          Button && React.createElement(Button, {
+            variant: 'ghost', size: 'sm',
+            onClick: props.onCancel,
+          }, 'Cancel'),
+        ),
+      ),
+
+    );
+  }
+
+  /* ── B.5 Version History Panel ─────────────────────────────────────── */
+
+  function VersionHistoryPanel(props) {
+    var templateId   = props.templateId;
+    var latestSchema = props.latestSchema;
+    var canManage    = props.canManage;
+    var Button       = window.FieldSight && window.FieldSight.Button;
+
+    var loadRef      = React.useState({ status: 'loading', versions: [] });
+    var load         = loadRef[0]; var setLoad = loadRef[1];
+
+    var selVidRef    = React.useState(null);
+    var selVid       = selVidRef[0]; var setSelVid = selVidRef[1];
+
+    var restoringRef = React.useState(false);
+    var restoring    = restoringRef[0]; var setRestoring = restoringRef[1];
+
+    React.useEffect(function () {
+      setLoad({ status: 'loading', versions: [] });
+      window.FS.api.templates.listVersions(templateId).then(function (res) {
+        /* Display newest-first */
+        setLoad({ status: 'ok', versions: (res.versions || []).slice().reverse() });
+      }).catch(function () {
+        setLoad({ status: 'error', versions: [] });
+      });
+    }, [templateId]);
+
+    function diffSections(verSchema) {
+      if (!verSchema || !latestSchema) return null;
+      var vTitles = (verSchema.sections || []).map(function (s) { return s.title; });
+      var lTitles = (latestSchema.sections || []).map(function (s) { return s.title; });
+      return {
+        same:    vTitles.filter(function (t) { return lTitles.indexOf(t) !== -1; }),
+        removed: vTitles.filter(function (t) { return lTitles.indexOf(t) === -1; }),
+        added:   lTitles.filter(function (t) { return vTitles.indexOf(t) === -1; }),
+      };
+    }
+
+    function restore(vid) {
+      setRestoring(true);
+      window.FS.api.templates.restore(templateId, vid).then(function (updated) {
+        setRestoring(false);
+        if (window.FS && window.FS.toast) window.FS.toast.show({ message: 'Restored as a new version', tone: 'success' });
+        if (props.onRestored) props.onRestored(updated);
+      }).catch(function (err) {
+        setRestoring(false);
+        if (window.FS && window.FS.toast) window.FS.toast.show({ message: (err && err.message) || 'Restore failed', tone: 'error' });
+      });
+    }
+
+    if (load.status === 'loading') {
+      return React.createElement('div', { className: 'fs-library__history' },
+        React.createElement('p', { style: { color: 'var(--text-tertiary)', fontSize: '13px', padding: '12px 0' } }, 'Loading…'),
+      );
+    }
+
+    if (load.status === 'error') {
+      return React.createElement('div', { className: 'fs-library__history' },
+        React.createElement('p', { style: { color: 'var(--text-danger)', fontSize: '13px', padding: '12px 0' } }, 'Could not load version history.'),
+      );
+    }
+
+    var versions = load.versions;
+
+    return React.createElement('div', { className: 'fs-library__history' },
+
+      React.createElement('p', { className: 'fs-library__history-intro' },
+        versions.length + ' version' + (versions.length === 1 ? '' : 's') + '. Old versions are read-only — restore creates a new version.'
+      ),
+
+      React.createElement('div', { className: 'fs-library__history-list' },
+        versions.map(function (ver, idx) {
+          var isSelected = ver.id === selVid;
+          var isLatest   = idx === 0;
+          var diff       = isSelected ? diffSections(ver.schema) : null;
+
+          return React.createElement('div', {
+            key:       ver.id,
+            className: 'fs-library__history-ver' + (isSelected ? ' fs-library__history-ver--selected' : ''),
+            onClick:   function () { setSelVid(isSelected ? null : ver.id); },
+            tabIndex:  0,
+            onKeyDown: function (e) { if (e.key === 'Enter' || e.key === ' ') setSelVid(isSelected ? null : ver.id); },
+          },
+            React.createElement('div', { className: 'fs-library__history-ver-header' },
+              React.createElement('span', { className: 'fs-library__history-ver-date' }, fmtDate(ver.created_at)),
+              isLatest && React.createElement('span', { className: 'fs-library__history-ver-badge' }, 'Current'),
+            ),
+            React.createElement('div', { className: 'fs-library__history-ver-meta' },
+              'By ' + (ver.created_by_user_id === 'system' ? 'FieldSight AI' : ver.created_by_user_id),
+            ),
+            ver.change_note && React.createElement('div', { className: 'fs-library__history-ver-note' }, ver.change_note),
+
+            /* Diff panel — expanded on click */
+            isSelected && diff && (diff.same.length || diff.removed.length || diff.added.length)
+              ? React.createElement('div', { className: 'fs-library__history-diff' },
+                  diff.same.map(function (t) {
+                    return React.createElement('div', { key: t, className: 'fs-library__history-diff-row' }, '= ' + t);
+                  }),
+                  diff.removed.map(function (t) {
+                    return React.createElement('div', { key: 'rem-' + t, className: 'fs-library__history-diff-row fs-library__history-diff-removed' }, '− ' + t);
+                  }),
+                  diff.added.map(function (t) {
+                    return React.createElement('div', { key: 'add-' + t, className: 'fs-library__history-diff-row fs-library__history-diff-added' }, '+ ' + t + ' (added later)');
+                  }),
+                )
+              : null,
+
+            /* Restore button */
+            isSelected && !isLatest && canManage && Button
+              ? React.createElement('div', { className: 'fs-library__history-ver-actions' },
+                  React.createElement(Button, {
+                    variant: 'secondary', size: 'sm',
+                    onClick: function (e) { e.stopPropagation(); restore(ver.id); },
+                    disabled: restoring,
+                  }, restoring ? 'Restoring…' : 'Restore as new version'),
+                )
+              : null,
+          );
+        }),
+      ),
+
+    );
+  }
+
+  /* ── Right detail (B.1/B.3/B.4/B.5) ────────────────────────────────── */
 
   function LibraryRight() {
     var ctx = React.useContext(LibraryContext);
+
+    /* All hooks unconditionally before any early return */
+    var viewRef = React.useState('preview');
+    var view    = viewRef[0]; var setView = viewRef[1];
+
+    var selId = ctx && ctx.sel ? ctx.sel.id : null;
+    React.useEffect(function () { setView('preview'); }, [selId]);
+
     if (!ctx) return null;
 
-    var sel             = ctx.sel;
-    var handleActivate  = ctx.handleActivate;
-    var canManageOrg    = ctx.canManageOrg;
-    var caller          = ctx.caller;
-    var Badge           = window.FieldSight.Badge;
-    var Button          = window.FieldSight.Button;
+    var sel            = ctx.sel;
+    var handleActivate = ctx.handleActivate;
+    var canManageOrg   = ctx.canManageOrg;
+    var caller         = ctx.caller;
+    var Badge          = window.FieldSight.Badge;
+    var Button         = window.FieldSight.Button;
 
     /* Empty state */
     if (!sel) {
@@ -292,11 +558,10 @@
       );
     }
 
-    var schema   = activeSchema(sel);
-    var ver      = sel.versions && sel.versions.length ? sel.versions[sel.versions.length - 1] : null;
+    var schema       = activeSchema(sel);
+    var ver          = sel.versions && sel.versions.length ? sel.versions[sel.versions.length - 1] : null;
     var isExtracting = sel._status === 'extracting';
 
-    /* Can this user activate / manage this template? */
     var canActivate = sel.scope === 'org'
       ? canManageOrg
       : !!(window.FS && window.FS.can && window.FS.can(caller, 'template:manage:self'));
@@ -316,7 +581,7 @@
       );
     }
 
-    /* ── No schema yet (should not normally render post-extraction) ── */
+    /* ── No schema yet ── */
     if (!schema) {
       return React.createElement('div', { className: 'fs-library__right' },
         React.createElement('div', { className: 'fs-library__right-header' },
@@ -326,7 +591,7 @@
       );
     }
 
-    /* ── B.3 Skip-edit primary path ── */
+    /* ── Main: Preview / Edit / History ── */
     return React.createElement('div', { className: 'fs-library__right' },
 
       /* Header */
@@ -345,61 +610,104 @@
         ),
       ),
 
-      /* ── Side-by-side: Source vs Extracted schema ── */
-      React.createElement('div', { className: 'fs-library__review-grid' },
+      /* Sub-nav: Preview / Edit / History */
+      React.createElement('div', { className: 'fs-library__right-subnav', role: 'tablist' },
+        React.createElement('button', {
+          type: 'button', role: 'tab', 'aria-selected': view === 'preview',
+          className: 'fs-library__right-tab' + (view === 'preview' ? ' fs-library__right-tab--active' : ''),
+          onClick: function () { setView('preview'); },
+        }, 'Preview'),
+        canActivate ? React.createElement('button', {
+          type: 'button', role: 'tab', 'aria-selected': view === 'editor',
+          className: 'fs-library__right-tab' + (view === 'editor' ? ' fs-library__right-tab--active' : ''),
+          onClick: function () { setView('editor'); },
+        }, 'Edit') : null,
+        React.createElement('button', {
+          type: 'button', role: 'tab', 'aria-selected': view === 'history',
+          className: 'fs-library__right-tab' + (view === 'history' ? ' fs-library__right-tab--active' : ''),
+          onClick: function () { setView('history'); },
+        }, 'History'),
+      ),
 
-        /* Left — source summary (file placeholder since we're mock-only) */
-        React.createElement('div', { className: 'fs-library__review-panel' },
-          React.createElement('h3', { className: 'fs-library__review-panel-title' }, 'Your file'),
-          React.createElement('div', { className: 'fs-library__source-card' },
-            React.createElement('div', { className: 'fs-library__source-icon' }, '📄'),
-            React.createElement('div', { className: 'fs-library__source-info' },
-              React.createElement('span', { className: 'fs-library__source-filename' }, sel.title + '.docx'),
-              React.createElement('span', { className: 'fs-library__source-meta' }, RT_LABEL[sel.report_type] + ' · uploaded ' + fmtDate(sel.created_at)),
-            ),
-          ),
-          React.createElement('p', { className: 'fs-library__review-note' },
-            'AI read your file and identified ' + schema.sections.length + ' section' + (schema.sections.length === 1 ? '' : 's') + ' below.',
-          ),
-        ),
+      /* Body — routed by view */
+      view === 'editor'
+        ? React.createElement(SchemaEditor, {
+            templateId: sel.id,
+            schema:     schema,
+            onSaved:    function (updated) {
+              ctx.setSel(updated); ctx.reload(); setView('preview');
+              if (window.FS && window.FS.toast) window.FS.toast.show({ message: 'Schema saved as a new version', tone: 'success' });
+            },
+            onCancel: function () { setView('preview'); },
+          })
+        : view === 'history'
+        ? React.createElement(VersionHistoryPanel, {
+            templateId:   sel.id,
+            latestSchema: schema,
+            canManage:    canActivate,
+            onRestored:   function (updated) { ctx.setSel(updated); ctx.reload(); setView('preview'); },
+          })
+        : /* preview */
+          React.createElement(React.Fragment, null,
 
-        /* Right — extracted schema */
-        React.createElement('div', { className: 'fs-library__review-panel' },
-          React.createElement('h3', { className: 'fs-library__review-panel-title' }, 'Extracted schema'),
-          React.createElement('ol', { className: 'fs-library__schema-list' },
-            schema.sections.map(function (s, i) {
-              return React.createElement('li', { key: i, className: 'fs-library__schema-item' },
-                React.createElement('span', { className: 'fs-library__schema-kind-icon', title: KIND_LABEL[s.kind] }, KIND_ICON[s.kind] || '•'),
-                React.createElement('div', { className: 'fs-library__schema-item-body' },
-                  React.createElement('span', { className: 'fs-library__schema-item-title' }, s.title),
-                  React.createElement('span', { className: 'fs-library__schema-item-hint' }, s.prompt_hint),
+            /* Side-by-side: Source vs Extracted schema */
+            React.createElement('div', { className: 'fs-library__review-grid' },
+
+              React.createElement('div', { className: 'fs-library__review-panel' },
+                React.createElement('h3', { className: 'fs-library__review-panel-title' }, 'Your file'),
+                React.createElement('div', { className: 'fs-library__source-card' },
+                  React.createElement('div', { className: 'fs-library__source-icon' }, '📄'),
+                  React.createElement('div', { className: 'fs-library__source-info' },
+                    React.createElement('span', { className: 'fs-library__source-filename' }, sel.title + '.docx'),
+                    React.createElement('span', { className: 'fs-library__source-meta' }, RT_LABEL[sel.report_type] + ' · uploaded ' + fmtDate(sel.created_at)),
+                  ),
                 ),
-              );
-            }),
+                React.createElement('p', { className: 'fs-library__review-note' },
+                  'AI read your file and identified ' + schema.sections.length + ' section' + (schema.sections.length === 1 ? '' : 's') + ' below.',
+                ),
+              ),
+
+              React.createElement('div', { className: 'fs-library__review-panel' },
+                React.createElement('h3', { className: 'fs-library__review-panel-title' }, 'Extracted schema'),
+                React.createElement('ol', { className: 'fs-library__schema-list' },
+                  schema.sections.map(function (s, i) {
+                    return React.createElement('li', { key: i, className: 'fs-library__schema-item' },
+                      React.createElement('span', { className: 'fs-library__schema-kind-icon', title: KIND_LABEL[s.kind] }, KIND_ICON[s.kind] || '•'),
+                      React.createElement('div', { className: 'fs-library__schema-item-body' },
+                        React.createElement('span', { className: 'fs-library__schema-item-title' }, s.title),
+                        React.createElement('span', { className: 'fs-library__schema-item-hint' }, s.prompt_hint),
+                      ),
+                    );
+                  }),
+                ),
+              ),
+            ),
+
+            /* Test render panel */
+            React.createElement(TestRenderPanel, { schema: schema, reportType: sel.report_type }),
+
+            /* CTA footer */
+            canActivate && !sel.active
+              ? React.createElement('div', { className: 'fs-library__cta-footer' },
+                  React.createElement(Button, {
+                    variant: 'primary',
+                    onClick: function () { handleActivate(sel); },
+                  }, '✓ Use this template'),
+                  React.createElement('p', { className: 'fs-library__cta-note' },
+                    'Sets this as the active default for ' + (RT_LABEL[sel.report_type] || sel.report_type).toLowerCase() + ' reports in the ' + sel.scope + ' library.',
+                  ),
+                )
+              : null,
+
+            sel.active
+              ? React.createElement('div', { className: 'fs-library__cta-footer fs-library__cta-footer--active' },
+                  React.createElement('div', { className: 'fs-library__active-confirm' },
+                    React.createElement('span', { className: 'fs-library__active-confirm-icon' }, '✓'),
+                    React.createElement('span', null, 'Active default for ' + (RT_LABEL[sel.report_type] || sel.report_type).toLowerCase() + ' reports'),
+                  ),
+                )
+              : null,
           ),
-        ),
-      ),
-
-      /* ── Test render panel ── */
-      React.createElement(TestRenderPanel, { schema: schema, reportType: sel.report_type }),
-
-      /* ── CTA footer ── */
-      canActivate && !sel.active && React.createElement('div', { className: 'fs-library__cta-footer' },
-        React.createElement(Button, {
-          variant: 'primary',
-          onClick: function () { handleActivate(sel); },
-        }, '✓ Use this template'),
-        React.createElement('p', { className: 'fs-library__cta-note' },
-          'Sets this as the active default for ' + (RT_LABEL[sel.report_type] || sel.report_type).toLowerCase() + ' reports in the ' + sel.scope + ' library.',
-        ),
-      ),
-
-      sel.active && React.createElement('div', { className: 'fs-library__cta-footer fs-library__cta-footer--active' },
-        React.createElement('div', { className: 'fs-library__active-confirm' },
-          React.createElement('span', { className: 'fs-library__active-confirm-icon' }, '✓'),
-          React.createElement('span', null, 'Active default for ' + (RT_LABEL[sel.report_type] || sel.report_type).toLowerCase() + ' reports'),
-        ),
-      ),
 
     );
   }
@@ -532,6 +840,9 @@
 
   if (!window.FieldSight)       window.FieldSight = {};
   if (!window.FieldSight.PAGES) window.FieldSight.PAGES = {};
+
+  window.FieldSight.SchemaEditor        = SchemaEditor;
+  window.FieldSight.VersionHistoryPanel = VersionHistoryPanel;
 
   window.FieldSight.PAGES['/library'] = {
     Provider: LibraryProvider,

@@ -118,6 +118,12 @@
   <script type="text/babel" src="scripts/composites/column-chart.js?v=2"></script>
   <script type="text/babel" src="scripts/composites/heatmap-grid.js?v=2"></script>
 
+  <!-- Sprint 10 B.0 — template fixture + store (needed for SchemaEditor / VersionHistoryPanel demos) -->
+  <script src="scripts/mock/templates.fixture.js?v=1"></script>
+  <script src="scripts/api/template-store.js?v=1"></script>
+  <!-- Sprint 10 B.4/B.5 — SchemaEditor + VersionHistoryPanel (exported from library.js) -->
+  <script type="text/babel" src="scripts/pages/library.js?v=2"></script>
+
   <script type="text/babel">
     const { Button, IconButton, Input, Textarea, Select, Card,
             Badge, NotificationDot, Avatar, AvatarGroup,
@@ -131,7 +137,9 @@
             BarStack, SparkLine, TrendPill,
             HealthScore, RollupTable,
             /* Sprint 9.5 — new L5 composites */
-            WordCloud, ColumnChart, HeatmapGrid } = window.FieldSight;
+            WordCloud, ColumnChart, HeatmapGrid,
+            /* Sprint 10 B.4/B.5 — library editor composites */
+            SchemaEditor, VersionHistoryPanel } = window.FieldSight;
 
     function Section({ title, children }) {
       return (
@@ -1450,6 +1458,48 @@
             <Row label="empty">
               <div style={{ flex: 1, minWidth: 0 }}>
                 {HeatmapGrid && <HeatmapGrid rows={[]} cols={[]} matrix={{}} />}
+              </div>
+            </Row>
+          </Section>
+
+          {/* Sprint 10 B.4/B.5 — Library editor composites */}
+
+          <Section title="Sprint 10 · SchemaEditor (B.4)">
+            <Row label="daily template sections">
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {SchemaEditor && <SchemaEditor
+                  templateId="tpl-org-daily-standard"
+                  schema={{
+                    sections: [
+                      { title: 'Daily Summary',   kind: 'narrative', fields: [],                                  prompt_hint: 'Summarise the day' },
+                      { title: 'Workforce',        kind: 'kpi',      fields: ['headcount', 'subcontractors'],    prompt_hint: 'Labour numbers' },
+                      { title: 'Key Decisions',   kind: 'list',      fields: [],                                  prompt_hint: 'Decisions affecting programme' },
+                      { title: 'Open Actions',    kind: 'table',     fields: ['action', 'owner', 'due_date'],    prompt_hint: 'Outstanding tasks' },
+                      { title: 'Photos',          kind: 'photos',    fields: [],                                  prompt_hint: 'Progress photos' },
+                    ],
+                  }}
+                  onSaved={(updated) => alert('Saved! Template now has ' + (updated.versions || []).length + ' version(s)')}
+                  onCancel={() => alert('Cancelled')}
+                />}
+              </div>
+            </Row>
+          </Section>
+
+          <Section title="Sprint 10 · VersionHistoryPanel (B.5)">
+            <Row label="org daily template (1 version)">
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {VersionHistoryPanel && <VersionHistoryPanel
+                  templateId="tpl-org-daily-standard"
+                  latestSchema={{
+                    sections: [
+                      { title: 'Daily Summary', kind: 'narrative', fields: [], prompt_hint: '' },
+                      { title: 'Workforce',      kind: 'kpi',      fields: ['headcount'], prompt_hint: '' },
+                      { title: 'Open Actions',  kind: 'table',     fields: ['action', 'owner'], prompt_hint: '' },
+                    ],
+                  }}
+                  canManage={true}
+                  onRestored={(updated) => alert('Restored! Template now has ' + (updated.versions || []).length + ' version(s)')}
+                />}
               </div>
             </Row>
           </Section>
