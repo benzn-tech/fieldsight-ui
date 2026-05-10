@@ -922,7 +922,10 @@
        so they share TodayContext. Pages without page-level state simply
        omit this and AppShell falls back to React.Fragment. */
     Provider: TodayProvider,
-    layout:   'full-width',   /* Sprint 10 A — feed page; detail via RightDrawer */
+    /* Sprint 10 follow-up — reverted full-width 2-panel back to 3-panel
+       per UX feedback: morning brief + KPIs + tasks + recent activity
+       all want a quiet detail rail rather than a slide-in drawer.
+       Activity / Settings / Evidence keep their 2-panel layout. */
   };
 
 })();

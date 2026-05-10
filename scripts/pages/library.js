@@ -569,6 +569,14 @@
       setSections(function (prev) {
         var node = getAt(prev, dragPath);
         if (!node) return prev;
+        /* 1-level nesting cap — if the dragged node has children and
+           we're trying to nest it, drop those children at top level
+           rather than silently turning them into invisible
+           grand-children. */
+        var effectiveZone = dropZone;
+        if (effectiveZone === 'into' && node.children && node.children.length > 0) {
+          effectiveZone = 'after';  /* refuse the nest, fall back to reorder */
+        }
         var without  = removeAt(prev, dragPath);
         /* Recompute hover path after removal — if drop target's path
            drifts because the source was removed earlier in the tree.
@@ -586,7 +594,7 @@
         var target = getAt(prev, hoverPath);
         var newHover = target ? findPath(without, target._key, '') : null;
         if (!newHover) return prev;
-        return insertAt(without, newHover, dropZone, node);
+        return insertAt(without, newHover, effectiveZone, node);
       });
     }
 
@@ -613,24 +621,43 @@
 
     function onDragStart(p) {
       return function (e) {
+        /* CRITICAL: <li>s are nested (parent contains child <ol> with
+           more <li>s). Without stopPropagation, dragging a child fires
+           the child's onDragStart, then bubbles up and the parent's
+           handler overwrites dragPath to the parent's path — moving
+           the parent (and all its children) instead of the child. The
+           visible effect is "the parent disappears" because it gets
+           folded as a child of the drop target. */
+        e.stopPropagation();
         e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', p);  /* fallback for browsers that need data */
+        e.dataTransfer.setData('text/plain', p);
         setDragPath(p);
       };
     }
     function onDragOver(p) {
       return function (e) {
         e.preventDefault();
+        e.stopPropagation();  /* same nesting reason as onDragStart */
         e.dataTransfer.dropEffect = 'move';
         if (!dragPath) return;
         if (pathStartsWith(p, dragPath)) return;  /* skip self/descendants */
         var rect = e.currentTarget.getBoundingClientRect();
         var y    = e.clientY - rect.top;
         var h    = rect.height;
-        var zone = 'after';
-        if (y < h * 0.30) zone = 'before';
-        else if (y > h * 0.70) zone = 'after';
-        else                   zone = 'into';
+        var isChild = pathToArr(p).length > 1;
+        /* On child targets, never compute 'into' (1-level nesting cap).
+           On top-level targets, tighten 'into' to the middle 20% so
+           reorder is the easy gesture and nest is deliberate. */
+        var zone;
+        if (isChild) {
+          zone = (y < h * 0.5) ? 'before' : 'after';
+        } else if (y < h * 0.40) {
+          zone = 'before';
+        } else if (y > h * 0.60) {
+          zone = 'after';
+        } else {
+          zone = 'into';
+        }
         setHoverPath(p);
         setDropZone(zone);
       };
@@ -638,12 +665,30 @@
     function onDrop() {
       return function (e) {
         e.preventDefault();
+        e.stopPropagation();
         moveByDrag();
         setDragPath(null); setHoverPath(null); setDropZone('after');
       };
     }
     function onDragEnd() {
       setDragPath(null); setHoverPath(null); setDropZone('after');
+    }
+
+    /* Promote a child back to top level — explicit escape hatch since
+       drag-back-to-top is fiddly inside nested <ol>. Inserts the
+       promoted node just after its current parent. */
+    function promote(p) {
+      var parts = pathToArr(p);
+      if (parts.length < 2) return;  /* already top-level */
+      setSections(function (prev) {
+        var node = getAt(prev, p);
+        if (!node) return prev;
+        var without = removeAt(prev, p);
+        var parentIdx = parts[0];
+        var copy = without.slice();
+        copy.splice(parentIdx + 1, 0, Object.assign({}, node, { children: [] }));
+        return copy;
+      });
     }
 
     /* ── Render helpers ──────────────────────────────────────────────── */
@@ -684,6 +729,11 @@
           maxLength:   80,
         }),
         React.createElement('div', { className: 'fs-library__editor-section-controls' },
+          isChild && React.createElement('button', {
+            type: 'button', className: 'fs-library__editor-promote-btn',
+            onClick: function () { promote(p); },
+            'aria-label': 'Promote to top level', title: 'Promote to top level',
+          }, '↤'),
           React.createElement('button', {
             type: 'button', className: 'fs-library__editor-delete-btn',
             onClick: function () { del(p); }, disabled: sections.length <= 1 && !isChild,
@@ -706,7 +756,9 @@
       React.createElement('p', { className: 'fs-library__editor-hint' },
         'Drag the ⋮⋮ handle to reorder. Drop a section ',
         React.createElement('strong', null, 'into the middle'),
-        ' of another to make it a sub-section. Re-upload to change a section\'s kind.'
+        ' of another to make it a sub-section. Use ',
+        React.createElement('strong', null, '↤'),
+        ' on a sub-section to promote it back to top level. Re-upload to change a section\'s kind.'
       ),
 
       React.createElement('ol', { className: 'fs-library__editor-section-list' },

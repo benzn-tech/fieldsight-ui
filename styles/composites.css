@@ -97,17 +97,20 @@
 }
 
 
-/* "View daily report" CTA — full-width banner above MorningBriefCard.
-   Lifted out of the brief card so the action reads as a top-level
-   page CTA (post-merge review feedback). */
+/* "View daily report" CTA — half-width banner above MorningBriefCard.
+   Sprint 10 follow-up: full-width felt outsized for a single "go
+   here" affordance. Half-width keeps the strong primary tone (so it
+   still reads as a top-level CTA) but no longer competes with the
+   brief card below. */
 .fs-today__view-report-cta {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  width: 100%;
+  width: 50%;
+  min-width: 220px;
   margin: 0 0 12px;
-  padding: 12px 16px;
+  padding: 10px 14px;
   font: inherit;
   font-size: 14px;
   font-weight: var(--font-weight-semibold);
@@ -2428,7 +2431,17 @@
    ========================================================================= */
 
 /* Activity page (middle) --------------------------------------------------- */
-.fs-activity { display: flex; flex-direction: column; gap: 12px; }
+/* Sprint 10 follow-up — `/activity` runs in the 2-panel layout, so the
+   middle column otherwise stretches to full content width. The feed
+   reads as overlong at that width; cap it at ~680px and centre. */
+.fs-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 680px;
+  margin: 0 auto;
+  width: 100%;
+}
 
 .fs-activity__header { padding: 0 4px; }
 .fs-activity__title {
@@ -9098,6 +9111,7 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 }
 
 .fs-library__editor-move-btn,
+.fs-library__editor-promote-btn,
 .fs-library__editor-delete-btn {
   width: 24px;
   height: 24px;
@@ -9116,6 +9130,8 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 }
 .fs-library__editor-move-btn:hover:not(:disabled) { background: var(--surface-panelMuted); color: var(--text-secondary); }
 .fs-library__editor-move-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.fs-library__editor-promote-btn { font-size: 14px; }
+.fs-library__editor-promote-btn:hover:not(:disabled) { background: var(--surface-panelMuted); color: var(--color-accent-600); }
 .fs-library__editor-delete-btn:hover:not(:disabled) { background: var(--color-danger-50); color: var(--color-danger-600); }
 .fs-library__editor-delete-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 [data-theme="dark"] .fs-library__editor-delete-btn:hover:not(:disabled) {

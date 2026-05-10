@@ -568,9 +568,17 @@
    ========================================================================== */
 
 :root {
-  /* Generic chart fills — light mode: deepened from -500 → -700 */
+  /* Generic chart fills — light mode: deepened from -500 → -700.
+     Sprint 10 follow-up: warning pinned at -500 instead of -700.
+     The deep brown-amber (#B45309) sat too close in luminance and
+     hue to the deep red (#B91C1C) for medium-vs-high segments inside
+     the same /insights bar to read as distinct categories. -500
+     (#F59E0B) is amber/gold — clearly yellow-leaning, no longer
+     confusable with red. (Deliberately not pushed into orange
+     territory; that was the 9.5.7 collision trap codified in
+     CLAUDE.md "Never pair red with deep-orange".) */
   --fs-chart-danger:  var(--color-danger-700);
-  --fs-chart-warning: var(--color-warning-700);
+  --fs-chart-warning: var(--color-warning-500);
   --fs-chart-success: var(--color-success-700);
   --fs-chart-info:    var(--color-info-700);
   --fs-chart-accent:  var(--color-accent-700);
