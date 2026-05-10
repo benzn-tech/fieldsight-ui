@@ -38,10 +38,14 @@
 
   /* ── Constants ─────────────────────────────────────────────────────── */
 
+  /* Sprint 10 follow-up — tab order changed to All / Organisation /
+     Personal per user review. The tab `key` stays 'org' so the
+     existing scope filter logic + persisted template.scope === 'org'
+     records keep working; only the visible label is "Organisation". */
   var TABS = [
-    { key: 'org',      label: 'Org' },
-    { key: 'personal', label: 'Personal' },
-    { key: 'all',      label: 'All' },
+    { key: 'all',      label: 'All'          },
+    { key: 'org',      label: 'Organisation' },
+    { key: 'personal', label: 'Personal'     },
   ];
 
   var RT_LABEL = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', incident: 'Incident' };
@@ -89,8 +93,12 @@
     var caller    = (window.AuthMock && window.AuthMock.currentUser) || {};
     var canManageOrg = window.FS && window.FS.can && window.FS.can(caller, 'template:manage:org');
 
-    var tabRef    = React.useState('org');
+    var tabRef    = React.useState('all');   /* Sprint 10 follow-up — default 'all' */
     var tab       = tabRef[0]; var setTab = tabRef[1];
+
+    /* Sprint 10 follow-up — favourites pin list (per-user, max 6). */
+    var favRef    = React.useState([]);
+    var favIds    = favRef[0]; var setFavIds = favRef[1];
 
     var stateRef  = React.useState({ status: 'loading', rows: [] });
     var state     = stateRef[0]; var setState = stateRef[1];
@@ -116,6 +124,31 @@
 
     /* Initial load + re-load when tab or retry changes */
     React.useEffect(function () { load(); }, [tab, retry]);
+
+    /* Sprint 10 follow-up — load favourites once + on retry */
+    React.useEffect(function () {
+      if (!window.FS.api.templates.getFavourites) return;
+      window.FS.api.templates.getFavourites().then(function (ids) {
+        setFavIds(ids || []);
+      });
+    }, [retry]);
+
+    function toggleFavourite(id) {
+      window.FS.api.templates.toggleFavourite(id).then(function (next) {
+        setFavIds(next || []);
+        if (window.FS && window.FS.toast) {
+          var nowFav = (next || []).indexOf(id) >= 0;
+          window.FS.toast.show({
+            message: nowFav ? 'Added to Favourites' : 'Removed from Favourites',
+            tone:    nowFav ? 'success' : 'info',
+          });
+        }
+      }).catch(function () {
+        if (window.FS && window.FS.toast) {
+          window.FS.toast.show({ message: 'Favourites cap reached (6)', tone: 'warning' });
+        }
+      });
+    }
 
     /* Listen for ADE extraction completions to auto-refresh */
     React.useEffect(function () {
@@ -151,7 +184,12 @@
     function reload() { setRetry(function (n) { return n + 1; }); }
 
     return React.createElement(LibraryContext.Provider, {
-      value: { caller, canManageOrg, tab, setTab, state, sel, setSel, uploadFor, setUploadFor, handleUploadComplete, handleActivate, reload },
+      value: {
+        caller, canManageOrg, tab, setTab, state, sel, setSel,
+        uploadFor, setUploadFor, handleUploadComplete, handleActivate, reload,
+        /* Sprint 10 follow-up — favourites */
+        favIds, toggleFavourite,
+      },
     }, props.children);
   }
 
@@ -208,6 +246,9 @@
         }),
       ),
 
+      /* Sprint 10 follow-up — Favourites row (Heidi-style pin shelf) */
+      React.createElement(FavouritesRow, { ctx: ctx }),
+
       /* Body */
       state.status === 'loading' && React.createElement('div', { className: 'fs-library__loading' },
         React.createElement('div', { className: 'fs-library__skeleton' }),
@@ -231,6 +272,7 @@
           var isSelected   = sel && sel.id === tpl.id;
           var isExtracting = tpl._status === 'extracting';
           var hasSchema    = tpl.versions && tpl.versions.length > 0;
+          var isFav        = (ctx.favIds || []).indexOf(tpl.id) >= 0;
 
           return React.createElement('div', {
             key:          tpl.id,
@@ -257,6 +299,15 @@
                 activeSchema(tpl) ? activeSchema(tpl).sections.length + ' sections' : '',
               ),
             ),
+            /* Sprint 10 follow-up — favourite toggle (right-aligned star). */
+            React.createElement('button', {
+              type:        'button',
+              className:   'fs-library__row-fav' + (isFav ? ' fs-library__row-fav--on' : ''),
+              onClick:     function (e) { e.stopPropagation(); ctx.toggleFavourite(tpl.id); },
+              'aria-label': isFav ? 'Remove from favourites' : 'Add to favourites',
+              'aria-pressed': isFav,
+              title:       isFav ? 'Remove from favourites' : 'Add to favourites',
+            }, isFav ? '★' : '☆'),
           );
         }),
       ),
@@ -274,6 +325,89 @@
     );
   }
 
+  /* ── Sprint 10 follow-up · Favourites row (Heidi-style pin shelf) ───── */
+
+  function FavouritesRow(props) {
+    var ctx = props.ctx;
+    if (!ctx) return null;
+    var Badge = window.FieldSight.Badge;
+    var FAV_CAP = (window.FS.api.templates && window.FS.api.templates.FAVOURITES_CAP) || 6;
+
+    /* Resolve favourite IDs against the loaded rows; templates not in
+       the current tab still show (we union across scopes) so the pin
+       shelf is stable as the user toggles between Org / Personal. */
+    var allRows = ctx.state && ctx.state.rows ? ctx.state.rows : [];
+    var pinned  = (ctx.favIds || [])
+      .map(function (id) {
+        return allRows.filter(function (r) { return r.id === id; })[0];
+      })
+      .filter(Boolean);
+
+    /* Hide the row entirely on the All tab when nothing is favourited
+       — feels less empty than showing 6 dotted slots before the user
+       has started using the feature. */
+    if (pinned.length === 0 && (ctx.favIds || []).length === 0) {
+      /* Show one "empty hint" tile so the feature is discoverable. */
+      return React.createElement('div', { className: 'fs-library__favs-row fs-library__favs-row--empty' },
+        React.createElement('div', { className: 'fs-library__favs-label' }, 'Favourites'),
+        React.createElement('div', { className: 'fs-library__favs-tiles' },
+          React.createElement('div', { className: 'fs-library__favs-empty-hint' },
+            'Tap the ☆ on any template to pin it here for one-click access.'
+          ),
+        ),
+      );
+    }
+
+    var emptySlots = Math.max(0, FAV_CAP - pinned.length);
+
+    return React.createElement('div', { className: 'fs-library__favs-row' },
+      React.createElement('div', { className: 'fs-library__favs-label' }, 'Favourites'),
+      React.createElement('div', { className: 'fs-library__favs-tiles' },
+        pinned.map(function (tpl) {
+          return React.createElement('button', {
+            key:        tpl.id,
+            type:       'button',
+            className:  'fs-library__fav-tile',
+            onClick:    function () { ctx.setSel(tpl); },
+            title:      tpl.title + ' · ' + (RT_LABEL[tpl.report_type] || tpl.report_type),
+          },
+            React.createElement('span', { className: 'fs-library__fav-tile-name' },
+              tpl.title),
+            React.createElement('span', { className: 'fs-library__fav-tile-meta' },
+              Badge && React.createElement(Badge, {
+                tone:  RT_TONE[tpl.report_type] || 'neutral',
+                label: RT_LABEL[tpl.report_type] || tpl.report_type,
+                size:  'xs',
+              }),
+              tpl.scope === 'personal'
+                ? React.createElement('span', { className: 'fs-library__personal-tag' }, 'Personal')
+                : null,
+            ),
+            React.createElement('span', {
+              className: 'fs-library__fav-tile-unpin',
+              onClick:   function (e) { e.stopPropagation(); ctx.toggleFavourite(tpl.id); },
+              role:      'button',
+              tabIndex:  0,
+              onKeyDown: function (e) {
+                if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); ctx.toggleFavourite(tpl.id); }
+              },
+              title:    'Remove from favourites',
+              'aria-label': 'Remove from favourites',
+            }, '×'),
+          );
+        }),
+        /* Empty slots — visual rhythm + invitation to add more */
+        Array.from({ length: emptySlots }).map(function (_, i) {
+          return React.createElement('div', {
+            key:       'empty-' + i,
+            className: 'fs-library__fav-tile fs-library__fav-tile--empty',
+            'aria-hidden': true,
+          }, '+');
+        }),
+      ),
+    );
+  }
+
   /* ── B.4 Schema Editor (rename / reorder / delete) ─────────────────── */
 
   function SchemaEditor(props) {
@@ -281,10 +415,24 @@
     var schema     = props.schema;
     var Button     = window.FieldSight && window.FieldSight.Button;
 
+    /* Sprint 10 follow-up — sections now support 1-level nesting via
+       a `children: []` array. Init preserves any existing children;
+       backwards-compat with flat schemas (children defaults to []). */
     var secRef     = React.useState(function () {
-      return (schema.sections || []).map(function (s, i) {
-        return { title: s.title, kind: s.kind, fields: s.fields || [], prompt_hint: s.prompt_hint || '', _key: i };
-      });
+      var counter = { n: 0 };
+      function tagKeys(arr) {
+        return (arr || []).map(function (s) {
+          return {
+            title:       s.title,
+            kind:        s.kind,
+            fields:      s.fields || [],
+            prompt_hint: s.prompt_hint || '',
+            children:    tagKeys(s.children || []),
+            _key:        counter.n++,
+          };
+        });
+      }
+      return tagKeys(schema.sections || []);
     });
     var sections    = secRef[0]; var setSections = secRef[1];
 
@@ -297,39 +445,161 @@
     var errRef      = React.useState(null);
     var saveErr     = errRef[0]; var setSaveErr = errRef[1];
 
-    function moveUp(idx) {
-      if (idx === 0) return;
+    /* Drag state — current dragged path + current hover target +
+       drop zone within target ('before' | 'into' | 'after'). */
+    var dragRef    = React.useState(null);
+    var dragPath   = dragRef[0]; var setDragPath = dragRef[1];
+
+    var hoverRef   = React.useState(null);
+    var hoverPath  = hoverRef[0]; var setHoverPath = hoverRef[1];
+
+    var zoneRef    = React.useState('after');
+    var dropZone   = zoneRef[0]; var setDropZone = zoneRef[1];
+
+    /* ── Path helpers (path = 'i' or 'i.j') ──────────────────────────── */
+
+    function pathToArr(p)      { return p.split('.').map(Number); }
+    function pathEq(a, b)      { return a === b; }
+    function pathStartsWith(child, parent) {
+      return child === parent || child.indexOf(parent + '.') === 0;
+    }
+    function getAt(arr, p) {
+      var idx = pathToArr(p);
+      var cur = arr;
+      var node = null;
+      for (var i = 0; i < idx.length; i++) {
+        node = cur[idx[i]];
+        if (!node) return null;
+        cur = node.children || [];
+      }
+      return node;
+    }
+    function removeAt(arr, p) {
+      var idx = pathToArr(p);
+      function rec(list, i) {
+        var copy = list.slice();
+        if (i === idx.length - 1) {
+          copy.splice(idx[i], 1);
+          return copy;
+        }
+        copy[idx[i]] = Object.assign({}, copy[idx[i]], {
+          children: rec(copy[idx[i]].children || [], i + 1),
+        });
+        return copy;
+      }
+      return rec(arr, 0);
+    }
+    function insertAt(arr, p, position, item) {
+      /* position: 'before' | 'after' | 'into' (last child of node at p) */
+      var idx = pathToArr(p);
+      function rec(list, i) {
+        var copy = list.slice();
+        if (i === idx.length - 1) {
+          if (position === 'before')      copy.splice(idx[i], 0, item);
+          else if (position === 'after')  copy.splice(idx[i] + 1, 0, item);
+          else if (position === 'into') {
+            /* Append into the target's children. Only allow nesting
+               at top level (don't make grand-children → keeps 1-level
+               cap) — if target is already a child, treat as 'after'. */
+            if (i > 0) {
+              copy.splice(idx[i] + 1, 0, item);
+            } else {
+              var withChildren = Object.assign({}, copy[idx[i]], {
+                children: (copy[idx[i]].children || []).concat([item]),
+              });
+              copy[idx[i]] = withChildren;
+            }
+          }
+          return copy;
+        }
+        copy[idx[i]] = Object.assign({}, copy[idx[i]], {
+          children: rec(copy[idx[i]].children || [], i + 1),
+        });
+        return copy;
+      }
+      return rec(arr, 0);
+    }
+
+    /* ── Mutations ───────────────────────────────────────────────────── */
+
+    function rename(p, val) {
       setSections(function (prev) {
-        var next = prev.slice();
-        var t = next[idx - 1]; next[idx - 1] = next[idx]; next[idx] = t;
-        return next;
+        var idx = pathToArr(p);
+        function rec(list, i) {
+          var copy = list.slice();
+          if (i === idx.length - 1) {
+            copy[idx[i]] = Object.assign({}, copy[idx[i]], { title: val });
+            return copy;
+          }
+          copy[idx[i]] = Object.assign({}, copy[idx[i]], {
+            children: rec(copy[idx[i]].children || [], i + 1),
+          });
+          return copy;
+        }
+        return rec(prev, 0);
       });
     }
 
-    function moveDown(idx) {
+    function del(p) {
       setSections(function (prev) {
-        if (idx >= prev.length - 1) return prev;
-        var next = prev.slice();
-        var t = next[idx + 1]; next[idx + 1] = next[idx]; next[idx] = t;
-        return next;
+        /* Promote children to the deleted node's level rather than
+           dropping them — gives the user a recoverable result if they
+           delete a parent by accident. */
+        var node = getAt(prev, p);
+        var children = (node && node.children) || [];
+        var without  = removeAt(prev, p);
+        if (children.length === 0) return without;
+        /* Insert children at deleted parent's position. */
+        var parts = pathToArr(p);
+        if (parts.length === 1) {
+          /* Top-level delete — splice children at idx */
+          var copy = without.slice();
+          copy.splice.apply(copy, [parts[0], 0].concat(children.map(function (c) {
+            return Object.assign({}, c, { children: [] });
+          })));
+          return copy;
+        }
+        return without;
       });
     }
 
-    function del(idx) {
-      setSections(function (prev) { return prev.filter(function (_, i) { return i !== idx; }); });
-    }
-
-    function rename(idx, val) {
+    function moveByDrag() {
+      if (!dragPath || !hoverPath || dragPath === hoverPath) return;
+      if (pathStartsWith(hoverPath, dragPath)) return;  /* prevent dropping onto self/descendant */
       setSections(function (prev) {
-        return prev.map(function (s, i) { return i === idx ? Object.assign({}, s, { title: val }) : s; });
+        var node = getAt(prev, dragPath);
+        if (!node) return prev;
+        var without  = removeAt(prev, dragPath);
+        /* Recompute hover path after removal — if drop target's path
+           drifts because the source was removed earlier in the tree.
+           Simpler safe approach: re-insert relative to the original
+           target by id, not path. Since _key is unique, find it: */
+        function findPath(list, key, base) {
+          for (var i = 0; i < list.length; i++) {
+            var p = base ? base + '.' + i : '' + i;
+            if (list[i]._key === key) return p;
+            var inChild = findPath(list[i].children || [], key, p);
+            if (inChild) return inChild;
+          }
+          return null;
+        }
+        var target = getAt(prev, hoverPath);
+        var newHover = target ? findPath(without, target._key, '') : null;
+        if (!newHover) return prev;
+        return insertAt(without, newHover, dropZone, node);
       });
     }
 
     function save() {
       setSaving(true); setSaveErr(null);
-      var newSchema = { sections: sections.map(function (s) {
-        return { title: s.title, kind: s.kind, fields: s.fields, prompt_hint: s.prompt_hint };
-      })};
+      function strip(arr) {
+        return arr.map(function (s) {
+          var out = { title: s.title, kind: s.kind, fields: s.fields, prompt_hint: s.prompt_hint };
+          if (s.children && s.children.length) out.children = strip(s.children);
+          return out;
+        });
+      }
+      var newSchema = { sections: strip(sections) };
       window.FS.api.templates.updateSchema(templateId, newSchema, changeNote || 'Edited sections').then(function (updated) {
         setSaving(false);
         if (props.onSaved) props.onSaved(updated);
@@ -339,43 +609,109 @@
       });
     }
 
+    /* ── Drag handlers ───────────────────────────────────────────────── */
+
+    function onDragStart(p) {
+      return function (e) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', p);  /* fallback for browsers that need data */
+        setDragPath(p);
+      };
+    }
+    function onDragOver(p) {
+      return function (e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (!dragPath) return;
+        if (pathStartsWith(p, dragPath)) return;  /* skip self/descendants */
+        var rect = e.currentTarget.getBoundingClientRect();
+        var y    = e.clientY - rect.top;
+        var h    = rect.height;
+        var zone = 'after';
+        if (y < h * 0.30) zone = 'before';
+        else if (y > h * 0.70) zone = 'after';
+        else                   zone = 'into';
+        setHoverPath(p);
+        setDropZone(zone);
+      };
+    }
+    function onDrop() {
+      return function (e) {
+        e.preventDefault();
+        moveByDrag();
+        setDragPath(null); setHoverPath(null); setDropZone('after');
+      };
+    }
+    function onDragEnd() {
+      setDragPath(null); setHoverPath(null); setDropZone('after');
+    }
+
+    /* ── Render helpers ──────────────────────────────────────────────── */
+
+    function renderSectionRow(sec, p, isChild, totalAtLevel) {
+      var idx           = pathToArr(p)[pathToArr(p).length - 1];
+      var hovered       = hoverPath === p && dragPath !== null && !pathStartsWith(p, dragPath);
+      var hoveredZone   = hovered ? dropZone : null;
+
+      return React.createElement('li', {
+        key:       sec._key,
+        className: 'fs-library__editor-section'
+                   + (isChild ? ' fs-library__editor-section--child' : '')
+                   + (dragPath === p ? ' fs-library__editor-section--dragging' : '')
+                   + (hoveredZone === 'before' ? ' fs-library__editor-section--drop-before' : '')
+                   + (hoveredZone === 'into'   ? ' fs-library__editor-section--drop-into'   : '')
+                   + (hoveredZone === 'after'  ? ' fs-library__editor-section--drop-after'  : ''),
+        draggable: true,
+        onDragStart: onDragStart(p),
+        onDragOver:  onDragOver(p),
+        onDrop:      onDrop(),
+        onDragEnd:   onDragEnd,
+      },
+        React.createElement('span', {
+          className:   'fs-library__editor-drag-handle',
+          'aria-hidden': true,
+          title:       'Drag to reorder or nest',
+        }, '⋮⋮'),
+        React.createElement('span', {
+          className: 'fs-library__editor-kind-tag',
+          title:     KIND_LABEL[sec.kind] || sec.kind,
+        }, KIND_ICON[sec.kind] || '•'),
+        React.createElement('input', {
+          className:   'fs-library__editor-section-input',
+          value:       sec.title,
+          onChange:    function (e) { rename(p, e.target.value); },
+          'aria-label': 'Section title',
+          maxLength:   80,
+        }),
+        React.createElement('div', { className: 'fs-library__editor-section-controls' },
+          React.createElement('button', {
+            type: 'button', className: 'fs-library__editor-delete-btn',
+            onClick: function () { del(p); }, disabled: sections.length <= 1 && !isChild,
+            'aria-label': 'Delete section', title: 'Delete',
+          }, '×'),
+        ),
+        /* Recursive children (only top-level can have children — 1-level cap) */
+        !isChild && sec.children && sec.children.length > 0
+          ? React.createElement('ol', { className: 'fs-library__editor-section-list fs-library__editor-children' },
+              sec.children.map(function (child, j) {
+                return renderSectionRow(child, p + '.' + j, true, sec.children.length);
+              }),
+            )
+          : null,
+      );
+    }
+
     return React.createElement('div', { className: 'fs-library__editor' },
 
       React.createElement('p', { className: 'fs-library__editor-hint' },
-        'Rename, reorder, or remove sections. Re-upload to change a section\'s kind or split/merge.'
+        'Drag the ⋮⋮ handle to reorder. Drop a section ',
+        React.createElement('strong', null, 'into the middle'),
+        ' of another to make it a sub-section. Re-upload to change a section\'s kind.'
       ),
 
       React.createElement('ol', { className: 'fs-library__editor-section-list' },
         sections.map(function (sec, idx) {
-          return React.createElement('li', { key: sec._key, className: 'fs-library__editor-section' },
-            React.createElement('span', { className: 'fs-library__editor-kind-tag', title: KIND_LABEL[sec.kind] },
-              KIND_ICON[sec.kind] || '•'
-            ),
-            React.createElement('input', {
-              className:   'fs-library__editor-section-input',
-              value:       sec.title,
-              onChange:    function (e) { rename(idx, e.target.value); },
-              'aria-label': 'Section title',
-              maxLength:   80,
-            }),
-            React.createElement('div', { className: 'fs-library__editor-section-controls' },
-              React.createElement('button', {
-                type: 'button', className: 'fs-library__editor-move-btn',
-                onClick: function () { moveUp(idx); }, disabled: idx === 0,
-                'aria-label': 'Move up', title: 'Move up',
-              }, '↑'),
-              React.createElement('button', {
-                type: 'button', className: 'fs-library__editor-move-btn',
-                onClick: function () { moveDown(idx); }, disabled: idx === sections.length - 1,
-                'aria-label': 'Move down', title: 'Move down',
-              }, '↓'),
-              React.createElement('button', {
-                type: 'button', className: 'fs-library__editor-delete-btn',
-                onClick: function () { del(idx); }, disabled: sections.length <= 1,
-                'aria-label': 'Delete section', title: 'Delete',
-              }, '×'),
-            ),
-          );
+          return renderSectionRow(sec, '' + idx, false, sections.length);
         }),
       ),
 
@@ -714,36 +1050,88 @@
 
   /* ── Test Render Panel ─────────────────────────────────────────────── */
 
+  /* Sprint 10 follow-up — TestRender body is now max-height scrollable
+     so long previews don't run off the page; "↗ Open in modal" expands
+     to a full-screen modal using ModalOverlay. */
   function TestRenderPanel(props) {
     var schema     = props.schema;
     var expandRef  = React.useState(false);
     var expanded   = expandRef[0]; var setExpanded = expandRef[1];
-    var Button     = window.FieldSight.Button;
+
+    var modalRef   = React.useState(false);
+    var modalOpen  = modalRef[0]; var setModalOpen = modalRef[1];
+
+    var Modal      = window.FieldSight.ModalOverlay;
 
     if (!schema || !schema.sections) return null;
+
+    /* Walk all sections, including nested children, into a single
+       flat list so the render body shows everything. */
+    function flatten(arr, depth) {
+      var out = [];
+      (arr || []).forEach(function (s) {
+        out.push({ sec: s, depth: depth || 0 });
+        if (s.children && s.children.length) {
+          out = out.concat(flatten(s.children, (depth || 0) + 1));
+        }
+      });
+      return out;
+    }
+    var flat = flatten(schema.sections, 0);
+
+    function renderBody(scrollable) {
+      return React.createElement('div', {
+        className: 'fs-library__test-render-body'
+                   + (scrollable ? ' fs-library__test-render-body--scroll' : ''),
+      },
+        flat.map(function (entry, i) {
+          return React.createElement('div', {
+            key:       i,
+            className: 'fs-library__render-section'
+                       + (entry.depth > 0 ? ' fs-library__render-section--child' : ''),
+          },
+            React.createElement('h4', { className: 'fs-library__render-section-title' },
+              React.createElement('span', { className: 'fs-library__render-kind-badge' }, KIND_LABEL[entry.sec.kind] || entry.sec.kind),
+              entry.sec.title,
+            ),
+            renderSectionSample(entry.sec),
+          );
+        }),
+      );
+    }
 
     return React.createElement('div', { className: 'fs-library__test-render' },
       React.createElement('div', { className: 'fs-library__test-render-header' },
         React.createElement('span', { className: 'fs-library__test-render-title' }, 'Test render'),
         React.createElement('span', { className: 'fs-library__test-render-sub' }, 'Preview with sample site data'),
-        React.createElement('button', {
-          className: 'fs-library__test-render-toggle',
-          onClick:   function () { setExpanded(function (e) { return !e; }); },
-          'aria-expanded': expanded,
-        }, expanded ? 'Collapse ▲' : 'Expand ▼'),
+        React.createElement('div', { className: 'fs-library__test-render-actions' },
+          expanded && Modal ? React.createElement('button', {
+            type:      'button',
+            className: 'fs-library__test-render-modal-btn',
+            onClick:   function () { setModalOpen(true); },
+            title:     'Open in full-screen modal',
+            'aria-label': 'Open preview in full-screen modal',
+          }, '↗ Full preview') : null,
+          React.createElement('button', {
+            type:      'button',
+            className: 'fs-library__test-render-toggle',
+            onClick:   function () { setExpanded(function (e) { return !e; }); },
+            'aria-expanded': expanded,
+          }, expanded ? 'Collapse ▲' : 'Expand ▼'),
+        ),
       ),
 
-      expanded && React.createElement('div', { className: 'fs-library__test-render-body' },
-        schema.sections.map(function (sec, i) {
-          return React.createElement('div', { key: i, className: 'fs-library__render-section' },
-            React.createElement('h4', { className: 'fs-library__render-section-title' },
-              React.createElement('span', { className: 'fs-library__render-kind-badge' }, KIND_LABEL[sec.kind] || sec.kind),
-              sec.title,
-            ),
-            renderSectionSample(sec),
-          );
-        }),
-      ),
+      expanded && renderBody(true),
+
+      modalOpen && Modal ? React.createElement(Modal, {
+        title:   'Test render · ' + flat.length + ' section' + (flat.length === 1 ? '' : 's'),
+        onClose: function () { setModalOpen(false); },
+        size:    'large',
+      },
+        React.createElement('div', { className: 'fs-library__test-render-modal' },
+          renderBody(false),
+        ),
+      ) : null,
     );
   }
 

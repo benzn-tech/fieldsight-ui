@@ -289,6 +289,59 @@
     });
   }
 
+  /* ── Favourites ─────────────────────────────────────────────────────────
+     Sprint 10 follow-up: Heidi-style favourites row at top of /library.
+     Per-user pin list, max 6 entries. localStorage key `fs.lib.favourites`
+     (separate from store key so favouriting doesn't clutter the
+     template store). Each entry is just a template_id; resolution to
+     template happens at render time so a deleted template falls out
+     of the row gracefully. */
+
+  var FAV_KEY  = 'fs.lib.favourites';
+  var FAV_CAP  = 6;
+
+  function loadFavourites() {
+    try {
+      var raw = localStorage.getItem(FAV_KEY);
+      var arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch (_) { return []; }
+  }
+  function saveFavourites(arr) {
+    try { localStorage.setItem(FAV_KEY, JSON.stringify(arr.slice(0, FAV_CAP))); } catch (_) {}
+  }
+
+  function getFavourites() {
+    return delay(10).then(function () { return loadFavourites().slice(); });
+  }
+
+  function isFavourite(id) {
+    return loadFavourites().indexOf(id) >= 0;
+  }
+
+  function addFavourite(id) {
+    return delay(10).then(function () {
+      var favs = loadFavourites();
+      if (favs.indexOf(id) < 0 && favs.length < FAV_CAP) {
+        favs.push(id);
+        saveFavourites(favs);
+      }
+      return favs;
+    });
+  }
+
+  function removeFavourite(id) {
+    return delay(10).then(function () {
+      var favs = loadFavourites().filter(function (x) { return x !== id; });
+      saveFavourites(favs);
+      return favs;
+    });
+  }
+
+  function toggleFavourite(id) {
+    return isFavourite(id) ? removeFavourite(id) : addFavourite(id);
+  }
+
   /* ── Expose ──────────────────────────────────────────────────────────── */
 
   if (!window.FS)      window.FS      = {};
@@ -304,6 +357,13 @@
     listVersions:  listVersions,
     restore:       restore,
     usageStats:    usageStats,
+    /* Sprint 10 follow-up — favourites */
+    getFavourites:    getFavourites,
+    isFavourite:      isFavourite,
+    addFavourite:     addFavourite,
+    removeFavourite:  removeFavourite,
+    toggleFavourite:  toggleFavourite,
+    FAVOURITES_CAP:   FAV_CAP,
   };
 
   if (!window.FS.templateStore) window.FS.templateStore = {};
