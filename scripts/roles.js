@@ -54,6 +54,7 @@ export const RESOURCES = {
   ESCALATION:  'escalation',
   PATTERN:     'pattern',
   KPI:         'kpi',
+  TEMPLATE:    'template',  /* Sprint 10 B.0 — report template library */
 };
 
 export const ACTIONS = {
@@ -136,6 +137,8 @@ export const ROLES = {
       P('report',    'view',    SCOPES.SELF),
       P('dashboard', 'view',    SCOPES.SELF),
       P('settings',  'view',    SCOPES.SELF),
+      P('template',  'manage',  SCOPES.SELF),   /* Sprint 10 B.0 — personal library */
+      P('template',  'view',    SCOPES.ORG),    /* Sprint 10 B.0 — can view org library */
     ],
   },
 
@@ -244,6 +247,7 @@ export const ROLES = {
       P('report',    'export', SCOPES.REGION),
       P('regional',  'view',   SCOPES.REGION),
       P('insights',  'view',   SCOPES.REGION),  // Sprint 9 Track A
+      P('template',  'manage', SCOPES.ORG),     // Sprint 10 B.0 — org library management
       P('settings',  'view',   SCOPES.SELF),
     ],
   },
@@ -356,6 +360,7 @@ export const NAV_ITEMS = {
   quality:    { permission: P('quality',   'view'),                   label: 'Quality' },
   evidence:   { permission: P('evidence',  'view'),                   label: 'Evidence' },
   reports:    { permission: P('report',    'view'),                   label: 'Reports' },
+  library:    { permission: P('template',  'manage', SCOPES.SELF),   label: 'Library' },  /* Sprint 10 B.0 */
 
   /* MANAGEMENT */
   sites:      { permission: P('sites',     'view'),                   label: 'Sites' },

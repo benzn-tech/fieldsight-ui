@@ -362,6 +362,7 @@
     Middle:   ActivityMiddleColumn,
     Right:    ActivityRightDetail,
     Provider: ActivityProvider,
+    layout:   'full-width',   /* Sprint 10 A — read-mostly stream; drill via RightDrawer */
   };
 
 })();

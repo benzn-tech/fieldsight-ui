@@ -473,6 +473,7 @@
     Middle:   EvidenceMiddleColumn,
     Right:    EvidenceRightDetail,
     Provider: EvidenceProvider,
+    layout:   'full-width',   /* Sprint 10 A — photo grid needs full width; detail via RightDrawer */
   };
 
 })();

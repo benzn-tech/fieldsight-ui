@@ -22,7 +22,9 @@ ledger.
 | **6** | Compliance pair — `/safety` + `/quality` cross-day rollups, deep-link spotlight, photo carousel | ✅ | PR [#16](https://github.com/benzn-tech/fieldsight-ui/pull/16) |
 | **7** | `/team` + `/settings` + dark-mode polish (theme + density + default-landing prefs) | ✅ | PR [#17](https://github.com/benzn-tech/fieldsight-ui/pull/17) |
 | **8** | Backend integration foundation, write flows, programme deep features, mobile bottom-nav, a11y, search, error/offline, performance, fixture expansion, demo tour, print/share, onboarding | ✅ | PR [#18](https://github.com/benzn-tech/fieldsight-ui/pull/18) |
-| **9** | Insights dashboard (PM-facing safety/quality analytics) + PM-scoped Team page + Strategic dashboards (Portfolio / Regional / Executive) | 🟡 | branch `claude/sprint9-insights-strategic` |
+| **9** | Insights dashboard (PM-facing safety/quality analytics) + PM-scoped Team page + Strategic dashboards (Portfolio / Regional / Executive) | ✅ | PR [#19](https://github.com/benzn-tech/fieldsight-ui/pull/19) |
+| **10** | Library / Template UI (B.0–B.6) + 3-panel → 2-panel migration (A) + follow-up polish | 🟡 | branch `claude/sprint10-prep` (Sprint 10 + follow-up fixes, HEAD `3ecdd49`) |
+| **11** | A11y hardening (axe-core gate + contrast + SR checklist) + XLSX column-mapper partial mapping + Tasks cross-day audit (Q-1) | 🟡 | branch `claude/sprint11` (fast-forwarded onto latest `sprint10-prep` — carries Sprint 11 work **+** all Sprint 10 follow-up fixes) |
 
 **Sprint 8 sub-sprint coverage** (audit on `claude/sprint8`):
 
@@ -82,6 +84,53 @@ review. Recommended sequence executed: Track A → B → C → 9.5.
 Sprint 9 decision points (Q-S9-1 … Q-S9-7) are tracked in §4. Strong
 defaults documented; locked at Track-A start.
 
+**Sprint 10 sub-sprint coverage** (in flight on `claude/sprint10-prep`):
+
+- ✅ **Candidate A · 3-panel → 2-panel migration** — `c91e06d`
+  - `/today` `/activity` `/settings` `/evidence` each gain `layout: 'full-width'`; existing Right component moves to RightDrawer; cache busters bumped.
+- ✅ **B.0 Stores + perm + scope model** — `921ff75`
+  - `templates.fixture.js`: 3 org + 1 personal template; ADE schema shape
+  - `template-store.js`: LocalStorage API (list / get / create / updateSchema / activate / delete / listVersions / restore / usageStats); async ADE simulation via `onExtracted` listeners
+  - `roles.js` + `fs-globals.js`: `TEMPLATE` resource; `template:manage:self` (all) / `template:view:org` (all) / `template:manage:org` (gm+)
+- ✅ **B.1 `/library` route + page scaffold** — `921ff75`
+  - `library.js`: LibraryProvider, LibraryMiddle (tabs Org/Personal/All, template list, upload button), LibraryRight
+  - `left-nav.js`: 'library' (book-open icon) in WORKSPACE trailingItems
+- ✅ **B.2 Upload modal + fixture-stubbed schema** — `921ff75`
+  - `template-upload-modal.js`: drag-drop, .pdf/.docx/.md/image, 50 MB cap, idle → uploading → extracting → done phases
+- ✅ **B.3 Skip-edit primary path + render preview** — `921ff75`
+  - Side-by-side "Your file" vs "Extracted schema" grid + Test render panel + "✓ Use this template" CTA
+- ✅ **B.4 Simple editor (rename / reorder / delete)** — this commit
+  - `SchemaEditor` in `library.js`; Preview / Edit / History sub-nav in LibraryRight; Edit tab: rename input, ↑↓ reorder, × delete; save → new version via `updateSchema`; exported as `window.FieldSight.SchemaEditor`
+- ✅ **B.5 Version history + author attribution** — this commit
+  - `VersionHistoryPanel` in `library.js`; History tab: newest-first list, click → diff vs current (= / − / +), "Restore as new version"; exported as `window.FieldSight.VersionHistoryPanel`
+- ✅ **B.6 Output-format selector + DemoTour + wrap-up** — this commit
+  - `TemplateFormatSelector` in `reports.js`: personal first (active ✓), then org; `template_id` included in regenerate payload
+  - DemoTour step 7: `/library` → highlight `.fs-library__list`
+  - `SchemaEditor` + `VersionHistoryPanel` registered in `components-preview.html` with fixture-data demos
+  - composites.css v50; demo-tour.js v3; library.js v2; reports.js v5
+- ✅ **Sprint 10 follow-up · /library polish** — `e4fc8df`
+  - Test render: `max-height: 480px` + `overflow-y: auto`; "↗ Full preview" button → ModalOverlay full-screen view
+  - Tab order changed to All / Organisation / Personal (label only; scope key `'org'` preserved for backwards-compat); default tab `'all'`
+  - Favourites pin shelf above template list (Heidi pattern): per-user `localStorage['fs.lib.favourites']`, max 6, ☆/★ button per row, × unpin on tile, empty-state hint
+  - SchemaEditor drag-and-drop + 1-level nesting: ⋮⋮ handle, three drop zones (before / into / after), accent-line indicators, delete-promotes-children safety; replaces previous ↑↓ button reorder
+  - Heidi-style document view + chatbot recorded as Sprint 11+ candidate in §6 backlog (deterministic schema-driven render kept as canonical path)
+
+**Sprint 11 sub-sprint coverage** (on `claude/sprint11`, fast-forwarded onto
+latest `sprint10-prep` — see §1 branch note):
+
+- ✅ **Track A · A11y hardening** — `4634761`
+  - A.1 axe-core via CDN gated on `?axe=1`; runs on every hashchange; logs WCAG 2.1 AA violations to console (Q-S11-4: one-off, not permanent)
+  - A.2 contrast fixes — `--text-disabled` + `--text-placeholder` bumped both themes (light: 2.85→4.83:1, dark: 4.05→8.5:1); `fs-globals.js` JS mirror synced
+  - A.3 new `ACCESSIBILITY.md` — NVDA/VoiceOver checklists for `/today` (6 steps) + `/programme` (4 steps) + common pitfalls + WCAG criterion legend
+- ✅ **Track B · XLSX column-mapper partial mapping** — `e47a061`
+  - B.1 partial-mapping per Q-S11-2 default: removed disabled gate; warning becomes informational note; button label shows skip count
+  - B.2 mapping flow already wired in 8.2.2; this commit just unblocks the UX
+- ✅ **Track C · Tasks cross-day audit (Q-1)** — `5d5562e`
+  - C.1 `tasks.getCrossDayAudit({from,to,user})` flat-array variant of `actions.getActionsRange`
+  - C.2 `WeeklyCompletionKpi` on `/today` (Mon→today per Q-S11-1 default; SparkLine; hidden on empty)
+  - C.3 `ActionHistoryPanel` on `/tasks` right-detail — every check event for the same `topic_action_key` over 90 days; Q-S11-3 role-aware visibility (admin sees all, users see own)
+  - C.4 mock API spec inlined as docblock on `getCrossDayAudit` for Sprint 12 backend handoff
+
 ---
 
 ## 2 · Pending / deferred
@@ -104,6 +153,7 @@ not-yet-started carry-overs.
 | **Q-2 vocabulary fold-in for Sprint 9 tag system** | Sprint 9 ships a hard-coded 12-tag vocab. When Q-2 admin-editable vocab system materialises, Insights can swap to a fetched list. Two-sprint stretch; not in Sprint 9. |
 | **Backend per-site timeline endpoint** (`GET /api/timeline?site_id=`) | Sprint 9 Track C aggregator uses `(date × user)` cross-product then groups by `r.site` (option C.1.a). Migrate to per-site fetch when backend exposes; one-aggregator swap, no page rewrite. |
 | **Subcontractor management surface** (CRUD UI for the new subcontractor directory) | Out of Sprint 9 scope; would gate behind a new `subcontractor_admin:manage` permission. |
+| **Library / Template — backend ADE integration (L-3)** | LandingAI ADE chosen at Sprint 10 kickoff (single-API extraction with chunk → section mapping; org-level account; ~50 calls/month cap). Backend-only work: receive multipart upload → proxy to ADE → store original in S3 + parsed schema in DynamoDB → expose to frontend via the API surface defined in §6 candidate B. UI ships in Sprint 10 against fixture-stubbed schemas that mirror ADE shape, so this swap-in is a backend-only change. |
 
 ---
 
@@ -306,9 +356,136 @@ The two alternatives below were rejected for now, but kept on file:
 
 ## 6 · Next phase candidates
 
-Sprint 9 is now active (see §1 sub-sprint coverage). The list below
-is the post-Sprint-9 menu — threads that could fund Sprint 10+ once
-the current branch lands.
+Sprint 9 merged via PR #19 (Insights + PM Team scope + Strategic
+dashboards + 9.5 redesign pass). Sprint 10 candidates below — primary
+contenders at the top, longer-tail items below.
+
+### Primary candidates (front-of-queue for Sprint 10)
+
+#### A · 3-panel → 2-panel migration (4 pages)
+
+Sprint 9.5 proved the full-width 2-panel pattern (matches `/programme`)
+works well for canvas-heavy pages. The same migration is high-ROI on
+4 more pages where the static right-detail rail is wasted space:
+
+| Page | Why 2-panel wins |
+|---|---|
+| **`/today`** | Today is a feed (brief → urgent → tasks → on-site), not list-detail. Right pane shows placeholder most of the time. |
+| **`/activity`** | User activity stream is read-mostly; per-user drill is a secondary path → RightDrawer fits better. |
+| **`/settings`** | Form, not list-detail. Current right "summary" panel just echoes selected values. |
+| **`/evidence`** | Photo grid lives in middle; lightbox already covers drill-down. 70%-wide grid renders much better than the cramped 4-col right-pane variant. |
+
+**Why keep 3-panel** on `/timeline /tasks /safety /quality /reports
+/sites /team` — all have frequent list↔detail switching where keeping
+the list visible is the value-prop.
+
+**Size:** Half-day. Same Sprint 9.5 commit pattern: add `layout:
+'full-width'` to each page registry, keep existing `Right` component
+(it'll render inside RightDrawer), tighten font sizes to match. ~20
+lines × 4 pages.
+
+#### B · Library / Template — UI prototype
+
+Per-company report templates. Each construction firm has its own daily
+report / weekly progress / incident report format. They upload their
+template; future generated reports fit their format. Heidi-Health-style
+clinical-note pattern, applied to construction reporting.
+
+**Architecture (4 layers):**
+
+1. **L-1 Source upload** — drag-drop `.docx` / `.md` / `.pdf` /
+   scanned image, original file stored S3-side.
+2. **L-2 Parsed schema** — `{ sections: [{ title, kind, fields,
+   prompt_hint }] }` where `kind ∈ { narrative, list, table, kpi,
+   photos }`. Schema shape mirrors LandingAI ADE chunk output so
+   the L-3 swap-in is a backend-only change.
+3. **L-3 Mapping + extraction** — file → schema via **LandingAI ADE**
+   API (chosen Sprint 10 kickoff). Backend-only integration; key
+   never leaves server. *Sprint 10 ships against fixture-stubbed
+   schemas; real ADE wiring tracked in §2 as a backend follow-up.*
+4. **L-4 Rendered output** — render canonical DailyReport into the
+   chosen template (preserve logo, footer, page layout). PDF/DOCX
+   export.
+
+**Two-tier library scope** (decided Sprint 10 kickoff):
+
+- **Org library** — admin-uploaded templates, visible to every user
+  in the org. Org pays the ADE cost. Has an org-wide "active default"
+  per report-type.
+- **Personal library** — user-uploaded templates, visible only to
+  the uploader. Personal active default overrides org default for
+  that user. Lets a PM keep their own preferred summary format
+  without polluting the org-wide list.
+
+**Skip-edit UX (cognitive-load mitigation — users may NOT want to
+edit schema):**
+
+The flow is designed so that 90% of users never touch the editor.
+Three-tier fallback:
+1. **Primary path** — after upload + ADE parse, show a side-by-side
+   "your file" vs "what we extracted" preview, then a **Test render**
+   panel that fills the schema with the latest daily-report data.
+   If it reads right, single button "✓ Use this template" saves
+   directly. Done.
+2. **Simple editor** (secondary path) — only three actions: rename
+   section, reorder, delete. No split / merge / nested hierarchy
+   editing in v1 (those are the actions that confuse non-technical
+   users most).
+3. **Start blank fallback** — when ADE fails or returns empty, "Start
+   blank" creates an empty template with 4 generic sections (Summary
+   / Decisions / Actions / Safety) the user can rename. Lets the
+   feature work even when AI extraction breaks.
+
+### Sprint 10 sub-sprint plan (Candidate B = 7 sub-sprints)
+
+| # | Sub-sprint | What ships | Size |
+|---|---|---|---|
+| **B.0** | Stores + perm + scope model | LocalStorage layers for `org_library` + `personal_library`; `template:manage:org` for admin/gm/director; everyone gets `template:manage:self` for personal lib. Template fixture shape: `{ id, scope: 'org'|'personal', report_type, active, versions[] }`. Mock 3 org templates + 1 personal per role. | 0.5 day |
+| **B.1** | `/library` route + page scaffold | Tabs (Org / Personal / All — All is read-only union). 3-panel layout (sidebar nav | template list | template detail). "Active default" badge per report-type. Permission-gated upload button. | 1 day |
+| **B.2** | Upload modal + fixture-stubbed schema | Drag-drop modal with file-type + size validation. Async progress UX (toast + library row marked "Extracting…" during the simulated ADE wait). Stubbed schema response matches ADE shape so L-3 lands without UI rework. | 1 day |
+| **B.3** | Skip-edit primary path + render preview | Side-by-side "source vs extracted schema" view + Test-render panel that fills mock schema with latest DailyReport data. "✓ Use this template" CTA saves + activates in one click. | 1 day |
+| **B.4** ✅ | Simple editor (rename / reorder / delete) | `SchemaEditor` in `library.js` — Preview / Edit / History sub-nav in LibraryRight; Edit tab: rename (text input), reorder (↑↓), delete (×) per section; save creates new version via `updateSchema`; change note input; cancel returns to Preview. Exported as `window.FieldSight.SchemaEditor`. | 0.5 day |
+| **B.5** ✅ | Version history + author attribution | `VersionHistoryPanel` in `library.js` — History tab in LibraryRight; versions displayed newest-first; click to expand diff vs. current schema (= same, − removed, + added later); "Restore as new version" via `restore(id, vid)`; read-only for non-managers. Exported as `window.FieldSight.VersionHistoryPanel`. | 1 day |
+| **B.6** ✅ | Output-format selector in `/reports` + DemoTour + components-preview wrap-up | `TemplateFormatSelector` in `reports.js` — personal templates first (active flagged ✓), then org; default = active template; selected `template_id` included in regenerate payload. DemoTour step 7: `/library` highlighting `.fs-library__list`. `SchemaEditor` + `VersionHistoryPanel` registered in `components-preview.html` with fixture data demos. | 0.5 day |
+
+**Total UI work**: ~5.5 days. Half a sprint, since most of B.* is
+declarative rendering + localStorage state.
+
+### Frontend API surface (mock-only in Sprint 10; backend lands later)
+
+Sprint 10 stubs all of these against localStorage. Backend wiring
+is the Sprint 11+ follow-up tracked in §2.
+
+```
+GET    /api/templates?scope=org|personal|all      list, optionally filtered
+POST   /api/templates                              upload (multipart) → schema parse
+GET    /api/templates/{id}                        full template + active version
+PATCH  /api/templates/{id}/schema                 edit (creates new version)
+POST   /api/templates/{id}/activate               set as default for {scope, report_type}
+DELETE /api/templates/{id}                        soft-delete; versions preserved
+GET    /api/templates/{id}/versions               list versions (id, author, date)
+GET    /api/templates/{id}/versions/{vid}         specific version snapshot
+POST   /api/templates/{id}/versions/{vid}/restore restore (creates new version from old)
+GET    /api/templates/usage?from=&to=             ADE call count for cost cap UI
+```
+
+**Sprint 10 decision points (all locked at kickoff):**
+
+| # | Question | Locked default |
+|---|---|---|
+| Q-S10-1 | Per-report-type templates? | Yes — `template.report_type ∈ {daily, weekly, monthly, incident}` |
+| Q-S10-2 | Version retention? | Every edit = new version, immutable history, for reproducibility |
+| Q-S10-3 | Cross-org sharing? | No for v1 (IP + privacy) |
+| Q-S10-4 | Inline AI instructions in template? | No for v1; v2 feature |
+| Q-S10-5 | ADE API key + cost ownership? | Org-level account; FieldSight-managed key; cost billed to org |
+| Q-S10-6 | Cost cap | 50 ADE calls per org per month (one-off-style use, not steady-state); over-cap shows warning, not auto-charge |
+| Q-S10-7 | Sync vs async UI? | Async + toast notifications; user can leave page during extraction |
+| Q-S10-8 | ADE failure / extraction empty? | Three-tier mitigation (skip-edit primary path, simple editor secondary, "Start blank" fallback). Users may not edit schema; UX must tolerate that. |
+| Q-S10-9 | File types? | Full ADE support: `.pdf`, `.docx`, `.md`, scanned images |
+| Q-S10-10 | Re-run ADE on edit? | No — once user confirms / edits, schema is truth. Re-upload file = new template version. |
+| Q-S10-11 | Personal lib vs org lib precedence? | Both visible side-by-side in `/library`. Personal active default overrides org default for that user; otherwise org default wins. Tracking who uploaded each version is mandatory (`created_by_user_id`). |
+
+### Backlog (post-primary)
 
 | Candidate | One-liner | Size |
 |---|---|---|
@@ -320,3 +497,4 @@ the current branch lands.
 | **Q-3 Photo lifecycle** | Delete + upload, with audit + permission gates. | One sprint + backend |
 | **Q-4 Global Ask** | Cross-day AI query surface; could pair with the Sprint 8.6 search palette. | One sprint + backend |
 | **BI embed for `/insights`** | Looker / Metabase iframe with Cognito SSO, once cross-month / cross-portfolio analytics needs justify the cost. Hook stays in `/insights` provider state. | One sprint + auth federation |
+| **Library / Template — Heidi-style document view + chatbot** | Add a "Document view" tab to `SchemaEditor` that renders the schema as a markdown-style document with `[placeholder]` markers + parenthetical instructions (Heidi pattern). Saves write back to schema, not free-form prompt. Optional chatbot ("What would you like to change?") can rewrite via a small LLM call — costly per-render so keep gate-able. Considered + deferred at Sprint 10 follow-up: schema-driven render kept as the canonical path because (a) deterministic, (b) cheap, (c) audit-friendly for compliance reports. Document view bridges UX gap for non-technical users without committing to LLM-per-render. | One sprint + small LLM cost (chatbot only) |

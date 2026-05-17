@@ -73,7 +73,8 @@
     },
     text: {
       primary: '#111827', secondary: '#4B5563', tertiary: '#6B7280',
-      disabled: '#9CA3AF', placeholder: '#9CA3AF', link: '#2563EB',
+      /* Sprint 11 A.2 — bumped to neutral-500 for AA 4.5:1 (was -400 = 2.85:1) */
+      disabled: '#6B7280', placeholder: '#6B7280', link: '#2563EB',
       linkHover: '#1D4ED8', inverse: '#FFFFFF', inverseMuted: '#D1D5DB',
       danger: '#B91C1C', success: '#15803D', warning: '#B45309',
     },
@@ -178,7 +179,8 @@
     border: { subtle: '#1F2937', default: '#374151', strong: '#4B5563' },
     text: {
       primary: '#F9FAFB', secondary: '#D1D5DB', tertiary: '#9CA3AF',
-      disabled: '#6B7280', placeholder: '#6B7280', inverse: '#111827',
+      /* Sprint 11 A.2 — bumped to #9CA3AF for AA 4.5:1 on dark surface */
+      disabled: '#9CA3AF', placeholder: '#9CA3AF', inverse: '#111827',
       inverseMuted: '#4B5563', danger: '#F87171', success: '#4ADE80',
       warning: '#FBBF24', link: '#60A5FA', linkHover: '#93C5FD',
     },
@@ -233,6 +235,8 @@
         P('hazard','create',SCOPES.SELF), P('evidence','view',SCOPES.SELF),
         P('report','view',SCOPES.SELF), P('dashboard','view',SCOPES.SELF),
         P('settings','view',SCOPES.SELF),
+        P('template','manage',SCOPES.SELF),  /* Sprint 10 B.0 — personal library */
+        P('template','view',SCOPES.ORG),     /* Sprint 10 B.0 — view org library */
       ],
     },
     foreman: {
@@ -295,6 +299,7 @@
         P('safety','view',SCOPES.REGION), P('user','manage',SCOPES.REGION),
         P('report','export',SCOPES.REGION), P('regional','view',SCOPES.REGION),
         P('insights','view',SCOPES.REGION),  /* Sprint 9 Track A */
+        P('template','manage',SCOPES.ORG),   /* Sprint 10 B.0 — org library management */
         P('settings','view',SCOPES.SELF),
       ],
     },
@@ -360,6 +365,7 @@
     quality:    { permission: P('quality','view'),    label: 'Quality',    path: '/quality' },
     evidence:   { permission: P('evidence','view'),   label: 'Evidence',   path: '/evidence' },
     reports:    { permission: P('report','view'),     label: 'Reports',    path: '/reports' },
+    library:    { permission: P('template','manage',SCOPES.SELF), label: 'Library', path: '/library' },  /* Sprint 10 B.0 */
 
     /* INSIGHTS — Sprint 9 Track A */
     insights:   { permission: P('insights','view'),   label: 'Insights',   path: '/insights' },

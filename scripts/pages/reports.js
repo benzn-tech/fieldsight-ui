@@ -116,6 +116,85 @@
   }
 
   /* =====================================================================
+     B.6 — TemplateFormatSelector
+     Shows personal templates first, then org; defaults to the active one.
+     Returns null when no templates exist (keeps the generate card clean).
+     ===================================================================== */
+  function TemplateFormatSelector(props) {
+    /* props: onChange(templateId|null) */
+    var loadRef  = React.useState({ status: 'loading', personal: [], org: [] });
+    var load     = loadRef[0]; var setLoad = loadRef[1];
+
+    var selRef   = React.useState('');
+    var selId    = selRef[0]; var setSelId = selRef[1];
+
+    React.useEffect(function () {
+      if (!window.FS || !window.FS.api || !window.FS.api.templates) {
+        setLoad({ status: 'ok', personal: [], org: [] });
+        return;
+      }
+      setLoad({ status: 'loading', personal: [], org: [] });
+      window.FS.api.templates.list().then(function (res) {
+        var all = (res.templates || []);
+        function sortActive(arr) {
+          return arr.slice().sort(function (a, b) { return (b.active ? 1 : 0) - (a.active ? 1 : 0); });
+        }
+        var personal = sortActive(all.filter(function (t) { return t.scope === 'personal'; }));
+        var org      = sortActive(all.filter(function (t) { return t.scope === 'org'; }));
+        setLoad({ status: 'ok', personal: personal, org: org });
+        /* Default: active personal first, then active org */
+        var activePers = personal.find(function (t) { return t.active; });
+        var activeOrg  = org.find(function (t) { return t.active; });
+        var def = (activePers || activeOrg || {}).id || '';
+        setSelId(def);
+        if (props.onChange) props.onChange(def || null);
+      }).catch(function () {
+        setLoad({ status: 'ok', personal: [], org: [] });
+      });
+    }, []);
+
+    function handleChange(e) {
+      var val = e.target.value;
+      setSelId(val);
+      if (props.onChange) props.onChange(val || null);
+    }
+
+    if (load.status === 'loading') return null;
+    if (!load.personal.length && !load.org.length) return null;
+
+    return React.createElement('div', { className: 'fs-reports__format' },
+      React.createElement('label', {
+        className: 'fs-reports__format-label',
+        htmlFor:   'rpt-format-sel',
+      }, 'Output format'),
+      React.createElement('select', {
+        id:        'rpt-format-sel',
+        className: 'fs-reports__format-select',
+        value:     selId,
+        onChange:  handleChange,
+      },
+        React.createElement('option', { value: '' }, '— Standard (FieldSight default) —'),
+        load.personal.length
+          ? React.createElement('optgroup', { label: 'My templates' },
+              load.personal.map(function (t) {
+                return React.createElement('option', { key: t.id, value: t.id },
+                  t.title + (t.active ? ' ✓' : '') + '  (' + (TYPE_LABEL[t.report_type] || t.report_type) + ')');
+              }),
+            )
+          : null,
+        load.org.length
+          ? React.createElement('optgroup', { label: 'Org templates' },
+              load.org.map(function (t) {
+                return React.createElement('option', { key: t.id, value: t.id },
+                  t.title + (t.active ? ' ✓' : '') + '  (' + (TYPE_LABEL[t.report_type] || t.report_type) + ')');
+              }),
+            )
+          : null,
+      ),
+    );
+  }
+
+  /* =====================================================================
      ReportsMiddleColumn
      ===================================================================== */
   function ReportsMiddleColumn(props) {
@@ -144,6 +223,11 @@
     var reg    = refReg[0];
     var setReg = refReg[1];
 
+    /* B.6 — selected output-format template ID (null = standard) */
+    var refTpl   = React.useState(null);
+    var selTplId = refTpl[0];
+    var setSelTplId = refTpl[1];
+
     React.useEffect(function () {
       var cancelled = false;
       window.FS.api.reports.getReportsHistory(50).then(function (res) {
@@ -168,7 +252,9 @@
 
     function regenerate(type) {
       setReg({ phase: 'submitting', type: type });
-      window.FS.api.reports.regenerate({ report_type: type, force: true }).then(function (res) {
+      var payload = { report_type: type, force: true };
+      if (selTplId) payload.template_id = selTplId;
+      window.FS.api.reports.regenerate(payload).then(function (res) {
         setReg({ phase: 'done', type: type, message: res.message });
         /* Clear the success message after a moment without dismissing
            the panel — gives the user a beat to see the confirmation. */
@@ -292,6 +378,8 @@
               className: 'fs-reports__regen-msg fs-reports__regen-msg--err',
             }, 'Failed: ' + (reg.error && reg.error.message || 'unknown')) : null,
           ),
+          /* B.6 output-format selector */
+          React.createElement(TemplateFormatSelector, { onChange: setSelTplId }),
         ),
       ) : null,
 

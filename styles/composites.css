@@ -97,17 +97,20 @@
 }
 
 
-/* "View daily report" CTA — full-width banner above MorningBriefCard.
-   Lifted out of the brief card so the action reads as a top-level
-   page CTA (post-merge review feedback). */
+/* "View daily report" CTA — half-width banner above MorningBriefCard.
+   Sprint 10 follow-up: full-width felt outsized for a single "go
+   here" affordance. Half-width keeps the strong primary tone (so it
+   still reads as a top-level CTA) but no longer competes with the
+   brief card below. */
 .fs-today__view-report-cta {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  width: 100%;
+  width: 50%;
+  min-width: 220px;
   margin: 0 0 12px;
-  padding: 12px 16px;
+  padding: 10px 14px;
   font: inherit;
   font-size: 14px;
   font-weight: var(--font-weight-semibold);
@@ -2428,7 +2431,17 @@
    ========================================================================= */
 
 /* Activity page (middle) --------------------------------------------------- */
-.fs-activity { display: flex; flex-direction: column; gap: 12px; }
+/* Sprint 10 follow-up — `/activity` runs in the 2-panel layout, so the
+   middle column otherwise stretches to full content width. The feed
+   reads as overlong at that width; cap it at ~680px and centre. */
+.fs-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 680px;
+  margin: 0 auto;
+  width: 100%;
+}
 
 .fs-activity__header { padding: 0 4px; }
 .fs-activity__title {
@@ -8258,5 +8271,1343 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+
+
+/* ==========================================================================
+   §LIBRARY · Sprint 10 B.1 + B.3 — /library page
+   ========================================================================== */
+
+/* ── Middle column ───────────────────────────────────────────────────────── */
+.fs-library__middle {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.fs-library__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 0;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.fs-library__title {
+  font-size: 15px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  margin: 0;
+}
+
+/* Tab strip */
+.fs-library__tabs {
+  display: flex;
+  gap: 2px;
+  padding: 12px 20px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.fs-library__tab {
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  transition: color var(--duration-fast), border-color var(--duration-fast);
+}
+.fs-library__tab:hover { color: var(--text-primary); }
+.fs-library__tab--active {
+  color: var(--color-accent-600);
+  border-bottom-color: var(--color-accent-500);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* Loading skeletons */
+.fs-library__loading { padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; }
+.fs-library__skeleton {
+  height: 52px;
+  background: var(--surface-panelMuted);
+  border-radius: var(--radius-md);
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) { .fs-library__skeleton { animation: none; } }
+
+/* Empty state */
+.fs-library__empty {
+  padding: 32px 20px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+/* List */
+.fs-library__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fs-library__row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background var(--duration-fast), border-color var(--duration-fast);
+}
+.fs-library__row:hover { background: var(--surface-panelMuted); }
+.fs-library__row--selected {
+  background: var(--surface-selected, var(--color-accent-50));
+  border-color: var(--color-accent-200);
+}
+[data-theme="dark"] .fs-library__row--selected {
+  background: rgba(255, 107, 53, 0.08);
+  border-color: rgba(255, 107, 53, 0.25);
+}
+.fs-library__row:focus-visible { outline: 2px solid var(--color-accent-500); outline-offset: 1px; }
+.fs-library__row--selected:focus-visible { box-shadow: none; }
+
+.fs-library__row-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fs-library__row-title {
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fs-library__row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.fs-library__active-badge {
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-success-700);
+  background: var(--color-success-100);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+}
+[data-theme="dark"] .fs-library__active-badge { color: var(--color-neutral-900); }
+
+.fs-library__personal-tag,
+.fs-library__extracting-tag,
+.fs-library__sections-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.fs-library__extracting-tag { color: var(--color-warning-600); font-style: italic; }
+
+/* ── Right detail ────────────────────────────────────────────────────────── */
+.fs-library__right {
+  height: 100%;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.fs-library__right--empty {
+  align-items: center;
+  justify-content: center;
+}
+.fs-library__right-hint {
+  color: var(--text-tertiary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.fs-library__right-header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.fs-library__right-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.fs-library__right-title {
+  font-size: 15px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  margin: 0;
+}
+.fs-library__right-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.fs-library__scope-tag {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: var(--surface-panelMuted);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+}
+.fs-library__right-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+.fs-library__right-version-note {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
+/* Extracting state */
+.fs-library__extracting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 32px 0;
+  text-align: center;
+}
+.fs-library__extracting-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--border-subtle);
+  border-top-color: var(--color-accent-500);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .fs-library__extracting-spinner { animation: none; border-top-color: var(--color-accent-500); } }
+.fs-library__extracting-label {
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  margin: 0;
+}
+.fs-library__extracting-sub {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
+/* ── B.3 — Side-by-side review grid ─────────────────────────────────────── */
+.fs-library__review-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 600px) {
+  .fs-library__review-grid { grid-template-columns: 1fr; }
+}
+
+.fs-library__review-panel {
+  background: var(--surface-panelMuted);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fs-library__review-panel-title {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+.fs-library__review-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Source card */
+.fs-library__source-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+.fs-library__source-icon { font-size: 22px; }
+.fs-library__source-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.fs-library__source-filename {
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fs-library__source-meta { font-size: 11px; color: var(--text-tertiary); }
+
+/* Schema sections list */
+.fs-library__schema-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fs-library__schema-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.fs-library__schema-kind-icon {
+  font-size: 14px;
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.fs-library__schema-item-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fs-library__schema-item-title {
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+.fs-library__schema-item-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  line-height: 1.4;
+}
+
+/* ── Test render panel ───────────────────────────────────────────────────── */
+.fs-library__test-render {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.fs-library__test-render-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--surface-panelMuted);
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: default;
+}
+.fs-library__test-render-title {
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.fs-library__test-render-sub {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  flex: 1;
+}
+.fs-library__test-render-toggle {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+}
+.fs-library__test-render-toggle:hover { background: var(--surface-panel); }
+
+.fs-library__test-render-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.fs-library__test-render-modal-btn {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
+.fs-library__test-render-modal-btn:hover {
+  background: var(--surface-panel);
+  color: var(--text-primary);
+}
+
+.fs-library__test-render-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+/* Sprint 10 follow-up — inline scroll cap so long previews don't
+   push the rest of the page off-screen. The "↗ Full preview" button
+   in the header opens an unbounded modal version when needed. */
+.fs-library__test-render-body--scroll {
+  max-height: 480px;
+  overflow-y: auto;
+}
+.fs-library__test-render-modal .fs-library__test-render-body {
+  max-height: none;
+  padding: 0;
+}
+.fs-library__render-section--child {
+  padding-left: 16px;
+  border-left: 2px solid var(--border-subtle);
+  margin-left: 4px;
+}
+.fs-library__render-section { display: flex; flex-direction: column; gap: 8px; }
+.fs-library__render-section-title {
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+.fs-library__render-kind-badge {
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+  background: var(--surface-panelMuted);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+}
+.fs-library__render-narrative {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0;
+  padding: 10px;
+  background: var(--surface-panelMuted);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--border-default);
+}
+.fs-library__render-list {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+  padding: 0 0 0 18px;
+  line-height: 1.8;
+}
+.fs-library__render-kpi-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.fs-library__render-kpi-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--surface-panelMuted);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  min-width: 64px;
+  gap: 2px;
+}
+.fs-library__render-kpi-value {
+  font-size: 16px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.fs-library__render-kpi-label {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+.fs-library__render-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fs-library__render-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.fs-library__render-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.fs-library__render-photos { display: flex; gap: 8px; flex-wrap: wrap; }
+.fs-library__render-photo-thumb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 72px;
+  height: 72px;
+  background: var(--surface-panelMuted);
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-md);
+  justify-content: center;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.fs-library__render-photo-icon { font-size: 20px; }
+.fs-library__render-photo-label { display: none; } /* placeholder only */
+
+/* ── CTA footer ──────────────────────────────────────────────────────────── */
+.fs-library__cta-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  background: var(--surface-panelMuted);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+.fs-library__cta-note {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+.fs-library__cta-footer--active { background: var(--color-success-50); border-color: var(--color-success-200); }
+[data-theme="dark"] .fs-library__cta-footer--active {
+  background: rgba(34, 197, 94, 0.08);
+  border-color: rgba(34, 197, 94, 0.2);
+  color: var(--color-neutral-900);
+}
+.fs-library__active-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-success-700);
+}
+.fs-library__active-confirm-icon {
+  font-size: 16px;
+  color: var(--color-success-600);
+}
+[data-theme="dark"] .fs-library__active-confirm { color: var(--color-neutral-900); }
+
+
+/* ==========================================================================
+   §TEMPLATE-UPLOAD · Sprint 10 B.2 — TemplateUploadModal
+   ========================================================================== */
+
+.fs-tpl-upload {
+  width: 480px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.fs-tpl-upload__title {
+  font-size: 16px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  margin: 0;
+}
+.fs-tpl-upload__subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Drop zone */
+.fs-tpl-upload__dropzone {
+  border: 2px dashed var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: 24px 16px;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color var(--duration-fast), background var(--duration-fast);
+  min-height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fs-tpl-upload__dropzone:hover,
+.fs-tpl-upload__dropzone--active {
+  border-color: var(--color-accent-400);
+  background: var(--surface-highlight);
+}
+.fs-tpl-upload__dropzone:focus-visible { outline: 2px solid var(--color-accent-500); outline-offset: 2px; }
+
+.fs-tpl-upload__drop-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.fs-tpl-upload__drop-icon { font-size: 22px; }
+.fs-tpl-upload__drop-types { font-size: 11px; color: var(--text-tertiary); }
+
+.fs-tpl-upload__file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  width: 100%;
+  justify-content: center;
+}
+.fs-tpl-upload__file-icon { font-size: 20px; }
+.fs-tpl-upload__file-name {
+  flex: 1;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+.fs-tpl-upload__file-clear {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+  color: var(--text-tertiary);
+  line-height: 1;
+  padding: 0 2px;
+  border-radius: 50%;
+}
+.fs-tpl-upload__file-clear:hover { color: var(--text-danger); }
+
+/* Fields */
+.fs-tpl-upload__fields { display: flex; flex-direction: column; gap: 10px; }
+.fs-tpl-upload__field { display: flex; flex-direction: column; gap: 4px; }
+.fs-tpl-upload__field-row { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.fs-tpl-upload__label { font-size: 12px; font-weight: var(--font-weight-medium); color: var(--text-secondary); }
+.fs-tpl-upload__input,
+.fs-tpl-upload__select,
+.fs-tpl-upload__textarea {
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--surface-input);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 7px 10px;
+  outline: none;
+  font-family: inherit;
+  transition: border-color var(--duration-fast);
+}
+.fs-tpl-upload__input:focus,
+.fs-tpl-upload__select:focus,
+.fs-tpl-upload__textarea:focus { border-color: var(--border-focus); }
+.fs-tpl-upload__textarea { resize: vertical; min-height: 54px; }
+.fs-tpl-upload__select { cursor: pointer; }
+
+/* Error */
+.fs-tpl-upload__error {
+  font-size: 12px;
+  color: var(--text-danger);
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--color-danger-50);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-danger-200);
+}
+[data-theme="dark"] .fs-tpl-upload__error { color: var(--color-neutral-900); }
+
+/* Footer */
+.fs-tpl-upload__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+/* Progress / done phase */
+.fs-tpl-upload__progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 24px 0;
+  text-align: center;
+}
+.fs-tpl-upload__spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border-subtle);
+  border-top-color: var(--color-accent-500);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .fs-tpl-upload__spinner { animation: none; border-top-color: var(--color-accent-500); } }
+.fs-tpl-upload__check {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--color-success-100);
+  color: var(--color-success-700);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: bold;
+}
+[data-theme="dark"] .fs-tpl-upload__check { color: var(--color-neutral-900); }
+.fs-tpl-upload__phase-label {
+  font-size: 14px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  margin: 0;
+}
+.fs-tpl-upload__phase-sub {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 0;
+  max-width: 340px;
+
+}
+
+/* ==========================================================================
+   §LIBRARY-SUBNAV · Sprint 10 B.4/B.5 — Preview / Edit / History sub-nav
+   ========================================================================== */
+
+.fs-library__right-subnav {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  margin-bottom: 2px;
+}
+
+.fs-library__right-tab {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  transition: color var(--duration-fast), border-color var(--duration-fast);
+}
+.fs-library__right-tab:hover { color: var(--text-primary); }
+.fs-library__right-tab--active {
+  color: var(--color-accent-600);
+  border-bottom-color: var(--color-accent-500);
+  font-weight: var(--font-weight-semibold);
+}
+.fs-library__right-tab:focus-visible { outline: 2px solid var(--color-accent-500); outline-offset: -1px; }
+
+/* ==========================================================================
+   §LIBRARY-EDITOR · Sprint 10 B.4 — schema editor (rename / reorder / delete)
+   ========================================================================== */
+
+.fs-library__editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fs-library__editor-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--surface-panelMuted);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--border-default);
+}
+
+.fs-library__editor-section-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fs-library__editor-section {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  transition: border-color var(--duration-fast);
+}
+.fs-library__editor-section:focus-within { border-color: var(--border-focus); }
+
+.fs-library__editor-kind-tag {
+  font-size: 14px;
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  user-select: none;
+}
+
+.fs-library__editor-section-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  outline: none;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+}
+.fs-library__editor-section-input:focus { background: var(--surface-input); }
+
+.fs-library__editor-section-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.fs-library__editor-move-btn,
+.fs-library__editor-promote-btn,
+.fs-library__editor-delete-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-tertiary);
+  transition: background var(--duration-fast), color var(--duration-fast);
+  padding: 0;
+  line-height: 1;
+}
+.fs-library__editor-move-btn:hover:not(:disabled) { background: var(--surface-panelMuted); color: var(--text-secondary); }
+.fs-library__editor-move-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.fs-library__editor-promote-btn { font-size: 14px; }
+.fs-library__editor-promote-btn:hover:not(:disabled) { background: var(--surface-panelMuted); color: var(--color-accent-600); }
+.fs-library__editor-delete-btn:hover:not(:disabled) { background: var(--color-danger-50); color: var(--color-danger-600); }
+.fs-library__editor-delete-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+[data-theme="dark"] .fs-library__editor-delete-btn:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--color-danger-300);
+}
+
+.fs-library__editor-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--surface-panelMuted);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+.fs-library__editor-change-label {
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+  display: block;
+}
+
+.fs-library__editor-change-input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--surface-input);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 5px 8px;
+  outline: none;
+  font-family: inherit;
+  transition: border-color var(--duration-fast);
+}
+.fs-library__editor-change-input:focus { border-color: var(--border-focus); }
+
+.fs-library__editor-error {
+  font-size: 12px;
+  color: var(--text-danger);
+  margin: 0;
+}
+
+.fs-library__editor-actions { display: flex; gap: 8px; align-items: center; }
+
+/* ==========================================================================
+   §LIBRARY-HISTORY · Sprint 10 B.5 — version history + author attribution
+   ========================================================================== */
+
+.fs-library__history {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.fs-library__history-intro {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.fs-library__history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fs-library__history-ver {
+  padding: 10px 12px;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: background var(--duration-fast);
+}
+.fs-library__history-ver:hover { background: var(--surface-panelMuted); }
+.fs-library__history-ver--selected {
+  background: var(--surface-selected, var(--color-accent-50));
+  border-color: var(--color-accent-200);
+}
+[data-theme="dark"] .fs-library__history-ver--selected {
+  background: rgba(255, 107, 53, 0.08);
+  border-color: rgba(255, 107, 53, 0.25);
+}
+.fs-library__history-ver:focus-visible { outline: 2px solid var(--color-accent-500); outline-offset: 1px; }
+
+.fs-library__history-ver-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fs-library__history-ver-date {
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+
+.fs-library__history-ver-badge {
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-success-700);
+  background: var(--color-success-100);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+}
+[data-theme="dark"] .fs-library__history-ver-badge { color: var(--color-neutral-900); }
+
+.fs-library__history-ver-meta { font-size: 11px; color: var(--text-tertiary); }
+
+.fs-library__history-ver-note { font-size: 11px; color: var(--text-secondary); font-style: italic; }
+
+.fs-library__history-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--surface-panelMuted);
+  border-radius: var(--radius-sm);
+  margin-top: 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.fs-library__history-diff-row { color: var(--text-tertiary); line-height: 1.6; }
+.fs-library__history-diff-removed { color: var(--color-danger-600); }
+.fs-library__history-diff-added   { color: var(--color-success-600); }
+[data-theme="dark"] .fs-library__history-diff-removed { color: var(--color-danger-300); }
+[data-theme="dark"] .fs-library__history-diff-added   { color: var(--color-success-300); }
+
+.fs-library__history-ver-actions { margin-top: 8px; }
+
+/* ==========================================================================
+   §REPORTS-TEMPLATE-SEL · Sprint 10 B.6 — output-format selector in /reports
+   ========================================================================== */
+
+.fs-reports__format {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 4px;
+  flex-wrap: wrap;
+}
+
+.fs-reports__format-label {
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.fs-reports__format-select {
+  flex: 1;
+  min-width: 180px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--surface-input);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 5px 8px;
+  outline: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color var(--duration-fast);
+}
+.fs-reports__format-select:focus { border-color: var(--border-focus); }
+
+
+/* ==========================================================================
+   §LIBRARY-S10F · Sprint 10 follow-up — favourites, drag-nest, row star
+   --------------------------------------------------------------------------
+   Three additions to /library:
+     1. Favourites pin shelf above the template list (Heidi-style).
+     2. Drag handle ⋮⋮ on every editor row + drop-zone indicators
+        (before / into / after) for reorder + 1-level sub-section nest.
+     3. Star toggle ☆/★ on each template list row.
+   ========================================================================== */
+
+/* ── Favourites row ─────────────────────────────────────────────────── */
+
+.fs-library__favs-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 0 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 8px;
+}
+.fs-library__favs-row--empty .fs-library__favs-tiles {
+  min-height: auto;
+}
+.fs-library__favs-label {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+.fs-library__favs-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+  min-height: 64px;
+}
+.fs-library__fav-tile {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 8px 28px 8px 10px;       /* extra right pad for unpin × */
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  position: relative;
+  min-height: 56px;
+  transition: border-color var(--duration-fast), background var(--duration-fast);
+}
+.fs-library__fav-tile:hover,
+.fs-library__fav-tile:focus-visible {
+  border-color: var(--color-accent-400);
+  background: var(--surface-selected);
+  outline: none;
+}
+.fs-library__fav-tile-name {
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  line-height: 1.25;
+  /* Two-line truncate */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.fs-library__fav-tile-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.fs-library__fav-tile-unpin {
+  position: absolute;
+  top: 4px; right: 4px;
+  width: 20px; height: 20px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  color: var(--text-tertiary);
+  background: transparent;
+  cursor: pointer;
+}
+.fs-library__fav-tile-unpin:hover,
+.fs-library__fav-tile-unpin:focus-visible {
+  background: var(--surface-panel-muted);
+  color: var(--text-primary);
+  outline: none;
+}
+.fs-library__fav-tile--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--border-subtle);
+  background: transparent;
+  color: var(--text-disabled);
+  font-size: 18px;
+  cursor: default;
+  pointer-events: none;
+}
+.fs-library__favs-empty-hint {
+  grid-column: 1 / -1;
+  padding: 12px;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text-tertiary);
+  background: var(--surface-panel-muted);
+  border-radius: var(--radius-md);
+}
+
+/* ── Star button on each template row ───────────────────────────────── */
+
+.fs-library__row-fav {
+  width: 28px; height: 28px;
+  border: none;
+  background: transparent;
+  font-size: 16px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color var(--duration-fast), background var(--duration-fast);
+}
+.fs-library__row-fav:hover,
+.fs-library__row-fav:focus-visible {
+  background: var(--surface-panel-muted);
+  outline: none;
+}
+.fs-library__row-fav--on {
+  color: var(--color-warning-500);
+}
+[data-theme="dark"] .fs-library__row-fav--on {
+  color: var(--color-warning-300);
+}
+
+/* ── Drag handle + drop-zone indicators on SchemaEditor rows ────────── */
+
+.fs-library__editor-section {
+  cursor: default;
+  position: relative;          /* needed for ::before/::after drop indicators */
+  user-select: none;
+}
+.fs-library__editor-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  cursor: grab;
+  user-select: none;
+  flex-shrink: 0;
+  letter-spacing: -2px;        /* tighten the two ⋮⋮ glyphs */
+}
+.fs-library__editor-drag-handle:hover { color: var(--text-secondary); }
+.fs-library__editor-section--dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+.fs-library__editor-section--drop-before::before,
+.fs-library__editor-section--drop-after::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  height: 3px;
+  background: var(--color-accent-500);
+  border-radius: 2px;
+  pointer-events: none;
+}
+.fs-library__editor-section--drop-before::before { top: -2px; }
+.fs-library__editor-section--drop-after::after   { bottom: -2px; }
+.fs-library__editor-section--drop-into {
+  background: var(--surface-selected);
+  box-shadow: inset 3px 0 0 var(--color-accent-500);
+}
+
+/* Nested children list — indent + connector line */
+.fs-library__editor-children {
+  list-style: none;
+  margin: 6px 0 0 24px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-left: 2px solid var(--border-subtle);
+  padding-left: 12px;
+}
+.fs-library__editor-section--child {
+  background: var(--surface-panel-muted);
+  border-color: var(--border-subtle);
+}
+
+
+/* ==========================================================================
+   §S11-C · Sprint 11 Track C — weekly KPI on /today + history drawer
+   --------------------------------------------------------------------------
+   1. .fs-today__week-kpi — slim horizontal tile above the Urgent block,
+      shows X / Y closed + % + 7-day SparkLine.
+   2. .fs-tasks-detail__history-* — cross-day audit trail in /tasks
+      right detail; replaces the prior single-event "Audit" stub.
+   ========================================================================== */
+
+.fs-today__week-kpi {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0 4px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+.fs-today__week-kpi-text { display: flex; flex-direction: column; gap: 2px; }
+.fs-today__week-kpi-headline {
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.fs-today__week-kpi-sub {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.fs-tasks-detail__history {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 12px;
+}
+.fs-tasks-detail__history-label {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+.fs-tasks-detail__history-empty {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text-tertiary);
+  padding: 4px 0;
+}
+.fs-tasks-detail__history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fs-tasks-detail__history-event {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+}
+.fs-tasks-detail__history-event--checked {
+  background: var(--surface-selected);
+  border-color: var(--color-success-300);
+}
+.fs-tasks-detail__history-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  flex-shrink: 0;
+  font-weight: 700;
+  color: var(--text-tertiary);
+}
+.fs-tasks-detail__history-event--checked .fs-tasks-detail__history-marker {
+  color: var(--color-success-600);
+}
+[data-theme="dark"] .fs-tasks-detail__history-event--checked .fs-tasks-detail__history-marker {
+  color: var(--color-success-300);
+}
+.fs-tasks-detail__history-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.fs-tasks-detail__history-date {
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+}
+.fs-tasks-detail__history-by {
+  font-size: 11px;
   color: var(--text-tertiary);
 }
