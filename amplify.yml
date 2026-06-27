@@ -1,0 +1,13 @@
+version: 1
+frontend:
+  phases:
+    build:
+      commands:
+        - mkdir -p dist
+        - cp -R scripts styles dist/
+        - cp *.html dist/
+        - cp app-shell-preview.html dist/index.html
+  artifacts:
+    baseDirectory: dist
+    files:
+      - '**/*'
