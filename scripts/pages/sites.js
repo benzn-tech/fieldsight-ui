@@ -175,7 +175,10 @@
     var refForm = React.useState({ name: '', location: '', region: 'south-island', client: '', project_value_nzd: '', planned_completion: '' });
     var form = refForm[0], setForm = refForm[1];
     var refBusy = React.useState(false); var busy = refBusy[0], setBusy = refBusy[1];
+    var iconRef = React.useRef(null);
+    var Avatar = window.FieldSight && window.FieldSight.Avatar;
     function set(k, v) { setForm(function (f) { var n = Object.assign({}, f); n[k] = v; return n; }); }
+    function onPickIcon(e) { var f = e.target.files && e.target.files[0]; if (!f) return; var r = new FileReader(); r.onload = function () { set('icon', r.result); }; r.readAsDataURL(f); }
     function submit() {
       if (!form.name.trim() || busy) return;
       setBusy(true);
@@ -193,6 +196,11 @@
     return React.createElement(Modal, { open: true, size: 'md', title: 'New project', onClose: props.onClose },
       React.createElement('div', { className: 'fs-settings__pw-form' },
         fFieldRow('Project name *', fText(form.name, function (v) { set('name', v); })),
+        fFieldRow('Project icon', React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+          Avatar ? React.createElement(Avatar, { name: form.name || 'Project', src: form.icon || undefined, size: 'md', shape: 'square' }) : null,
+          React.createElement('input', { type: 'file', accept: 'image/*', ref: iconRef, onChange: onPickIcon, style: { display: 'none' } }),
+          React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm', onClick: function () { if (iconRef.current) iconRef.current.click(); } }, 'Upload icon')
+        )),
         fFieldRow('Location', fText(form.location, function (v) { set('location', v); })),
         fFieldRow('Region', fSelect(form.region, [{ v: 'south-island', l: 'South Island' }, { v: 'north-island', l: 'North Island' }], function (v) { set('region', v); })),
         fFieldRow('Client', fText(form.client, function (v) { set('client', v); })),

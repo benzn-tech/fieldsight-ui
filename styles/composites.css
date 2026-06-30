@@ -2091,7 +2091,7 @@
 .fs-ask-chat__msg--user {
   align-self: flex-end;
   background: var(--color-accent-500);
-  color: var(--text-primary); /* dark text on yellow */
+  color: var(--color-neutral-900); /* fixed dark — black on yellow in both themes */
   border-bottom-right-radius: 4px;
 }
 .fs-ask-chat__msg--assistant {
@@ -2165,7 +2165,7 @@
   border: none;
   border-radius: var(--radius-md);
   background: var(--color-accent-500);
-  color: var(--text-primary); /* dark text on yellow */
+  color: var(--color-neutral-900); /* fixed dark — black on yellow in both themes */
   cursor: pointer;
   font-weight: var(--font-weight-medium);
   transition: background var(--duration-fast) var(--easing-out);
@@ -5642,7 +5642,7 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-settings__avatar-col { display: flex; flex-direction: column; align-items: center; gap: 8px; flex-shrink: 0; }
 .fs-settings__avatar-fallback {
   width: 64px; height: 64px; border-radius: 50%;
-  background: var(--color-accent-500); color: var(--text-primary);
+  background: var(--color-accent-500); color: var(--color-neutral-900);
   display: flex; align-items: center; justify-content: center;
   font-weight: 700; font-size: 22px;
 }
@@ -6208,23 +6208,19 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-quality__log-btn {
   flex-shrink:     0;
   padding:         7px 14px;
-  background:      var(--color-safety-500, #ff6b35);
-  color:           #fff;
+  background:      var(--color-accent-500);   /* unified brand yellow #FFD966 */
+  color:           var(--color-neutral-900);  /* black text on yellow */
   border:          none;
   border-radius:   var(--radius-sm);
-  font-size:       var(--text-sm);
+  font-size:       13px;
   font-weight:     600;
   cursor:          pointer;
   white-space:     nowrap;
   transition:      background 120ms ease, box-shadow 120ms ease;
 }
 
-.fs-quality__log-btn {
-  background: var(--color-accent-600, #2563eb);
-}
-
-.fs-safety__raise-btn:hover  { background: var(--color-safety-600, #e55a27); box-shadow: var(--shadow-sm); }
-.fs-quality__log-btn:hover   { background: var(--color-accent-700, #1d4ed8); box-shadow: var(--shadow-sm); }
+.fs-safety__raise-btn:hover,
+.fs-quality__log-btn:hover    { background: var(--color-accent-600); box-shadow: var(--shadow-sm); }
 
 .fs-safety__raise-btn:focus-visible,
 .fs-quality__log-btn:focus-visible {

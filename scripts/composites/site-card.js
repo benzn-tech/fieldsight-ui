@@ -33,8 +33,9 @@
   }
 
   function SiteCard(props) {
-    var Card  = window.FieldSight.Card;
-    var Badge = window.FieldSight.Badge;
+    var Card   = window.FieldSight.Card;
+    var Badge  = window.FieldSight.Badge;
+    var Avatar = window.FieldSight.Avatar;
 
     var site     = props.site || {};
     var kpi      = props.kpi  || {};
@@ -50,11 +51,14 @@
     },
       React.createElement(Card.Body, null,
         React.createElement('div', { className: 'fs-site-card__header' },
-          React.createElement('div', { className: 'fs-site-card__main' },
-            React.createElement('div', { className: 'fs-site-card__name' },
-              site.name || site.site_id),
-            React.createElement('div', { className: 'fs-site-card__sub' },
-              [site.location, site.client].filter(Boolean).join(' · ')),
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 } },
+            Avatar ? React.createElement(Avatar, { name: site.name || site.site_id, src: site.icon || undefined, size: 'sm', shape: 'square' }) : null,
+            React.createElement('div', { className: 'fs-site-card__main' },
+              React.createElement('div', { className: 'fs-site-card__name' },
+                site.name || site.site_id),
+              React.createElement('div', { className: 'fs-site-card__sub' },
+                [site.location, site.client].filter(Boolean).join(' · ')),
+            ),
           ),
           React.createElement('div', { className: 'fs-site-card__chev' }, '›'),
         ),

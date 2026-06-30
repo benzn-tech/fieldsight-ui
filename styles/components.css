@@ -76,7 +76,7 @@
 /* primary — solid accent (brand yellow) */
 .fs-btn--primary {
   background: var(--color-accent-500);
-  color: var(--text-primary); /* dark text — yellow brand fails contrast with #fff */
+  color: var(--color-neutral-900); /* fixed dark — stays black on yellow in dark mode too */
   border-color: var(--color-accent-500);
 }
 .fs-btn--primary:hover:not([disabled]):not([aria-disabled="true"]) {
@@ -748,9 +748,9 @@
 
 .fs-badge--solid.fs-badge--accent {
   background: var(--color-accent-500);
-  color: var(--text-primary); /* dark text — yellow fails contrast with #fff */
+  color: var(--color-neutral-900); /* fixed dark — black on yellow in both themes */
 }
-.fs-badge--solid.fs-badge--accent .fs-badge__prefix-dot { background: var(--text-primary); }
+.fs-badge--solid.fs-badge--accent .fs-badge__prefix-dot { background: var(--color-neutral-900); }
 
 .fs-badge--outline.fs-badge--accent {
   background: transparent;

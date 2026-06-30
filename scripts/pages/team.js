@@ -311,7 +311,10 @@
     var refForm = React.useState({ name: '', email: '', role: (roles[0] && roles[0].v) || 'worker', primary_site: (sites[0] && sites[0].v) || '' });
     var form = refForm[0], setForm = refForm[1];
     var refBusy = React.useState(false); var busy = refBusy[0], setBusy = refBusy[1];
+    var avatarRef = React.useRef(null);
+    var Avatar = window.FieldSight && window.FieldSight.Avatar;
     function set(k, v) { setForm(function (f) { var n = Object.assign({}, f); n[k] = v; return n; }); }
+    function onPickAvatar(e) { var f = e.target.files && e.target.files[0]; if (!f) return; var r = new FileReader(); r.onload = function () { set('avatarUrl', r.result); }; r.readAsDataURL(f); }
     function submit() {
       if (!form.name.trim() || busy) return;
       setBusy(true);
@@ -326,6 +329,11 @@
     return React.createElement(Modal, { open: true, size: 'md', title: 'Add member', onClose: props.onClose },
       React.createElement('div', { className: 'fs-settings__pw-form' },
         fFieldRow('Full name *', fText(form.name, function (v) { set('name', v); })),
+        fFieldRow('Picture', React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+          Avatar ? React.createElement(Avatar, { name: form.name || 'Member', src: form.avatarUrl || undefined, size: 'md' }) : null,
+          React.createElement('input', { type: 'file', accept: 'image/*', ref: avatarRef, onChange: onPickAvatar, style: { display: 'none' } }),
+          React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm', onClick: function () { if (avatarRef.current) avatarRef.current.click(); } }, 'Upload picture')
+        )),
         fFieldRow('Email', fText(form.email, function (v) { set('email', v); }, 'email')),
         fFieldRow('Position / role', fSelect(form.role, roles, function (v) { set('role', v); })),
         fFieldRow('Primary site', fSelect(form.primary_site, sites, function (v) { set('primary_site', v); })),
@@ -454,7 +462,7 @@
                         onSelect({ kind: 'user', id: 'user_' + u.device_id, device_id: u.device_id, user: u });
                       },
                     },
-                      Avatar ? React.createElement(Avatar, { name: u.name, size: 'sm' }) : null,
+                      Avatar ? React.createElement(Avatar, { name: u.name, src: u.avatarUrl || undefined, size: 'sm' }) : null,
                       React.createElement('div', { className: 'fs-team__user-info' },
                         React.createElement('div', { className: 'fs-team__user-name' }, u.name),
                         React.createElement('div', { className: 'fs-team__user-meta' },
@@ -635,7 +643,7 @@
 
       React.createElement('div', { className: 'fs-team-detail__header' },
         React.createElement('div', { className: 'fs-team-detail__header-main' },
-          Avatar ? React.createElement(Avatar, { name: u.name, size: 'lg' }) : null,
+          Avatar ? React.createElement(Avatar, { name: u.name, src: u.avatarUrl || undefined, size: 'lg' }) : null,
           React.createElement('div', { className: 'fs-team-detail__header-text' },
             React.createElement('h2', { className: 'fs-team-detail__name' }, u.name || '—'),
             React.createElement('div', { className: 'fs-team-detail__badges' },
