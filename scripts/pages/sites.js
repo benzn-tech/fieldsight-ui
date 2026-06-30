@@ -147,6 +147,15 @@
       state: state,
       caller: caller,
       addSite: function (site) { setState(function (s) { return Object.assign({}, s, { sites: [site].concat(s.sites || []) }); }); },
+      setSiteIcon: function (siteId, icon) {
+        setState(function (s) {
+          if (!s.sites) return s;
+          return Object.assign({}, s, { sites: s.sites.map(function (x) { return x.site_id === siteId ? Object.assign({}, x, { icon: icon }) : x; }) });
+        });
+        var f = (window.FieldSight && window.FieldSight.fixtures && window.FieldSight.fixtures.sites);
+        if (f && f.sites) { var fx = f.sites.filter(function (x) { return x.site_id === siteId; })[0]; if (fx) fx.icon = icon; }
+        if (window.FS.toast) window.FS.toast.show({ message: icon ? 'Project image updated' : 'Project image removed', tone: 'success' });
+      },
     };
     return React.createElement(SitesContext.Provider, { value: ctx },
       props.children);
@@ -332,6 +341,8 @@
 
     var ctx = React.useContext(SitesContext);
     var sel = props.selectedItem;
+    var iconRef = React.useRef(null);
+    var Avatar = fs.Avatar;
 
     /* Per-site users state — fetched lazily on selection. */
     var refUsers = React.useState({ status: 'idle', users: [] });
@@ -369,6 +380,11 @@
     }
 
     var site = sel.site;
+    if (ctx && ctx.state && ctx.state.sites) {
+      var liveSite = ctx.state.sites.filter(function (s) { return s.site_id === sel.site_id; })[0];
+      if (liveSite) site = liveSite;
+    }
+    function onPickIcon(e) { var f = e.target.files && e.target.files[0]; if (!f) return; var r = new FileReader(); r.onload = function () { if (ctx && ctx.setSiteIcon) ctx.setSiteIcon(sel.site_id, r.result); }; r.readAsDataURL(f); }
     var rows = (ctx && ctx.state && ctx.state.reportsBySite && ctx.state.reportsBySite[sel.site_id]) || [];
     var topReports = rows.slice(0, 5);
 
@@ -387,6 +403,12 @@
           React.createElement('div', { className: 'fs-sites-detail__metaline' },
             site.client ? React.createElement('span', null, site.client) : null,
             site.location ? React.createElement('span', null, site.location) : null,
+          ),
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', marginTop: '12px' } },
+            Avatar ? React.createElement(Avatar, { name: site.name || site.site_id, src: site.icon || undefined, size: 'lg', shape: 'square' }) : null,
+            React.createElement('input', { type: 'file', accept: 'image/*', ref: iconRef, onChange: onPickIcon, style: { display: 'none' } }),
+            React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm', onClick: function () { if (iconRef.current) iconRef.current.click(); } }, site.icon ? 'Change image' : 'Upload image'),
+            site.icon ? React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--tertiary fs-btn--sm', onClick: function () { if (ctx && ctx.setSiteIcon) ctx.setSiteIcon(sel.site_id, null); } }, 'Remove') : null,
           ),
         ),
         IconBtn ? React.createElement(IconBtn, {

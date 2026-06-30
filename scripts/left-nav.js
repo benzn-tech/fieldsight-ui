@@ -263,9 +263,12 @@ function UserArea({ user, isCollapsed }) {
 
   return React.createElement('div', { style: areaStyle, className: 'user-area' },
     React.createElement('div', {
-      style: avatarStyle,
+      style: Object.assign({}, avatarStyle, { overflow: 'hidden' }),
       onClick: function() { setMenuOpen(function(o) { return !o; }); },
-    }, user.initials || '?'),
+    },
+      user.avatarUrl
+        ? React.createElement('img', { src: user.avatarUrl, alt: '', style: { width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' } })
+        : (user.initials || '?')),
 
     !isCollapsed ? React.createElement('div', {
       style: { flex: 1, minWidth: 0, cursor: 'pointer' },

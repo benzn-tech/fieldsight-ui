@@ -19,7 +19,7 @@
     var f  = fixtures().sites || { sites: [], users: [] };
     var u  = (window.AuthMock && window.AuthMock.currentUser) || {};
     return {
-      sites:        f.sites,
+      sites:        f.sites.slice(),   /* copy — keep state independent of the fixture so optimistic adds don't double up */
       role:         u.role || 'site_manager',
       display_name: u.name || 'Jarley Trainor',
     };
@@ -39,7 +39,7 @@
     if (!window.FS.api.useMocks) return window.FS.api.request('/users');
     await window.FS.api.delay();
     var f = fixtures().sites || { users: [] };
-    return { users: f.users };
+    return { users: f.users.slice() };   /* copy — see getSites note */
   }
 
   function slugify(s) {
