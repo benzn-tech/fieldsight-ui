@@ -171,7 +171,8 @@
   }
 
   /* ---------- Preferences tab (original content) ------------------------ */
-  function PreferencesTab(ctx) {
+  function PreferencesTab(props) {
+    var ctx = props.ctx;
     var state = ctx.state, user = ctx.user;
     var visibleItems = window.FS && window.FS.getVisibleNavItems ? window.FS.getVisibleNavItems(user) : [];
     var roleDefault = window.FS && window.FS.getDefaultLanding ? window.FS.getDefaultLanding(user) : '/today';
@@ -229,7 +230,8 @@
   }
 
   /* ---------- Profile tab ----------------------------------------------- */
-  function ProfileTab(ctx) {
+  function ProfileTab(props) {
+    var ctx = props.ctx;
     var p = ctx.profile;
     var Avatar = window.FieldSight && window.FieldSight.Avatar;
     var fileRef = React.useRef(null);
@@ -276,7 +278,8 @@
   }
 
   /* ---------- Security tab ---------------------------------------------- */
-  function SecurityTab(ctx) {
+  function SecurityTab(props) {
+    var ctx = props.ctx;
     var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
     var refPw = React.useState(false); var pwOpen = refPw[0], setPwOpen = refPw[1];
     function row(icon, title, sub, btnLabel, onClick) {
@@ -313,7 +316,8 @@
   }
 
   /* ---------- Notifications tab ----------------------------------------- */
-  function NotificationsTab(ctx) {
+  function NotificationsTab(props) {
+    var ctx = props.ctx;
     var n = ctx.notif;
     return React.createElement('section', { className: 'fs-settings__section' },
       React.createElement('div', { className: 'fs-settings__section-desc' }, 'Configure global email notification settings for your projects.'),
@@ -349,10 +353,10 @@
     var ctx = React.useContext(SettingsContext);
     if (!ctx) return null;
     var body;
-    if (ctx.tab === 'profile') body = ProfileTab(ctx);
-    else if (ctx.tab === 'security') body = SecurityTab(ctx);
-    else if (ctx.tab === 'notifications') body = NotificationsTab(ctx);
-    else body = PreferencesTab(ctx);
+    if (ctx.tab === 'profile') body = React.createElement(ProfileTab, { ctx: ctx });
+    else if (ctx.tab === 'security') body = React.createElement(SecurityTab, { ctx: ctx });
+    else if (ctx.tab === 'notifications') body = React.createElement(NotificationsTab, { ctx: ctx });
+    else body = React.createElement(PreferencesTab, { ctx: ctx });
 
     return React.createElement('div', { className: 'fs-settings' },
       React.createElement('div', { className: 'fs-settings__header' },

@@ -289,7 +289,10 @@ function UserArea({ user, isCollapsed }) {
     ) : null,
 
     menuOpen ? React.createElement('div', { style: menuStyle },
-      React.createElement('div', { style: menuItemStyle }, 'Profile'),
+      React.createElement('div', {
+        style: menuItemStyle,
+        onClick: function() { setMenuOpen(false); window.location.hash = '#/settings'; },
+      }, 'Settings'),
       React.createElement('div', {
         style: Object.assign({}, menuItemStyle, {
           borderTop: '1px solid var(--border-subtle)',

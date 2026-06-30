@@ -2091,7 +2091,7 @@
 .fs-ask-chat__msg--user {
   align-self: flex-end;
   background: var(--color-accent-500);
-  color: #fff;
+  color: var(--text-primary); /* dark text on yellow */
   border-bottom-right-radius: 4px;
 }
 .fs-ask-chat__msg--assistant {
@@ -2165,7 +2165,7 @@
   border: none;
   border-radius: var(--radius-md);
   background: var(--color-accent-500);
-  color: #fff;
+  color: var(--text-primary); /* dark text on yellow */
   cursor: pointer;
   font-weight: var(--font-weight-medium);
   transition: background var(--duration-fast) var(--easing-out);
@@ -4089,6 +4089,8 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-modal__body {
   padding: 20px;
   overflow-y: auto;
+  flex: 1 1 auto;   /* fill the bounded modal so long content scrolls to the bottom */
+  min-height: 0;    /* allow the flex child to shrink below content height and scroll */
 }
 
 @media (prefers-reduced-motion: reduce) {
