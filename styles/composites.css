@@ -4622,8 +4622,10 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-safety__row-btn:hover {
   background: var(--surface-panel-muted);
 }
+/* Single border: the inner .fs-safety-flag-row carries the selected border
+   (rule further below); keep the outer button border transparent so the two
+   don't stack into a double ring. */
 .fs-safety__row-btn--active {
-  border-color: var(--color-accent-400);
   background: var(--surface-selected);
 }
 .fs-safety__row-meta {
@@ -8680,7 +8682,7 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
    push the rest of the page off-screen. The "↗ Full preview" button
    in the header opens an unbounded modal version when needed. */
 .fs-library__test-render-body--scroll {
-  max-height: 480px;
+  max-height: 70vh;
   overflow-y: auto;
 }
 .fs-library__test-render-modal .fs-library__test-render-body {

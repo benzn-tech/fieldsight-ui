@@ -99,7 +99,7 @@ function NavItem({ navKey, label, isActive, isCollapsed, onClick, isSubItem }) {
   const t = window.FS.tokens;
 
   const iconColor = isActive
-    ? t.colors.accent[500]
+    ? t.colors.neutral[900]
     : (hovered ? t.colors.neutral[0] : t.colors.neutral[400]);
 
   /* Sprint 3 P-04: in collapsed mode (justifyContent:center, 48 px wide
@@ -108,10 +108,10 @@ function NavItem({ navKey, label, isActive, isCollapsed, onClick, isSubItem }) {
      borderLeft in expanded mode (where it sits beside text and the
      visual offset is fine) and switch to a non-layout box-shadow
      inset stripe when collapsed. */
-  const activeStripe   = isActive ? '3px solid ' + t.colors.accent[500] : '3px solid transparent';
-  const collapsedStripe = isCollapsed && isActive
-    ? 'inset 3px 0 0 ' + t.colors.accent[500]
-    : 'none';
+  /* Selection is now a solid yellow fill (see itemStyle); the old yellow edge
+     stripe is redundant/invisible on yellow — keep the layout slot transparent. */
+  const activeStripe   = '3px solid transparent';
+  const collapsedStripe = 'none';
 
   const itemStyle = {
     display: 'flex',
@@ -129,9 +129,9 @@ function NavItem({ navKey, label, isActive, isCollapsed, onClick, isSubItem }) {
     position: 'relative',
     justifyContent: isCollapsed ? 'center' : 'flex-start',
     background: isActive
-      ? 'var(--surface-sidebar-active)'
+      ? t.colors.accent[500]
       : hovered ? 'var(--surface-sidebar-hover)' : 'transparent',
-    color: isActive || hovered ? t.colors.neutral[0] : t.colors.neutral[300],
+    color: isActive ? t.colors.neutral[900] : (hovered ? t.colors.neutral[0] : t.colors.neutral[300]),
     fontSize: t.typography.fontSize.sm,
     fontWeight: isActive ? t.typography.fontWeight.semibold : t.typography.fontWeight.medium,
     transition: 'background 100ms ease-out, color 100ms ease-out',

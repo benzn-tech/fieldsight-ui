@@ -65,7 +65,7 @@
       panelMuted: '#F3F4F6', sidebar: '#111827', sidebarHover: '#1F2937',
       sidebarActive: '#374151', input: '#FFFFFF', inputHover: '#F9FAFB',
       inputFocus: '#FFFFFF', overlay: 'rgba(17, 24, 39, 0.5)',
-      tooltip: '#111827', highlight: '#FFFDE7',
+      tooltip: '#111827', highlight: '#FFD966',
     },
     border: {
       subtle: '#E5E7EB', default: '#D1D5DB', strong: '#9CA3AF',

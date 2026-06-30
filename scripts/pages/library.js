@@ -1178,6 +1178,7 @@
       expanded && renderBody(true),
 
       modalOpen && Modal ? React.createElement(Modal, {
+        open:    true,   /* ModalOverlay only shows when open=true (toggles fs-modal--open) */
         title:   'Test render · ' + flat.length + ' section' + (flat.length === 1 ? '' : 's'),
         onClose: function () { setModalOpen(false); },
         size:    'lg',

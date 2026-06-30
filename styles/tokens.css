@@ -348,8 +348,10 @@
   --surface-input-focus:    var(--color-neutral-0);
   --surface-overlay:        rgba(17, 24, 39, 0.5);
   --surface-tooltip:        var(--color-neutral-900);
-  --surface-highlight:      var(--color-accent-50);
-  --surface-selected:       var(--color-accent-50);
+  /* Solid brand yellow for highlighted/selected surfaces (was pale accent-50).
+     Text on these is --text-primary (dark) — keep it dark for contrast. */
+  --surface-highlight:      var(--color-accent-500);
+  --surface-selected:       var(--color-accent-500);
 
   /* Borders */
   --border-subtle:  var(--color-neutral-200);

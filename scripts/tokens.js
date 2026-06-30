@@ -158,7 +158,7 @@ export const tokens = {
     inputFocus:     '#FFFFFF',
     overlay:        'rgba(17, 24, 39, 0.5)',
     tooltip:        '#111827',  /* neutral-900 */
-    highlight:      '#FFFDE7',  /* accent-50 */
+    highlight:      '#FFD966',  /* accent-500 */
   },
 
 

@@ -313,12 +313,12 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
     ? {
         flex: 1,
         minWidth: 0,
-        background: 'var(--surface-panel)',
+        background: 'var(--surface-app)',
         borderRight: '1px solid var(--border-subtle)',
       }
     : {
         width: width + 'px',
-        background: 'var(--surface-panel)',
+        background: 'var(--surface-app)',
         borderRight: '1px solid var(--border-subtle)',
       };
 
@@ -490,7 +490,7 @@ function RightDetail({ route, selectedItem, onClose }) {
       className: 'right-detail',
       /* alignItems/justifyContent reset the empty-state centering (.right-detail
          in app-shell.css) so a populated Right panel fills the full pane width. */
-      style: { background: 'var(--surface-app)', height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start' },
+      style: { background: 'var(--surface-panel)', height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start' },
     },
       /* Sprint 8.4.1 — back button visible only on mobile via CSS */
       React.createElement(MobileBack, { onClose: onClose }),
@@ -506,14 +506,14 @@ function RightDetail({ route, selectedItem, onClose }) {
   /* Default empty state for unregistered routes */
   const iconWrapStyle = {
     width: '60px', height: '60px', borderRadius: '50%',
-    background: 'var(--surface-panel)',
+    background: 'var(--surface-app)',
     border: '1px solid var(--border-subtle)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     boxShadow: t.shadow.sm,
   };
 
   return React.createElement('div', {
-    style: { background: 'var(--surface-app)', color: 'var(--text-tertiary)' },
+    style: { background: 'var(--surface-panel)', color: 'var(--text-tertiary)' },
     className: 'right-detail',
   },
     React.createElement('div', { style: iconWrapStyle },
