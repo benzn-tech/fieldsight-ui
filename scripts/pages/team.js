@@ -251,13 +251,90 @@
       }
     }
 
+    function addUser(user) {
+      setState(function (s) {
+        if (s.status !== 'ok') return s;
+        var users = [user].concat(s.users || []);
+        var groups = groupUsersBySite(users);
+        return Object.assign({}, s, {
+          users: users, groups: groups,
+          totals: { users: users.length, sites: groups.filter(function (g) { return g.site_id !== '__none__'; }).length, roles: countDistinctRoles(users) },
+        });
+      });
+    }
+
+    function changeRole(deviceId, role) {
+      if (window.FS.api.sites.updateUserRole) window.FS.api.sites.updateUserRole(deviceId, role);
+      setState(function (s) {
+        if (s.status !== 'ok') return s;
+        var patched = (s.users || []).map(function (u) { return u.device_id === deviceId ? Object.assign({}, u, { role: role }) : u; });
+        return Object.assign({}, s, { users: patched, groups: groupUsersBySite(patched), totals: Object.assign({}, s.totals, { roles: countDistinctRoles(patched) }) });
+      });
+      if (window.FS && window.FS.toast) window.FS.toast.show({ message: 'Position updated', tone: 'success' });
+    }
+
     var ctx = {
       state:       state,
       caller:      caller,
       overrides:   overrides,
       applyReassign: applyReassign,
+      addUser:     addUser,
+      changeRole:  changeRole,
     };
     return React.createElement(TeamContext.Provider, { value: ctx }, props.children);
+  }
+
+  /* ---------- Phase B form helpers + Add member modal ------------------ */
+  function fFieldRow(label, control) {
+    return React.createElement('div', { className: 'fs-settings__field-row' },
+      React.createElement('label', { className: 'fs-settings__label' }, label), control);
+  }
+  function fText(value, onChange, type) {
+    return React.createElement('input', { type: type || 'text', className: 'fs-settings__input', value: value || '', onChange: function (e) { onChange(e.target.value); } });
+  }
+  function fSelect(value, options, onChange) {
+    return React.createElement('select', { className: 'fs-settings__select', value: value, onChange: function (e) { onChange(e.target.value); } },
+      options.map(function (o) { return React.createElement('option', { key: o.v, value: o.v }, o.l); }));
+  }
+  function roleOptions() {
+    var R = (window.FS && window.FS.ROLES) || {};
+    return Object.keys(R).map(function (k) { return { v: k, l: R[k].label || k }; });
+  }
+  function siteOptions() {
+    var f = (window.FieldSight && window.FieldSight.fixtures && window.FieldSight.fixtures.sites) || { sites: [] };
+    return (f.sites || []).map(function (s) { return { v: s.site_id, l: s.name }; });
+  }
+
+  function AddMemberModal(props) {
+    var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
+    var roles = roleOptions(); var sites = siteOptions();
+    var refForm = React.useState({ name: '', email: '', role: (roles[0] && roles[0].v) || 'worker', primary_site: (sites[0] && sites[0].v) || '' });
+    var form = refForm[0], setForm = refForm[1];
+    var refBusy = React.useState(false); var busy = refBusy[0], setBusy = refBusy[1];
+    function set(k, v) { setForm(function (f) { var n = Object.assign({}, f); n[k] = v; return n; }); }
+    function submit() {
+      if (!form.name.trim() || busy) return;
+      setBusy(true);
+      window.FS.api.sites.createUser(form).then(function (user) {
+        setBusy(false);
+        if (window.FS.toast) window.FS.toast.show({ message: form.name + ' added', tone: 'success' });
+        if (props.onCreated) props.onCreated(user);
+        if (props.onClose) props.onClose();
+      }).catch(function () { setBusy(false); if (window.FS.toast) window.FS.toast.show({ message: 'Could not add member', tone: 'error' }); });
+    }
+    if (!Modal) return null;
+    return React.createElement(Modal, { open: true, size: 'md', title: 'Add member', onClose: props.onClose },
+      React.createElement('div', { className: 'fs-settings__pw-form' },
+        fFieldRow('Full name *', fText(form.name, function (v) { set('name', v); })),
+        fFieldRow('Email', fText(form.email, function (v) { set('email', v); }, 'email')),
+        fFieldRow('Position / role', fSelect(form.role, roles, function (v) { set('role', v); })),
+        fFieldRow('Primary site', fSelect(form.primary_site, sites, function (v) { set('primary_site', v); })),
+        React.createElement('div', { className: 'fs-settings__actions' },
+          React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: props.onClose }, 'Cancel'),
+          React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--md', disabled: busy, onClick: submit }, busy ? 'Adding…' : 'Add member')
+        )
+      )
+    );
   }
 
   /* ---------- TeamMiddleColumn ------------------------------------------ */
@@ -269,6 +346,8 @@
     var onSelect  = props.onSelect || function () {};
 
     var ctx = React.useContext(TeamContext);
+    var amRef = React.useState(false);
+    var addOpen = amRef[0], setAddOpen = amRef[1];
     if (!ctx) {
       console.warn('[TeamMiddleColumn] TeamContext missing');
       return null;
@@ -322,12 +401,18 @@
 
     return React.createElement('div', { className: 'fs-team' },
 
-      React.createElement('div', { className: 'fs-team__header' },
-        React.createElement('h2', { className: 'fs-team__title' }, 'Team'),
-        React.createElement('div', { className: 'fs-team__subtitle' }, metaLine),
-        scopeCaption
-          ? React.createElement('div', { className: 'fs-team__scope-caption' }, scopeCaption)
-          : null,
+      React.createElement('div', { className: 'fs-team__header', style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' } },
+        React.createElement('div', null,
+          React.createElement('h2', { className: 'fs-team__title' }, 'Team'),
+          React.createElement('div', { className: 'fs-team__subtitle' }, metaLine),
+          scopeCaption
+            ? React.createElement('div', { className: 'fs-team__scope-caption' }, scopeCaption)
+            : null,
+        ),
+        React.createElement('button', {
+          type: 'button', className: 'fs-btn fs-btn--primary fs-btn--sm',
+          onClick: function () { setAddOpen(true); },
+        }, '+ Add member'),
       ),
 
       /* KPI strip */
@@ -388,6 +473,11 @@
               );
             }),
       ),
+
+      addOpen ? React.createElement(AddMemberModal, {
+        onClose:   function () { setAddOpen(false); },
+        onCreated: function (user) { ctx.addUser(user); },
+      }) : null,
     );
   }
 
@@ -563,6 +653,15 @@
 
       /* Field rows */
       React.createElement('div', { className: 'fs-team-detail__fields' },
+        React.createElement('div', { className: 'fs-team-detail__field' },
+          React.createElement('div', { className: 'fs-team-detail__field-label' }, 'Position'),
+          React.createElement('div', { className: 'fs-team-detail__field-value' },
+            React.createElement('select', {
+              className: 'fs-settings__select', value: u.role, style: { maxWidth: '240px' },
+              onChange: function (e) { if (ctx && ctx.changeRole) ctx.changeRole(u.device_id, e.target.value); },
+            }, roleOptions().map(function (o) { return React.createElement('option', { key: o.v, value: o.v }, o.l); })),
+          ),
+        ),
         React.createElement('div', { className: 'fs-team-detail__field' },
           React.createElement('div', { className: 'fs-team-detail__field-label' }, 'Primary site'),
           React.createElement('div', { className: 'fs-team-detail__field-value' }, scopePrimary),
