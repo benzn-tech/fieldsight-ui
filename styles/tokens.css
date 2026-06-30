@@ -42,18 +42,20 @@
   --color-primary-900: #102A43;
   --color-primary-950: #0A1A2E;
 
-  /* ---- Accent · Safety Orange ------------------------------------------ */
-  /* Hi-vis construction signature; reserved for CTAs and key highlights   */
-  --color-accent-50:  #FFF4ED;
-  --color-accent-100: #FFE6D5;
-  --color-accent-200: #FFC8A5;
-  --color-accent-300: #FFA06B;
-  --color-accent-400: #FF7A3C;
-  --color-accent-500: #FF6B35; /* PRIMARY ACCENT */
-  --color-accent-600: #E54B1E;
-  --color-accent-700: #C23616;
-  --color-accent-800: #9A2A13;
-  --color-accent-900: #7A2210;
+  /* ---- Accent · Brand Yellow (FieldSightAI) ---------------------------- */
+  /* Warm-yellow brand; reserved for CTAs and key highlights. Anchored at   */
+  /* brand-500 #FFD966. NOTE: foregrounds on accent must be dark            */
+  /* (--text-primary), never white — yellow fails contrast with #fff.       */
+  --color-accent-50:  #FFFDE7;
+  --color-accent-100: #FFF9C4;
+  --color-accent-200: #FFF59D;
+  --color-accent-300: #FFF176;
+  --color-accent-400: #FFEE58;
+  --color-accent-500: #FFD966; /* PRIMARY ACCENT */
+  --color-accent-600: #FFC107;
+  --color-accent-700: #FF8F00;
+  --color-accent-800: #FF6F00;
+  --color-accent-900: #E65100;
 
   /* ---- Semantic · Danger (Red) ----------------------------------------- */
   /* Hazards, errors, stop conditions, critical incidents                  */
@@ -324,7 +326,8 @@
 
   --focus-ring-width:  2px;
   --focus-ring-offset: 2px;
-  --focus-ring-color:  var(--color-accent-500);
+  /* accent-700 (amber) not accent-500 (yellow): a yellow ring is invisible on white. */
+  --focus-ring-color:  var(--color-accent-700);
   --focus-ring-style:  solid;
 
 
@@ -337,9 +340,9 @@
   --surface-panel:          var(--color-neutral-0);
   --surface-panel-elevated: var(--color-neutral-0);
   --surface-panel-muted:    var(--color-neutral-100);
-  --surface-sidebar:        var(--color-primary-900);
-  --surface-sidebar-hover:  var(--color-primary-800);
-  --surface-sidebar-active: var(--color-primary-700);
+  --surface-sidebar:        var(--color-neutral-900);
+  --surface-sidebar-hover:  var(--color-neutral-800);
+  --surface-sidebar-active: var(--color-neutral-700);
   --surface-input:          var(--color-neutral-0);
   --surface-input-hover:    var(--color-neutral-50);
   --surface-input-focus:    var(--color-neutral-0);
@@ -352,7 +355,7 @@
   --border-subtle:  var(--color-neutral-200);
   --border-default: var(--color-neutral-300);
   --border-strong:  var(--color-neutral-400);
-  --border-focus:   var(--color-accent-500);
+  --border-focus:   var(--color-accent-700);
   --border-danger:  var(--color-danger-500);
   --border-success: var(--color-success-500);
 
@@ -664,8 +667,8 @@
   --surface-input-focus:    #111827;
   --surface-overlay:        rgba(0, 0, 0, 0.75);
   --surface-tooltip:        #1F2937;
-  --surface-highlight:      rgba(255, 107, 53, 0.12);
-  --surface-selected:       rgba(255, 107, 53, 0.15);
+  --surface-highlight:      rgba(255, 217, 102, 0.12);
+  --surface-selected:       rgba(255, 217, 102, 0.15);
 
   /* Borders */
   --border-subtle:  #1F2937;

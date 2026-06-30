@@ -6846,16 +6846,16 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   position: relative;
   z-index: 2;
   box-shadow: 0 0 0 3px var(--color-accent-500),
-              0 0 0 7px rgba(255, 107, 53, 0.25);
+              0 0 0 7px rgba(255, 217, 102, 0.25);
   border-radius: var(--radius-md, 8px);
   animation: fs-demo-pulse 1.6s ease-in-out infinite;
 }
 
 @keyframes fs-demo-pulse {
   0%, 100% { box-shadow: 0 0 0 3px var(--color-accent-500),
-                          0 0 0 7px rgba(255, 107, 53, 0.25); }
+                          0 0 0 7px rgba(255, 217, 102, 0.25); }
   50%      { box-shadow: 0 0 0 3px var(--color-accent-500),
-                          0 0 0 12px rgba(255, 107, 53, 0.10); }
+                          0 0 0 12px rgba(255, 217, 102, 0.10); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -7014,7 +7014,7 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color:      var(--color-neutral-200);
 }
 [data-theme="dark"] .fs-badge--subtle.fs-badge--accent {
-  background: rgba(255, 107, 53, 0.18);
+  background: rgba(255, 217, 102, 0.18);
   color:      var(--color-accent-300);
 }
 [data-theme="dark"] .fs-badge--subtle.fs-badge--danger {
@@ -7464,7 +7464,7 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 }
 [data-theme="dark"] .fs-team__scope-caption {
   color:        var(--color-accent-300);
-  border-color: rgba(255, 107, 53, 0.30);
+  border-color: rgba(255, 217, 102, 0.30);
 }
 
 .fs-team-detail__action-btn--primary {
@@ -8375,8 +8375,8 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   border-color: var(--color-accent-200);
 }
 [data-theme="dark"] .fs-library__row--selected {
-  background: rgba(255, 107, 53, 0.08);
-  border-color: rgba(255, 107, 53, 0.25);
+  background: rgba(255, 217, 102, 0.08);
+  border-color: rgba(255, 217, 102, 0.25);
 }
 .fs-library__row:focus-visible { outline: 2px solid var(--color-accent-500); outline-offset: 1px; }
 .fs-library__row--selected:focus-visible { box-shadow: none; }
@@ -9219,8 +9219,8 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   border-color: var(--color-accent-200);
 }
 [data-theme="dark"] .fs-library__history-ver--selected {
-  background: rgba(255, 107, 53, 0.08);
-  border-color: rgba(255, 107, 53, 0.25);
+  background: rgba(255, 217, 102, 0.08);
+  border-color: rgba(255, 217, 102, 0.25);
 }
 .fs-library__history-ver:focus-visible { outline: 2px solid var(--color-accent-500); outline-offset: 1px; }
 

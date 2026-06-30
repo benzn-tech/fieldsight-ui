@@ -1107,7 +1107,9 @@
      to a full-screen modal using ModalOverlay. */
   function TestRenderPanel(props) {
     var schema     = props.schema;
-    var expandRef  = React.useState(false);
+    /* Default expanded so the preview, its scroller, and the "Full preview"
+       affordance are visible without first clicking Expand. */
+    var expandRef  = React.useState(true);
     var expanded   = expandRef[0]; var setExpanded = expandRef[1];
 
     var modalRef   = React.useState(false);
@@ -1178,7 +1180,7 @@
       modalOpen && Modal ? React.createElement(Modal, {
         title:   'Test render · ' + flat.length + ' section' + (flat.length === 1 ? '' : 's'),
         onClose: function () { setModalOpen(false); },
-        size:    'large',
+        size:    'lg',
       },
         React.createElement('div', { className: 'fs-library__test-render-modal' },
           renderBody(false),

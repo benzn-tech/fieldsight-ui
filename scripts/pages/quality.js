@@ -91,15 +91,34 @@
 
   var QualityContext = React.createContext(null);
 
+  /* Persist the quality toolbar view (mode + picked day) so it survives route
+     changes / tab switches. localStorage, per the fs.settings.* convention
+     (theme.js / density.js). Will be cleared on logout once a real logout
+     flow exists (the current "Log out" item is a stub). */
+  var QUALITY_VIEW_KEY = 'fs.settings.qualityView';
+  function loadQualityView() {
+    try {
+      var raw = window.localStorage.getItem(QUALITY_VIEW_KEY);
+      if (!raw) return null;
+      var v = JSON.parse(raw);
+      if (v && (v.mode === 'week' || v.mode === 'today' || v.mode === 'day')) return v;
+    } catch (_) {}
+    return null;
+  }
+  function saveQualityView(mode, day) {
+    try { window.localStorage.setItem(QUALITY_VIEW_KEY, JSON.stringify({ mode: mode, day: day })); } catch (_) {}
+  }
+
   function QualityProvider(props) {
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
     var depKey = (caller.name || '') + '|' + (caller.role || '') + '|' + (caller.isAdmin ? 'admin' : '');
+    var savedView = loadQualityView();
 
-    var refMode = React.useState('week');
+    var refMode = React.useState((savedView && savedView.mode) || 'week');
     var mode    = refMode[0];
     var setMode = refMode[1];
 
-    var refDay = React.useState(window.FS.api.todayNZDT());
+    var refDay = React.useState((savedView && savedView.day) || window.FS.api.todayNZDT());
     var day    = refDay[0];
     var setDay = refDay[1];
 
@@ -165,8 +184,8 @@
       setState:      setState,
       mode:          mode,
       day:           day,
-      setMode:       function (m) { setSel(null); setMode(m); },
-      setDay:        function (d) { setSel(null); setDay(d); setMode('day'); },
+      setMode:       function (m) { setSel(null); setMode(m); saveQualityView(m, day); },
+      setDay:        function (d) { setSel(null); setDay(d); setMode('day'); saveQualityView('day', d); },
       selectedItem:  sel,
       setSelected:   setSel,
       showCreate:    showCreate,

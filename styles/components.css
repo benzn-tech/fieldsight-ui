@@ -73,10 +73,10 @@
 
 /* ---------- Variants ----------------------------------------------------- */
 
-/* primary — solid accent (safety orange) */
+/* primary — solid accent (brand yellow) */
 .fs-btn--primary {
   background: var(--color-accent-500);
-  color: #fff;
+  color: var(--text-primary); /* dark text — yellow brand fails contrast with #fff */
   border-color: var(--color-accent-500);
 }
 .fs-btn--primary:hover:not([disabled]):not([aria-disabled="true"]) {
@@ -301,7 +301,7 @@
 .fs-field__control:focus-visible {
   outline: none;
   border-color: var(--color-accent-500);
-  box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.20);
+  box-shadow: 0 0 0 3px rgba(255, 217, 102, 0.20);
 }
 
 .fs-field__control[readonly] {

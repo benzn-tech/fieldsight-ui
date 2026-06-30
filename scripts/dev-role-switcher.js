@@ -126,7 +126,7 @@ function DevRoleSwitcher() {
   const triggerStyle = {
     width: '100%',
     background: 'rgba(255,255,255,0.07)',
-    border: '1px solid ' + (dropOpen ? 'rgba(255,107,53,0.5)' : 'rgba(255,255,255,0.12)'),
+    border: '1px solid ' + (dropOpen ? 'rgba(255,217,102,0.5)' : 'rgba(255,255,255,0.12)'),
     borderRadius: '6px',
     color: '#fff',
     padding: '7px 10px',
@@ -173,7 +173,7 @@ function DevRoleSwitcher() {
       fontSize: t.typography.fontSize.sm,
       color: active ? t.colors.accent[300] : '#fff',
       background: active
-        ? 'rgba(255,107,53,0.12)'
+        ? 'rgba(255,217,102,0.12)'
         : (hovered ? 'rgba(255,255,255,0.06)' : 'transparent'),
       cursor: 'pointer',
       display: 'flex',
@@ -323,7 +323,7 @@ function DevRoleSwitcher() {
               style: {
                 padding: '1px 6px',
                 borderRadius: '4px',
-                background: 'rgba(255,107,53,0.15)',
+                background: 'rgba(255,217,102,0.15)',
                 color: t.colors.accent[300],
                 fontSize: '10px',
               },

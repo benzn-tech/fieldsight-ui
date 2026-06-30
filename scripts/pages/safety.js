@@ -86,18 +86,37 @@
 
   var SafetyContext = React.createContext(null);
 
+  /* Persist the safety toolbar view (mode + picked day) so it survives route
+     changes / tab switches. localStorage, per the fs.settings.* convention
+     (theme.js / density.js). Will be cleared on logout once a real logout
+     flow exists (the current "Log out" item is a stub). */
+  var SAFETY_VIEW_KEY = 'fs.settings.safetyView';
+  function loadSafetyView() {
+    try {
+      var raw = window.localStorage.getItem(SAFETY_VIEW_KEY);
+      if (!raw) return null;
+      var v = JSON.parse(raw);
+      if (v && (v.mode === 'week' || v.mode === 'today' || v.mode === 'day')) return v;
+    } catch (_) {}
+    return null;
+  }
+  function saveSafetyView(mode, day) {
+    try { window.localStorage.setItem(SAFETY_VIEW_KEY, JSON.stringify({ mode: mode, day: day })); } catch (_) {}
+  }
+
   function SafetyProvider(props) {
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
     var depKey = (caller.name || '') + '|' + (caller.role || '') + '|' + (caller.isAdmin ? 'admin' : '');
+    var savedView = loadSafetyView();
 
     /* mode: 'week' (last 7 days incl. today) or 'day' (single date). */
-    var refMode = React.useState('week');
+    var refMode = React.useState((savedView && savedView.mode) || 'week');
     var mode    = refMode[0];
     var setMode = refMode[1];
 
     /* When in 'day' mode, this is the picked date. Initialised to
        today; user clicks the picker chip to enter day mode. */
-    var refDay = React.useState(window.FS.api.todayNZDT());
+    var refDay = React.useState((savedView && savedView.day) || window.FS.api.todayNZDT());
     var day    = refDay[0];
     var setDay = refDay[1];
 
@@ -164,8 +183,8 @@
       setState:      setState,
       mode:          mode,
       day:           day,
-      setMode:       function (m) { setSel(null); setMode(m); },
-      setDay:        function (d) { setSel(null); setDay(d); setMode('day'); },
+      setMode:       function (m) { setSel(null); setMode(m); saveSafetyView(m, day); },
+      setDay:        function (d) { setSel(null); setDay(d); setMode('day'); saveSafetyView('day', d); },
       selectedFlag:  sel,
       setSelected:   setSel,
       showCreate:    showCreate,
