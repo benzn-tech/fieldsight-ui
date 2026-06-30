@@ -1,22 +1,15 @@
 /* ==========================================================================
-   FieldSight Settings Page — Sprint 7.3 + 7.6
+   FieldSight Settings Page — Sprint 7.3 / 7.6 + account area (Phase A)
    --------------------------------------------------------------------------
-   /settings — user preferences: theme + density + default landing override.
+   /settings — tabbed account area:
+     • Preferences   — theme + density + default landing (original Sprint 7)
+     • Profile       — avatar, name, email, time/date format, timezone
+     • Security      — password change, two-factor authentication (mock)
+     • Notifications — global email notification preferences
 
-   Middle column:
-     • Section 1 — Theme: Light / Dark / Auto radio group
-       Calls FS.theme.set(mode) instantly; "Auto" shows resolved mode.
-     • Section 2 — Density: Comfortable / Compact radio group (Sprint 7.6)
-       Calls FS.density.set(mode) instantly; applies data-density on <html>.
-     • Section 3 — Default landing: dropdown of visible nav items.
-       First option unsets the override (role default).
-       Persists to localStorage['fs.settings.defaultLanding'].
-
-   Right detail:
-     • Static summary card: current theme, density, and effective landing.
-
-   All prefs are localStorage-only; documented as Sprint 8+ migration
-   target when /api/user/prefs lands.
+   All prefs are localStorage-only (mock prototype); documented as the
+   /api/user/prefs migration target. Auth/security data stays out of
+   localStorage where it matters (the real password change is Cognito).
 
    Registers as window.FieldSight.PAGES['/settings']
    ========================================================================== */
@@ -26,311 +19,365 @@
 (function () {
   'use strict';
 
-  var LANDING_KEY = 'fs.settings.defaultLanding';
+  var LANDING_KEY  = 'fs.settings.defaultLanding';
+  var PROFILE_KEY  = 'fs.settings.profile';
+  var NOTIF_KEY    = 'fs.settings.notifications';
+  var SECURITY_KEY = 'fs.settings.security';
 
   /* ---------- localStorage helpers -------------------------------------- */
+  function readJSON(key)  { try { return JSON.parse(localStorage.getItem(key) || 'null') || {}; } catch (_) { return {}; } }
+  function writeJSON(k, o) { try { localStorage.setItem(k, JSON.stringify(o)); } catch (_) {} }
+  function readLandingOverride() { try { return localStorage.getItem(LANDING_KEY) || null; } catch (_) { return null; } }
+  function writeLandingOverride(p) { try { if (p) localStorage.setItem(LANDING_KEY, p); else localStorage.removeItem(LANDING_KEY); } catch (_) {} }
+  function readThemeStored()   { return window.FS && window.FS.theme ? window.FS.theme.getStored() : 'auto'; }
+  function readThemeResolved() { return window.FS && window.FS.theme ? window.FS.theme.get() : 'light'; }
+  function readDensityStored() { return window.FS && window.FS.density ? window.FS.density.getStored() : 'comfortable'; }
+  function toast(message, tone) { if (window.FS && window.FS.toast) window.FS.toast.show({ message: message, tone: tone || 'success' }); }
 
-  function readLandingOverride() {
-    try { return localStorage.getItem(LANDING_KEY) || null; } catch (_) { return null; }
+  /* ---------- option data ----------------------------------------------- */
+  var TABS = [
+    { key: 'preferences',   label: 'Preferences' },
+    { key: 'profile',       label: 'Profile' },
+    { key: 'security',      label: 'Security' },
+    { key: 'notifications', label: 'Notifications' },
+  ];
+  var TIME_FORMATS = [{ v: '24h', l: '24-hour (14:30)' }, { v: '12h', l: '12-hour (2:30 PM)' }];
+  var DATE_FORMATS = [{ v: 'DD/MM/YYYY', l: 'DD/MM/YYYY' }, { v: 'MM/DD/YYYY', l: 'MM/DD/YYYY' }, { v: 'YYYY-MM-DD', l: 'YYYY-MM-DD' }];
+  var TIMEZONES = [
+    'Pacific/Auckland', 'Australia/Sydney', 'Australia/Brisbane', 'Asia/Singapore',
+    'Asia/Shanghai', 'Asia/Kolkata', 'Europe/London', 'America/Los_Angeles',
+    'America/New_York', 'UTC',
+  ];
+  var FREQ_OPTS = [
+    { v: 'instant', l: 'Instant' }, { v: 'hourly', l: '1 hour' },
+    { v: 'daily', l: '24 hours' }, { v: 'weekly', l: 'Weekly' },
+  ];
+  var EVENT_TYPES = [
+    { k: 'comment_added', l: 'Comment added' }, { k: 'status_changed', l: 'Status changed' },
+    { k: 'issue_completed', l: 'Issue completed' }, { k: 'title_changed', l: 'Title changed' },
+    { k: 'markup_changed', l: 'Markup changed' }, { k: 'type_changed', l: 'Type changed' },
+    { k: 'priority_changed', l: 'Priority changed' }, { k: 'deadline_changed', l: 'Deadline changed' },
+    { k: 'assignee_changed', l: 'Assignee changed' }, { k: 'reporter_changed', l: 'Reporter changed' },
+    { k: 'watchers_changed', l: 'Watchers changed' }, { k: 'visibility_changed', l: 'Visibility changed' },
+    { k: 'tags_changed', l: 'Tags changed' },
+  ];
+
+  function defaultNotifications() {
+    var events = {};
+    EVENT_TYPES.forEach(function (e) { events[e.k] = true; });
+    events.type_changed = false; events.reporter_changed = false;
+    events.watchers_changed = false; events.visibility_changed = false; events.tags_changed = false;
+    return { frequency: 'daily', events: events, watched_by_me: true, assigned_to_me: true };
   }
 
-  function writeLandingOverride(path) {
-    try {
-      if (path) localStorage.setItem(LANDING_KEY, path);
-      else localStorage.removeItem(LANDING_KEY);
-    } catch (_) {}
+  function deriveProfile() {
+    var saved = readJSON(PROFILE_KEY);
+    var u = (window.AuthMock && window.AuthMock.currentUser) || {};
+    var parts = (u.name || '').split(' ');
+    return {
+      firstName:    saved.firstName    != null ? saved.firstName    : (u.firstName || parts[0] || ''),
+      lastName:     saved.lastName     != null ? saved.lastName     : (u.lastName || parts.slice(1).join(' ') || ''),
+      email:        saved.email        != null ? saved.email        : (u.email || ''),
+      avatarUrl:    saved.avatarUrl    != null ? saved.avatarUrl    : (u.avatarUrl || null),
+      timeFormat:   saved.timeFormat   || '24h',
+      dateFormat:   saved.dateFormat   || 'DD/MM/YYYY',
+      autoTimezone: saved.autoTimezone != null ? saved.autoTimezone : false,
+      timezone:     saved.timezone     || 'Pacific/Auckland',
+    };
   }
 
-  function readThemeStored() {
-    return window.FS && window.FS.theme ? window.FS.theme.getStored() : 'auto';
-  }
-
-  function readThemeResolved() {
-    return window.FS && window.FS.theme ? window.FS.theme.get() : 'light';
-  }
-
-  function readDensityStored() {
-    return window.FS && window.FS.density ? window.FS.density.getStored() : 'comfortable';
-  }
-
-  /* ---------- SettingsContext ------------------------------------------ */
-
+  /* ---------- Context --------------------------------------------------- */
   var SettingsContext = React.createContext(null);
 
   function SettingsProvider(props) {
-    var refState = React.useState(function () {
-      return {
-        themeStored:     readThemeStored(),
-        themeResolved:   readThemeResolved(),
-        densityStored:   readDensityStored(),
-        landingOverride: readLandingOverride(),
-      };
+    var refTab      = React.useState('preferences');
+    var refState    = React.useState(function () {
+      return { themeStored: readThemeStored(), themeResolved: readThemeResolved(), densityStored: readDensityStored(), landingOverride: readLandingOverride() };
     });
-    var state    = refState[0];
-    var setState = refState[1];
+    var refProfile  = React.useState(deriveProfile);
+    var refNotif    = React.useState(function () {
+      var d = defaultNotifications(); var s = readJSON(NOTIF_KEY);
+      return Object.assign(d, s, { events: Object.assign({}, d.events, s.events || {}) });
+    });
+    var refSecurity = React.useState(function () { var s = readJSON(SECURITY_KEY); return { twoFactor: !!s.twoFactor }; });
 
-    function handleSetTheme(mode) {
-      if (window.FS && window.FS.theme) window.FS.theme.set(mode);
-      setState(function (s) {
-        return Object.assign({}, s, {
-          themeStored:   readThemeStored(),
-          themeResolved: readThemeResolved(),
-        });
-      });
+    var state = refState[0], setState = refState[1];
+
+    function ctxObj() {
+      return {
+        tab: refTab[0], setTab: refTab[1],
+        state: state, user: (window.AuthMock && window.AuthMock.currentUser) || {},
+        setTheme: function (m) { if (window.FS && window.FS.theme) window.FS.theme.set(m); setState(function (s) { return Object.assign({}, s, { themeStored: readThemeStored(), themeResolved: readThemeResolved() }); }); },
+        setDensity: function (m) { if (window.FS && window.FS.density) window.FS.density.set(m); setState(function (s) { return Object.assign({}, s, { densityStored: readDensityStored() }); }); },
+        setLanding: function (p) { writeLandingOverride(p || null); setState(function (s) { return Object.assign({}, s, { landingOverride: p || null }); }); },
+
+        profile: refProfile[0], setProfile: refProfile[1],
+        patchProfile: function (patch) { refProfile[1](function (p) { return Object.assign({}, p, patch); }); },
+        saveProfile: function () {
+          var p = refProfile[0];
+          writeJSON(PROFILE_KEY, p);
+          if (window.AuthMock && window.AuthMock.updateProfile) {
+            window.AuthMock.updateProfile({ firstName: p.firstName, lastName: p.lastName, email: p.email, avatarUrl: p.avatarUrl });
+          }
+          toast('Profile saved');
+        },
+        resetProfile: function () { refProfile[1](deriveProfile()); toast('Reverted to saved profile', 'info'); },
+
+        notif: refNotif[0], setNotif: refNotif[1],
+        patchNotif: function (patch) { refNotif[1](function (n) { return Object.assign({}, n, patch); }); },
+        toggleEvent: function (k) { refNotif[1](function (n) { var e = Object.assign({}, n.events); e[k] = !e[k]; return Object.assign({}, n, { events: e }); }); },
+        saveNotif: function () { writeJSON(NOTIF_KEY, refNotif[0]); toast('Notification preferences saved'); },
+
+        security: refSecurity[0],
+        toggle2FA: function () { refSecurity[1](function (s) { var next = { twoFactor: !s.twoFactor }; writeJSON(SECURITY_KEY, next); toast(next.twoFactor ? 'Two-factor authentication enabled (demo)' : 'Two-factor authentication disabled (demo)', 'info'); return next; }); },
+      };
     }
 
-    function handleSetDensity(mode) {
-      if (window.FS && window.FS.density) window.FS.density.set(mode);
-      setState(function (s) {
-        return Object.assign({}, s, { densityStored: readDensityStored() });
-      });
-    }
-
-    function handleSetLanding(path) {
-      writeLandingOverride(path || null);
-      setState(function (s) { return Object.assign({}, s, { landingOverride: path || null }); });
-    }
-
-    var user = (window.AuthMock && window.AuthMock.currentUser) || {};
-    var ctx = {
-      state:        state,
-      user:         user,
-      setTheme:     handleSetTheme,
-      setDensity:   handleSetDensity,
-      setLanding:   handleSetLanding,
-    };
-    return React.createElement(SettingsContext.Provider, { value: ctx }, props.children);
+    return React.createElement(SettingsContext.Provider, { value: ctxObj() }, props.children);
   }
 
-  /* ---------- SettingsMiddleColumn -------------------------------------- */
+  /* ---------- Tab strip ------------------------------------------------- */
+  function TabStrip(ctx) {
+    return React.createElement('div', { className: 'fs-settings__tabs', role: 'tablist', 'aria-label': 'Settings sections' },
+      TABS.map(function (t) {
+        var active = ctx.tab === t.key;
+        return React.createElement('button', {
+          key: t.key, type: 'button', role: 'tab', 'aria-selected': active,
+          className: 'fs-settings__tab' + (active ? ' fs-settings__tab--active' : ''),
+          onClick: function () { ctx.setTab(t.key); },
+        }, t.label);
+      })
+    );
+  }
 
+  /* ---------- shared field helpers -------------------------------------- */
+  function Field(label, control) {
+    return React.createElement('div', { className: 'fs-settings__field-row' },
+      React.createElement('label', { className: 'fs-settings__label' }, label),
+      control
+    );
+  }
+  function TextInput(value, onChange, opts) {
+    opts = opts || {};
+    return React.createElement('input', {
+      type: 'text', className: 'fs-settings__input' + (opts.readOnly ? ' fs-settings__input--readonly' : ''),
+      value: value || '', readOnly: !!opts.readOnly, onChange: function (e) { if (onChange) onChange(e.target.value); },
+    });
+  }
+  function SelectInput(value, options, onChange) {
+    return React.createElement('select', { className: 'fs-settings__select', value: value, onChange: function (e) { onChange(e.target.value); } },
+      options.map(function (o) { return React.createElement('option', { key: o.v, value: o.v }, o.l); })
+    );
+  }
+
+  /* ---------- Preferences tab (original content) ------------------------ */
+  function PreferencesTab(ctx) {
+    var state = ctx.state, user = ctx.user;
+    var visibleItems = window.FS && window.FS.getVisibleNavItems ? window.FS.getVisibleNavItems(user) : [];
+    var roleDefault = window.FS && window.FS.getDefaultLanding ? window.FS.getDefaultLanding(user) : '/today';
+    var themeOptions = [
+      { value: 'light', label: 'Light', caption: null },
+      { value: 'dark', label: 'Dark', caption: null },
+      { value: 'auto', label: 'Auto', caption: 'Matches your system, currently ' + state.themeResolved },
+    ];
+    var densityOptions = [
+      { value: 'comfortable', label: 'Comfortable', caption: 'Default spacing — optimised for field use with gloves.' },
+      { value: 'compact', label: 'Compact', caption: 'Reduced row height and padding — fits more on screen.' },
+    ];
+    function radioGroup(name, opts, current, onPick) {
+      return React.createElement('div', { className: 'fs-settings__radio-group', role: 'radiogroup', 'aria-label': name },
+        opts.map(function (opt) {
+          var checked = current === opt.value;
+          return React.createElement('label', { key: opt.value, className: 'fs-settings__radio-row' + (checked ? ' fs-settings__radio-row--checked' : '') },
+            React.createElement('input', { type: 'radio', name: name, value: opt.value, checked: checked, onChange: function () { onPick(opt.value); }, className: 'fs-settings__radio-input' }),
+            React.createElement('div', { className: 'fs-settings__radio-text' },
+              React.createElement('span', { className: 'fs-settings__radio-label' }, opt.label),
+              opt.caption ? React.createElement('span', { className: 'fs-settings__radio-caption' }, opt.caption) : null
+            )
+          );
+        })
+      );
+    }
+    return React.createElement(React.Fragment, null,
+      React.createElement('section', { className: 'fs-settings__section' },
+        React.createElement('div', { className: 'fs-settings__section-title' }, 'Theme'),
+        React.createElement('div', { className: 'fs-settings__section-desc' }, 'Choose how FieldSight appears to you.'),
+        radioGroup('fs-theme', themeOptions, state.themeStored, ctx.setTheme)
+      ),
+      React.createElement('section', { className: 'fs-settings__section' },
+        React.createElement('div', { className: 'fs-settings__section-title' }, 'Display density'),
+        React.createElement('div', { className: 'fs-settings__section-desc' }, 'Control how much information fits on screen at once.'),
+        radioGroup('fs-density', densityOptions, state.densityStored, ctx.setDensity)
+      ),
+      React.createElement('section', { className: 'fs-settings__section' },
+        React.createElement('div', { className: 'fs-settings__section-title' }, 'Default landing page'),
+        React.createElement('div', { className: 'fs-settings__section-desc' }, 'Where you land when you open the app or navigate to the root.'),
+        Field('On open, go to',
+          React.createElement('select', { className: 'fs-settings__select', value: state.landingOverride || '', onChange: function (e) { ctx.setLanding(e.target.value || null); } },
+            React.createElement('option', { value: '' }, 'Use my role\'s default (' + roleDefault + ')'),
+            visibleItems.map(function (item) { return React.createElement('option', { key: item.key, value: item.path }, item.label); })
+          )
+        ),
+        state.landingOverride ? React.createElement('div', { className: 'fs-settings__field-hint' }, 'Override active. Clear the dropdown to restore role default.') : null
+      ),
+      React.createElement('section', { className: 'fs-settings__section' },
+        React.createElement('div', { className: 'fs-settings__section-title' }, 'Help'),
+        React.createElement('div', { className: 'fs-settings__section-desc' }, 'Replay the welcome tour the next time you open the app.'),
+        React.createElement('button', { type: 'button', className: 'fs-settings__link-btn', onClick: function () { try { localStorage.removeItem('fs.onboarded'); } catch (_) {} toast('Onboarding will run on next reload', 'info'); } }, 'Reset onboarding')
+      )
+    );
+  }
+
+  /* ---------- Profile tab ----------------------------------------------- */
+  function ProfileTab(ctx) {
+    var p = ctx.profile;
+    var Avatar = window.FieldSight && window.FieldSight.Avatar;
+    var fileRef = React.useRef(null);
+    function onPick(e) {
+      var f = e.target.files && e.target.files[0];
+      if (!f) return;
+      var reader = new FileReader();
+      reader.onload = function () { ctx.patchProfile({ avatarUrl: reader.result }); };
+      reader.readAsDataURL(f);
+    }
+    var avatarEl = Avatar
+      ? React.createElement(Avatar, { name: (p.firstName + ' ' + p.lastName).trim() || 'User', src: p.avatarUrl || undefined, size: 'xl' })
+      : React.createElement('div', { className: 'fs-settings__avatar-fallback' }, ((p.firstName[0] || '') + (p.lastName[0] || '')).toUpperCase() || '?');
+
+    return React.createElement('section', { className: 'fs-settings__section' },
+      React.createElement('div', { className: 'fs-settings__profile' },
+        React.createElement('div', { className: 'fs-settings__avatar-col' },
+          avatarEl,
+          React.createElement('input', { type: 'file', accept: 'image/*', ref: fileRef, onChange: onPick, style: { display: 'none' } }),
+          React.createElement('button', { type: 'button', className: 'fs-settings__link-btn', onClick: function () { if (fileRef.current) fileRef.current.click(); } }, 'Change picture')
+        ),
+        React.createElement('div', { className: 'fs-settings__profile-fields' },
+          Field('First name *', TextInput(p.firstName, function (v) { ctx.patchProfile({ firstName: v }); })),
+          Field('Last name *', TextInput(p.lastName, function (v) { ctx.patchProfile({ lastName: v }); })),
+          Field('Email', TextInput(p.email, null, { readOnly: true })),
+          Field('Time format', SelectInput(p.timeFormat, TIME_FORMATS.map(function (o) { return { v: o.v, l: o.l }; }), function (v) { ctx.patchProfile({ timeFormat: v }); })),
+          Field('Date format', SelectInput(p.dateFormat, DATE_FORMATS.map(function (o) { return { v: o.v, l: o.l }; }), function (v) { ctx.patchProfile({ dateFormat: v }); })),
+          React.createElement('label', { className: 'fs-settings__checkbox-row' },
+            React.createElement('input', { type: 'checkbox', checked: !!p.autoTimezone, onChange: function (e) { ctx.patchProfile({ autoTimezone: e.target.checked }); } }),
+            React.createElement('span', null, 'Set time zone automatically')
+          ),
+          Field('Your time zone',
+            React.createElement('select', { className: 'fs-settings__select', value: p.timezone, disabled: !!p.autoTimezone, onChange: function (e) { ctx.patchProfile({ timezone: e.target.value }); } },
+              TIMEZONES.map(function (tz) { return React.createElement('option', { key: tz, value: tz }, tz); })
+            )
+          ),
+          React.createElement('div', { className: 'fs-settings__actions' },
+            React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: ctx.resetProfile }, 'Reset'),
+            React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--md', onClick: ctx.saveProfile }, 'Save')
+          )
+        )
+      )
+    );
+  }
+
+  /* ---------- Security tab ---------------------------------------------- */
+  function SecurityTab(ctx) {
+    var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
+    var refPw = React.useState(false); var pwOpen = refPw[0], setPwOpen = refPw[1];
+    function row(icon, title, sub, btnLabel, onClick) {
+      return React.createElement('div', { className: 'fs-settings__security-row' },
+        React.createElement('div', { className: 'fs-settings__security-main' },
+          React.createElement('span', { className: 'fs-settings__security-icon' }, icon),
+          React.createElement('div', null,
+            React.createElement('div', { className: 'fs-settings__security-title' }, title),
+            sub ? React.createElement('div', { className: 'fs-settings__security-sub' }, sub) : null
+          )
+        ),
+        React.createElement('button', { type: 'button', className: 'fs-settings__link-btn', onClick: onClick }, btnLabel + ' →')
+      );
+    }
+    return React.createElement('section', { className: 'fs-settings__section' },
+      React.createElement('div', { className: 'fs-settings__security-card' },
+        row('🔑', 'Password', null, 'Change', function () { setPwOpen(true); }),
+        row('🛡', 'Two-factor authentication', ctx.security.twoFactor ? 'On' : 'Off', 'Change', ctx.toggle2FA)
+      ),
+      (pwOpen && Modal) ? React.createElement(Modal, {
+        open: true, size: 'sm', title: 'Change password', onClose: function () { setPwOpen(false); },
+      },
+        React.createElement('div', { className: 'fs-settings__pw-form' },
+          Field('Current password', React.createElement('input', { type: 'password', className: 'fs-settings__input' })),
+          Field('New password', React.createElement('input', { type: 'password', className: 'fs-settings__input' })),
+          Field('Confirm new password', React.createElement('input', { type: 'password', className: 'fs-settings__input' })),
+          React.createElement('div', { className: 'fs-settings__actions' },
+            React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: function () { setPwOpen(false); } }, 'Cancel'),
+            React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--md', onClick: function () { setPwOpen(false); toast('Password updated (demo)'); } }, 'Update password')
+          )
+        )
+      ) : null
+    );
+  }
+
+  /* ---------- Notifications tab ----------------------------------------- */
+  function NotificationsTab(ctx) {
+    var n = ctx.notif;
+    return React.createElement('section', { className: 'fs-settings__section' },
+      React.createElement('div', { className: 'fs-settings__section-desc' }, 'Configure global email notification settings for your projects.'),
+      Field('Notification frequency', SelectInput(n.frequency, FREQ_OPTS, function (v) { ctx.patchNotif({ frequency: v }); })),
+      React.createElement('div', { className: 'fs-settings__section-title', style: { marginTop: '20px' } }, 'Event types'),
+      React.createElement('div', { className: 'fs-settings__notif-grid' },
+        EVENT_TYPES.map(function (e) {
+          return React.createElement('label', { key: e.k, className: 'fs-settings__checkbox-row' },
+            React.createElement('input', { type: 'checkbox', checked: !!n.events[e.k], onChange: function () { ctx.toggleEvent(e.k); } }),
+            React.createElement('span', null, e.l)
+          );
+        })
+      ),
+      React.createElement('div', { className: 'fs-settings__section-title', style: { marginTop: '20px' } }, 'My involvement'),
+      React.createElement('div', { className: 'fs-settings__notif-grid' },
+        React.createElement('label', { className: 'fs-settings__checkbox-row' },
+          React.createElement('input', { type: 'checkbox', checked: !!n.watched_by_me, onChange: function (e) { ctx.patchNotif({ watched_by_me: e.target.checked }); } }),
+          React.createElement('span', null, 'Watched by me')
+        ),
+        React.createElement('label', { className: 'fs-settings__checkbox-row' },
+          React.createElement('input', { type: 'checkbox', checked: !!n.assigned_to_me, onChange: function (e) { ctx.patchNotif({ assigned_to_me: e.target.checked }); } }),
+          React.createElement('span', null, 'Assigned to me')
+        )
+      ),
+      React.createElement('div', { className: 'fs-settings__actions' },
+        React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--md', onClick: ctx.saveNotif }, 'Save')
+      )
+    );
+  }
+
+  /* ---------- Middle column --------------------------------------------- */
   function SettingsMiddleColumn() {
     var ctx = React.useContext(SettingsContext);
     if (!ctx) return null;
-
-    var state        = ctx.state;
-    var user         = ctx.user;
-    var setTheme     = ctx.setTheme;
-    var setDensity   = ctx.setDensity;
-    var setLanding   = ctx.setLanding;
-
-    var visibleItems = window.FS && window.FS.getVisibleNavItems
-      ? window.FS.getVisibleNavItems(user)
-      : [];
-    var roleDefault = window.FS && window.FS.getDefaultLanding
-      ? window.FS.getDefaultLanding(user)
-      : '/today';
-
-    var themeOptions = [
-      { value: 'light', label: 'Light', caption: null },
-      { value: 'dark',  label: 'Dark',  caption: null },
-      {
-        value:   'auto',
-        label:   'Auto',
-        caption: 'Matches your system, currently ' + state.themeResolved,
-      },
-    ];
-
-    var densityOptions = [
-      {
-        value:   'comfortable',
-        label:   'Comfortable',
-        caption: 'Default spacing — optimised for field use with gloves.',
-      },
-      {
-        value:   'compact',
-        label:   'Compact',
-        caption: 'Reduced row height and padding — fits more on screen.',
-      },
-    ];
+    var body;
+    if (ctx.tab === 'profile') body = ProfileTab(ctx);
+    else if (ctx.tab === 'security') body = SecurityTab(ctx);
+    else if (ctx.tab === 'notifications') body = NotificationsTab(ctx);
+    else body = PreferencesTab(ctx);
 
     return React.createElement('div', { className: 'fs-settings' },
-
       React.createElement('div', { className: 'fs-settings__header' },
         React.createElement('h2', { className: 'fs-settings__title' }, 'Settings'),
-        React.createElement('div', { className: 'fs-settings__subtitle' }, 'App preferences'),
+        React.createElement('div', { className: 'fs-settings__subtitle' }, 'Account & app preferences')
       ),
-
-      /* ---- Section 1: Theme ---- */
-      React.createElement('section', { className: 'fs-settings__section' },
-        React.createElement('div', { className: 'fs-settings__section-title' }, 'Theme'),
-        React.createElement('div', { className: 'fs-settings__section-desc' },
-          'Choose how FieldSight appears to you.'),
-        React.createElement('div', { className: 'fs-settings__radio-group', role: 'radiogroup', 'aria-label': 'Theme' },
-          themeOptions.map(function (opt) {
-            var checked = state.themeStored === opt.value;
-            return React.createElement('label', {
-              key:       opt.value,
-              className: 'fs-settings__radio-row' + (checked ? ' fs-settings__radio-row--checked' : ''),
-            },
-              React.createElement('input', {
-                type:     'radio',
-                name:     'fs-theme',
-                value:    opt.value,
-                checked:  checked,
-                onChange: function () { setTheme(opt.value); },
-                className: 'fs-settings__radio-input',
-              }),
-              React.createElement('div', { className: 'fs-settings__radio-text' },
-                React.createElement('span', { className: 'fs-settings__radio-label' }, opt.label),
-                opt.caption
-                  ? React.createElement('span', { className: 'fs-settings__radio-caption' }, opt.caption)
-                  : null,
-              ),
-            );
-          }),
-        ),
-      ),
-
-      /* ---- Section 2: Density ---- */
-      React.createElement('section', { className: 'fs-settings__section' },
-        React.createElement('div', { className: 'fs-settings__section-title' }, 'Display density'),
-        React.createElement('div', { className: 'fs-settings__section-desc' },
-          'Control how much information fits on screen at once.'),
-        React.createElement('div', { className: 'fs-settings__radio-group', role: 'radiogroup', 'aria-label': 'Display density' },
-          densityOptions.map(function (opt) {
-            var checked = state.densityStored === opt.value;
-            return React.createElement('label', {
-              key:       opt.value,
-              className: 'fs-settings__radio-row' + (checked ? ' fs-settings__radio-row--checked' : ''),
-            },
-              React.createElement('input', {
-                type:     'radio',
-                name:     'fs-density',
-                value:    opt.value,
-                checked:  checked,
-                onChange: function () { setDensity(opt.value); },
-                className: 'fs-settings__radio-input',
-              }),
-              React.createElement('div', { className: 'fs-settings__radio-text' },
-                React.createElement('span', { className: 'fs-settings__radio-label' }, opt.label),
-                React.createElement('span', { className: 'fs-settings__radio-caption' }, opt.caption),
-              ),
-            );
-          }),
-        ),
-      ),
-
-      /* ---- Section 3: Default landing ---- */
-      React.createElement('section', { className: 'fs-settings__section' },
-        React.createElement('div', { className: 'fs-settings__section-title' }, 'Default landing page'),
-        React.createElement('div', { className: 'fs-settings__section-desc' },
-          'Where you land when you open the app or navigate to the root.'),
-        React.createElement('div', { className: 'fs-settings__field-row' },
-          React.createElement('label', {
-            className: 'fs-settings__label',
-            htmlFor:   'fs-settings-landing',
-          }, 'On open, go to'),
-          React.createElement('select', {
-            id:        'fs-settings-landing',
-            className: 'fs-settings__select',
-            value:     state.landingOverride || '',
-            onChange:  function (e) { setLanding(e.target.value || null); },
-          },
-            React.createElement('option', { value: '' },
-              'Use my role\'s default (' + roleDefault + ')'),
-            visibleItems.map(function (item) {
-              return React.createElement('option', { key: item.key, value: item.path }, item.label);
-            }),
-          ),
-        ),
-        state.landingOverride
-          ? React.createElement('div', { className: 'fs-settings__field-hint' },
-              'Override active. Clear the dropdown to restore role default.')
-          : null,
-      ),
-
-      /* ---- Section 4: Help (Sprint 8.11.1) ---- */
-      React.createElement('section', { className: 'fs-settings__section' },
-        React.createElement('div', { className: 'fs-settings__section-title' }, 'Help'),
-        React.createElement('div', { className: 'fs-settings__section-desc' },
-          'Replay the welcome tour the next time you open the app.'),
-        React.createElement('button', {
-          type:      'button',
-          className: 'fs-settings__link-btn',
-          onClick:   function () {
-            try { localStorage.removeItem('fs.onboarded'); } catch (_) {}
-            if (window.FS && window.FS.toast) {
-              window.FS.toast.show({
-                message: 'Onboarding will run on next reload',
-                tone:    'info',
-              });
-            }
-          },
-        }, 'Reset onboarding'),
-      ),
-
+      TabStrip(ctx),
+      body
     );
   }
 
-  /* ---------- SettingsRightDetail --------------------------------------- */
-
+  /* ---------- Right detail (kept minimal) ------------------------------- */
   function SettingsRightDetail() {
-    var ctx = React.useContext(SettingsContext);
-    if (!ctx) {
-      return React.createElement('div', { className: 'fs-settings-summary fs-settings-summary--empty' },
-        'Select a preference to see details.');
-    }
-
-    var state       = ctx.state;
-    var user        = ctx.user;
-    var roleDefault = window.FS && window.FS.getDefaultLanding
-      ? window.FS.getDefaultLanding(user)
-      : '/today';
-
-    /* Look up the display label for the effective landing */
-    var effectiveLanding = state.landingOverride || roleDefault;
-    var landingLabel     = effectiveLanding;
-    if (window.FS && window.FS.NAV_ITEMS) {
-      var items = window.FS.NAV_ITEMS;
-      Object.keys(items).forEach(function (k) {
-        if (items[k].path === effectiveLanding) landingLabel = items[k].label;
-      });
-    }
-
-    var themeStoredLabel   = { light: 'Light', dark: 'Dark', auto: 'Auto' }[state.themeStored]
-      || state.themeStored;
-    var themeResolvedLabel = state.themeResolved.charAt(0).toUpperCase()
-      + state.themeResolved.slice(1);
-    var densityLabel       = { comfortable: 'Comfortable', compact: 'Compact' }[state.densityStored]
-      || state.densityStored;
-
-    function Row(label, value) {
-      return React.createElement('div', { className: 'fs-settings-summary__row' },
-        React.createElement('div', { className: 'fs-settings-summary__label' }, label),
-        React.createElement('div', { className: 'fs-settings-summary__value' }, value),
-      );
-    }
-
-    return React.createElement('div', { className: 'fs-settings-summary' },
-
-      React.createElement('div', { className: 'fs-settings-summary__title' }, 'Your preferences'),
-
-      React.createElement('div', { className: 'fs-settings-summary__rows' },
-        Row('Theme preference', themeStoredLabel),
-        Row('Resolved to',      themeResolvedLabel),
-        Row('Display density',  densityLabel),
-        Row('Default landing',
-          state.landingOverride
-            ? landingLabel + ' (override)'
-            : 'Role default · ' + roleDefault),
-      ),
-
-      React.createElement('div', { className: 'fs-settings-summary__note' },
-        'Preferences are stored in your browser. Changes take effect immediately.'),
-
-    );
+    return React.createElement('div', { className: 'fs-settings-summary fs-settings-summary--empty' },
+      'Settings are saved in your browser.');
   }
 
   /* ---------- Register -------------------------------------------------- */
-
   if (!window.FieldSight) window.FieldSight = {};
   if (!window.FieldSight.PAGES) window.FieldSight.PAGES = {};
   window.FieldSight.PAGES['/settings'] = {
     Middle:   SettingsMiddleColumn,
     Right:    SettingsRightDetail,
     Provider: SettingsProvider,
-    layout:   'full-width',   /* Sprint 10 A — form page; summary panel via RightDrawer */
+    layout:   'full-width',
   };
 
 })();
