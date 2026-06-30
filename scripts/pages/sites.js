@@ -143,9 +143,67 @@
       return function () { cancelled = true; };
     }, [depKey, retryCount]);
 
-    var ctx = { state: state };
+    var ctx = {
+      state: state,
+      caller: caller,
+      addSite: function (site) { setState(function (s) { return Object.assign({}, s, { sites: [site].concat(s.sites || []) }); }); },
+    };
     return React.createElement(SitesContext.Provider, { value: ctx },
       props.children);
+  }
+
+  /* ---------- Shared form helpers (Phase B modals) --------------------- */
+  function fFieldRow(label, control) {
+    return React.createElement('div', { className: 'fs-settings__field-row' },
+      React.createElement('label', { className: 'fs-settings__label' }, label),
+      control);
+  }
+  function fText(value, onChange, type) {
+    return React.createElement('input', {
+      type: type || 'text', className: 'fs-settings__input', value: value || '',
+      onChange: function (e) { onChange(e.target.value); },
+    });
+  }
+  function fSelect(value, options, onChange) {
+    return React.createElement('select', { className: 'fs-settings__select', value: value, onChange: function (e) { onChange(e.target.value); } },
+      options.map(function (o) { return React.createElement('option', { key: o.v, value: o.v }, o.l); }));
+  }
+
+  /* ---------- NewProjectModal (Phase B — admin create project) --------- */
+  function NewProjectModal(props) {
+    var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
+    var refForm = React.useState({ name: '', location: '', region: 'south-island', client: '', project_value_nzd: '', planned_completion: '' });
+    var form = refForm[0], setForm = refForm[1];
+    var refBusy = React.useState(false); var busy = refBusy[0], setBusy = refBusy[1];
+    function set(k, v) { setForm(function (f) { var n = Object.assign({}, f); n[k] = v; return n; }); }
+    function submit() {
+      if (!form.name.trim() || busy) return;
+      setBusy(true);
+      window.FS.api.sites.createSite(form).then(function (site) {
+        setBusy(false);
+        if (window.FS.toast) window.FS.toast.show({ message: 'Project "' + site.name + '" created', tone: 'success' });
+        if (props.onCreated) props.onCreated(site);
+        if (props.onClose) props.onClose();
+      }).catch(function () {
+        setBusy(false);
+        if (window.FS.toast) window.FS.toast.show({ message: 'Could not create project', tone: 'error' });
+      });
+    }
+    if (!Modal) return null;
+    return React.createElement(Modal, { open: true, size: 'md', title: 'New project', onClose: props.onClose },
+      React.createElement('div', { className: 'fs-settings__pw-form' },
+        fFieldRow('Project name *', fText(form.name, function (v) { set('name', v); })),
+        fFieldRow('Location', fText(form.location, function (v) { set('location', v); })),
+        fFieldRow('Region', fSelect(form.region, [{ v: 'south-island', l: 'South Island' }, { v: 'north-island', l: 'North Island' }], function (v) { set('region', v); })),
+        fFieldRow('Client', fText(form.client, function (v) { set('client', v); })),
+        fFieldRow('Project value (NZD)', fText(form.project_value_nzd, function (v) { set('project_value_nzd', v); }, 'number')),
+        fFieldRow('Planned completion', fText(form.planned_completion, function (v) { set('planned_completion', v); }, 'date')),
+        React.createElement('div', { className: 'fs-settings__actions' },
+          React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: props.onClose }, 'Cancel'),
+          React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--md', disabled: busy, onClick: submit }, busy ? 'Creating…' : 'Create project')
+        )
+      )
+    );
   }
 
   /* ---------- SitesMiddleColumn ---------------------------------------- */
@@ -156,6 +214,8 @@
     var onSelect = props.onSelect || function () {};
 
     var ctx = React.useContext(SitesContext);
+    var nmRef = React.useState(false);
+    var newOpen = nmRef[0], setNewOpen = nmRef[1];
     if (!ctx) {
       console.warn('[SitesMiddleColumn] SitesContext missing — was the page Provider mounted?');
       return null;
@@ -200,6 +260,7 @@
     var selectedId    = props.selectedItem && props.selectedItem.kind === 'site'
       ? props.selectedItem.site_id
       : null;
+    var canCreate = ctx.caller && (ctx.caller.isAdmin || (window.FS && window.FS.can && window.FS.can(ctx.caller, 'user:manage')));
 
     if (sites.length === 0) {
       return React.createElement('div', { className: 'fs-sites' },
@@ -210,11 +271,16 @@
 
     return React.createElement('div', { className: 'fs-sites' },
 
-      React.createElement('div', { className: 'fs-sites__header' },
-        React.createElement('h2', { className: 'fs-sites__title' }, 'Sites'),
-        React.createElement('div', { className: 'fs-sites__subtitle' },
-          sites.length + ' ' + (sites.length === 1 ? 'site' : 'sites')
-            + ' visible to your role'),
+      React.createElement('div', { className: 'fs-sites__header', style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' } },
+        React.createElement('div', null,
+          React.createElement('h2', { className: 'fs-sites__title' }, 'Sites'),
+          React.createElement('div', { className: 'fs-sites__subtitle' },
+            sites.length + ' ' + (sites.length === 1 ? 'site' : 'sites') + ' visible to your role'),
+        ),
+        canCreate ? React.createElement('button', {
+          type: 'button', className: 'fs-btn fs-btn--primary fs-btn--sm',
+          onClick: function () { setNewOpen(true); },
+        }, '+ New project') : null,
       ),
 
       React.createElement('div', { className: 'fs-sites__list' },
@@ -240,6 +306,11 @@
           });
         }),
       ),
+
+      newOpen ? React.createElement(NewProjectModal, {
+        onClose:   function () { setNewOpen(false); },
+        onCreated: function (site) { ctx.addSite(site); },
+      }) : null,
     );
   }
 
