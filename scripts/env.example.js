@@ -4,6 +4,7 @@
    The REAL env.js is generated at deploy time (see amplify.yml) and is NOT
    committed. It must load BEFORE scripts/api/index.js. Absent → mock mode.
    NOTE: baseUrl MUST end with /api (module paths carry no /api prefix).
+   Amplify env vars FS_USEMOCKS / FS_WRITEMOCKS must be literally true or false.
    ========================================================================== */
 window.FS_ENV = {
   baseUrl: 'https://khfj3p1fkb.execute-api.ap-southeast-2.amazonaws.com/prod/api',

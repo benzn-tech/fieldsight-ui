@@ -128,7 +128,10 @@ In the inline bootstrap block (near lines 247-260) that currently handles `baseU
 Add ONE build command after `cp app-shell-preview.html dist/index.html`:
 
 ```yaml
-        - printf 'window.FS_ENV = { baseUrl: "%s", useMocks: %s, writeMocks: %s };\n' "${FS_BASEURL:-/api}" "${FS_USEMOCKS:-true}" "${FS_WRITEMOCKS:-true}" > dist/env.js
+        - >-
+          printf 'window.FS_ENV = { baseUrl: "%s", useMocks: %s, writeMocks: %s };\n'
+          "${FS_BASEURL:-/api}" "${FS_USEMOCKS:-true}" "${FS_WRITEMOCKS:-true}"
+          > dist/env.js
 ```
 
 (Defaults keep any env-var-less build in mock mode — identical to today's behavior.)
