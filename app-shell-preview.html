@@ -142,6 +142,9 @@
   <script type="text/babel" src="scripts/composites/column-chart.js?v=2"></script>
   <script type="text/babel" src="scripts/composites/heatmap-grid.js?v=2"></script>
 
+  <!-- Per-environment config (generated at deploy; 404s locally → mock mode). -->
+  <script src="env.js?v=1"></script>
+
   <!-- Auth scaffolding (Phase I) — Cognito IDP wrapper + session store.
        Loaded before FS.api so api/_fetch.js can use FS.session for
        Authorization headers when useMocks is flipped to false. -->
@@ -258,6 +261,10 @@
       if (params.get('mocks') === '0' && window.FS && window.FS.api) {
         window.FS.api.useMocks = false;
       }
+
+      if (params.get('mocks') === '1' && window.FS && window.FS.api) { window.FS.api.useMocks = true; }
+      var wm = params.get('writemocks');
+      if (wm !== null && window.FS && window.FS.api) { window.FS.api.writeMocks = wm !== '0'; }
 
       /* Sprint 11 A.1 — ?axe=1 loads axe-core dynamically + runs the
          WCAG 2.1 AA audit on every route change. Findings logged to

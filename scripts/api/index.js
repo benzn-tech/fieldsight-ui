@@ -71,9 +71,16 @@
     return ct.indexOf('application/json') !== -1;
   }
 
+  /* Per-environment config: env.js (generated at deploy time) sets
+     window.FS_ENV before this script loads. Absent locally → mock mode. */
+  var env = window.FS_ENV || {};
+
   window.FS.api = {
-    useMocks: true,
-    baseUrl: '/api',
+    useMocks: env.useMocks !== undefined ? !!env.useMocks : true,
+    /* writeMocks: write paths WITHOUT a real backend stay mocked even when
+       reads go live (Sprint-5 lesson: never ship writes without a backend). */
+    writeMocks: env.writeMocks !== undefined ? !!env.writeMocks : true,
+    baseUrl: env.baseUrl || '/api',
     delay: delay,
     folderName: folderName,
     mockPresignedUrl: mockPresignedUrl,
