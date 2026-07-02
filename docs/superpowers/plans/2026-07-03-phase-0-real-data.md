@@ -31,6 +31,7 @@ scripts/env.example.js        # NEW — documented template; real env.js is gene
 scripts/api/index.js          # MODIFY — consume window.FS_ENV; add writeMocks flag
 scripts/api/sites.js          # MODIFY — write fns gate on writeMocks
 scripts/api/actions.js        # MODIFY — toggle → POST /actions/toggle (live)
+scripts/api/programme.js      # MODIFY — write fns (updateTask/createTask/deleteTask/importTasks) gate on writeMocks — no real /api/programmes endpoints exist
 scripts/composites/safety-create-modal.js   # MODIFY — gate on writeMocks
 scripts/composites/quality-create-modal.js  # MODIFY — gate on writeMocks
 scripts/auth/session-bridge.js # NEW — mirror FS.session.user → AuthMock.currentUser
@@ -158,6 +159,7 @@ git -C "C:/Users/camil/Dropbox/fieldsight-ui" commit -m "feat(env): FS_ENV seam 
 **Files:**
 - Modify: `scripts/api/sites.js` (write fns near lines 64, 82, 89)
 - Modify: `scripts/api/actions.js` (toggle near line 64; create near line 130)
+- Modify: `scripts/api/programme.js` (write fns `updateTask`/`createTask`/`deleteTask`/`importTasks` near lines 109, 120, 130, 141 — audit-sweep addition; no real `/api/programmes` endpoints exist, so all four must gate on `writeMocks` too, not just the 3 originally scoped)
 - Modify: `scripts/composites/safety-create-modal.js` (real-POST branch near line 107)
 - Modify: `scripts/composites/quality-create-modal.js` (real-POST branch near line 87)
 
@@ -261,7 +263,7 @@ git -C "C:/Users/camil/Dropbox/fieldsight-ui" commit -m "feat(auth): bridge real
 
 - [ ] **Step 1: Bump cache-busters**
 
-In `app-shell-preview.html`, bump the `?v=N` for: `scripts/api/index.js`, `scripts/api/sites.js`, `scripts/api/actions.js`, `scripts/composites/safety-create-modal.js`, `scripts/composites/quality-create-modal.js` (new files env.js/session-bridge.js already carry `?v=1`). Commit:
+In `app-shell-preview.html`, bump the `?v=N` for: `scripts/api/index.js`, `scripts/api/sites.js`, `scripts/api/actions.js`, `scripts/api/programme.js`, `scripts/composites/safety-create-modal.js`, `scripts/composites/quality-create-modal.js` (new files env.js/session-bridge.js already carry `?v=1`). Commit:
 
 ```bash
 git -C "C:/Users/camil/Dropbox/fieldsight-ui" add app-shell-preview.html

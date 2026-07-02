@@ -99,12 +99,14 @@
 
   /* =========================================================================
      Sprint 8.2.1 — Write operations (PATCH / POST / DELETE)
-     When useMocks=false these fire real HTTP; in mock mode they return a
+     No real /api/programmes endpoints exist yet — gated on
+     useMocks=false && writeMocks=false (Phase 0 Task 2 audit sweep) so
+     these stay mocked even once reads go live. In mock mode they return a
      resolved-success object immediately (mutations live in page state).
      ========================================================================= */
 
   async function updateTask(programmeId, taskId, patch) {
-    if (!window.FS.api.useMocks) {
+    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
       return window.FS.api.request(
         '/programmes/' + encodeURIComponent(programmeId) +
         '/tasks/' + encodeURIComponent(taskId),
@@ -115,7 +117,7 @@
   }
 
   async function createTask(programmeId, payload) {
-    if (!window.FS.api.useMocks) {
+    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
       return window.FS.api.request(
         '/programmes/' + encodeURIComponent(programmeId) + '/tasks',
         { method: 'POST', body: JSON.stringify(payload) });
@@ -125,7 +127,7 @@
   }
 
   async function deleteTask(programmeId, taskId) {
-    if (!window.FS.api.useMocks) {
+    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
       return window.FS.api.request(
         '/programmes/' + encodeURIComponent(programmeId) +
         '/tasks/' + encodeURIComponent(taskId),
@@ -136,7 +138,7 @@
   }
 
   async function importTasks(programmeId, tasks) {
-    if (!window.FS.api.useMocks) {
+    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
       return window.FS.api.request(
         '/programmes/' + encodeURIComponent(programmeId) + '/tasks/bulk',
         { method: 'POST', body: JSON.stringify({ tasks: tasks }) });
