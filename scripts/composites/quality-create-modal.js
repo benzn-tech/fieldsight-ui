@@ -17,7 +17,7 @@
      deadline           Input[type=date], optional
      location           Input, optional
 
-   Real-backend path (useMocks=false):
+   Real-backend path (useMocks=false, writeMocks=false — Phase 0 Task 2):
      POST /api/quality-items
      body: { site_id, observation, category, follow_up_required, deadline, location }
 
@@ -83,7 +83,7 @@
       try {
         var newItem;
 
-        if (!window.FS.api.useMocks) {
+        if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
           newItem = await window.FS.api.request('/quality-items', {
             method: 'POST',
             body: {

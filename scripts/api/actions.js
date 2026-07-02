@@ -4,11 +4,11 @@
    GET    /api/actions?date=YYYY-MM-DD
           → { date, actions: { '<topic_id>_<action_index>': { checked, checked_by, checked_at } } }
 
-   PATCH  /api/actions/{id}            (useMocks=false — Sprint 8.1.1)
-          body { done: true/false }
-          → { id, done, checked_by, checked_at }
+   POST   /api/actions/toggle          (useMocks=false — Phase 0 Task 2)
+          body { date, topic_id, action_index, checked, action_text }
+          → { message: "Updated", checked: true }
 
-   POST   /api/actions                 (useMocks=false — Sprint 8.1.1)
+   POST   /api/actions                 (useMocks=false, writeMocks=false — Sprint 8.1.1)
           body { date, topic_id, action_index, action_text, responsible, ... }
           → { id, ...action }
 
@@ -51,21 +51,19 @@
     var topic_id     = opts.topic_id;
     var action_index = opts.action_index;
     var checked      = !!opts.checked;
+    var action_text  = opts.action_text;
 
-    /* --- Real backend path (Sprint 8.1.1) --------------------------------
+    /* --- Real backend path (Phase 0 Task 2) ------------------------------
        Optimistic flow:
          1. ActionItemRow already flips its local checkbox state.
-         2. We fire PATCH /api/actions/{id}.
+         2. We fire POST /api/actions/toggle (BACKEND-CONTEXT §4.10).
          3. On success: emit confirmed bus event (sibling rows sync).
          4. On failure: emit revert bus event + show toast error.
-       The id follows the BACKEND-CONTEXT §4.10 key format:
-         {date}_{topic_id}_{action_index}
     */
     if (!window.FS.api.useMocks) {
-      var id = date + '_' + actionKey(topic_id, action_index);
-      return window.FS.api.request('/actions/' + encodeURIComponent(id), {
-        method: 'PATCH',
-        body:   { done: checked },
+      return window.FS.api.request('/actions/toggle', {
+        method: 'POST',
+        body:   { date: date, topic_id: topic_id, action_index: action_index, checked: checked, action_text: action_text },
       }).then(function (res) {
         /* Emit confirmed bus event so any sibling row with the same key
            updates to the server-truth value. */
@@ -127,7 +125,7 @@
 
   /* Sprint 8.1.1 — create a new action item. Used by future write flows. */
   async function createAction(payload) {
-    if (!window.FS.api.useMocks) {
+    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
       return window.FS.api.request('/actions', {
         method: 'POST',
         body:   payload,

@@ -61,7 +61,7 @@
       icon:               input.icon || null,
       user_count:         0,
     };
-    if (!window.FS.api.useMocks) return window.FS.api.request('/sites', { method: 'POST', body: site });
+    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) return window.FS.api.request('/sites', { method: 'POST', body: site });
     await window.FS.api.delay(400);
     var f = fixtures().sites; if (f && f.sites) f.sites.unshift(site);
     return site;
@@ -79,14 +79,14 @@
       managed_sites: [],
       avatarUrl:    input.avatarUrl || null,
     };
-    if (!window.FS.api.useMocks) return window.FS.api.request('/users', { method: 'POST', body: user });
+    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) return window.FS.api.request('/users', { method: 'POST', body: user });
     await window.FS.api.delay(400);
     var f = fixtures().sites; if (f && f.users) f.users.unshift(user);
     return user;
   }
 
   async function updateUserRole(deviceId, role) {
-    if (!window.FS.api.useMocks) return window.FS.api.request('/users/' + deviceId, { method: 'PATCH', body: { role: role } });
+    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) return window.FS.api.request('/users/' + deviceId, { method: 'PATCH', body: { role: role } });
     await window.FS.api.delay(300);
     var f = fixtures().sites;
     if (f && f.users) {

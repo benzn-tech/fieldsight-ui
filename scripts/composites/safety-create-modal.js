@@ -18,7 +18,7 @@
      location            Input, optional
      photos              file input, multiple, accept image/*, max 5
 
-   Real-backend path (useMocks=false):
+   Real-backend path (useMocks=false, writeMocks=false — Phase 0 Task 2):
      POST /api/safety-observations
      body: { site_id, observation, risk_level, recommended_action, location, photo_keys[] }
      photo_keys come from presigned PUT uploads via FS.api.media.presignedPut().
@@ -94,7 +94,7 @@
       try {
         var newFlag;
 
-        if (!window.FS.api.useMocks) {
+        if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
           /* Upload photos first (if any). */
           var photoKeys = [];
           if (photos.length > 0 && window.FS.api.media && window.FS.api.media.presignedPut) {
