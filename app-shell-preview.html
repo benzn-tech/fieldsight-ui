@@ -306,14 +306,6 @@
         };
         document.head.appendChild(s);
       }
-
-      /* Default landing navigation. */
-      if (!location.hash || location.hash === '#' || location.hash === '#/') {
-        var stored;
-        try { stored = localStorage.getItem('fs.settings.defaultLanding'); } catch (_) {}
-        var landing = stored || window.FS.getDefaultLanding(window.AuthMock.currentUser);
-        location.hash = landing;
-      }
     })();
   </script>
 
@@ -323,6 +315,22 @@
        FS.api.useMocks), and before the mount call so the first paint
        already reflects the real signed-in user when one is restored. -->
   <script src="scripts/auth/session-bridge.js?v=1"></script>
+
+  <script>
+    (function () {
+      /* Default landing navigation. Must run AFTER session-bridge.js:
+         on a live-mode session restore, window.AuthMock.currentUser is
+         only the real (bridged) user once session-bridge has run — computing
+         the landing route before that point used the stale mock role
+         instead of the real signed-in user's role. */
+      if (!location.hash || location.hash === '#' || location.hash === '#/') {
+        var stored;
+        try { stored = localStorage.getItem('fs.settings.defaultLanding'); } catch (_) {}
+        var landing = stored || window.FS.getDefaultLanding(window.AuthMock.currentUser);
+        location.hash = landing;
+      }
+    })();
+  </script>
 
   <script type="text/babel">
     // Mount AppShell with dev switcher always visible in preview
