@@ -79,9 +79,11 @@
   <script type="text/babel" src="scripts/composites/audio-playlist.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/video-player.js?v=1"></script>
   <!-- Sprint 2.5 (Phase E) Calendar/date picker -->
-  <script type="text/babel" src="scripts/composites/date-picker.js?v=2"></script>
+  <script type="text/babel" src="scripts/composites/date-picker.js?v=3"></script>
+  <!-- Sprint date-range-batch — Range toolbar (uses DatePicker + ModalOverlay) -->
+  <script type="text/babel" src="scripts/composites/range-toolbar.js?v=1"></script>
   <!-- Sprint 2.7 (Phase G) Ask Agent chat strip -->
-  <script type="text/babel" src="scripts/composites/ask-chat.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/ask-chat.js?v=2"></script>
   <!-- Sprint 2.8 (Phase H) Meeting Minutes -->
   <script type="text/babel" src="scripts/composites/meeting-topic-card.js?v=2"></script>
   <!-- Sprint 2.9 (Phase I) Auth scaffolding — Login + 403 -->
@@ -96,7 +98,7 @@
   <!-- Sprint 5.4/5.5/8.2.2 — CSV + XML + XLSX import modal -->
   <script type="text/babel" src="scripts/composites/programme-import-modal.js?v=4"></script>
   <!-- Sprint 8.6 — SearchPalette (global search overlay, ⌘K / Ctrl+K) -->
-  <script type="text/babel" src="scripts/composites/search-palette.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/search-palette.js?v=2"></script>
   <!-- Sprint 8.0.3 — ErrorBanner (used by all page providers on fetch failure) -->
   <script type="text/babel" src="scripts/composites/error-banner.js?v=1"></script>
   <!-- Sprint 8.1.4 — Toast notification stack (vanilla JS, no React) -->
@@ -171,6 +173,8 @@
   <!--   3. Per-endpoint api modules (read fixtures via FS.api.*) -->
   <script src="scripts/api/sites.js?v=4"></script>
   <script src="scripts/api/dates.js?v=1"></script>
+  <!-- Sprint date-range-batch — Data window (range calculations) -->
+  <script src="scripts/api/data-window.js?v=1"></script>
   <script src="scripts/api/timeline.js?v=1"></script>
   <script src="scripts/api/transcripts.js?v=1"></script>
   <script src="scripts/api/audio.js?v=1"></script>
@@ -187,7 +191,7 @@
   <!-- Sprint 4.2 — Tasks aggregator (cross-day join: timeline + actions) -->
   <script src="scripts/api/tasks-aggregator.js?v=3"></script>
   <!-- Sprint 6.0 — Compliance aggregator (cross-day fan-out for /safety + /quality) -->
-  <script src="scripts/api/compliance-aggregator.js?v=3"></script>
+  <script src="scripts/api/compliance-aggregator.js?v=4"></script>
   <!-- Sprint 9 Track A.1 — Insights aggregator (subcontractor + tag rollups over compliance rows) -->
   <script src="scripts/api/insights-aggregator.js?v=1"></script>
   <!-- Sprint 9 Track C.1 — Strategic aggregator (per-site / per-region / org rollups) -->
@@ -208,16 +212,16 @@
   <!-- Mock data shim (weather only) + page registry + pages -->
   <script type="text/babel" src="scripts/mock-data.js?v=4"></script>
   <script type="text/babel" src="scripts/pages/_page-registry.js?v=1"></script>
-  <script type="text/babel" src="scripts/pages/today.js?v=17"></script>
-  <script type="text/babel" src="scripts/pages/timeline.js?v=15"></script>
+  <script type="text/babel" src="scripts/pages/today.js?v=18"></script>
+  <script type="text/babel" src="scripts/pages/timeline.js?v=16"></script>
   <script type="text/babel" src="scripts/pages/reports.js?v=5"></script>
   <script type="text/babel" src="scripts/pages/sites.js?v=5"></script>
   <script type="text/babel" src="scripts/pages/activity.js?v=4"></script>
   <script type="text/babel" src="scripts/pages/tasks.js?v=7"></script>
-  <script type="text/babel" src="scripts/pages/evidence.js?v=5"></script>
+  <script type="text/babel" src="scripts/pages/evidence.js?v=6"></script>
   <script type="text/babel" src="scripts/pages/programme.js?v=15"></script>
-  <script type="text/babel" src="scripts/pages/safety.js?v=10"></script>
-  <script type="text/babel" src="scripts/pages/quality.js?v=7"></script>
+  <script type="text/babel" src="scripts/pages/safety.js?v=11"></script>
+  <script type="text/babel" src="scripts/pages/quality.js?v=8"></script>
   <!-- Sprint 7.1+7.2 — /team page -->
   <script type="text/babel" src="scripts/pages/team.js?v=5"></script>
   <!-- Sprint 7.3 + 7.6 — /settings page (density toggle added in 7.6) -->
@@ -227,7 +231,7 @@
   <!-- Sprint 10 B.1+B.3 — /library page (template library + skip-edit preview) -->
   <script type="text/babel" src="scripts/pages/library.js?v=6"></script>
   <!-- Sprint 9 Track A — /insights dashboard (subcontractor + tag analytics) -->
-  <script type="text/babel" src="scripts/pages/insights.js?v=4"></script>
+  <script type="text/babel" src="scripts/pages/insights.js?v=5"></script>
   <!-- Sprint 9 Track C — strategic dashboards (Portfolio / Regional / Executive) -->
   <script type="text/babel" src="scripts/pages/strategic-shared.js?v=1"></script>
   <script type="text/babel" src="scripts/pages/portfolio.js?v=3"></script>
