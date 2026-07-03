@@ -395,6 +395,60 @@
     var ctx = React.useContext(SafetyContext);
     var sel = ctx && ctx.selectedFlag;
 
+    /* Task 2 (live-data fixes) — resolve/reopen toggle, piggybacking the
+       existing actions-toggle endpoint (see compliance-aggregator.js
+       _AUDIT-2). Mirrors action-item-row.js's optimistic pattern: flip
+       local state immediately, fire toggleAction, revert on reject. */
+    var refPending = React.useState(false);
+    var togglePending = refPending[0];
+    var setTogglePending = refPending[1];
+
+    function toggleResolve() {
+      if (!sel || togglePending) return;
+      var idxMatch = String(sel.id || '').match(
+        sel.source === 'topic_flag' ? /_flag_(\d+)$/ : /_obs_(\d+)$/
+      );
+      if (!idxMatch) return;  /* unexpected id shape — no-op, guard only */
+      var actionIndex = (sel.source === 'topic_flag' ? 'flag_' : 'obs_') + idxMatch[1];
+      var prevSel   = sel;
+      var nextStatus = prevSel.status === 'resolved' ? 'open' : 'resolved';
+      var nextSel   = Object.assign({}, prevSel, { status: nextStatus });
+
+      function applyStatus(rowId, status) {
+        if (!ctx.setState) return;
+        ctx.setState(function (s) {
+          if (s.status !== 'ok') return s;
+          var updatedRows = (s.rows || []).map(function (r) {
+            return r.id === rowId ? Object.assign({}, r, { status: status }) : r;
+          });
+          return Object.assign({}, s, {
+            rows:   updatedRows,
+            totals: totalsFromRows(updatedRows),
+            groups: groupByDate(updatedRows),
+          });
+        });
+      }
+
+      setTogglePending(true);
+      if (ctx.setSelected) ctx.setSelected(nextSel);
+      applyStatus(prevSel.id, nextStatus);
+
+      window.FS.api.actions.toggleAction({
+        date:         sel.date,
+        topic_id:     sel.topic_id,
+        action_index: actionIndex,
+        checked:      nextStatus === 'resolved',
+        action_text:  sel.observation,
+      }).then(function () {
+        setTogglePending(false);
+      }).catch(function (err) {
+        console.error('[SafetyRightDetail] resolve toggle failed, reverting', err);
+        setTogglePending(false);
+        if (ctx.setSelected) ctx.setSelected(prevSel);
+        applyStatus(prevSel.id, prevSel.status);
+      });
+    }
+
     /* Lazy-fetch related action_items from the source topic. Mirrors
        the linked-actions lazy-fetch from programme.js:805-881. The
        source topic carries N action_items — we surface them as
@@ -615,6 +669,10 @@
 
       /* Footer actions */
       React.createElement('div', { className: 'fs-safety-detail__actions' },
+        Button ? React.createElement(Button, {
+          variant: 'primary', size: 'sm', loading: togglePending,
+          onClick: toggleResolve,
+        }, sel.status === 'resolved' ? 'Reopen' : 'Mark resolved') : null,
         React.createElement(Button, {
           variant: 'secondary', size: 'sm', rightIcon: 'arrow-right',
           onClick: onOpenInTimeline,

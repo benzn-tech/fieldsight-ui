@@ -64,6 +64,7 @@
       case 'fail':      return 'danger';
       case 'blocked':   return 'danger';
       case 'observed':  return 'info';
+      case 'resolved':  return 'success';
       default:          return 'neutral';
     }
   }
@@ -388,6 +389,59 @@
     var ctx = React.useContext(QualityContext);
     var sel = ctx && ctx.selectedItem;
 
+    /* Task 2 (live-data fixes) — resolve/reopen toggle, piggybacking the
+       existing actions-toggle endpoint (see compliance-aggregator.js
+       _AUDIT-2). Only 'topic_quality' rows carry the synthetic status
+       gap (fixed 'observed' literal) — 'qc_item' rows already have a
+       real backend status (q.status) and are left alone; toggling them
+       would overwrite honest data with a synthetic binary. Mirrors
+       action-item-row.js's optimistic pattern: flip local state
+       immediately, fire toggleAction, revert on reject. */
+    var refPending = React.useState(false);
+    var togglePending = refPending[0];
+    var setTogglePending = refPending[1];
+
+    function toggleResolve() {
+      if (!sel || togglePending || sel.source !== 'topic_quality') return;
+      var prevSel   = sel;
+      var nextStatus = prevSel.status === 'resolved' ? 'observed' : 'resolved';
+      var nextSel   = Object.assign({}, prevSel, { status: nextStatus });
+
+      function applyStatus(rowId, status) {
+        if (!ctx.setState) return;
+        ctx.setState(function (s) {
+          if (s.status !== 'ok') return s;
+          var updatedRows = (s.rows || []).map(function (r) {
+            return r.id === rowId ? Object.assign({}, r, { status: status }) : r;
+          });
+          return Object.assign({}, s, {
+            rows:   updatedRows,
+            totals: totalsFromRows(updatedRows),
+            groups: groupByDate(updatedRows),
+          });
+        });
+      }
+
+      setTogglePending(true);
+      if (ctx.setSelected) ctx.setSelected(nextSel);
+      applyStatus(prevSel.id, nextStatus);
+
+      window.FS.api.actions.toggleAction({
+        date:         sel.date,
+        topic_id:     sel.topic_id,
+        action_index: 'quality',
+        checked:      nextStatus === 'resolved',
+        action_text:  sel.item,
+      }).then(function () {
+        setTogglePending(false);
+      }).catch(function (err) {
+        console.error('[QualityRightDetail] resolve toggle failed, reverting', err);
+        setTogglePending(false);
+        if (ctx.setSelected) ctx.setSelected(prevSel);
+        applyStatus(prevSel.id, prevSel.status);
+      });
+    }
+
     /* Lazy-fetch related action_items from the source topic — only
        applies when the row was sourced from a quality-tagged topic
        (topic_id >= 0). Report-level qc_items have topic_id = -1. */
@@ -579,6 +633,10 @@
       linkedBlock,
 
       React.createElement('div', { className: 'fs-quality-detail__actions' },
+        (Button && sel.source === 'topic_quality') ? React.createElement(Button, {
+          variant: 'primary', size: 'sm', loading: togglePending,
+          onClick: toggleResolve,
+        }, sel.status === 'resolved' ? 'Reopen' : 'Mark resolved') : null,
         React.createElement(Button, {
           variant: 'secondary', size: 'sm', rightIcon: 'arrow-right',
           onClick: onOpenInTimeline,

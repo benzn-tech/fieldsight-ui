@@ -30,6 +30,8 @@
                location:            string | null,    // null for topic_flag
                who_raised:          string | null,    // null for topic_flag
                status:              'open' | 'resolved',  // see _AUDIT-2 below
+               resolved_by:         string | null,
+               resolved_at:         string | null,    // ISO
              }
            ],
            from, to, user, dates: [...]
@@ -49,7 +51,11 @@
                topic_category:      'quality' | 'progress' | 'safety',
                source:              'qc_item' | 'topic_quality',
                item:                string,        // headline
-               status:               string,        // 'completed' | 'concern' | etc
+               status:               string,        // 'completed' | 'concern' | etc for
+                                                      // qc_item; 'observed' | 'resolved'
+                                                      // for topic_quality (see _AUDIT-2)
+               resolved_by:         string | null,   // topic_quality only
+               resolved_at:         string | null,   // topic_quality only, ISO
                details:              string | null,
                follow_up_needed:    boolean,
                who_raised:          string | null,    // null for qc_item
@@ -76,10 +82,28 @@
    _AUDIT-2 · No `status` field on safety_observations or safety_flags.
        Schema (BACKEND-CONTEXT §5.1) doesn't carry a status —
        observations are append-only at capture time. UI needs an open/
-       resolved split for the KPI strip. Aggregator synthesises:
-         status = 'open' for every row in mock land.
-       When a real backend `POST /api/safety/:id/resolve` ships, the
-       row shape gains a real status without consumer changes.
+       resolved split for the KPI strip.
+
+       Task 2 (live-data fixes, 2026-07-03) — RESOLVED via piggyback.
+       The deployed `toggle_action` accepts ANY string `action_index`
+       (SK is an f-string, no validation), so flag rows join the
+       existing GET /api/actions checked map instead of a literal:
+         safety_observations → action_index = 'obs_<idx>'  under topic_id -1
+         topic-level safety_flags → action_index = 'flag_<idx>' under the
+           topic's own topic_id
+         quality topic rows (topic_category==='quality', same synthetic-
+           status gap) → action_index = 'quality' under the topic's own
+           topic_id
+       status = 'resolved' when the joined entry has checked:true, else
+       the previous default ('open' for safety rows, 'observed' for
+       quality topic rows). resolved_by/resolved_at carry checked_by/
+       checked_at through when present. The actions map is fetched once
+       per date (not per user) in fanoutDates() and joined per row; a
+       fetch failure for a date degrades to an empty map for that date
+       (rows show as unresolved) rather than failing the page.
+       qc_item rows (source 'qc_item') are NOT joined — they already
+       carry a real backend status (q.status), so a resolve toggle
+       would overwrite honest data with a synthetic binary.
 
    _AUDIT-3 · Permission scope vs fan-out.
        resolveUser() clamps non-admin / non-gm callers to their own
@@ -145,8 +169,26 @@
       .sort();
 
     if (datesInRange.length === 0) {
-      return { perDay: [], dates: [] };
+      return { perDay: [], dates: [], actionsByDate: {} };
     }
+
+    /* Task 2 (live-data fixes) — fetch the checked-actions map for every
+       date in the range, in parallel with the timeline fanout below, so
+       flag/topic rows can join their real resolved status instead of a
+       hard-coded literal. Actions are keyed by date only (not by user),
+       so one fetch per unique date covers the admin cross-product too.
+       Per-date failures are swallowed to an empty map — resilience over
+       correctness of status (a flag simply shows as 'open' if the join
+       fails, it never blocks the page). */
+    var actionsByDatePromise = Promise.all(datesInRange.map(function (d) {
+      return window.FS.api.actions.getActions(d)
+        .then(function (res) { return { date: d, actions: (res && res.actions) || {} }; })
+        .catch(function () { return { date: d, actions: {} }; });
+    })).then(function (list) {
+      var map = {};
+      list.forEach(function (x) { map[x.date] = x.actions; });
+      return map;
+    });
 
     /* Admin path: cross-product (date × all users) so every report in
        the window gets included rather than being short-circuited by
@@ -162,19 +204,21 @@
           return acc;
         }, [])
       );
+      var actionsByDateAdmin = await actionsByDatePromise;
       var deniedAdmin = perDayAdmin.filter(function (x) {
         return x.report && x.report._accessDenied;
       })[0];
       if (deniedAdmin) {
         return { _accessDenied: true, error: deniedAdmin.report.error };
       }
-      return { perDay: perDayAdmin, dates: datesInRange };
+      return { perDay: perDayAdmin, dates: datesInRange, actionsByDate: actionsByDateAdmin };
     }
 
     var perDay = await Promise.all(datesInRange.map(function (d) {
       return window.FS.api.timeline.getTimeline({ date: d, user: user })
         .then(function (r) { return { date: d, report: r }; });
     }));
+    var actionsByDate = await actionsByDatePromise;
 
     var deniedHit = perDay.filter(function (x) {
       return x.report && x.report._accessDenied;
@@ -183,7 +227,7 @@
       return { _accessDenied: true, error: deniedHit.report.error };
     }
 
-    return { perDay: perDay, dates: datesInRange };
+    return { perDay: perDay, dates: datesInRange, actionsByDate: actionsByDate };
   }
 
   /* ─── Safety ─────────────────────────────────────────────────────────── */
@@ -204,10 +248,17 @@
       var r = x.report;
       if (!r || r._notFound || r.available_users) return;
       var folder = r.user_name ? window.FS.api.folderName(r.user_name) : null;
+      var checkedMap = (fanout.actionsByDate && fanout.actionsByDate[x.date]) || {};
 
       /* a) Report-level safety_observations (richer — has location +
-         who_raised). */
+         who_raised). Status is joined from the actions checked map,
+         piggy-backing the existing toggle_action endpoint with
+         action_index = 'obs_<idx>' under topic_id -1 (see _AUDIT-2 —
+         these rows have no real status field, so 'open' is the
+         default until a resolve toggle is recorded). */
       (r.safety_observations || []).forEach(function (o, idx) {
+        var entry = checkedMap['-1_obs_' + idx];
+        var resolved = !!(entry && entry.checked);
         rows.push({
           id:                 x.date + '_obs_' + idx,
           date:               x.date,
@@ -223,16 +274,22 @@
           recommended_action: o.recommended_action || null,
           location:           o.location || null,
           who_raised:         o.who_raised || null,
-          status:             'open',  /* see _AUDIT-2 */
+          status:             resolved ? 'resolved' : 'open',  /* see _AUDIT-2 */
+          resolved_by:        resolved ? (entry.checked_by || null) : null,
+          resolved_at:        resolved ? (entry.checked_at || null) : null,
         });
       });
 
       /* b) Topic-level safety_flags (less rich — no location/who, but
          carries topic context). Also surfaces related_photos so the
          /safety right panel can render them inline (Sprint 6.6.3 —
-         removes the round-trip to /timeline just to see the photos). */
+         removes the round-trip to /timeline just to see the photos).
+         Status joined the same way as (a), action_index = 'flag_<idx>'
+         under the topic's own topic_id. */
       (r.topics || []).forEach(function (t) {
         (t.safety_flags || []).forEach(function (f, idx) {
+          var entry = checkedMap[t.topic_id + '_flag_' + idx];
+          var resolved = !!(entry && entry.checked);
           rows.push({
             id:                 x.date + '_' + t.topic_id + '_flag_' + idx,
             date:               x.date,
@@ -248,7 +305,9 @@
             recommended_action: f.recommended_action || null,
             location:           null,
             who_raised:         null,
-            status:             'open',  /* see _AUDIT-2 */
+            status:             resolved ? 'resolved' : 'open',  /* see _AUDIT-2 */
+            resolved_by:        resolved ? (entry.checked_by || null) : null,
+            resolved_at:        resolved ? (entry.checked_at || null) : null,
             related_photos:     (t.related_photos || []).slice(),
           });
         });
@@ -276,8 +335,13 @@
       var r = x.report;
       if (!r || r._notFound || r.available_users) return;
       var folder = r.user_name ? window.FS.api.folderName(r.user_name) : null;
+      var checkedMap = (fanout.actionsByDate && fanout.actionsByDate[x.date]) || {};
 
-      /* a) Report-level quality_and_compliance items. */
+      /* a) Report-level quality_and_compliance items. These carry a
+         REAL backend status (q.status — 'completed'/'concern'/etc, not
+         synthetic), so they are left untouched by the resolve/reopen
+         join below — toggling would overwrite honest data with a fake
+         binary. */
       (r.quality_and_compliance || []).forEach(function (q, idx) {
         rows.push({
           id:               x.date + '_qc_' + idx,
@@ -299,9 +363,15 @@
 
       /* b) Topics tagged category === 'quality' — surface as a row each
          so the page covers both shapes. related_photos carried through
-         for /quality right panel inline preview (Sprint 6.6.3). */
+         for /quality right panel inline preview (Sprint 6.6.3). Status
+         here IS synthetic (fixed 'observed', quality's equivalent of
+         safety's _AUDIT-2 gap) — joined the same way as safety topic
+         flags, piggy-backing action_index = 'quality' under the
+         topic's own topic_id (one row per topic, no idx needed). */
       (r.topics || []).forEach(function (t) {
         if (t.category !== 'quality') return;
+        var entry = checkedMap[t.topic_id + '_quality'];
+        var resolved = !!(entry && entry.checked);
         rows.push({
           id:               x.date + '_' + t.topic_id + '_topic',
           date:             x.date,
@@ -313,7 +383,9 @@
           topic_category:   t.category,
           source:           'topic_quality',
           item:             t.topic_title,
-          status:           'observed',
+          status:           resolved ? 'resolved' : 'observed',
+          resolved_by:      resolved ? (entry.checked_by || null) : null,
+          resolved_at:      resolved ? (entry.checked_at || null) : null,
           details:          t.summary || null,
           follow_up_needed: false,
           who_raised:       (t.participants && t.participants[0]) || null,
