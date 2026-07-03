@@ -5,8 +5,8 @@
 FieldSight is an AI construction-site documentation platform. Body-cam video, push-to-talk audio, and photos captured by field workers (RealPTT devices like `Benl1`–`Benl6`) are uploaded to S3, run through a pipeline (VAD → AWS Transcribe → Claude), and emitted as **structured JSON daily / weekly / monthly reports** plus optional **meeting minutes**. The frontend authenticates users through Cognito and reads everything via a single REST API Lambda (`fieldsight-api`). All media is served via short-lived **presigned S3 URLs** the API hands out.
 - **Region:** `ap-southeast-2` (Sydney) — all resources colocated
 - **S3 bucket:** `fieldsight-data-509194952652`
-- **Cognito user pool:** `ap-southeast-2_ps7XIQGHB`
-- **Cognito client ID:** `5npb81jbj1hgh9tsck25kan3os`
+- **Cognito user pool:** `ap-southeast-2_q88pd6XXr` (`fieldsight-users`; the old `ap-southeast-2_ps7XIQGHB` was deleted — verified live 2026-07-03)
+- **Cognito client ID:** `4ratjdjonqm17tln6bs2761ci3` (`fieldsight-web-client`)
 - **Display timezone:** NZDT (UTC+13). All API output is already UTC-based; **the frontend converts to NZDT for display**.
 ---
 ## 2. High-level data flow (what the UI ultimately reads)

@@ -36,8 +36,8 @@
 
   var DEFAULTS = {
     region:        'ap-southeast-2',
-    poolId:        'ap-southeast-2_ps7XIQGHB',
-    clientId:      '5npb81jbj1hgh9tsck25kan3os',
+    poolId:        'ap-southeast-2_q88pd6XXr',   /* fieldsight-users (verified live 2026-07-03) */
+    clientId:      '4ratjdjonqm17tln6bs2761ci3', /* fieldsight-web-client */
     hostedUiDomain: null,  /* e.g. 'fieldsight.auth.ap-southeast-2.amazoncognito.com' */
   };
 
