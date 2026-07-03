@@ -152,10 +152,12 @@
       if (session) {
         var token = await session.ensureFresh();
         if (token) {
-          /* Prefer accessToken for Bearer if available (API Gateway validates it).
-             ensureFresh returns idToken; use getAccessToken() when present. */
-          var bearer = (session.getAccessToken && session.getAccessToken()) || token;
-          headers['Authorization'] = 'Bearer ' + bearer;
+          /* This API's Cognito REST authorizer validates the ID token passed
+             RAW (no "Bearer " prefix) — mirrors the shipped fieldsight_v5
+             frontend exactly. Access token / Bearer prefix → 401, and the
+             gateway's 401 carries no CORS headers, so the browser surfaces
+             it as "Failed to fetch". */
+          headers['Authorization'] = token;
         }
       }
     }
