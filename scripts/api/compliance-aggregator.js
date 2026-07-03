@@ -121,6 +121,20 @@
        Verified against scripts/mock/daily-report.fixture.js:
        29-247 (single report).
 
+   _AUDIT-5 · Generator duplicate observation-vs-flag (2026-07-03).
+       Browser-confirmed: the real report generator sometimes writes the
+       SAME safety event into BOTH arrays with paraphrased wording —
+       e.g. "Worker entering clean area with muddy shoes risking damage
+       to finished surfaces" (topics[].safety_flags[], locatable via
+       topic_id) vs "Worker entering clean area with muddy shoes"
+       (safety_observations[], topic_id -1 — "Open source report" can't
+       trace it). getSafetyRange now drops the report-level observation
+       row when it fuzzily matches a topic-flag row from the SAME
+       report, keeping the topic-flag row. See isDuplicateObservation()
+       below. Deliberately NOT applied topic-flag vs topic-flag —
+       different topics may legitimately raise similar-sounding flags
+       (e.g. two "loose bracing" issues on different levels).
+
    ────────────────────────────────────────────────────────────────────────── */
 
 (function () {
@@ -230,6 +244,50 @@
     return { perDay: perDay, dates: datesInRange, actionsByDate: actionsByDate };
   }
 
+  /* ─── Dedup helpers (_AUDIT-5) ───────────────────────────────────────── */
+
+  /* Lowercase, strip punctuation to spaces, collapse whitespace. Pure. */
+  function normalizeObservationText(s) {
+    return String(s || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function tokenize(normalized) {
+    return normalized ? normalized.split(' ') : [];
+  }
+
+  /* |intersection| / |union| over whitespace-split tokens. Pure. */
+  function tokenJaccard(normA, normB) {
+    var tokensA = tokenize(normA);
+    var tokensB = tokenize(normB);
+    if (!tokensA.length || !tokensB.length) return 0;
+    var setA = {};
+    tokensA.forEach(function (t) { setA[t] = true; });
+    var setB = {};
+    tokensB.forEach(function (t) { setB[t] = true; });
+    var union = {};
+    tokensA.concat(tokensB).forEach(function (t) { union[t] = true; });
+    var intersectionCount = 0;
+    Object.keys(setA).forEach(function (t) { if (setB[t]) intersectionCount += 1; });
+    var unionCount = Object.keys(union).length;
+    return unionCount === 0 ? 0 : intersectionCount / unionCount;
+  }
+
+  /* True when obsText (report-level safety_observations[] wording) is a
+     near-duplicate of flagText (topics[].safety_flags[] wording) — see
+     _AUDIT-5. Deterministic, cheap, pure. */
+  function isDuplicateObservation(obsText, flagText) {
+    var normA = normalizeObservationText(obsText);
+    var normB = normalizeObservationText(flagText);
+    if (!normA || !normB) return false;
+    if (normA === normB) return true;
+    if (normA.startsWith(normB) || normB.startsWith(normA)) return true;
+    return tokenJaccard(normA, normB) >= 0.6;
+  }
+
   /* ─── Safety ─────────────────────────────────────────────────────────── */
 
   async function getSafetyRange(opts) {
@@ -250,13 +308,59 @@
       var folder = r.user_name ? window.FS.api.folderName(r.user_name) : null;
       var checkedMap = (fanout.actionsByDate && fanout.actionsByDate[x.date]) || {};
 
+      /* b) Topic-level safety_flags — built FIRST (but appended after
+         the observations below, preserving the original row order) so
+         that (a)'s dedup pass has the full same-report flag set to
+         compare against. Less rich than observations — no location/
+         who, but carries topic context. Also surfaces related_photos
+         so the /safety right panel can render them inline (Sprint
+         6.6.3 — removes the round-trip to /timeline just to see the
+         photos). Status joined the same way as (a), action_index =
+         'flag_<idx>' under the topic's own topic_id. */
+      var topicFlagRows = [];
+      (r.topics || []).forEach(function (t) {
+        (t.safety_flags || []).forEach(function (f, idx) {
+          var entry = checkedMap[t.topic_id + '_flag_' + idx];
+          var resolved = !!(entry && entry.checked);
+          topicFlagRows.push({
+            id:                 x.date + '_' + t.topic_id + '_flag_' + idx,
+            date:               x.date,
+            site:               r.site || null,
+            user_name:          r.user_name || null,
+            user_folder:        folder,
+            topic_id:           t.topic_id,
+            topic_title:        t.topic_title,
+            topic_category:     t.category,
+            source:             'topic_flag',
+            observation:        f.observation,
+            risk_level:         f.risk_level,
+            recommended_action: f.recommended_action || null,
+            location:           null,
+            who_raised:         null,
+            status:             resolved ? 'resolved' : 'open',  /* see _AUDIT-2 */
+            resolved_by:        resolved ? (entry.checked_by || null) : null,
+            resolved_at:        resolved ? (entry.checked_at || null) : null,
+            related_photos:     (t.related_photos || []).slice(),
+          });
+        });
+      });
+
       /* a) Report-level safety_observations (richer — has location +
          who_raised). Status is joined from the actions checked map,
          piggy-backing the existing toggle_action endpoint with
          action_index = 'obs_<idx>' under topic_id -1 (see _AUDIT-2 —
          these rows have no real status field, so 'open' is the
-         default until a resolve toggle is recorded). */
+         default until a resolve toggle is recorded).
+
+         _AUDIT-5 — drop this observation if it's a near-duplicate of
+         any topic-flag row from the SAME report; keep the topic-flag
+         row instead (it's locatable via topic_id, this one is not). */
       (r.safety_observations || []).forEach(function (o, idx) {
+        var isDup = topicFlagRows.some(function (fr) {
+          return isDuplicateObservation(o.observation, fr.observation);
+        });
+        if (isDup) return;
+
         var entry = checkedMap['-1_obs_' + idx];
         var resolved = !!(entry && entry.checked);
         rows.push({
@@ -280,38 +384,7 @@
         });
       });
 
-      /* b) Topic-level safety_flags (less rich — no location/who, but
-         carries topic context). Also surfaces related_photos so the
-         /safety right panel can render them inline (Sprint 6.6.3 —
-         removes the round-trip to /timeline just to see the photos).
-         Status joined the same way as (a), action_index = 'flag_<idx>'
-         under the topic's own topic_id. */
-      (r.topics || []).forEach(function (t) {
-        (t.safety_flags || []).forEach(function (f, idx) {
-          var entry = checkedMap[t.topic_id + '_flag_' + idx];
-          var resolved = !!(entry && entry.checked);
-          rows.push({
-            id:                 x.date + '_' + t.topic_id + '_flag_' + idx,
-            date:               x.date,
-            site:               r.site || null,
-            user_name:          r.user_name || null,
-            user_folder:        folder,
-            topic_id:           t.topic_id,
-            topic_title:        t.topic_title,
-            topic_category:     t.category,
-            source:             'topic_flag',
-            observation:        f.observation,
-            risk_level:         f.risk_level,
-            recommended_action: f.recommended_action || null,
-            location:           null,
-            who_raised:         null,
-            status:             resolved ? 'resolved' : 'open',  /* see _AUDIT-2 */
-            resolved_by:        resolved ? (entry.checked_by || null) : null,
-            resolved_at:        resolved ? (entry.checked_at || null) : null,
-            related_photos:     (t.related_photos || []).slice(),
-          });
-        });
-      });
+      rows.push.apply(rows, topicFlagRows);
     });
 
     return { rows: rows, from: from, to: to, user: user, dates: fanout.dates };
@@ -402,6 +475,12 @@
   window.FS.api.compliance = {
     getSafetyRange:  getSafetyRange,
     getQualityRange: getQualityRange,
+    /* _AUDIT-5 — exposed for unit testing the fuzzy-match spec. */
+    _dedupe: {
+      normalizeObservationText: normalizeObservationText,
+      tokenJaccard:             tokenJaccard,
+      isDuplicateObservation:   isDuplicateObservation,
+    },
   };
 
 })();
