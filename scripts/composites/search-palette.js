@@ -44,7 +44,16 @@
     _cache.loading = true;
     try {
       var today = window.FS.api.todayNZDT();
-      var from  = window.FS.api.addDaysISO(today, -14);
+      /* Task C — widen the cache window from a trailing 14 days to the
+         full report span (FS.api.window.getSpan(), shared/cached with
+         every other widened call site) so Search can actually find the
+         historic Feb/Mar report data instead of an empty last-14-days
+         slice. Falls back to `today` (i.e. no widening) if the span
+         lookup fails or no report has ever existed. */
+      var span  = await window.FS.api.window.getSpan().catch(function () {
+        return { earliest: null, latest: null };
+      });
+      var from  = span.earliest || today;
 
       var results = await Promise.all([
         window.FS.api.sites.getSites()
@@ -145,6 +154,23 @@
   }
 
   /* ---------------------------------------------------------------------- */
+  /* Ask hand-off — which report user's Timeline the "Ask FieldSight" row    */
+  /* routes to. Worker/site_manager: own folder (server would force this     */
+  /* anyway). Admin/gm: no personal report folder, so fall back to the       */
+  /* seeded default site_manager, matching compliance-aggregator.js's        */
+  /* resolveUser() (:107-116) parity convention.                             */
+  /* ---------------------------------------------------------------------- */
+
+  var ADMIN_ASK_FOLDER = 'Jarley_Trainor';
+
+  function _resolveAskFolder() {
+    var caller  = (window.AuthMock && window.AuthMock.currentUser) || {};
+    var isAdmin = caller.role === 'admin' || caller.role === 'gm' || caller.isAdmin;
+    if (!isAdmin && caller.name) return window.FS.api.folderName(caller.name);
+    return ADMIN_ASK_FOLDER;
+  }
+
+  /* ---------------------------------------------------------------------- */
   /* SearchPalette component                                                  */
   /* ---------------------------------------------------------------------- */
 
@@ -191,14 +217,62 @@
       if (el) el.scrollIntoView({ block: 'nearest' });
     }, [selIdx]);
 
+    var trimmedQuery = query.trim();
+
+    /* Group results by type for sectioned display. Computed ahead of
+       doSelect/onKeyDown below so the "Ask FieldSight" row (Task C) can
+       be folded into the same flat, arrow-key-navigable list as the
+       ordinary results — it's appended as the final entry whenever the
+       query is non-empty, whether or not any results matched. */
+    var groups = [];
+    TYPE_ORDER.forEach(function (type) {
+      var items = results.filter(function (r) { return r.type === type; });
+      if (items.length) groups.push({ type: type, items: items });
+    });
+    var flatItems = groups.reduce(function (acc, g) { return acc.concat(g.items); }, []);
+
+    var askItem = trimmedQuery
+      ? { type: 'ask', id: '__ask__', title: 'Ask FieldSight: “' + trimmedQuery + '”' }
+      : null;
+    if (askItem) flatItems = flatItems.concat([askItem]);
+
+    function saveRecent(q) {
+      if (!q) return;
+      var next = [q].concat(recent.filter(function (r) { return r !== q; })).slice(0, 5);
+      setRecent(next);
+      try { sessionStorage.setItem('fs.search.recent', JSON.stringify(next)); } catch (_) {}
+    }
+
+    /* Ask hand-off (Task C) — stash the query for Timeline's report-level
+       AskChat to prefill-and-clear, then route to the latest report date
+       for the resolved user folder. getSpan() is already warm by the time
+       this fires (kicked off by _loadCache on palette open), so the async
+       hop is imperceptible in practice; still tolerate a slow/failed span
+       lookup by falling back to today. */
+    function doAsk(q) {
+      if (!q) return;
+      saveRecent(q);
+      try { sessionStorage.setItem('fs.ask.prefill', q); } catch (_) {}
+      var folder = _resolveAskFolder();
+      function go(dateStr) {
+        window.FS.Router.navigate('/timeline?date=' + encodeURIComponent(dateStr)
+          + '&user=' + encodeURIComponent(folder));
+      }
+      window.FS.api.window.getSpan().then(function (span) {
+        go((span && span.latest) || window.FS.api.todayNZDT());
+      }).catch(function () {
+        go(window.FS.api.todayNZDT());
+      });
+      onClose();
+    }
+
     function doSelect(item) {
       if (!item) return;
-      var q = query.trim();
-      if (q) {
-        var next = [q].concat(recent.filter(function (r) { return r !== q; })).slice(0, 5);
-        setRecent(next);
-        try { sessionStorage.setItem('fs.search.recent', JSON.stringify(next)); } catch (_) {}
+      if (item.type === 'ask') {
+        doAsk(trimmedQuery);
+        return;
       }
+      saveRecent(trimmedQuery);
       window.FS.Router.navigate(item.route);
       onClose();
     }
@@ -210,27 +284,19 @@
           break;
         case 'ArrowDown':
           e.preventDefault();
-          setSelIdx(function (i) { return Math.min(i + 1, results.length - 1); });
+          setSelIdx(function (i) { return Math.min(i + 1, flatItems.length - 1); });
           break;
         case 'ArrowUp':
           e.preventDefault();
           setSelIdx(function (i) { return Math.max(i - 1, 0); });
           break;
         case 'Enter':
-          doSelect(results[selIdx]);
+          doSelect(flatItems[selIdx]);
           break;
         default:
           break;
       }
     }
-
-    /* Group results by type for sectioned display */
-    var groups = [];
-    TYPE_ORDER.forEach(function (type) {
-      var items = results.filter(function (r) { return r.type === type; });
-      if (items.length) groups.push({ type: type, items: items });
-    });
-    var flatItems = groups.reduce(function (acc, g) { return acc.concat(g.items); }, []);
 
     return React.createElement('div', {
       className:    'fs-search-palette',
@@ -367,6 +433,43 @@
             /* Empty prompt */
             : React.createElement('div', { className: 'fs-search-palette__hint' },
                 'Type to search across tasks, safety flags, sites, and people'),
+
+          /* ---- "Ask FieldSight" hand-off (Task C) -------------------------
+             Distinct final row, appended whenever the query is non-empty —
+             whether or not any of the client-side result types matched.
+             Selecting it stashes the query for Timeline's report-level
+             AskChat to prefill and routes there. Styled inline (border +
+             accent tint, tokens-only) rather than via composites.css so
+             this stays a JS-only change — no new CSS class needed. */
+          askItem
+            ? React.createElement('button', {
+                type:            'button',
+                role:            'option',
+                'aria-selected': flatItems.indexOf(askItem) === selIdx,
+                'data-selected': String(flatItems.indexOf(askItem) === selIdx),
+                className:       'fs-search-palette__result'
+                                  + (flatItems.indexOf(askItem) === selIdx ? ' fs-search-palette__result--active' : ''),
+                style: {
+                  borderTop:  '1px solid var(--border-subtle)',
+                  marginTop:  '4px',
+                  paddingTop: '10px',
+                },
+                onClick:         function () { doSelect(askItem); },
+                onMouseEnter:    function () { setSelIdx(flatItems.indexOf(askItem)); },
+              },
+                NavIcon && React.createElement(NavIcon, {
+                  name:  'message-circle',
+                  size:  15,
+                  color: 'var(--color-accent-700)',
+                }),
+                React.createElement('div', { className: 'fs-search-palette__result-body' },
+                  React.createElement('span', {
+                    className: 'fs-search-palette__result-title',
+                    style:     { color: 'var(--color-accent-800)', fontWeight: 600 },
+                  }, askItem.title),
+                ),
+              )
+            : null,
         ),
       ),
     );

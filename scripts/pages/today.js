@@ -81,16 +81,6 @@
     });
   }
 
-  /* Pick the most recent date with a report from /api/dates, or null. */
-  function findLatestReportDate(datesMap) {
-    var keys = Object.keys(datesMap || {}).filter(function (d) {
-      return datesMap[d] && datesMap[d].hasReport;
-    });
-    if (keys.length === 0) return null;
-    keys.sort(); /* YYYY-MM-DD sorts lexically */
-    return keys[keys.length - 1];
-  }
-
   /* ---------- TodayContext (Sprint 3, P-07) ---------------------------- */
   /* TodayMiddleColumn loads the report; TodayRightDetail needs the same
      snapshot to render `findItemById` lookups for the selected item.
@@ -194,22 +184,27 @@
             setState(Object.assign({ status: 'ok' }, withProgramme(first, programmeRows)));
             return;
           }
-          /* No report for today — try the latest available. */
-          return window.FS.api.dates.getDates({ months: 3 }).then(function (res) {
+          /* No report for today — try the latest available. Widened
+             discovery (Task C) via FS.api.window.getSpan() so the
+             fallback reaches historic report months instead of the
+             trailing 3-month window (data is Feb/Mar while "today"
+             runs months ahead of it). */
+          return window.FS.api.window.getSpan().then(function (span) {
             if (cancelled) return;
-            if (res && res._accessDenied) {
-              setState({ status: 'access_denied', message: res.error, today: today });
-              return;
-            }
-            var latest = findLatestReportDate(res.dates || {});
+            var latest = span && span.latest;
             if (!latest || latest === today) {
               /* Empty-state still shows today's programme tasks if any —
-                 the programme is not gated on a daily report existing. */
+                 the programme is not gated on a daily report existing.
+                 `latest` (possibly null) threads through so the render
+                 branch can offer a "View latest report" CTA when one
+                 exists. */
               setState({
                 status:         'empty',
                 report:         first.report,
                 today:          today,
                 programmeTasks: programmeRows,
+                latest:         latest,
+                folder:         folder,
               });
               return;
             }
@@ -227,6 +222,8 @@
                   report:         second.report,
                   today:          today,
                   programmeTasks: programmeRows,
+                  latest:         latest,
+                  folder:         folder,
                 });
               }
             });
@@ -499,9 +496,34 @@
       var msg = (report.available_users && 'Pick a user from /timeline to view a daily report.')
               || report.message
               || 'No report yet for today.';
+      var emptyLatest = state.latest;
       return React.createElement('div', { className: 'fs-page fs-page--today' },
         React.createElement('div', { style: { padding: '24px', color: 'var(--text-tertiary)', fontSize: '13px' } },
           msg),
+
+        /* Task C — when the widened data-window discovery (:198 above)
+           found a report on some earlier date but couldn't use it as a
+           fallback here (e.g. it's today itself, or the same-user load
+           still came back empty), offer a direct deep-link instead of
+           leaving the page a dead end. Reuses the OK-branch CTA markup
+           below (fs-today__view-report-cta). Guarded on latest existing. */
+        emptyLatest
+          ? React.createElement('button', {
+              type:      'button',
+              className: 'fs-today__view-report-cta',
+              onClick:   function () {
+                var qs = '?date=' + encodeURIComponent(emptyLatest);
+                if (state.folder) qs += '&user=' + encodeURIComponent(state.folder);
+                qs += '&from=today';
+                window.FS.Router.navigate('/timeline' + qs);
+              },
+            },
+              React.createElement('span', { className: 'fs-today__view-report-cta-text' },
+                'View latest report (' + fmtDate(emptyLatest) + ')'),
+              React.createElement('span', { className: 'fs-today__view-report-cta-arrow' },
+                '→'),
+            )
+          : null,
       );
     }
 

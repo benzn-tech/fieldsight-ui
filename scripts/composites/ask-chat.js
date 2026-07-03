@@ -20,13 +20,16 @@
    override; no UI gating needed beyond that.
 
    Props:
-     date          'YYYY-MM-DD'
-     user          folder-name string (optional — server handles default)
-     scope         'report' | 'transcript' | 'both'  (default 'both')
-     topic_id      number | null
-     placeholder   string for the input (e.g. "Ask about this topic…")
-     suggestions   string[] of pre-canned questions (clickable chips)
-     compact       boolean — render in a tighter layout for sidebars
+     date            'YYYY-MM-DD'
+     user            folder-name string (optional — server handles default)
+     scope           'report' | 'transcript' | 'both'  (default 'both')
+     topic_id        number | null
+     placeholder     string for the input (e.g. "Ask about this topic…")
+     suggestions     string[] of pre-canned questions (clickable chips)
+     compact         boolean — render in a tighter layout for sidebars
+     initialQuestion optional string — prefills the input once on mount
+                     (Task C: Search's "Ask FieldSight" hand-off). Does
+                     NOT auto-send; the user still presses Ask/Enter.
 
    Exported to:
      window.FieldSight.AskChat
@@ -57,6 +60,15 @@
     var setBusy = refBusy[1];
 
     var listRef = React.useRef(null);
+
+    /* Task C — one-shot prefill from an `initialQuestion` prop (Search's
+       "Ask FieldSight" hand-off). Runs once on mount only ([] deps); a
+       later change to the prop is intentionally ignored — this seeds a
+       starting value, it does not keep the input in sync with the prop.
+       Never auto-sends; the user still submits explicitly. */
+    React.useEffect(function () {
+      if (props.initialQuestion) setQ(props.initialQuestion);
+    }, []);
 
     /* Auto-scroll the message list to the bottom whenever it grows. */
     React.useEffect(function () {

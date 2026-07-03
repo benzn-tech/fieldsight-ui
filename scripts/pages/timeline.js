@@ -398,6 +398,23 @@
       }
     }, [state.status, targetTopicId, date]);
 
+    /* Task C — Search's "Ask FieldSight" hand-off (search-palette.js).
+       Read-and-clear the sessionStorage prefill exactly once per mount,
+       via a lazy useState initializer rather than an effect so the value
+       is ready in time for AskChat's own mount-time prefill effect
+       (ask-chat.js) — that effect only runs once on ITS mount too, so it
+       must see the real value on AskChat's first render, not one render
+       later. Threaded into the report-level AskChat mount below. Must
+       sit above the early returns (:401+) — rules of hooks. */
+    var refAskPrefill = React.useState(function () {
+      try {
+        var v = sessionStorage.getItem('fs.ask.prefill');
+        if (v) sessionStorage.removeItem('fs.ask.prefill');
+        return v || '';
+      } catch (_) { return ''; }
+    });
+    var askPrefill = refAskPrefill[0];
+
     /* Loading */
     if (state.status === 'loading') {
       return React.createElement('div', {
@@ -626,11 +643,12 @@
         React.createElement('div', { className: 'fs-timeline-page__section-label' },
           'Ask agent'),
         React.createElement(AskChat, {
-          date:        date,
-          user:        user,
-          scope:       'both',
-          placeholder: 'Ask anything about today’s report…',
-          compact:     true,
+          date:            date,
+          user:            user,
+          scope:           'both',
+          placeholder:     'Ask anything about today’s report…',
+          compact:         true,
+          initialQuestion: askPrefill,
           suggestions: [
             'What were today’s safety highlights?',
             'Which actions are still open?',
