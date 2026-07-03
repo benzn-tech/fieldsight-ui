@@ -85,6 +85,7 @@
     var caption = props.caption;       /* e.g. 'Apr' under strip cells */
     var selected = props.selected;
     var inRange  = props.inRange;      /* range mode: strictly between from/to */
+    var inPreview = props.inPreview;   /* range mode: prospective span before `to` is chosen */
     var muted    = props.muted;        /* for prev/next-month bleed in grid */
     var disabled = props.disabled;     /* future dates if you want to lock — not used yet */
 
@@ -96,11 +97,15 @@
        tint with a dark-mode override, replacing the old low-opacity
        inline color-mix that was barely visible on either theme.
        Endpoints reuse the existing --selected class instead, so this
-       only ever applies to the days between them. */
+       only ever applies to the days between them.
+       --in-preview is the lighter hover-only echo of that fill: shown
+       for the prospective span between `from` and the hovered day
+       while `to` hasn't been chosen yet (see MonthGrid). */
     var className = 'fs-date-picker__cell'
       + ' fs-date-picker__cell--i' + i
       + (selected ? ' fs-date-picker__cell--selected' : '')
       + (inRange && !selected ? ' fs-date-picker__cell--in-range' : '')
+      + (inPreview && !selected ? ' fs-date-picker__cell--in-preview' : '')
       + (muted    ? ' fs-date-picker__cell--muted'    : '')
       + (props.variant === 'strip' ? ' fs-date-picker__cell--strip' : ' fs-date-picker__cell--grid');
 
@@ -109,6 +114,7 @@
       className: className,
       disabled:  disabled,
       onClick:   function () { if (props.onSelect) props.onSelect(iso); },
+      onMouseEnter: function () { if (props.onHover) props.onHover(iso); },
       'aria-label': iso + (meta && meta.hasReport
         ? ', ' + meta.topics + ' topics' + (hasSafety ? ', ' + meta.safety + ' safety' : '')
         : ', no report'),
@@ -189,6 +195,16 @@
     var rangeFrom = props.rangeFrom || null;
     var rangeTo   = props.rangeTo   || null;
 
+    /* Hover-preview state (range mode only): tracks the day currently
+       under the pointer so the prospective span [from..hoverDate] can
+       be highlighted before the second click commits `to`. Lives at
+       MonthGrid level — it's transient, view-only, and never escapes
+       to the DatePicker root. Cleared on mouse-leave so it can't get
+       stuck once the pointer exits the grid. */
+    var refHover  = React.useState(null);
+    var hoverDate    = refHover[0];
+    var setHoverDate = refHover[1];
+
     /* First day of the visible month, shifted to a Monday-start week. */
     var firstOfMonth = new Date(Date.UTC(month.year, month.month0, 1));
     var dayIdxMonStart = (firstOfMonth.getUTCDay() + 6) % 7; /* Mon=0..Sun=6 */
@@ -206,6 +222,12 @@
         ? (iso === rangeFrom || iso === rangeTo)
         : (iso === date);
       var inRange = range && !!rangeFrom && !!rangeTo && iso > rangeFrom && iso < rangeTo;
+      /* Prospective span: only while `from` is set and `to` isn't yet
+         (second endpoint still undecided). A day before `from` never
+         matches (iso > rangeFrom guards it) — hovering there previews
+         nothing, since clicking it restarts the selection instead. */
+      var inPreview = range && !!rangeFrom && !rangeTo && !!hoverDate
+        && iso > rangeFrom && iso <= hoverDate;
 
       cells.push(React.createElement(DayCell, {
         key:      iso,
@@ -214,13 +236,18 @@
         label:    String(d.getUTCDate()),
         selected: selected,
         inRange:  inRange,
+        inPreview: inPreview,
         muted:    !inMonth,
         variant:  'grid',
         onSelect: range ? props.onRangeSelect : props.onSelect,
+        onHover:  range ? setHoverDate : undefined,
       }));
     }
 
-    return React.createElement('div', { className: 'fs-date-picker__grid' },
+    return React.createElement('div', {
+      className: 'fs-date-picker__grid',
+      onMouseLeave: function () { setHoverDate(null); },
+    },
       DAY_NAMES_HDR.map(function (n) {
         return React.createElement('div', {
           key: n, className: 'fs-date-picker__grid-hdr',
