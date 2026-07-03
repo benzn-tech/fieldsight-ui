@@ -134,7 +134,8 @@
   /* Internal: discover dates with reports in [from, to], then fan out
      getTimeline for each. Returns { perDay: [{date, report}], denied? }. */
   async function fanoutDates(from, to, user) {
-    var datesRes = await window.FS.api.dates.getDates({ months: 3 });
+    var monthsLookback = (window.FS.api.window && window.FS.api.window.MONTHS_LOOKBACK) || 24;
+    var datesRes = await window.FS.api.dates.getDates({ months: monthsLookback });
     if (datesRes && datesRes._accessDenied) {
       return { _accessDenied: true, error: datesRes.error };
     }

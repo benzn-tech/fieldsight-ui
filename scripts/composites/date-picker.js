@@ -24,8 +24,19 @@
    Props:
      date        'YYYY-MM-DD' selected date
      onChange    (yyyymmdd) => void
-     monthsRange optional months parameter for /api/dates (default 3)
+     monthsRange optional months parameter for /api/dates
+                 (default FS.api.window.MONTHS_LOOKBACK, fallback 24)
      site        optional site filter for /api/dates
+
+     Range mode (date-range batch — Task A) — backward compatible, opt-in:
+     range          true => range-selection mode (MonthGrid click-click:
+                    first click sets `from`, second sets `to`; a click
+                    before `from` restarts the selection; same-day
+                    ranges are allowed)
+     from           'YYYY-MM-DD' range start (range mode)
+     to             'YYYY-MM-DD' range end (range mode)
+     onRangeChange  (from, to) => void — fired only once BOTH ends are
+                    chosen (not after the first click)
 
    Exported to:
      window.FieldSight.DatePicker
@@ -73,6 +84,7 @@
     var label = props.label;          /* e.g. '29' for grid, 'Wed 29' for strip */
     var caption = props.caption;       /* e.g. 'Apr' under strip cells */
     var selected = props.selected;
+    var inRange  = props.inRange;      /* range mode: strictly between from/to */
     var muted    = props.muted;        /* for prev/next-month bleed in grid */
     var disabled = props.disabled;     /* future dates if you want to lock — not used yet */
 
@@ -85,9 +97,18 @@
       + (muted    ? ' fs-date-picker__cell--muted'    : '')
       + (props.variant === 'strip' ? ' fs-date-picker__cell--strip' : ' fs-date-picker__cell--grid');
 
+    /* In-range days (strictly between the two chosen endpoints) get a
+       light --surface-selected fill. Endpoints reuse the existing
+       --selected class above instead — this is only for the days
+       between them, so it stays visually subordinate. */
+    var style = (inRange && !selected)
+      ? { background: 'color-mix(in srgb, var(--surface-selected) 30%, transparent)' }
+      : undefined;
+
     return React.createElement('button', {
       type:      'button',
       className: className,
+      style:     style,
       disabled:  disabled,
       onClick:   function () { if (props.onSelect) props.onSelect(iso); },
       'aria-label': iso + (meta && meta.hasReport
@@ -163,6 +184,13 @@
     var month = props.month;          /* { year, month0 } visible month */
     var dates = props.dates || {};
 
+    /* Range mode (opt-in, backward compatible — props.range is undefined
+       for every existing single-date caller, so this whole block is a
+       no-op for them). */
+    var range     = !!props.range;
+    var rangeFrom = props.rangeFrom || null;
+    var rangeTo   = props.rangeTo   || null;
+
     /* First day of the visible month, shifted to a Monday-start week. */
     var firstOfMonth = new Date(Date.UTC(month.year, month.month0, 1));
     var dayIdxMonStart = (firstOfMonth.getUTCDay() + 6) % 7; /* Mon=0..Sun=6 */
@@ -176,15 +204,21 @@
       var inMonth = d.getUTCMonth() === month.month0;
       var meta = dates[iso];
 
+      var selected = range
+        ? (iso === rangeFrom || iso === rangeTo)
+        : (iso === date);
+      var inRange = range && !!rangeFrom && !!rangeTo && iso > rangeFrom && iso < rangeTo;
+
       cells.push(React.createElement(DayCell, {
         key:      iso,
         iso:      iso,
         meta:     meta,
         label:    String(d.getUTCDate()),
-        selected: iso === date,
+        selected: selected,
+        inRange:  inRange,
         muted:    !inMonth,
         variant:  'grid',
-        onSelect: props.onSelect,
+        onSelect: range ? props.onRangeSelect : props.onSelect,
       }));
     }
 
@@ -201,7 +235,10 @@
   /* ---------- DatePicker root ------------------------------------------- */
   function DatePicker(props) {
     var date = props.date;
-    var monthsRange = props.monthsRange || 3;
+    var isRange = !!props.range;
+    var monthsRange = props.monthsRange
+      || (window.FS.api.window && window.FS.api.window.MONTHS_LOOKBACK)
+      || 24;
     var site = props.site || null;
 
     var refDates = React.useState({ status: 'loading', map: {} });
@@ -212,9 +249,23 @@
     var open    = refOpen[0];
     var setOpen = refOpen[1];
 
+    /* Range-selection state (Task A). Mirrors the controlled from/to
+       props but also tracks an in-progress (from-only) click that
+       hasn't been reported to the parent yet — onRangeChange only
+       fires once both ends are chosen, so this local state is the only
+       place a lone first click lives. */
+    var refRange = React.useState({ from: props.from || null, to: props.to || null });
+    var rangeSel    = refRange[0];
+    var setRangeSel = refRange[1];
+
+    React.useEffect(function () {
+      if (!isRange) return;
+      setRangeSel({ from: props.from || null, to: props.to || null });
+    }, [isRange, props.from, props.to]);
+
     /* Visible month for the modal — driven by selected date but
        independent so prev/next nav works inside the modal. */
-    var initial = parseISO(date) || new Date();
+    var initial = parseISO(isRange ? (props.from || rangeSel.from) : date) || new Date();
     var refMonth = React.useState({
       year: initial.getUTCFullYear(), month0: initial.getUTCMonth(),
     });
@@ -233,12 +284,14 @@
       return function () { cancelled = true; };
     }, [monthsRange, site]);
 
-    /* When selected date changes externally, follow it in the modal. */
+    /* When the selected date (or, in range mode, the range start)
+       changes externally, follow it in the modal. */
     React.useEffect(function () {
-      var d = parseISO(date);
+      var anchor = isRange ? props.from : date;
+      var d = parseISO(anchor);
       if (!d) return;
       setMonth({ year: d.getUTCFullYear(), month0: d.getUTCMonth() });
-    }, [date]);
+    }, [isRange, date, props.from]);
 
     React.useEffect(function () {
       if (!open) return;
@@ -250,6 +303,26 @@
     function onSelect(iso) {
       props.onChange(iso);
       setOpen(false);
+    }
+
+    /* Range click-click: first click sets `from`; second click sets
+       `to` and fires onRangeChange; a click before `from` (or a click
+       once a full range is already selected) restarts the selection.
+       Same-day ranges are allowed. */
+    function onRangeSelect(iso) {
+      setRangeSel(function (prev) {
+        var next;
+        if (!prev.from || (prev.from && prev.to) || iso < prev.from) {
+          next = { from: iso, to: null };
+        } else {
+          next = { from: prev.from, to: iso };
+        }
+        if (next.from && next.to) {
+          if (props.onRangeChange) props.onRangeChange(next.from, next.to);
+          setOpen(false);
+        }
+        return next;
+      });
     }
 
     function shiftMonth(delta) {
@@ -286,7 +359,11 @@
           date:     date,
           month:    month,
           dates:    datesS.map,
-          onSelect: function (iso) { props.onChange(iso); },
+          range:      isRange,
+          rangeFrom:  rangeSel.from,
+          rangeTo:    rangeSel.to,
+          onSelect:      function (iso) { props.onChange(iso); },
+          onRangeSelect: onRangeSelect,
         }),
         React.createElement('div', { className: 'fs-date-picker__legend' },
           React.createElement('span', null,
@@ -302,7 +379,7 @@
     }
 
     return React.createElement('div', { className: 'fs-date-picker' },
-      React.createElement(DateStrip, {
+      isRange ? null : React.createElement(DateStrip, {
         date:  date,
         dates: datesS.map,
         onChange: props.onChange,
@@ -342,7 +419,11 @@
             date:     date,
             month:    month,
             dates:    datesS.map,
-            onSelect: onSelect,
+            range:      isRange,
+            rangeFrom:  rangeSel.from,
+            rangeTo:    rangeSel.to,
+            onSelect:      onSelect,
+            onRangeSelect: onRangeSelect,
           }),
           React.createElement('div', { className: 'fs-date-picker__legend' },
             React.createElement('span', null,
