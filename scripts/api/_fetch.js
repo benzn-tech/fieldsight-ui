@@ -141,7 +141,13 @@
 
     var headers = Object.assign({}, opts.headers || {});
 
-    headers['X-Request-Id'] = uuidV4();
+    /* X-Request-Id only on same-origin requests: the API Gateway preflight
+       allow-list is Content-Type,Authorization — any extra header makes the
+       browser's CORS preflight fail ("Failed to fetch"). Verified live A/B
+       2026-07-03. Cross-origin tracing can return when the gateway allows it. */
+    if (base.charAt(0) === '/') {
+      headers['X-Request-Id'] = uuidV4();
+    }
 
     if (opts.body !== undefined && opts.body !== null && !(opts.body instanceof FormData)) {
       headers['Content-Type'] = 'application/json';
