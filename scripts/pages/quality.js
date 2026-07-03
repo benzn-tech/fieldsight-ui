@@ -21,8 +21,6 @@
 (function () {
   'use strict';
 
-  var DEFAULT_DAYS = 7;
-
   /* ---------- Helpers --------------------------------------------------- */
 
   function fmtDate(yyyymmdd) {
@@ -91,36 +89,19 @@
 
   var QualityContext = React.createContext(null);
 
-  /* Persist the quality toolbar view (mode + picked day) so it survives route
-     changes / tab switches. localStorage, per the fs.settings.* convention
-     (theme.js / density.js). Will be cleared on logout once a real logout
-     flow exists (the current "Log out" item is a stub). */
-  var QUALITY_VIEW_KEY = 'fs.settings.qualityView';
-  function loadQualityView() {
-    try {
-      var raw = window.localStorage.getItem(QUALITY_VIEW_KEY);
-      if (!raw) return null;
-      var v = JSON.parse(raw);
-      if (v && (v.mode === 'week' || v.mode === 'today' || v.mode === 'day')) return v;
-    } catch (_) {}
-    return null;
-  }
-  function saveQualityView(mode, day) {
-    try { window.localStorage.setItem(QUALITY_VIEW_KEY, JSON.stringify({ mode: mode, day: day })); } catch (_) {}
-  }
-
+  /* fs.settings.qualityView now holds { preset, from, to } — persisted and
+     restored by the shared RangeToolbar composite itself (Task B), which
+     also tolerates the pre-Task-B { mode, day } shape. Default preset
+     'all' widens discovery back to the real report span (Feb–Mar 2026)
+     instead of the last-7-days window, which used to come up empty since
+     "today" runs months ahead of the fixture data. */
   function QualityProvider(props) {
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
     var depKey = (caller.name || '') + '|' + (caller.role || '') + '|' + (caller.isAdmin ? 'admin' : '');
-    var savedView = loadQualityView();
 
-    var refMode = React.useState((savedView && savedView.mode) || 'week');
-    var mode    = refMode[0];
-    var setMode = refMode[1];
-
-    var refDay = React.useState((savedView && savedView.day) || window.FS.api.todayNZDT());
-    var day    = refDay[0];
-    var setDay = refDay[1];
+    var refView = React.useState({ preset: 'all', from: null, to: null });
+    var view    = refView[0];
+    var setView = refView[1];
 
     var refState = React.useState({ status: 'loading' });
     var state    = refState[0];
@@ -130,22 +111,15 @@
     var retryCount = retryRef[0];
     var setRetry   = retryRef[1];
 
-    var today = window.FS.api.todayNZDT();
-    var range;
-    if (mode === 'week') {
-      range = { from: window.FS.api.addDaysISO(today, -(DEFAULT_DAYS - 1)), to: today };
-    } else if (mode === 'today') {
-      range = { from: today, to: today };
-    } else {
-      range = { from: day, to: day };
-    }
-
     React.useEffect(function () {
+      /* RangeToolbar resolves the range asynchronously (e.g. 'all' needs
+         FS.api.window.getSpan()) — wait for both ends before fetching. */
+      if (!view.from || !view.to) return undefined;
       var cancelled = false;
       setState({ status: 'loading' });
 
       window.FS.api.compliance.getQualityRange({
-        from: range.from, to: range.to,
+        from: view.from, to: view.to,
       }).then(function (res) {
         if (cancelled) return;
         if (res && res._accessDenied) {
@@ -156,8 +130,8 @@
         setState({
           status: 'ok',
           rows:   rows,
-          from:   range.from,
-          to:     range.to,
+          from:   view.from,
+          to:     view.to,
           totals: totalsFromRows(rows),
           groups: groupByDate(rows),
           dates:  (res && res.dates) || [],
@@ -169,7 +143,7 @@
       });
 
       return function () { cancelled = true; };
-    }, [depKey, mode, day, retryCount]);
+    }, [depKey, view.from, view.to, retryCount]);
 
     var refSel = React.useState(null);
     var sel    = refSel[0];
@@ -182,10 +156,8 @@
     var ctx = {
       state:         state,
       setState:      setState,
-      mode:          mode,
-      day:           day,
-      setMode:       function (m) { setSel(null); setMode(m); saveQualityView(m, day); },
-      setDay:        function (d) { setSel(null); setDay(d); setMode('day'); saveQualityView('day', d); },
+      view:          view,
+      setView:       function (next) { setSel(null); setView(next); },
       selectedItem:  sel,
       setSelected:   setSel,
       showCreate:    showCreate,
@@ -194,50 +166,6 @@
     };
     return React.createElement(QualityContext.Provider, { value: ctx },
       props.children);
-  }
-
-  /* ---------- Range toolbar -------------------------------------------- */
-
-  function RangeToolbar(props) {
-    var DatePicker = window.FieldSight.DatePicker;
-    var ctx = props.ctx;
-    var refOpen = React.useState(false);
-    var open    = refOpen[0];
-    var setOpen = refOpen[1];
-
-    function chip(key, label, isActive) {
-      return React.createElement('button', {
-        key:       key,
-        type:      'button',
-        className: 'fs-quality__chip' + (isActive ? ' fs-quality__chip--active' : ''),
-        onClick:   function () {
-          if (key === 'pick') { setOpen(!open); return; }
-          ctx.setMode(key);
-          setOpen(false);
-        },
-      }, label);
-    }
-
-    return React.createElement('div', { className: 'fs-quality__toolbar' },
-      React.createElement('div', { className: 'fs-quality__chips' },
-        chip('today', 'Today',         ctx.mode === 'today'),
-        chip('week',  'Last 7 days',   ctx.mode === 'week'),
-        chip('pick',  ctx.mode === 'day' ? fmtDate(ctx.day) : 'Pick date…',
-             ctx.mode === 'day'),
-      ),
-      open && DatePicker
-        ? React.createElement('div', { className: 'fs-quality__picker-wrap' },
-            React.createElement(DatePicker, {
-              date:        ctx.day,
-              onChange:    function (d) {
-                ctx.setDay(d);
-                setOpen(false);
-              },
-              monthsRange: 3,
-              inline:      true,
-            }))
-        : null,
-    );
   }
 
   /* ---------- Middle column -------------------------------------------- */
@@ -250,6 +178,7 @@
     var AccessDenied        = fs.AccessDenied;
     var QualityCreateModal  = fs.QualityCreateModal;
     var Button              = fs.Button;
+    var RangeToolbar        = fs.RangeToolbar;
 
     var ctx = React.useContext(QualityContext);
     if (!ctx) {
@@ -283,7 +212,14 @@
         logBtn,
       ),
     );
-    var toolbar = React.createElement(RangeToolbar, { ctx: ctx });
+    var toolbar = RangeToolbar
+      ? React.createElement(RangeToolbar, {
+          value:      ctx.view,
+          onChange:   ctx.setView,
+          presets:    ['today', '7d', '30d', 'all', 'custom'],
+          storageKey: 'fs.settings.qualityView',
+        })
+      : null;
 
     if (state.status === 'loading') {
       return React.createElement('div', { className: 'fs-quality' },

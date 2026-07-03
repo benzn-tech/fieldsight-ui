@@ -80,6 +80,15 @@
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
     var depKey = (caller.name || '') + '|' + (caller.role || '') + '|' + (caller.isAdmin ? 'admin' : '');
 
+    /* fs.settings.evidenceView holds { preset, from, to } — persisted and
+       restored by the shared RangeToolbar composite (Task B). Default
+       preset 'all' so Evidence reaches the real report span (Feb–Mar
+       2026) instead of a trailing-days window that comes up empty since
+       "today" runs months ahead of the fixture data. */
+    var refView = React.useState({ preset: 'all', from: null, to: null });
+    var view    = refView[0];
+    var setView = refView[1];
+
     var refDays = React.useState(DEFAULT_DAYS);
     var daysToLoad    = refDays[0];
     var setDaysToLoad = refDays[1];
@@ -107,19 +116,25 @@
       : null;
 
     React.useEffect(function () {
+      /* RangeToolbar resolves the range asynchronously (e.g. 'all' needs
+         FS.api.window.getSpan()) — wait for both ends before fetching. */
+      if (!view.from || !view.to) return undefined;
       var cancelled = false;
       setState({ status: 'loading' });
       setPhotos({ status: 'idle', perDay: [], totalCount: 0 });
 
-      window.FS.api.dates.getDates({ months: 1 }).then(function (res) {
+      /* Reuses FS.api.window.getSpan()'s cached wide-discovery fetch
+         (same underlying GET /api/dates the toolbar's 'all' preset and
+         DatePicker already share) instead of a separate months-scoped
+         call, then narrows to the selected [from, to] window client-side
+         and paginates within it. */
+      window.FS.api.window.getSpan().then(function (span) {
         if (cancelled) return;
-        if (res && res._accessDenied) {
-          setState({ status: 'access_denied', message: res.error });
-          return;
-        }
-        var datesMap = (res && res.dates) || {};
+        var datesMap = (span && span.dates) || {};
         var dates = Object.keys(datesMap)
-          .filter(function (d) { return datesMap[d] && datesMap[d].hasReport; })
+          .filter(function (d) {
+            return datesMap[d] && datesMap[d].hasReport && d >= view.from && d <= view.to;
+          })
           .sort()
           .reverse()
           .slice(0, daysToLoad);
@@ -131,7 +146,7 @@
       });
 
       return function () { cancelled = true; };
-    }, [depKey, daysToLoad, retryCount]);
+    }, [depKey, view.from, view.to, daysToLoad, retryCount]);
 
     /* Lazy-load photos when the Photos tab is the active one and we
        don't yet have data for it. Other tabs are populated by their
@@ -195,6 +210,14 @@
 
     function loadMore() { setDaysToLoad(function (n) { return n + LOAD_STEP; }); }
 
+    /* A newly picked range restarts pagination from the top — the old
+       daysToLoad count belonged to the previous window and has no
+       meaning in the new one. */
+    function handleViewChange(next) {
+      setDaysToLoad(DEFAULT_DAYS);
+      setView(next);
+    }
+
     var ctx = {
       state:        state,
       activeTab:    activeTab,
@@ -202,6 +225,8 @@
       daysToLoad:   daysToLoad,
       loadMore:     loadMore,
       photos:       photos,
+      view:         view,
+      setView:      handleViewChange,
     };
     return React.createElement(EvidenceContext.Provider, { value: ctx },
       props.children);
@@ -224,7 +249,7 @@
     }
     if (!photos.perDay.length) {
       return React.createElement('div', { className: 'fs-evidence__empty' },
-        'No photos in the last ' + ctx.daysToLoad + ' days.');
+        'No photos in the selected range.');
     }
 
     return React.createElement('div', { className: 'fs-evidence__sections' },
@@ -261,7 +286,7 @@
 
     if (dates.length === 0) {
       return React.createElement('div', { className: 'fs-evidence__empty' },
-        'No reports in the last ' + ctx.daysToLoad + ' days.');
+        'No reports in the selected range.');
     }
 
     var Component = props.component;
@@ -287,6 +312,7 @@
     var fs              = window.FieldSight;
     var EvidenceTabs    = fs.EvidenceTabs;
     var Button          = fs.Button;
+    var RangeToolbar    = fs.RangeToolbar;
 
     var ctx = React.useContext(EvidenceContext);
     if (!ctx) {
@@ -295,8 +321,20 @@
     }
     var state = ctx.state;
 
+    var header = React.createElement('div', { className: 'fs-evidence__header' },
+      React.createElement('h2', { className: 'fs-evidence__title' }, 'Evidence'));
+    var toolbar = RangeToolbar
+      ? React.createElement(RangeToolbar, {
+          value:      ctx.view,
+          onChange:   ctx.setView,
+          presets:    ['today', '7d', '30d', 'all', 'custom'],
+          storageKey: 'fs.settings.evidenceView',
+        })
+      : null;
+
     if (state.status === 'loading') {
       return React.createElement('div', { className: 'fs-evidence' },
+        header, toolbar,
         React.createElement('div', { className: 'fs-evidence__loading' },
           'Loading evidence…'),
       );
@@ -304,6 +342,7 @@
     if (state.status === 'error') {
       var ErrorBanner = window.FieldSight.ErrorBanner;
       return React.createElement('div', { className: 'fs-evidence' },
+        header, toolbar,
         ErrorBanner
           ? React.createElement(ErrorBanner, {
               message:   (state.error && state.error.message) || 'Could not load evidence',
@@ -317,6 +356,7 @@
     if (state.status === 'access_denied') {
       var AccessDenied = fs.AccessDenied;
       return React.createElement('div', { className: 'fs-evidence' },
+        header,
         AccessDenied
           ? React.createElement(AccessDenied, {
               scope:   'this evidence library',
@@ -366,8 +406,9 @@
         React.createElement('h2', { className: 'fs-evidence__title' }, 'Evidence'),
         React.createElement('div', { className: 'fs-evidence__subtitle' },
           dates.length + ' ' + (dates.length === 1 ? 'day' : 'days')
-            + ' with reports · last ' + ctx.daysToLoad + ' days searched'),
+            + ' with reports in this range · showing up to ' + ctx.daysToLoad + ' at a time'),
       ),
+      toolbar,
 
       /* Tabs */
       React.createElement(EvidenceTabs, {
@@ -379,7 +420,7 @@
       /* Body */
       dates.length === 0
         ? React.createElement('div', { className: 'fs-evidence__empty' },
-            'No reports in the last ' + ctx.daysToLoad + ' days.')
+            'No reports in the selected range.')
         : body,
 
       /* Load more */

@@ -1,11 +1,14 @@
 /* ==========================================================================
    FieldSight /insights — Sprint 9 Track A.1
    --------------------------------------------------------------------------
-   PM-facing analytics dashboard. Aggregates safety + quality issues
-   over a date window (default last 7 days, switchable to 30) and
-   surfaces three focusable views:
+   PM-facing analytics dashboard. Aggregates safety + quality issues over
+   a date window (default last 7 days; switchable to 30 days, All, or a
+   custom range via the shared RangeToolbar — date-range batch Task B)
+   and surfaces three focusable views:
 
-     • KPI strip — totals + week-over-week deltas
+     • KPI strip — totals + week-over-week deltas (7d/30d only; All and
+       Custom have no natural "period before" to diff against, so the
+       delta badges are hidden for those two)
      • Top-5 subcontractors (with risk-level segmentation per bar)
      • Top-5 tags (with linked top-subcontractor caption)
      • 14-day daily-count sparkline
@@ -36,19 +39,15 @@
     return d.getUTCDate() + ' ' + months[d.getUTCMonth()];
   }
 
-  function rangeFor(mode, today) {
-    /* mode = 'week' → last 7 days incl today; 'month' → last 30 days */
-    var span = mode === 'month' ? 29 : 6;
-    return {
-      from: window.FS.api.addDaysISO(today, -span),
-      to:   today,
-    };
-  }
-
-  function priorRangeFor(mode, today) {
-    /* The matched-length window immediately before the current one,
-       used for week-over-week / month-over-month deltas. */
-    var span = mode === 'month' ? 30 : 7;
+  /* Prior-period delta is only meaningful for the trailing-window presets
+     ('7d'/'30d' — both always end "today", per FS.api.window.resolve),
+     never for 'all' or an arbitrary 'custom' span: there's no natural
+     "period before" a custom range and 'all' has nothing earlier to
+     compare against. Returns null for those, and callers hide the delta
+     badges accordingly (Task B). */
+  function priorRangeFor(preset, today) {
+    if (preset !== '7d' && preset !== '30d') return null;
+    var span = preset === '30d' ? 30 : 7;
     return {
       from: window.FS.api.addDaysISO(today, -(span * 2 - 1)),
       to:   window.FS.api.addDaysISO(today, -span),
@@ -66,8 +65,12 @@
        defense in depth: a direct URL hit lands here too). */
     var canSee = window.FS && window.FS.can && window.FS.can(caller, 'insights:view');
 
-    var refMode = React.useState('week');
-    var mode = refMode[0]; var setMode = refMode[1];
+    /* fs.settings.insightsView holds { preset, from, to } — persisted and
+       restored by the shared RangeToolbar composite (Task B). Default
+       preset stays '7d' ("Last 7 days") — the pre-Task-B default — with
+       'all'/'custom' newly available alongside it. */
+    var refView = React.useState({ preset: '7d', from: null, to: null });
+    var view = refView[0]; var setView = refView[1];
 
     var refSel = React.useState(null);    /* { kind: 'sub'|'tag', id } */
     var sel = refSel[0]; var setSel = refSel[1];
@@ -84,20 +87,25 @@
         setState({ status: 'access_denied', message: 'Insights requires the insights:view permission.' });
         return undefined;
       }
+      /* RangeToolbar resolves the range asynchronously (e.g. 'all' needs
+         FS.api.window.getSpan()) — wait for both ends before fetching. */
+      if (!view.from || !view.to) return undefined;
       var cancelled = false;
       setState({ status: 'loading' });
 
       var today    = window.FS.api.todayNZDT();
-      var current  = rangeFor(mode, today);
-      var previous = priorRangeFor(mode, today);
+      var current  = { from: view.from, to: view.to };
+      /* null for 'all'/'custom' — no natural "period before" to diff
+         against, so no prior fetch and no delta badges (Task B). */
+      var previous = priorRangeFor(view.preset, today);
 
       Promise.all([
         window.FS.api.insights.getInsights({
-          from: current.from,  to: current.to,  kind: 'all',
+          from: current.from, to: current.to, kind: 'all',
         }),
-        window.FS.api.insights.getInsights({
-          from: previous.from, to: previous.to, kind: 'all',
-        }),
+        previous
+          ? window.FS.api.insights.getInsights({ from: previous.from, to: previous.to, kind: 'all' })
+          : Promise.resolve(null),
       ]).then(function (results) {
         if (cancelled) return;
         var cur  = results[0];
@@ -112,13 +120,13 @@
 
         setState({
           status:   'ok',
-          range:    { mode: mode, current: current, previous: previous, today: today },
+          range:    { preset: view.preset, current: current, previous: previous, today: today },
           safety:   cur.safety  || emptySection(),
           quality:  cur.quality || emptySection(),
-          previous: {
+          previous: prev ? {
             safety:  (prev.safety  && !prev.safety._accessDenied)  ? prev.safety  : emptySection(),
             quality: (prev.quality && !prev.quality._accessDenied) ? prev.quality : emptySection(),
-          },
+          } : null,
         });
       }).catch(function (err) {
         if (cancelled) return;
@@ -134,12 +142,12 @@
       });
 
       return function () { cancelled = true; };
-    }, [mode, retryCount, canSee]);
+    }, [view.preset, view.from, view.to, retryCount, canSee]);
 
     var ctx = {
       state:      state,
-      mode:       mode,
-      setMode:    function (m) { setSel(null); setMode(m); },
+      view:       view,
+      setView:    function (next) { setSel(null); setView(next); },
       selection:  sel,
       setSelection: setSel,
       caller:     caller,
@@ -151,27 +159,6 @@
 
   function emptySection() {
     return { rows: [], bySub: [], byTag: [], byDay: [], totals: { count: 0, high: 0, medium: 0, low: 0, distinct_subs: 0, distinct_tags: 0 } };
-  }
-
-  /* ─── Range toolbar ──────────────────────────────────────────────── */
-
-  function RangeToolbar(props) {
-    var ctx = props.ctx;
-    var modes = [
-      { value: 'week',  label: 'Last 7 days'  },
-      { value: 'month', label: 'Last 30 days' },
-    ];
-    return React.createElement('div', { className: 'fs-insights__toolbar', role: 'group', 'aria-label': 'Date range' },
-      modes.map(function (m) {
-        var active = ctx.mode === m.value;
-        return React.createElement('button', {
-          key: m.value,
-          type: 'button',
-          className: 'fs-insights__chip' + (active ? ' fs-insights__chip--active' : ''),
-          onClick: function () { ctx.setMode(m.value); },
-        }, m.label);
-      }),
-    );
   }
 
   /* ─── KPI strip ──────────────────────────────────────────────────── */
@@ -187,8 +174,11 @@
     var prevSafety   = props.prevSafety;
     var prevQuality  = props.prevQuality;
 
-    var safetyDelta  = safety.totals.count  - prevSafety.totals.count;
-    var qualityDelta = quality.totals.count - prevQuality.totals.count;
+    /* Task B: prevSafety/prevQuality are null for 'all'/'custom' ranges
+       (no matched-length "period before" to diff against) — hide the
+       delta badges rather than diffing against nothing. */
+    var safetyDelta  = prevSafety  ? safety.totals.count  - prevSafety.totals.count  : null;
+    var qualityDelta = prevQuality ? quality.totals.count - prevQuality.totals.count : null;
 
     var topSub = safety.bySub[0] || quality.bySub[0] || null;
     var topTag = safety.byTag[0] || quality.byTag[0] || null;
@@ -197,14 +187,14 @@
       React.createElement(StatCard, {
         value: safety.totals.count, label: 'Safety issues',
         tone: safety.totals.high > 0 ? 'danger' : 'neutral',
-        footer: TrendPill ? React.createElement(TrendPill, {
+        footer: (TrendPill && safetyDelta != null) ? React.createElement(TrendPill, {
           delta: safetyDelta, unit: '', polarity: 'lower_better',
         }) : null,
       }),
       React.createElement(StatCard, {
         value: quality.totals.count, label: 'Quality issues',
         tone: quality.totals.count > 0 ? 'warning' : 'neutral',
-        footer: TrendPill ? React.createElement(TrendPill, {
+        footer: (TrendPill && qualityDelta != null) ? React.createElement(TrendPill, {
           delta: qualityDelta, unit: '', polarity: 'lower_better',
         }) : null,
       }),
@@ -546,6 +536,7 @@
     var fs           = window.FieldSight;
     var AccessDenied = fs.AccessDenied;
     var ErrorBanner  = fs.ErrorBanner;
+    var RangeToolbar = fs.RangeToolbar;
 
     var ctx = React.useContext(InsightsContext);
     if (!ctx) return null;
@@ -556,6 +547,14 @@
       React.createElement('div', { className: 'fs-insights__subtitle' },
         'Cross-report safety + quality patterns. Closed 12-tag vocab.'),
     );
+    var toolbar = RangeToolbar
+      ? React.createElement(RangeToolbar, {
+          value:      ctx.view,
+          onChange:   ctx.setView,
+          presets:    ['7d', '30d', 'all', 'custom'],
+          storageKey: 'fs.settings.insightsView',
+        })
+      : null;
 
     if (state.status === 'access_denied') {
       return React.createElement('div', { className: 'fs-insights' },
@@ -569,7 +568,7 @@
     if (state.status === 'loading') {
       return React.createElement('div', { className: 'fs-insights' },
         header,
-        React.createElement(RangeToolbar, { ctx: ctx }),
+        toolbar,
         React.createElement('div', { className: 'fs-insights__loading' }, 'Aggregating…'),
       );
     }
@@ -577,7 +576,7 @@
     if (state.status === 'error') {
       return React.createElement('div', { className: 'fs-insights' },
         header,
-        React.createElement(RangeToolbar, { ctx: ctx }),
+        toolbar,
         ErrorBanner ? React.createElement(ErrorBanner, {
           message:   (state.error && state.error.message) || 'Could not load insights',
           retryable: true,
@@ -588,8 +587,8 @@
 
     var safety      = state.safety;
     var quality     = state.quality;
-    var prevSafety  = state.previous.safety;
-    var prevQuality = state.previous.quality;
+    var prevSafety  = state.previous ? state.previous.safety  : null;
+    var prevQuality = state.previous ? state.previous.quality : null;
 
     /* Sprint 9.5.5 — full-width 2-column dashboard layout. The
        previous stacked-panel layout (4 separate top-N panels) is
@@ -599,7 +598,7 @@
        trend; carrying separate quality bars below was duplicative. */
     return React.createElement('div', { className: 'fs-insights' },
       header,
-      React.createElement(RangeToolbar, { ctx: ctx }),
+      toolbar,
       React.createElement(InsightsKpis, {
         safety:      safety,      quality:      quality,
         prevSafety:  prevSafety,  prevQuality:  prevQuality,
