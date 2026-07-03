@@ -296,12 +296,23 @@ function UserArea({ user, isCollapsed }) {
         style: menuItemStyle,
         onClick: function() { setMenuOpen(false); window.location.hash = '#/settings'; },
       }, 'Settings'),
-      React.createElement('div', {
-        style: Object.assign({}, menuItemStyle, {
-          borderTop: '1px solid var(--border-subtle)',
-          color: 'var(--text-danger)',
-        }),
-      }, 'Log out'),
+      /* Sign out — live mode only (mock mode has no real session to clear).
+         Session API: window.FS.session.isSignedIn() / .clear() (scripts/auth/session.js). */
+      (window.FS && window.FS.api && window.FS.api.useMocks === false &&
+       window.FS.session && window.FS.session.isSignedIn())
+        ? React.createElement('div', {
+            style: Object.assign({}, menuItemStyle, {
+              borderTop: '1px solid var(--border-subtle)',
+              color: 'var(--text-danger)',
+            }),
+            onClick: function() {
+              setMenuOpen(false);
+              window.FS.session.clear();
+              window.location.hash = '';
+              window.location.reload();
+            },
+          }, 'Sign out')
+        : null,
     ) : null,
 
     menuOpen ? React.createElement('div', {
