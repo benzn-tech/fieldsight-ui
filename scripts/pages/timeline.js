@@ -222,9 +222,8 @@
        topic; all other topics auto-collapse (focus mode). Parsed
        once per params change so navigating again resets the focus. */
     var targetTopicId = params.topic != null && params.topic !== ''
-      ? parseInt(params.topic, 10)
+      ? String(params.topic)
       : null;
-    if (targetTopicId !== null && isNaN(targetTopicId)) targetTopicId = null;
 
     /* Sprint 6.7.2 — deeper precision: when /safety includes
        &flag=<idx>, highlight that specific safety_flag inside the
@@ -381,7 +380,7 @@
       var key = date + '|' + targetTopicId;
       if (autoSelectKeyRef.current === key) return;
       var topic = (report.topics || []).filter(function (t) {
-        return t.topic_id === targetTopicId;
+        return String(t.topic_id) === String(targetTopicId);
       })[0];
       if (!topic) return;
       autoSelectKeyRef.current = key;
@@ -599,7 +598,7 @@
              flash). Other topics force-collapse (defaultOpen=false)
              so the target reads as the focal point. When no target,
              defaultOpen=undefined leaves user-toggled state alone. */
-          var isTarget = targetTopicId !== null && topic.topic_id === targetTopicId;
+          var isTarget = targetTopicId !== null && String(topic.topic_id) === String(targetTopicId);
           var defaultOpenProp = targetTopicId === null
             ? undefined
             : isTarget;
@@ -644,7 +643,7 @@
           'Ask agent'),
         React.createElement(AskChat, {
           date:            date,
-          user:            user,
+          user:            user || (report && report.user_name && window.FS.api.folderName(report.user_name)),
           scope:           'both',
           placeholder:     'Ask anything about today’s report…',
           compact:         true,
@@ -973,7 +972,7 @@
         ask:        AskChat        ? React.createElement(AskChat, {
           date:        sel.date,
           user:        mediaProps.user,
-          scope:       'transcript',
+          scope:       'both',
           topic_id:    topic.topic_id,
           placeholder: 'Ask about this topic…',
           suggestions: [

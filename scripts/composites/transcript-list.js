@@ -65,6 +65,7 @@
           status:   'ok',
           segments: res.speaker_segments || [],
           speakers: res.speakers || [],
+          message:  res.message,
           counts: {
             files:    res.count,
             segments: res.total_speaker_segments,
@@ -87,8 +88,11 @@
         'Could not load transcript.');
     }
     if (state.segments.length === 0) {
+      var emptyText = window.FS.api.useMocks
+        ? 'No speaker segments in this window.'
+        : (state.message || 'No transcripts available for this date — recordings may have been archived.');
       return React.createElement('div', { className: 'fs-transcript-list__empty' },
-        'No speaker segments in this window.');
+        emptyText);
     }
 
     /* Build position-within-view label → palette index map. */
