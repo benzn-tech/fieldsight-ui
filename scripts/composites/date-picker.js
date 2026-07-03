@@ -91,24 +91,22 @@
     var i  = intensity(meta);
     var hasSafety = meta && meta.hasReport && (meta.safety || 0) > 0;
 
+    /* In-range days (strictly between the two chosen endpoints) get the
+       --in-range fill (styles/composites.css) — a token-based accent
+       tint with a dark-mode override, replacing the old low-opacity
+       inline color-mix that was barely visible on either theme.
+       Endpoints reuse the existing --selected class instead, so this
+       only ever applies to the days between them. */
     var className = 'fs-date-picker__cell'
       + ' fs-date-picker__cell--i' + i
       + (selected ? ' fs-date-picker__cell--selected' : '')
+      + (inRange && !selected ? ' fs-date-picker__cell--in-range' : '')
       + (muted    ? ' fs-date-picker__cell--muted'    : '')
       + (props.variant === 'strip' ? ' fs-date-picker__cell--strip' : ' fs-date-picker__cell--grid');
-
-    /* In-range days (strictly between the two chosen endpoints) get a
-       light --surface-selected fill. Endpoints reuse the existing
-       --selected class above instead — this is only for the days
-       between them, so it stays visually subordinate. */
-    var style = (inRange && !selected)
-      ? { background: 'color-mix(in srgb, var(--surface-selected) 30%, transparent)' }
-      : undefined;
 
     return React.createElement('button', {
       type:      'button',
       className: className,
-      style:     style,
       disabled:  disabled,
       onClick:   function () { if (props.onSelect) props.onSelect(iso); },
       'aria-label': iso + (meta && meta.hasReport

@@ -1671,6 +1671,22 @@
 .fs-date-picker__cell--i2 { background: color-mix(in srgb, var(--color-info-200) 35%, var(--surface-panel)); }
 .fs-date-picker__cell--i3 { background: color-mix(in srgb, var(--color-info-300) 35%, var(--surface-panel)); }
 
+/* In-range fill (date-range batch follow-up, live-data fixes Task 3) —
+   the strictly-between days of a picked range. Replaces a barely-visible
+   inline color-mix. --color-accent-100 isn't theme-flipped (stays a pale
+   pastel in dark mode too — see CLAUDE.md "Status colour tokens are not
+   theme-flipped"), so dark mode swaps in a solid, clearly-visible accent
+   tone and pins the label text to neutral-900 per the yellow-background
+   rule (light text over an accent fill is unreadable). Declared after
+   the --iN heat-map tints so it wins the cascade when both apply. */
+.fs-date-picker__cell--in-range {
+  background: var(--color-accent-100);
+}
+[data-theme="dark"] .fs-date-picker__cell--in-range {
+  background: var(--color-accent-700);
+  color: var(--color-neutral-900);
+}
+
 .fs-date-picker__cell--selected {
   border-color: var(--color-accent-500) !important;
   box-shadow: 0 0 0 2px var(--color-accent-100);

@@ -9,6 +9,10 @@
      Safety   — safety_flags + safety_observations
      Sites    — sites[].name + sites[].location
      People   — users derived from sites[].users
+     Topics   — topics[].topic_title + summary, fanned out across every
+                hasReport date × user in scope (own folder only for
+                non-admin; capped cross-product for admin/gm — see
+                TOPIC_FANOUT_CAP)
 
    Data is loaded once on first open and cached in module scope for the
    rest of the session (survives palette close/reopen).
@@ -28,16 +32,95 @@
 (function () {
   'use strict';
 
-  var TYPE_ORDER  = ['task', 'safety', 'site', 'user'];
-  var TYPE_LABELS = { task: 'Tasks', safety: 'Safety', site: 'Sites', user: 'People' };
-  var TYPE_ICONS  = { task: 'check-square', safety: 'shield-alert', site: 'building-2', user: 'user' };
+  var TYPE_ORDER  = ['task', 'safety', 'site', 'user', 'topic'];
+  var TYPE_LABELS = { task: 'Tasks', safety: 'Safety', site: 'Sites', user: 'People', topic: 'Topics' };
+  var TYPE_ICONS  = { task: 'check-square', safety: 'shield-alert', site: 'building-2', user: 'user', topic: 'file-text' };
+
+  /* Live-data fix batch (Task 3) — cross-day/cross-user cap on the topic
+     fan-out below. Admin callers have no single "own folder", so indexing
+     topics means walking a (date × user) cross-product; unbounded that's
+     `hasReport dates × all known users` fetches, easily 100+ round trips.
+     Cap at 30 pairs — beyond it, keep the most recent report dates (the
+     ones someone is most likely searching for) and drop the older ones. */
+  var TOPIC_FANOUT_CAP = 30;
 
   /* ---------------------------------------------------------------------- */
   /* Module-level data cache — survives palette close/reopen in a session    */
   /* ---------------------------------------------------------------------- */
 
   var _cache = { loaded: false, loading: false,
-                 tasks: [], safety: [], sites: [], users: [] };
+                 tasks: [], safety: [], sites: [], users: [], topics: [] };
+
+  function _isAdminCaller() {
+    var c = (window.AuthMock && window.AuthMock.currentUser) || {};
+    return c.role === 'admin' || c.role === 'gm' || !!c.isAdmin;
+  }
+
+  /* Task 3 — topic index fan-out. Builds the (date × user) pairs to walk
+     for GET /api/timeline, then flattens every report's topics[] into
+     cache rows. Non-admin callers only ever have one folder (their own —
+     matches every other aggregator's resolveUser() clamp); admin/gm fan
+     out across every known user (CLAUDE.md "Admin permission flow" ·
+     compliance-aggregator.fanoutDates parity), capped at
+     TOPIC_FANOUT_CAP, most-recent dates kept first. */
+  function _topicFanoutPairs(reportDates) {
+    var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
+
+    if (!_isAdminCaller()) {
+      var folder = caller.name ? window.FS.api.folderName(caller.name) : null;
+      if (!folder) return [];
+      return reportDates.map(function (d) { return { date: d, user: folder }; });
+    }
+
+    var fx = (window.FieldSight && window.FieldSight.fixtures
+      && window.FieldSight.fixtures.sites) || {};
+    var folders = (fx.users || []).map(function (u) { return u.folder_name; }).filter(Boolean);
+    if (!folders.length) return [];
+
+    var total = reportDates.length * folders.length;
+    var sortedDates = reportDates.slice().sort().reverse(); /* most recent first */
+    var pairs = [];
+    for (var i = 0; i < sortedDates.length && pairs.length < TOPIC_FANOUT_CAP; i++) {
+      for (var j = 0; j < folders.length && pairs.length < TOPIC_FANOUT_CAP; j++) {
+        pairs.push({ date: sortedDates[i], user: folders[j] });
+      }
+    }
+    if (total > TOPIC_FANOUT_CAP) {
+      console.debug('[SearchPalette] topic fan-out capped at ' + TOPIC_FANOUT_CAP
+        + ' date\xd7user pairs (of ' + total + ' possible) — keeping the most recent dates');
+    }
+    return pairs;
+  }
+
+  /* Fetch + flatten topics for every (date, user) pair. Each pair is
+     independently tolerant of failure (denied/not-found/errored fetches
+     just contribute nothing) so one bad date never blanks the whole
+     topic index. */
+  async function _loadTopics(pairs) {
+    if (!pairs.length) return [];
+    var settled = await Promise.allSettled(pairs.map(function (p) {
+      return window.FS.api.timeline.getTimeline({ date: p.date, user: p.user })
+        .then(function (r) { return { date: p.date, user: p.user, report: r }; });
+    }));
+
+    var topics = [];
+    settled.forEach(function (s) {
+      if (s.status !== 'fulfilled') return;
+      var x = s.value;
+      var r = x.report;
+      if (!r || r._notFound || r._accessDenied || r.available_users) return;
+      (r.topics || []).forEach(function (t) {
+        topics.push({
+          title:    t.topic_title,
+          snippet:  (t.summary || '').slice(0, 80),
+          date:     x.date,
+          user:     x.user,
+          topic_id: t.topic_id,
+        });
+      });
+    });
+    return topics;
+  }
 
   async function _loadCache() {
     if (_cache.loaded || _cache.loading) return;
@@ -51,9 +134,17 @@
          slice. Falls back to `today` (i.e. no widening) if the span
          lookup fails or no report has ever existed. */
       var span  = await window.FS.api.window.getSpan().catch(function () {
-        return { earliest: null, latest: null };
+        return { earliest: null, latest: null, dates: {} };
       });
       var from  = span.earliest || today;
+
+      /* Task 3 — hasReport dates drive the topic fan-out; computed here
+         (not inside _loadTopics) so the pair-count/cap decision stays
+         visible at the call site. */
+      var reportDates = Object.keys(span.dates || {}).filter(function (d) {
+        return span.dates[d] && span.dates[d].hasReport;
+      }).sort();
+      var topicPairs = _topicFanoutPairs(reportDates);
 
       var results = await Promise.all([
         window.FS.api.sites.getSites()
@@ -62,11 +153,14 @@
           .catch(function () { return { rows: [] }; }),
         window.FS.api.compliance.getSafetyRange({ from: from, to: today })
           .catch(function () { return { rows: [] }; }),
+        _loadTopics(topicPairs)
+          .catch(function () { return []; }),
       ]);
 
       _cache.sites  = (results[0] && results[0].sites) || [];
       _cache.tasks  = (results[1] && results[1].rows)  || [];
       _cache.safety = (results[2] && results[2].rows)  || [];
+      _cache.topics = results[3] || [];
 
       /* Derive unique users from sites */
       var usersMap = {};
@@ -89,7 +183,7 @@
 
   function _search(q) {
     var ql = q.toLowerCase();
-    var byType = { task: [], safety: [], site: [], user: [] };
+    var byType = { task: [], safety: [], site: [], user: [], topic: [] };
 
     _cache.tasks.forEach(function (row) {
       if (byType.task.length >= 5) return;
@@ -144,6 +238,24 @@
           title:    u.name,
           subtitle: u.role || '',
           route:    '/team',
+        });
+      }
+    });
+
+    _cache.topics.forEach(function (row) {
+      if (byType.topic.length >= 5) return;
+      var hay = ((row.title || '') + ' ' + (row.snippet || '')).toLowerCase();
+      if (hay.indexOf(ql) !== -1) {
+        byType.topic.push({
+          type:     'topic',
+          id:       row.date + '_' + row.user + '_' + row.topic_id,
+          title:    row.title,
+          subtitle: (row.snippet ? row.snippet + ' \xb7 ' : '') + row.date,
+          /* topic_id routes as a raw string — never parseInt (timeline.js
+             deep-link matching is String(a) === String(b) throughout). */
+          route:    '/timeline?date=' + encodeURIComponent(row.date)
+                     + '&user=' + encodeURIComponent(row.user)
+                     + '&topic=' + encodeURIComponent(String(row.topic_id)),
         });
       }
     });
@@ -325,7 +437,7 @@
             ref:          inputRef,
             type:         'text',
             className:    'fs-search-palette__input',
-            placeholder:  'Search tasks, sites, people, safety…',
+            placeholder:  'Search tasks, sites, people, safety, topics…',
             value:        query,
             onChange:     function (e) { setQuery(e.target.value); },
             onKeyDown:    onKeyDown,
@@ -432,7 +544,7 @@
 
             /* Empty prompt */
             : React.createElement('div', { className: 'fs-search-palette__hint' },
-                'Type to search across tasks, safety flags, sites, and people'),
+                'Type to search across tasks, safety flags, sites, people, and topics'),
 
           /* ---- "Ask FieldSight" hand-off (Task C) -------------------------
              Distinct final row, appended whenever the query is non-empty —
