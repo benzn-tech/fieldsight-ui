@@ -136,7 +136,7 @@
 
   async function rawRequest(path, opts) {
     opts = opts || {};
-    var base = (window.FS && window.FS.api && window.FS.api.baseUrl) || '/api';
+    var base = opts.baseUrl || (window.FS && window.FS.api && window.FS.api.baseUrl) || '/api';
     var url  = base + path + buildQuery(opts.params);
 
     var headers = Object.assign({}, opts.headers || {});
@@ -228,9 +228,20 @@
     window.FS.api.baseUrl = url;
   }
 
+  /* Org backend channel: same request() machinery (auth, retries, error
+     envelopes) but routed at FS.api.orgBaseUrl (a cross-origin absolute URL,
+     so the X-Request-Id same-origin guard omits that header automatically).
+     Callers in api/org.js only invoke this when orgBaseUrl is non-empty. */
+  function orgRequest(path, opts) {
+    opts = Object.assign({}, opts);
+    opts.baseUrl = (window.FS && window.FS.api && window.FS.api.orgBaseUrl) || '';
+    return request(path, opts);
+  }
+
   if (!window.FS) window.FS = {};
   if (!window.FS.api) window.FS.api = {};
   window.FS.api.request   = request;
   window.FS.api.setBaseUrl = setBaseUrl;
+  window.FS.api.orgRequest = orgRequest;
 
 })();
