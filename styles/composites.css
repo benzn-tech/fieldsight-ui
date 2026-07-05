@@ -1710,10 +1710,21 @@
   }
 }
 
+/* Range endpoints (and the single-date selection): deep primary-navy fill
+   with white text so the chosen day(s) read prominently in light mode,
+   kept inside the accent ring for emphasis. Dark mode's surfaces are
+   already navy-tinted, so a navy fill would blend in — switch the endpoint
+   to the accent there to stay legible. */
 .fs-date-picker__cell--selected {
+  background: var(--color-primary-900);
+  color: #fff;
   border-color: var(--color-accent-500) !important;
   box-shadow: 0 0 0 2px var(--color-accent-100);
   font-weight: var(--font-weight-semibold);
+}
+[data-theme="dark"] .fs-date-picker__cell--selected {
+  background: var(--color-accent-600);
+  color: var(--color-neutral-900);
 }
 .fs-date-picker__cell--muted { color: var(--text-disabled); }
 
@@ -2141,6 +2152,31 @@
 }
 .fs-ask-chat__msg--error { color: var(--color-danger-700); }
 .fs-ask-chat__msg-text { white-space: pre-wrap; word-break: break-word; }
+/* Markdown-rendered assistant replies — block elements own their spacing, so
+   drop pre-wrap (the renderer already emits <p>/<br>/<ul>). */
+.fs-ask-chat__msg-text--md { white-space: normal; }
+.fs-ask-chat__msg-text--md > :first-child { margin-top: 0; }
+.fs-ask-chat__msg-text--md > :last-child  { margin-bottom: 0; }
+.fs-ask-chat__msg-text--md p { margin: 0 0 0.5em; }
+.fs-ask-chat__msg-text--md ul,
+.fs-ask-chat__msg-text--md ol { margin: 0.25em 0 0.55em; padding-left: 1.35em; }
+.fs-ask-chat__msg-text--md li { margin: 0.15em 0; }
+.fs-ask-chat__msg-text--md h1,
+.fs-ask-chat__msg-text--md h2,
+.fs-ask-chat__msg-text--md h3 { margin: 0.65em 0 0.3em; font-weight: var(--font-weight-semibold); line-height: 1.25; }
+.fs-ask-chat__msg-text--md h1 { font-size: 1.15em; }
+.fs-ask-chat__msg-text--md h2 { font-size: 1.08em; }
+.fs-ask-chat__msg-text--md h3 { font-size: 1em; }
+.fs-ask-chat__msg-text--md code {
+  font-family: var(--font-family-mono, ui-monospace, "JetBrains Mono", Consolas, monospace);
+  font-size: 0.9em; background: var(--surface-panel-muted); padding: 0.1em 0.35em; border-radius: 4px;
+}
+.fs-ask-chat__msg-text--md pre {
+  margin: 0.45em 0; padding: 0.6em 0.8em; background: var(--surface-panel-muted);
+  border: 1px solid var(--border-subtle); border-radius: 6px; overflow-x: auto;
+}
+.fs-ask-chat__msg-text--md pre code { background: none; padding: 0; }
+.fs-ask-chat__msg-text--md a { color: var(--color-accent-600); text-decoration: underline; }
 
 .fs-ask-chat__citations,
 .fs-ask-chat__model {
