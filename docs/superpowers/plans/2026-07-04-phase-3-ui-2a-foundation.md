@@ -176,9 +176,15 @@ Read `scripts/api/_fetch.js` 第 183-220 行(`request` 函数)。确认它以 `r
   function orgRequest(path, opts) {
     opts = Object.assign({}, opts);
     opts.baseUrl = (window.FS && window.FS.api && window.FS.api.orgBaseUrl) || '';
-    return request(path, opts);
+    /* Org endpoints live under /api/org/* on the gateway, but orgBaseUrl ends
+       at /prod/api — prefix the logical path (/me → /org/me). api/org.js passes
+       Lambda-internal route names (/me, /sites, …) and only calls this when
+       orgBaseUrl is set (orgLive gate), so no report-gateway leak. */
+    return request('/org' + path, opts);
   }
 ```
+
+(修订 2026-07-04:orgRequest 加 `/org` 前缀——org 网关路由 `/api/org/{proxy+}`,orgBaseUrl 止于 `/prod/api`。org.js 路径保持逻辑名 `/me`。)
 
 在导出块(第 233-234 行 `window.FS.api.request = request;` / `window.FS.api.setBaseUrl = setBaseUrl;`)后加:
 
