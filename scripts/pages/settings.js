@@ -115,9 +115,31 @@
         patchProfile: function (patch) { refProfile[1](function (p) { return Object.assign({}, p, patch); }); },
         saveProfile: function () {
           var p = refProfile[0];
-          writeJSON(PROFILE_KEY, p);
+          /* strip transient underscore keys (raw File handle) before persisting */
+          var persisted = {};
+          Object.keys(p).forEach(function (k) { if (k.charAt(0) !== '_') persisted[k] = p[k]; });
+          writeJSON(PROFILE_KEY, persisted);
           if (window.AuthMock && window.AuthMock.updateProfile) {
             window.AuthMock.updateProfile({ firstName: p.firstName, lastName: p.lastName, email: p.email, avatarUrl: p.avatarUrl });
+          }
+          /* Phase 3: sync name + avatar to the org backend when live.
+             Local save above never blocks on the network. */
+          var org = window.FS && window.FS.api && window.FS.api.org;
+          if (org && org.isLive()) {
+            var jobs = [];
+            if (p.firstName || p.lastName) {
+              jobs.push(org.patchMe({ first_name: p.firstName || null, last_name: p.lastName || null }));
+            }
+            if (p._avatarFile) jobs.push(org.uploadAvatar(p._avatarFile));
+            if (jobs.length) {
+              Promise.all(jobs).then(function () {
+                refProfile[1](function (prev) { var n = Object.assign({}, prev); delete n._avatarFile; return n; });
+                toast('Profile saved');
+              }).catch(function (e) {
+                toast('Saved locally — sync failed: ' + ((e && e.message) || 'server error'), 'error');
+              });
+              return;
+            }
           }
           toast('Profile saved');
         },
@@ -239,7 +261,9 @@
       var f = e.target.files && e.target.files[0];
       if (!f) return;
       var reader = new FileReader();
-      reader.onload = function () { ctx.patchProfile({ avatarUrl: reader.result }); };
+      /* _avatarFile: raw File kept for the Phase 3 org upload on Save;
+         underscore keys are stripped before localStorage persistence. */
+      reader.onload = function () { ctx.patchProfile({ avatarUrl: reader.result, _avatarFile: f }); };
       reader.readAsDataURL(f);
     }
     var avatarEl = Avatar

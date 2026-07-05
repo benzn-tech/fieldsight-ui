@@ -498,14 +498,43 @@ Original videos can be 200–300 MB each. Always render the H264 preview in /api
 | User switcher (admin/pm) | GET /api/sites, GET /api/site-users?site= |
 | Meeting minutes view | GET /api/media/presigned-url?key=reports/{date}/{user}/meeting_minutes.json (no dedicated endpoint yet — fetch the JSON directly) |
 ---
+## 9b. Phase 3 — Org API (dual-base, TEST gateway)
+
+Org data (company / projects / members / roles / profile images) lives in
+**Aurora Postgres behind the TEST stack's gateway** — a second base URL,
+because the prod gateway is hand-built and stays untouched. Report reads keep
+using `baseUrl`; org calls use `orgBaseUrl` (`FS.api.org.*`, gated by
+`FS.api.orgWrites`). Auth: the SAME prod-pool ID token (raw, no Bearer) — the
+test gateway's org routes run a dedicated authorizer pointing at the prod pool.
+
+| Endpoint | Notes |
+|---|---|
+| GET /api/org/me | caller profile + site_ids; auto-provisions the row on first call |
+| PATCH /api/org/me | `{first_name?, last_name?}` — role/company/email NOT patchable |
+| GET /api/org/sites | admin/gm: company sites; others: membership sites. `icon_url` presigned |
+| POST /api/org/sites | `{name, location?, client?, industry?}` (admin/gm) |
+| GET /api/org/members | company roster + memberships (admin/gm only — 403 otherwise) |
+| POST /api/org/members | `{email, first_name?, last_name?, global_role?, memberships?}` — Cognito invite email + DB upsert; anti-escalation (gm can't create admin) |
+| PATCH /api/org/members/{sub}/role | `{role}` — admin/gm, same company, no self-change |
+| POST /api/org/upload-url | `{kind: 'avatar'\|'site_icon', content_type, site_id?}` → presigned PUT, key persisted at issuance |
+| GET /api/org/asset-url?key= | presigned GET for org-assets/ keys |
+| POST /api/org/seed | idempotent backfill (company + pool users + user_mapping sites); bootstrap-gated |
+
+Backend roles are the pipeline 5 (`admin/gm/pm/site_manager/worker`); the UI's
+richer taxonomy maps lossily via `ORG_ROLE_BY_UI_ROLE` in `scripts/api/sites.js`.
+Org site ids are **uuids**, not user_mapping slugs — the sites.js adapters map
+by name where possible. Uploads PUT straight to S3: bucket CORS must allow the
+app origin (pipeline `scripts/wire-bucket-cors.sh`).
+
+---
 ## 10. What's NOT in the API yet
 Useful to know before designing flows that assume them:
 - **No streaming / websockets** — everything is short-lived REST. Polling is fine for action items.
 - **No edit endpoints** — reports are read-only. Action checkboxes are the only mutable surface (besides regenerate).
 - **No comments / threading.**
 - **No notifications endpoint.**
-- **No file upload from the UI** — uploads happen device-side (RealPTT).
-- **No user/profile management UI hook** — Cognito admin operations are CLI-only.
+- **No file upload from the UI** except Phase 3 org assets (avatars / site icons via presigned PUT) — media uploads happen device-side (RealPTT).
+- **No user/profile management UI hook** — superseded by the Phase 3 org API (§9b).
 - **/api/ask is stateless** — multi-turn chat must be reconstructed client-side and resent.
 - **Meeting minutes has no list endpoint** — discover via /api/reports/history (matches *_report.json only) or by building S3 keys yourself.
 If a screen needs any of the above, raise it before designing — backend work is required first.

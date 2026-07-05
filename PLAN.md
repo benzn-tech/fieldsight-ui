@@ -25,6 +25,7 @@ ledger.
 | **9** | Insights dashboard (PM-facing safety/quality analytics) + PM-scoped Team page + Strategic dashboards (Portfolio / Regional / Executive) | ✅ | PR [#19](https://github.com/benzn-tech/fieldsight-ui/pull/19) |
 | **10** | Library / Template UI (B.0–B.6) + 3-panel → 2-panel migration (A) + follow-up polish | 🟡 | branch `claude/sprint10-prep` (Sprint 10 + follow-up fixes, HEAD `3ecdd49`) |
 | **11** | A11y hardening (axe-core gate + contrast + SR checklist) + XLSX column-mapper partial mapping + Tasks cross-day audit (Q-1) | 🟡 | branch `claude/sprint11` (fast-forwarded onto latest `sprint10-prep` — carries Sprint 11 work **+** all Sprint 10 follow-up fixes) |
+| **P3** | Phase 3 org write wiring — `FS.api.org` module (dual-base to TEST gateway), `orgBaseUrl`/`orgWrites` env switches, sites.js live adapters (member roster / add member / role change / create project), settings profile + avatar sync, BACKEND-CONTEXT §9b | 🟡 | branch `claude/fieldsight-migration-phase-3-vdd7a8` (pairs with pipeline OrgApiFunction; needs live browser pass) |
 
 **Sprint 8 sub-sprint coverage** (audit on `claude/sprint8`):
 

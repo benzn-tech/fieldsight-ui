@@ -81,6 +81,12 @@
        reads go live (Sprint-5 lesson: never ship writes without a backend). */
     writeMocks: env.writeMocks !== undefined ? !!env.writeMocks : true,
     baseUrl: env.baseUrl || '/api',
+    /* Phase 3 dual-base: org data (projects/members/roles/assets) lives in
+       Aurora behind the TEST gateway; report reads stay on baseUrl (prod).
+       orgWrites is the org-only write switch — writeMocks keeps governing
+       the still-backend-less writes (programme, safety-create, ...). */
+    orgBaseUrl: env.orgBaseUrl || '',
+    orgWrites: env.orgWrites !== undefined ? !!env.orgWrites : false,
     delay: delay,
     folderName: folderName,
     mockPresignedUrl: mockPresignedUrl,

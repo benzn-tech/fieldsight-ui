@@ -155,8 +155,9 @@
 
   <!-- Backend-shaped data layer (Sprint 2.1, Phase A): fixtures → api modules → adapter -->
   <!--   1. FS.api namespace + helpers (must precede every api/* and adapter) -->
-  <script src="scripts/api/index.js?v=3"></script>
-  <script src="scripts/api/_fetch.js?v=4"></script>
+  <script src="scripts/api/index.js?v=4"></script>
+  <script src="scripts/api/_fetch.js?v=5"></script>
+  <script src="scripts/api/org.js?v=1"></script>
   <!--   2. Fixtures populate window.FieldSight.fixtures.* -->
   <script src="scripts/mock/sites.fixture.js?v=3"></script>
   <!-- Sprint 9 Track A.0 — closed 12-tag vocabulary + tag inference + subcontractor lookup -->
@@ -171,7 +172,7 @@
   <!-- Sprint 10 B.0 — Template library fixture -->
   <script src="scripts/mock/templates.fixture.js?v=1"></script>
   <!--   3. Per-endpoint api modules (read fixtures via FS.api.*) -->
-  <script src="scripts/api/sites.js?v=4"></script>
+  <script src="scripts/api/sites.js?v=5"></script>
   <script src="scripts/api/dates.js?v=1"></script>
   <!-- Sprint date-range-batch — Data window (range calculations) -->
   <script src="scripts/api/data-window.js?v=1"></script>
@@ -225,7 +226,7 @@
   <!-- Sprint 7.1+7.2 — /team page -->
   <script type="text/babel" src="scripts/pages/team.js?v=5"></script>
   <!-- Sprint 7.3 + 7.6 — /settings page (density toggle added in 7.6) -->
-  <script type="text/babel" src="scripts/pages/settings.js?v=6"></script>
+  <script type="text/babel" src="scripts/pages/settings.js?v=7"></script>
   <!-- Sprint 10 B.2 — Template upload modal composite -->
   <script type="text/babel" src="scripts/composites/template-upload-modal.js?v=1"></script>
   <!-- Sprint 10 B.1+B.3 — /library page (template library + skip-edit preview) -->

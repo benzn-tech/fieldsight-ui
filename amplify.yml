@@ -8,8 +8,9 @@ frontend:
         - cp *.html dist/
         - cp app-shell-preview.html dist/index.html
         - >-
-          printf 'window.FS_ENV = { baseUrl: "%s", useMocks: %s, writeMocks: %s };\n'
+          printf 'window.FS_ENV = { baseUrl: "%s", useMocks: %s, writeMocks: %s, orgBaseUrl: "%s", orgWrites: %s };\n'
           "${FS_BASEURL:-/api}" "${FS_USEMOCKS:-true}" "${FS_WRITEMOCKS:-true}"
+          "${FS_ORG_BASEURL:-}" "${FS_ORGWRITES:-false}"
           > dist/env.js
   artifacts:
     baseDirectory: dist

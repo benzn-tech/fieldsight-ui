@@ -29,6 +29,7 @@
          signal:    AbortSignal
          allowAnon: boolean — skip auth header (e.g. /api/health)
          timeoutMs: number — per-request timeout in ms (default 10000)
+         base:      string — base URL override (org API dual-base, Phase 3)
        }
        → resolves to either:
             the JSON body, or
@@ -136,7 +137,10 @@
 
   async function rawRequest(path, opts) {
     opts = opts || {};
-    var base = (window.FS && window.FS.api && window.FS.api.baseUrl) || '/api';
+    /* opts.base: per-request base override — Phase 3 dual-base setup sends
+       org requests to the test gateway while everything else stays on the
+       default baseUrl. */
+    var base = opts.base || (window.FS && window.FS.api && window.FS.api.baseUrl) || '/api';
     var url  = base + path + buildQuery(opts.params);
 
     var headers = Object.assign({}, opts.headers || {});
