@@ -109,11 +109,16 @@
       });
     });
 
+    /* Pooled, not Promise.all: the (dates × users) cross-product reaches
+       150+ requests for admin-like callers — see FS.api.pooledAll. Failed
+       fetches → null → filtered (partial data beats a dead page). */
     var [reports, audit] = await Promise.all([
-      Promise.all(perCall.map(function (k) {
-        return window.FS.api.timeline.getTimeline({ date: k.date, user: k.user.folder_name })
-          .then(function (r) { return Object.assign({ report: r }, k); });
-      })),
+      window.FS.api.pooledAll(perCall.map(function (k) {
+        return function () {
+          return window.FS.api.timeline.getTimeline({ date: k.date, user: k.user.folder_name })
+            .then(function (r) { return Object.assign({ report: r }, k); });
+        };
+      }), 8).then(function (rs) { return rs.filter(Boolean); }),
       window.FS.api.actions.getActionsRange({ from: dates[0], to: dates[dates.length - 1] }),
     ]);
 

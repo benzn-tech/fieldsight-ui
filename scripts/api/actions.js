@@ -157,9 +157,26 @@
       cursor = window.FS.api.addDaysISO(cursor, 1);
     }
 
-    var perDay = await Promise.all(dates.map(function (d) {
-      return getActions(d).then(function (res) { return { date: d, res: res }; });
-    }));
+    /* Narrow to days that actually have a report — actions only exist where
+       reports do, and the calendar enumeration above can span 150 days on
+       the 'All' range. getSpan() reuses the same cached /api/dates fetch the
+       toolbar uses; on failure keep the full enumeration. */
+    try {
+      var span = await window.FS.api.window.getSpan();
+      var dmap = (span && span.dates) || {};
+      var reportDays = dates.filter(function (d) { return dmap[d] && dmap[d].hasReport; });
+      if (reportDays.length) dates = reportDays;
+    } catch (e) { /* keep full enumeration */ }
+
+    /* Pooled + per-day catch (an uncaught throttle rejection here killed
+       /tasks even after the timeline leg was pooled — a failed day degrades
+       to "no audit info" instead). */
+    var perDay = (await window.FS.api.pooledAll(dates.map(function (d) {
+      return function () {
+        return getActions(d).then(function (res) { return { date: d, res: res }; })
+          .catch(function () { return { date: d, res: { actions: {} } }; });
+      };
+    }), 8)).filter(Boolean);
 
     var byDate = {};
     var anyDenied = null;
