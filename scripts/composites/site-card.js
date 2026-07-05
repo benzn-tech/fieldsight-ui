@@ -60,6 +60,9 @@
                 [site.location, site.client].filter(Boolean).join(' · ')),
             ),
           ),
+          site.archived ? React.createElement(Badge, {
+            tone: 'neutral', size: 'sm', variant: 'subtle',
+          }, 'Archived') : null,
           React.createElement('div', { className: 'fs-site-card__chev' }, '›'),
         ),
 

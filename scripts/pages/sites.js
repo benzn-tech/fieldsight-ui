@@ -102,12 +102,19 @@
     var retryCount = retryRef[0];
     var setRetry   = retryRef[1];
 
+    /* batch 2c Task 5 — "Show archived" toggle (live + user:manage only).
+       Mock sites.getSites() never receives the flag — mock fixtures have
+       no archived dimension, so the toggle stays hidden in mock mode. */
+    var refShowArchived = React.useState(false);
+    var showArchived    = refShowArchived[0];
+    var setShowArchived = refShowArchived[1];
+
     React.useEffect(function () {
       var cancelled = false;
       setState({ status: 'loading' });
 
       Promise.all([
-        (orgLive() ? window.FS.api.org.getOrgSites() : window.FS.api.sites.getSites()),
+        (orgLive() ? window.FS.api.org.getOrgSites({ includeArchived: showArchived }) : window.FS.api.sites.getSites()),
         window.FS.api.reports.getReportsHistory(50),
       ]).then(function (results) {
         if (cancelled) return;
@@ -173,12 +180,18 @@
       });
 
       return function () { cancelled = true; };
-    }, [depKey, retryCount]);
+    }, [depKey, retryCount, showArchived]);
 
     var ctx = {
       state: state,
       caller: caller,
+      showArchived:    showArchived,
+      setShowArchived: setShowArchived,
+      refetch: function () { setRetry(function (n) { return n + 1; }); },
       addSite: function (site) { setState(function (s) { return Object.assign({}, s, { sites: [site].concat(s.sites || []) }); }); },
+      /* Kept for the (unlikely) case something still calls it directly —
+         onArchive below now refetches instead so archived-list toggling
+         self-resolves the right-detail staleness (batch 2c Task 5). */
       removeSite: function (siteId) {
         setState(function (s) {
           if (!s.sites) return s;
@@ -347,6 +360,9 @@
       ? props.selectedItem.site_id
       : null;
     var canCreate = ctx.caller && (ctx.caller.isAdmin || (window.FS && window.FS.can && window.FS.can(ctx.caller, 'user:manage')));
+    /* batch 2c Task 5 — toggle is live-only (mock fixtures carry no
+       archived dimension) and gated the same as the archive action itself. */
+    var canToggleArchived = orgLive() && !!(window.FS && window.FS.can && window.FS.can(ctx.caller, 'user:manage'));
 
     if (sites.length === 0) {
       return React.createElement('div', { className: 'fs-sites' },
@@ -363,10 +379,16 @@
           React.createElement('div', { className: 'fs-sites__subtitle' },
             sites.length + ' ' + (sites.length === 1 ? 'site' : 'sites') + ' visible to your role'),
         ),
-        canCreate ? React.createElement('button', {
-          type: 'button', className: 'fs-btn fs-btn--primary fs-btn--sm',
-          onClick: function () { setNewOpen(true); },
-        }, '+ New project') : null,
+        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+          canToggleArchived ? React.createElement('button', {
+            type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm',
+            onClick: function () { ctx.setShowArchived(!ctx.showArchived); },
+          }, ctx.showArchived ? 'Hide archived' : 'Show archived') : null,
+          canCreate ? React.createElement('button', {
+            type: 'button', className: 'fs-btn fs-btn--primary fs-btn--sm',
+            onClick: function () { setNewOpen(true); },
+          }, '+ New project') : null,
+        ),
       ),
 
       React.createElement('div', { className: 'fs-sites__list' },
@@ -510,11 +532,34 @@
       setArchiving(true);
       window.FS.api.org.archiveSite(sel.site_id).then(function () {
         setArchiving(false);
-        if (ctx && ctx.removeSite) ctx.removeSite(sel.site_id);
         if (window.FS.toast) window.FS.toast.show({ message: 'Project archived', tone: 'success' });
+        if (ctx && ctx.refetch) ctx.refetch();
+        /* batch 2c Task 5 — with showArchived=false (the default) the
+           just-archived site drops out of the refetched list, so the
+           `liveSite` lookup below misses and this panel would otherwise
+           keep rendering the pre-archive `sel.site` snapshot (stale name/
+           icon, and an "Archive project" button offered again on an
+           already-archived site). props.onClose is AppShell's
+           setSelectedItem(null) (see RightDetail in app-shell.js) — the
+           same handler the header's × button uses — so calling it here
+           clears the selection and falls back to the "Select a site"
+           placeholder instead of showing stale data. */
+        if (props.onClose) props.onClose();
       }).catch(function () {
         setArchiving(false);
         if (window.FS.toast) window.FS.toast.show({ message: 'Could not archive project', tone: 'error' });
+      });
+    }
+    function onUnarchive() {
+      if (archiving) return;
+      setArchiving(true);
+      window.FS.api.org.unarchiveSite(sel.site_id).then(function () {
+        setArchiving(false);
+        if (window.FS.toast) window.FS.toast.show({ message: 'Project restored', tone: 'success' });
+        if (ctx && ctx.refetch) ctx.refetch();
+      }).catch(function () {
+        setArchiving(false);
+        if (window.FS.toast) window.FS.toast.show({ message: 'Could not restore project', tone: 'error' });
       });
     }
 
@@ -542,7 +587,8 @@
                backend backlog: explicit-null icon clear), so hide Remove entirely
                rather than offer a button that silently no-ops. Mock keeps it. */
             (!orgLive() && site.icon) ? React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--tertiary fs-btn--sm', onClick: function () { if (ctx && ctx.setSiteIcon) ctx.setSiteIcon(sel.site_id, null); } }, 'Remove') : null,
-            canArchive ? React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--tertiary fs-btn--sm', disabled: archiving, onClick: onArchive }, archiving ? 'Archiving…' : 'Archive project') : null,
+            (canArchive && site.archived) ? React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--tertiary fs-btn--sm', disabled: archiving, onClick: onUnarchive }, archiving ? 'Restoring…' : 'Restore project') : null,
+            (canArchive && !site.archived) ? React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--tertiary fs-btn--sm', disabled: archiving, onClick: onArchive }, archiving ? 'Archiving…' : 'Archive project') : null,
           ),
         ),
         IconBtn ? React.createElement(IconBtn, {

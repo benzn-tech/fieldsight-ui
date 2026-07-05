@@ -207,6 +207,13 @@
     var retryCount = retryRef[0];
     var setRetry   = retryRef[1];
 
+    /* batch 2c Task 5 — "Show archived" toggle (live + user:manage only).
+       Mock sites.getUsers() never receives the flag — mock fixtures have
+       no archived dimension, so the toggle stays hidden in mock mode. */
+    var refShowArchived = React.useState(false);
+    var showArchived    = refShowArchived[0];
+    var setShowArchived = refShowArchived[1];
+
     React.useEffect(function () {
       /* Permission gate */
       if (!window.FS.can(caller, 'user:manage')) {
@@ -217,7 +224,7 @@
       var cancelled = false;
       setState({ status: 'loading' });
 
-      var loadUsers = orgLive() ? window.FS.api.org.getMembers() : window.FS.api.sites.getUsers();
+      var loadUsers = orgLive() ? window.FS.api.org.getMembers({ includeArchived: showArchived }) : window.FS.api.sites.getUsers();
       loadUsers.then(function (res) {
         if (cancelled) return;
         if (res && res._accessDenied) {
@@ -295,7 +302,7 @@
       });
 
       return function () { cancelled = true; };
-    }, [depKey, retryCount]);
+    }, [depKey, retryCount, showArchived]);
 
     /* Sprint 9 B.3 — local override for reassign-to-site. Map of
        device_id → { primary_site }. Merged into render output so the
@@ -379,6 +386,9 @@
       state:       state,
       caller:      caller,
       overrides:   overrides,
+      showArchived:    showArchived,
+      setShowArchived: setShowArchived,
+      refetch: function () { setRetry(function (n) { return n + 1; }); },
       applyReassign: applyReassign,
       addUser:     addUser,
       removeUser:  removeUser,
@@ -559,6 +569,10 @@
     var metaLine = totals.users + ' ' + (totals.users === 1 ? 'person' : 'people')
       + ' · ' + totals.sites + ' ' + (totals.sites === 1 ? 'site' : 'sites');
 
+    /* batch 2c Task 5 — toggle is live-only (mock fixtures carry no
+       archived dimension) and gated the same as the archive action itself. */
+    var canToggleArchived = orgLive() && !!(window.FS && window.FS.can && window.FS.can(ctx.caller, 'user:manage'));
+
     /* Sprint 9 B.2 — scope caption when caller is a PM. */
     var scopeCaption = null;
     if (state.callerScoped && state.managedSites && state.managedSites.length > 0) {
@@ -576,10 +590,16 @@
             ? React.createElement('div', { className: 'fs-team__scope-caption' }, scopeCaption)
             : null,
         ),
-        React.createElement('button', {
-          type: 'button', className: 'fs-btn fs-btn--primary fs-btn--sm',
-          onClick: function () { setAddOpen(true); },
-        }, '+ Add member'),
+        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+          canToggleArchived ? React.createElement('button', {
+            type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm',
+            onClick: function () { ctx.setShowArchived(!ctx.showArchived); },
+          }, ctx.showArchived ? 'Hide archived' : 'Show archived') : null,
+          React.createElement('button', {
+            type: 'button', className: 'fs-btn fs-btn--primary fs-btn--sm',
+            onClick: function () { setAddOpen(true); },
+          }, '+ Add member'),
+        ),
       ),
 
       /* KPI strip */
@@ -628,6 +648,9 @@
                           Badge ? React.createElement(Badge, {
                             tone: 'neutral', size: 'xs', variant: 'subtle',
                           }, roleLabel(u.role)) : roleLabel(u.role),
+                          (u.archived && Badge) ? React.createElement(Badge, {
+                            tone: 'neutral', size: 'xs', variant: 'subtle',
+                          }, 'Archived') : null,
                           extraSites.length > 0
                             ? React.createElement('span', { className: 'fs-team__extra-sites' },
                                 '+' + extraSites.length + ' site' + (extraSites.length > 1 ? 's' : ''))
@@ -808,7 +831,7 @@
        we hide the control client-side too so it's never offered).
        callerSub prefers the real Cognito session identity (live mode);
        caller.device_id is the mock-mode fallback (unused while gated
-       on orgLive()). Restore / view-archived is out of scope (2c). */
+       on orgLive()). Restore added batch 2c Task 5. */
     var callerSub  = ((window.FS && window.FS.session && window.FS.session.user) || {}).sub || caller.device_id;
     var canArchive = orgLive() && !!(window.FS && window.FS.can && window.FS.can(caller, 'user:manage'))
       && u.device_id !== callerSub;
@@ -818,11 +841,33 @@
       setArchiving(true);
       window.FS.api.org.archiveMember(u.device_id).then(function () {
         setArchiving(false);
-        if (ctx && ctx.removeUser) ctx.removeUser(u.device_id);
         if (window.FS.toast) window.FS.toast.show({ message: 'Member archived', tone: 'success' });
+        if (ctx && ctx.refetch) ctx.refetch();
+        /* batch 2c Task 5 — mirrors sites.js: with showArchived=false (the
+           default) the just-archived member drops out of the refetched
+           list, so the `hit` lookup above misses and this panel would
+           otherwise keep rendering the pre-archive `sel.user` snapshot.
+           props.onClose is AppShell's setSelectedItem(null) (see
+           RightDetail in app-shell.js) — the same handler the header's ×
+           button uses — so calling it here clears the selection instead
+           of showing stale data. */
+        if (props.onClose) props.onClose();
       }).catch(function () {
         setArchiving(false);
         if (window.FS.toast) window.FS.toast.show({ message: 'Could not archive member', tone: 'error' });
+      });
+    }
+
+    function onUnarchiveMember() {
+      if (archiving) return;
+      setArchiving(true);
+      window.FS.api.org.unarchiveMember(u.device_id).then(function () {
+        setArchiving(false);
+        if (window.FS.toast) window.FS.toast.show({ message: 'Member restored', tone: 'success' });
+        if (ctx && ctx.refetch) ctx.refetch();
+      }).catch(function () {
+        setArchiving(false);
+        if (window.FS.toast) window.FS.toast.show({ message: 'Could not restore member', tone: 'error' });
       });
     }
 
@@ -891,7 +936,13 @@
           className: 'fs-team-detail__action-btn fs-team-detail__action-btn--primary',
           onClick:   function () { setModalOpen(true); },
         }, 'Reassign to another site') : null,
-        canArchive ? React.createElement('button', {
+        (canArchive && u.archived) ? React.createElement('button', {
+          type:      'button',
+          className: 'fs-team-detail__action-btn',
+          disabled:  archiving,
+          onClick:   onUnarchiveMember,
+        }, archiving ? 'Restoring…' : 'Restore member') : null,
+        (canArchive && !u.archived) ? React.createElement('button', {
           type:      'button',
           className: 'fs-team-detail__action-btn',
           disabled:  archiving,
