@@ -242,10 +242,34 @@
     return request('/org' + path, opts);
   }
 
+  /* Bounded-concurrency Promise.all for the admin fan-out cross-products.
+     (dates × users reaches 150+ requests on the 'All' range; an unbounded
+     burst trips API Gateway throttling, whose 429s carry no CORS headers and
+     so surface as opaque "Failed to fetch" rejections that killed the whole
+     page.) Takes THUNKS (() => Promise), runs at most `limit` at a time, and
+     maps a failed thunk to null instead of rejecting — partial data beats a
+     dead page; callers filter(Boolean). */
+  async function pooledAll(thunks, limit) {
+    var results = new Array(thunks.length);
+    var next = 0;
+    async function worker() {
+      while (next < thunks.length) {
+        var i = next++;
+        try { results[i] = await thunks[i](); }
+        catch (e) { results[i] = null; }
+      }
+    }
+    var workers = [];
+    for (var w = 0; w < Math.min(limit || 8, thunks.length); w++) workers.push(worker());
+    await Promise.all(workers);
+    return results;
+  }
+
   if (!window.FS) window.FS = {};
   if (!window.FS.api) window.FS.api = {};
   window.FS.api.request   = request;
   window.FS.api.setBaseUrl = setBaseUrl;
   window.FS.api.orgRequest = orgRequest;
+  window.FS.api.pooledAll  = pooledAll;
 
 })();
