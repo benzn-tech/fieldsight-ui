@@ -26,7 +26,9 @@
      use display name with spaces→underscores, e.g. "Jarley_Trainor"). */
   function folderName(m) {
     if (m.folder_name) return m.folder_name;
-    return [m.first_name, m.last_name].filter(Boolean).join('_');
+    var fromParts = [m.first_name, m.last_name].filter(Boolean).join('_');
+    if (fromParts) return fromParts;
+    return m.name ? m.name.replace(/ /g, '_') : '';
   }
 
   // -------- profile --------
@@ -67,6 +69,12 @@
     if (orgWrite()) return api.orgRequest('/sites/' + encodeURIComponent(id), { method: 'PATCH', body: patch });
     await api.delay();
     return Object.assign({ id: id }, patch);
+  }
+
+  async function updateProfile(patch) {
+    if (orgWrite()) return api.orgRequest('/me', { method: 'PATCH', body: patch });
+    await api.delay();
+    return Object.assign({}, patch);
   }
 
   async function archiveSite(id)   { return _siteArchive(id, 'archive'); }
@@ -127,6 +135,7 @@
 
   window.FS.api.org = {
     getMe: getMe,
+    updateProfile: updateProfile,
     getOrgSites: getOrgSites, createOrgSite: createOrgSite, updateOrgSite: updateOrgSite,
     archiveSite: archiveSite, unarchiveSite: unarchiveSite,
     getMembers: getMembers, createMember: createMember, updateMemberRole: updateMemberRole,

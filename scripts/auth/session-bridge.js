@@ -93,6 +93,10 @@
       patch.role = sessionUser.role;
     }
 
+    if (sessionUser.email) {
+      patch.email = sessionUser.email;
+    }
+
     var name = sessionUser.display_name || sessionUser.name || sessionUser.email;
     if (name) {
       var parts = splitName(name);
