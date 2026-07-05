@@ -1710,10 +1710,21 @@
   }
 }
 
+/* Range endpoints (and the single-date selection): deep primary-navy fill
+   with white text so the chosen day(s) read prominently in light mode,
+   kept inside the accent ring for emphasis. Dark mode's surfaces are
+   already navy-tinted, so a navy fill would blend in — switch the endpoint
+   to the accent there to stay legible. */
 .fs-date-picker__cell--selected {
+  background: var(--color-primary-900);
+  color: #fff;
   border-color: var(--color-accent-500) !important;
   box-shadow: 0 0 0 2px var(--color-accent-100);
   font-weight: var(--font-weight-semibold);
+}
+[data-theme="dark"] .fs-date-picker__cell--selected {
+  background: var(--color-accent-600);
+  color: var(--color-neutral-900);
 }
 .fs-date-picker__cell--muted { color: var(--text-disabled); }
 
