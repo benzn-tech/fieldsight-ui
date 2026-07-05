@@ -166,13 +166,18 @@
   function toOrgRole(role) {
     var ORG_ROLES = { admin: 1, gm: 1, pm: 1, site_manager: 1, worker: 1 };
     if (ORG_ROLES[role]) return role;
+    /* Least-privilege: only the explicit 'admin' page role maps to org
+       'admin'. Senior roles cap at 'gm', specialists at 'pm' — never hand
+       full company-admin rights via a role the user picked as something
+       else. (10→5 is lossy; offering only org roles in live mode is a 2c
+       polish.) */
     var map = {
       project_manager:     'pm',
       foreman:             'worker',
       construction_manager:'gm',
-      director:            'admin',
-      hse_manager:         'admin',
-      quality_manager:     'admin',
+      director:            'gm',
+      hse_manager:         'pm',
+      quality_manager:     'pm',
       client_viewer:       'worker',
     };
     return map[role] || 'worker';
