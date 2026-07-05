@@ -152,6 +152,11 @@
 
     return React.createElement('div', { className: 'fs-login' },
       React.createElement('div', { className: 'fs-login__card' },
+        React.createElement('img', {
+          src: 'assets/logo.png?v=1', alt: '',
+          className: 'fs-login__logo',
+          style: { width: '76px', height: 'auto', display: 'block', margin: '0 auto 14px' },
+        }),
         React.createElement('div', { className: 'fs-login__brand' }, 'FieldSight'),
         React.createElement('div', { className: 'fs-login__caption' },
           mode === 'signIn'
