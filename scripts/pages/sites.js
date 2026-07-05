@@ -78,6 +78,14 @@
     return hit ? hit.site_id : null;
   }
 
+  /* Org API live gate (batch 2b Task 3): mirrors api/org.js's own orgLive()
+     check. LIVE → window.FS.api.org.*; MOCK → keep window.FS.api.sites.*
+     path unchanged (mock + org fixtures differ; never swap them). */
+  function orgLive() {
+    return !!(window.FS && window.FS.api && !window.FS.api.useMocks
+      && window.FS.api.orgBaseUrl && window.FS.api.org);
+  }
+
   /* ---------- SitesContext --------------------------------------------- */
 
   var SitesContext = React.createContext(null);
@@ -99,7 +107,7 @@
       setState({ status: 'loading' });
 
       Promise.all([
-        window.FS.api.sites.getSites(),
+        (orgLive() ? window.FS.api.org.getOrgSites() : window.FS.api.sites.getSites()),
         window.FS.api.reports.getReportsHistory(50),
       ]).then(function (results) {
         if (cancelled) return;
@@ -147,6 +155,12 @@
       state: state,
       caller: caller,
       addSite: function (site) { setState(function (s) { return Object.assign({}, s, { sites: [site].concat(s.sites || []) }); }); },
+      removeSite: function (siteId) {
+        setState(function (s) {
+          if (!s.sites) return s;
+          return Object.assign({}, s, { sites: s.sites.filter(function (x) { return x.site_id !== siteId; }) });
+        });
+      },
       setSiteIcon: function (siteId, icon) {
         setState(function (s) {
           if (!s.sites) return s;
@@ -191,8 +205,13 @@
     function submit() {
       if (!form.name.trim() || busy) return;
       setBusy(true);
-      window.FS.api.sites.createSite(form).then(function (site) {
+      var live = orgLive();
+      var creating = live
+        ? window.FS.api.org.createOrgSite({ name: form.name, location: form.location, client: form.client, industry: form.industry })
+        : window.FS.api.sites.createSite(form);
+      creating.then(function (site) {
         setBusy(false);
+        if (live) site = window.FS.api.org._toPageSite(site);
         if (window.FS.toast) window.FS.toast.show({ message: 'Project "' + site.name + '" created', tone: 'success' });
         if (props.onCreated) props.onCreated(site);
         if (props.onClose) props.onClose();
@@ -349,6 +368,10 @@
     var usersS   = refUsers[0];
     var setUsers = refUsers[1];
 
+    var refArchiving = React.useState(false);
+    var archiving    = refArchiving[0];
+    var setArchiving = refArchiving[1];
+
     React.useEffect(function () {
       if (!sel || sel.kind !== 'site') {
         setUsers({ status: 'idle', users: [] });
@@ -388,6 +411,23 @@
     var rows = (ctx && ctx.state && ctx.state.reportsBySite && ctx.state.reportsBySite[sel.site_id]) || [];
     var topReports = rows.slice(0, 5);
 
+    /* Archive (batch 2b Task 3) — live-only write, gated on user:manage.
+       Restore/"view archived" is out of scope here (batch 2c follow-up). */
+    var caller = (ctx && ctx.caller) || (window.AuthMock && window.AuthMock.currentUser) || {};
+    var canArchive = orgLive() && !!(window.FS && window.FS.can && window.FS.can(caller, 'user:manage'));
+    function onArchive() {
+      if (archiving) return;
+      setArchiving(true);
+      window.FS.api.org.archiveSite(sel.site_id).then(function () {
+        setArchiving(false);
+        if (ctx && ctx.removeSite) ctx.removeSite(sel.site_id);
+        if (window.FS.toast) window.FS.toast.show({ message: 'Project archived', tone: 'success' });
+      }).catch(function () {
+        setArchiving(false);
+        if (window.FS.toast) window.FS.toast.show({ message: 'Could not archive project', tone: 'error' });
+      });
+    }
+
     function openTimeline(folderName, dateOpt) {
       var qs = '?date=' + encodeURIComponent(dateOpt || (rows[0] && rows[0].date) || '');
       qs += '&user=' + encodeURIComponent(folderName);
@@ -409,6 +449,7 @@
             React.createElement('input', { type: 'file', accept: 'image/*', ref: iconRef, onChange: onPickIcon, style: { display: 'none' } }),
             React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm', onClick: function () { if (iconRef.current) iconRef.current.click(); } }, site.icon ? 'Change image' : 'Upload image'),
             site.icon ? React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--tertiary fs-btn--sm', onClick: function () { if (ctx && ctx.setSiteIcon) ctx.setSiteIcon(sel.site_id, null); } }, 'Remove') : null,
+            canArchive ? React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--tertiary fs-btn--sm', disabled: archiving, onClick: onArchive }, archiving ? 'Archiving…' : 'Archive project') : null,
           ),
         ),
         IconBtn ? React.createElement(IconBtn, {
