@@ -154,8 +154,17 @@
             className: 'fs-ask-chat__msg fs-ask-chat__msg--' + m.role
               + (m.error ? ' fs-ask-chat__msg--error' : ''),
           },
-            React.createElement('div', { className: 'fs-ask-chat__msg-text' },
-              m.text),
+            /* Assistant replies are markdown → render via the safe renderer
+               (it HTML-escapes first, then emits only a fixed tag set, so
+               dangerouslySetInnerHTML carries no LLM-supplied markup). User
+               messages are the person's own typed question → keep plain. */
+            m.role === 'assistant' && window.FieldSight.renderMarkdown
+              ? React.createElement('div', {
+                  className: 'fs-ask-chat__msg-text fs-ask-chat__msg-text--md',
+                  dangerouslySetInnerHTML: { __html: window.FieldSight.renderMarkdown(m.text) },
+                })
+              : React.createElement('div', { className: 'fs-ask-chat__msg-text' },
+                  m.text),
             m.citations && m.citations.length > 0
               ? React.createElement('div', { className: 'fs-ask-chat__citations' },
                   'Citations: ' + m.citations.length)
