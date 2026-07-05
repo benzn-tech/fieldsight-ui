@@ -637,6 +637,22 @@ function AppShell({ showDevSwitcher = false }) {
     return window.AuthMock.onChange(function(u) { setUser(Object.assign({}, u)); });
   }, []);
 
+  /* Sprint 2b — org status banner. FS.session.user (real backend identity)
+     isn't mirrored onto AuthMock (session-bridge.js only copies role/name/
+     site), so `user` above won't carry orgStatus. Subscribe separately just
+     to force a re-render when the session changes (sign-in, hydrateUser());
+     the actual orgStatus read happens fresh each render, right before the
+     return below. Guarded for mock mode, where window.FS.session is present
+     but .user stays null. */
+  var refOrgStatusTick   = React.useState(0);
+  var setOrgStatusTick   = refOrgStatusTick[1];
+  React.useEffect(function() {
+    if (!(window.FS && window.FS.session && window.FS.session.onChange)) return undefined;
+    return window.FS.session.onChange(function () {
+      setOrgStatusTick(function (n) { return n + 1; });
+    });
+  }, []);
+
   React.useEffect(function() {
     return window.FS.Router.subscribe(function(r) { setRoute(r.path); });
   }, []);
@@ -765,6 +781,11 @@ function AppShell({ showDevSwitcher = false }) {
     return function () { delete window.FS.shell; };
   });
 
+  /* Sprint 2b — org account status (unprovisioned / archived). Null-guarded:
+     mock mode has no window.FS.session.user, so orgStatus stays undefined
+     and the banner below renders nothing. */
+  var orgStatus = ((window.FS && window.FS.session && window.FS.session.user) || {}).orgStatus;
+
   return React.createElement('div', { style: shellStyle, className: shellClassName },
 
     /* Sprint 8.5.3 — skip navigation link (visually hidden until focused) */
@@ -839,6 +860,19 @@ function AppShell({ showDevSwitcher = false }) {
           role:        'status',
           'aria-live': 'polite',
         }, '⚠️ You’re offline — changes won’t sync')
+      : null,
+
+    /* Sprint 2b — org account status banner (fixed; stacks below the
+       offline banner via CSS adjacent-sibling on the rare occasion both
+       show at once). 'active' / mock (null orgStatus) render nothing. */
+    (orgStatus === 'unprovisioned' || orgStatus === 'archived')
+      ? React.createElement('div', {
+          className:   'fs-orgstatus-banner fs-orgstatus-banner--' + orgStatus,
+          role:        'status',
+          'aria-live': 'polite',
+        }, orgStatus === 'unprovisioned'
+          ? 'Your account isn’t activated yet — contact your administrator for access.'
+          : 'Your account is archived — you have read-only access.')
       : null,
 
     /* Sprint 8.6 — global search palette */
