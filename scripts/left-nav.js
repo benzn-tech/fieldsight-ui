@@ -349,13 +349,6 @@ function LeftNav({ user, currentRoute, isCollapsed, onToggleCollapse, onNavigate
     flexShrink: 0,
   };
 
-  const logoMarkStyle = {
-    width: '28px', height: '28px', borderRadius: '6px',
-    background: t.colors.accent[500], color: '#111827', /* dark glyph on yellow */
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontWeight: 800, fontSize: '14px', flexShrink: 0,
-  };
-
   const toggleBtnStyle = {
     width: '28px', height: '28px', borderRadius: '6px',
     border: 'none', background: 'rgba(255,255,255,0.07)',
@@ -392,7 +385,10 @@ function LeftNav({ user, currentRoute, isCollapsed, onToggleCollapse, onNavigate
       !isCollapsed ? React.createElement('div', {
         style: { display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 },
       },
-        React.createElement('div', { style: logoMarkStyle }, 'F'),
+        React.createElement('img', {
+          src: 'assets/logo.png?v=1', alt: 'FieldSight',
+          style: { height: '26px', width: 'auto', flexShrink: 0, display: 'block' },
+        }),
         React.createElement('span', {
           style: {
             color: '#fff',
