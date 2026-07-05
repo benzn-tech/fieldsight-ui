@@ -15,7 +15,11 @@
     opts = opts || {};
     if (!window.FS.api.useMocks) {
       return window.FS.api.request('/dates', {
-        params: { months: opts.months, site: opts.site },
+        /* `user` narrows the dots to one user's report days so the
+           timeline date-picker matches its per-user fetch (admin dots
+           were a union across all users — dotted dates with no content
+           for the selected user). Empty/undefined → old behavior. */
+        params: { months: opts.months, site: opts.site, user: opts.user },
       });
     }
     await window.FS.api.delay();
