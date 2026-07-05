@@ -50,6 +50,13 @@
     return user && (user.role === 'admin' || user.role === 'gm' || user.isAdmin);
   }
 
+  /* folder_name if present (fixtures + live /api/users alike), else
+     derived client-side from name. Real /api/users returns only
+     {device_id,name,role,sites} — no folder_name. */
+  function deriveFolder(u) {
+    return u.folder_name || (u.name ? u.name.replace(/ /g, '_') : '');
+  }
+
   function fmtDate(yyyymmdd) {
     if (!yyyymmdd) return '';
     var p = String(yyyymmdd).split('-').map(Number);
@@ -159,20 +166,30 @@
       setPhotos({ status: 'loading', perDay: [], totalCount: 0 });
 
       /* Sprint 8 follow-up — admin fan-out across all known users so
-         /evidence Photos tab isn't blank when running as admin. */
-      var fanoutFolders = state.user ? [state.user] : null;
-      if (!fanoutFolders) {
-        var fxUsers = (window.FieldSight && window.FieldSight.fixtures
-          && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [];
-        fanoutFolders = fxUsers.map(function (u) { return u.folder_name; }).filter(Boolean);
-      }
-      Promise.all((state.dates || []).reduce(function (acc, d) {
-        fanoutFolders.forEach(function (f) {
-          acc.push(window.FS.api.timeline.getTimeline({ date: d, user: f })
-            .then(function (r) { return { date: d, report: r }; }));
-        });
-        return acc;
-      }, [])).then(function (perDay) {
+         /evidence Photos tab isn't blank when running as admin. Sourced
+         from the real GET /api/users (report identity) — live =
+         pass-through of /api/users, mock = fixtures (unchanged
+         behaviour). Falls back to the fixtures read on any /api/users
+         error. */
+      var foldersPromise = state.user
+        ? Promise.resolve([state.user])
+        : window.FS.api.sites.getUsers().then(function (res) {
+            return ((res && res.users) || []).map(deriveFolder).filter(Boolean);
+          }).catch(function () {
+            var fxUsers = (window.FieldSight && window.FieldSight.fixtures
+              && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [];
+            return fxUsers.map(deriveFolder).filter(Boolean);
+          });
+
+      foldersPromise.then(function (fanoutFolders) {
+        return Promise.all((state.dates || []).reduce(function (acc, d) {
+          fanoutFolders.forEach(function (f) {
+            acc.push(window.FS.api.timeline.getTimeline({ date: d, user: f })
+              .then(function (r) { return { date: d, report: r }; }));
+          });
+          return acc;
+        }, []));
+      }).then(function (perDay) {
         if (cancelled) return;
         var rows = [];
         var total = 0;
