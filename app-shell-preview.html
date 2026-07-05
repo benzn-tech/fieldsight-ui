@@ -271,6 +271,11 @@
       var wm = params.get('writemocks');
       if (wm !== null && window.FS && window.FS.api) { window.FS.api.writeMocks = wm !== '0'; }
 
+      var ob = params.get('orgbaseurl');
+      if (ob !== null && window.FS && window.FS.api) { window.FS.api.orgBaseUrl = ob; }
+      var ow = params.get('orgwrites');
+      if (ow !== null && window.FS && window.FS.api) { window.FS.api.orgWrites = ow !== '0'; }
+
       /* Sprint 11 A.1 — ?axe=1 loads axe-core dynamically + runs the
          WCAG 2.1 AA audit on every route change. Findings logged to
          the console in an `[axe]` group with violation count + per-
