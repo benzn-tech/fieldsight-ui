@@ -133,7 +133,15 @@
     });
   }
 
+  /* Live org site names (batch 2c Task 4) — org.getMembers() memberships
+     only carry site_id, not name, so group headers / scope captions /
+     detail rows would otherwise render the raw UUID. Populated by
+     TeamProvider's load effect (getOrgSites) once org sites resolve;
+     stays empty in mock mode so the fixtures lookup below is unaffected. */
+  var _orgSiteNames = {};
+
   function siteDisplayName(siteId) {
+    if (_orgSiteNames[siteId]) return _orgSiteNames[siteId];
     var fix = (window.FieldSight && window.FieldSight.fixtures && window.FieldSight.fixtures.sites) || {};
     var match = (fix.sites || []).filter(function (s) { return s.site_id === siteId; })[0];
     return match ? match.name : siteId || 'Unknown site';
@@ -241,6 +249,46 @@
             roles:    countDistinctRoles(scoped),
           },
         });
+
+        if (orgLive()) {
+          /* Site-name resolution (batch 2c Task 4) — fire in parallel,
+             don't block members render. includeArchived so an archived
+             site's name still resolves for members still tagged with it. */
+          window.FS.api.org.getOrgSites({ includeArchived: true }).then(function (sitesRes) {
+            if (cancelled || !sitesRes || !sitesRes.sites) return;
+            sitesRes.sites.forEach(function (s) { _orgSiteNames[s.site_id] = s.name; });
+            setState(function (s) { return Object.assign({}, s); });   /* re-render so group headers refresh */
+          }).catch(function () {});
+
+          /* Avatar resolution (batch 2c Task 4) — members whose avatarUrl
+             is an org-assets/ key (not yet a presigned URL) get one
+             resolved in the background. Functional setState + patch by
+             device_id so this can never clobber a role change / archive
+             that landed while resolution was in flight; groups are
+             rebuilt from the patched users so both row + detail avatars
+             update. Unresolved keys are left as-is (Avatar falls back to
+             initials). */
+          var avatarUsers = scoped.filter(function (u) { return /^org-assets\//.test(u.avatarUrl || ''); });
+          if (avatarUsers.length > 0) {
+            Promise.all(avatarUsers.map(function (u) {
+              return window.FS.api.org.resolveAssetUrl(u.avatarUrl).then(function (url) {
+                return { device_id: u.device_id, url: url };
+              });
+            })).then(function (resolved) {
+              if (cancelled) return;
+              var byId = {};
+              resolved.forEach(function (r) { if (r.url) byId[r.device_id] = r.url; });
+              if (Object.keys(byId).length === 0) return;
+              setState(function (s) {
+                if (s.status !== 'ok') return s;
+                var patched = (s.users || []).map(function (u) {
+                  return byId[u.device_id] ? Object.assign({}, u, { avatarUrl: byId[u.device_id] }) : u;
+                });
+                return Object.assign({}, s, { users: patched, groups: groupUsersBySite(patched) });
+              });
+            }).catch(function () {});
+          }
+        }
       }).catch(function (err) {
         if (cancelled) return;
         setState({ status: 'error', error: { code: (err && err.status) || 0, message: (err && err.message) || 'Could not load team', retryable: true }, retry: function () { setRetry(function (n) { return n + 1; }); } });
@@ -352,6 +400,20 @@
       options.map(function (o) { return React.createElement('option', { key: o.v, value: o.v }, o.l); }));
   }
   function roleOptions() {
+    /* Live org API only knows 5 global_role slugs — offering the full
+       10-role mock vocabulary would let an admin pick a role toOrgRole()
+       then silently remaps away from under them. Live u.role IS already
+       the org slug (set by _toPageMember), so these values line up
+       directly with the select's current value. Mock path unchanged. */
+    if (orgLive()) {
+      return [
+        { v: 'admin',        l: 'Admin' },
+        { v: 'gm',           l: 'General Manager' },
+        { v: 'pm',           l: 'Project Manager' },
+        { v: 'site_manager', l: 'Site Manager' },
+        { v: 'worker',       l: 'Worker' },
+      ];
+    }
     var R = (window.FS && window.FS.ROLES) || {};
     return Object.keys(R).map(function (k) { return { v: k, l: R[k].label || k }; });
   }
