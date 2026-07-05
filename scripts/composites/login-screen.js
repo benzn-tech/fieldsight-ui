@@ -55,19 +55,40 @@
       });
     }
 
-    /* After tokens are set, hydrate the user payload via /api/sites
-       (BACKEND-CONTEXT §4.2 — returns role + display_name). */
+    /* Hydrate real identity via GET /api/org/me. Three cases (spec §8b):
+       - 200 active            → full identity, orgStatus 'active'.
+       - 200 + archived_at     → real identity + orgStatus 'archived' (backend
+                                  lets an archived caller read /me so the UI can
+                                  surface it; visible banner is batch 2b).
+       - 403/404 unprovisioned → a clearly-non-default read-only placeholder so
+                                  we never show the default mock persona; flagged
+                                  orgStatus 'unprovisioned' for the 2b banner. */
     async function hydrateUser() {
       try {
-        var res = await window.FS.api.sites.getSites();
+        var me = await window.FS.api.org.getMe();
+        if (me && (me._accessDenied || me._notFound)) {
+          window.FS.session.set({
+            user: {
+              role:         'worker',
+              display_name: 'Account not provisioned',
+              orgStatus:    'unprovisioned',
+            },
+          });
+          console.warn('[login] org account not provisioned/denied — read-only (2b banner pending)');
+          return;
+        }
         window.FS.session.set({
           user: {
-            role:         res.role,
-            display_name: res.display_name,
+            sub:          me.cognito_sub,
+            email:        me.email,
+            role:         me.global_role,
+            display_name: [me.first_name, me.last_name].filter(Boolean).join(' '),
+            sites:        me.site_ids || [],
+            orgStatus:    me.archived_at ? 'archived' : 'active',
           },
         });
       } catch (err) {
-        console.warn('[login] could not load /api/sites for user payload', err);
+        console.warn('[login] could not load /api/org/me', err);
       }
     }
 

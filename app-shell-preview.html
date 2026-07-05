@@ -87,7 +87,7 @@
   <!-- Sprint 2.8 (Phase H) Meeting Minutes -->
   <script type="text/babel" src="scripts/composites/meeting-topic-card.js?v=2"></script>
   <!-- Sprint 2.9 (Phase I) Auth scaffolding — Login + 403 -->
-  <script type="text/babel" src="scripts/composites/login-screen.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/login-screen.js?v=3"></script>
   <script type="text/babel" src="scripts/composites/access-denied.js?v=1"></script>
   <!-- Sprint 4.7 — Slide-in drawer used by full-width pages (Programme) -->
   <script type="text/babel" src="scripts/composites/right-drawer.js?v=2"></script>
@@ -155,8 +155,8 @@
 
   <!-- Backend-shaped data layer (Sprint 2.1, Phase A): fixtures → api modules → adapter -->
   <!--   1. FS.api namespace + helpers (must precede every api/* and adapter) -->
-  <script src="scripts/api/index.js?v=3"></script>
-  <script src="scripts/api/_fetch.js?v=4"></script>
+  <script src="scripts/api/index.js?v=4"></script>
+  <script src="scripts/api/_fetch.js?v=5"></script>
   <!--   2. Fixtures populate window.FieldSight.fixtures.* -->
   <script src="scripts/mock/sites.fixture.js?v=3"></script>
   <!-- Sprint 9 Track A.0 — closed 12-tag vocabulary + tag inference + subcontractor lookup -->
@@ -172,6 +172,7 @@
   <script src="scripts/mock/templates.fixture.js?v=1"></script>
   <!--   3. Per-endpoint api modules (read fixtures via FS.api.*) -->
   <script src="scripts/api/sites.js?v=4"></script>
+  <script src="scripts/api/org.js?v=2"></script>
   <script src="scripts/api/dates.js?v=1"></script>
   <!-- Sprint date-range-batch — Data window (range calculations) -->
   <script src="scripts/api/data-window.js?v=1"></script>
@@ -270,6 +271,11 @@
       var wm = params.get('writemocks');
       if (wm !== null && window.FS && window.FS.api) { window.FS.api.writeMocks = wm !== '0'; }
 
+      var ob = params.get('orgbaseurl');
+      if (ob !== null && window.FS && window.FS.api) { window.FS.api.orgBaseUrl = ob; }
+      var ow = params.get('orgwrites');
+      if (ow !== null && window.FS && window.FS.api) { window.FS.api.orgWrites = ow !== '0'; }
+
       /* Sprint 11 A.1 — ?axe=1 loads axe-core dynamically + runs the
          WCAG 2.1 AA audit on every route change. Findings logged to
          the console in an `[axe]` group with violation count + per-
@@ -318,7 +324,7 @@
        ?mocks=0/?mocks=1 bootstrap block above (it reads the fully-resolved
        FS.api.useMocks), and before the mount call so the first paint
        already reflects the real signed-in user when one is restored. -->
-  <script src="scripts/auth/session-bridge.js?v=1"></script>
+  <script src="scripts/auth/session-bridge.js?v=2"></script>
 
   <script>
     (function () {

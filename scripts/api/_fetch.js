@@ -136,7 +136,7 @@
 
   async function rawRequest(path, opts) {
     opts = opts || {};
-    var base = (window.FS && window.FS.api && window.FS.api.baseUrl) || '/api';
+    var base = opts.baseUrl || (window.FS && window.FS.api && window.FS.api.baseUrl) || '/api';
     var url  = base + path + buildQuery(opts.params);
 
     var headers = Object.assign({}, opts.headers || {});
@@ -228,9 +228,24 @@
     window.FS.api.baseUrl = url;
   }
 
+  /* Org backend channel: same request() machinery (auth, retries, error
+     envelopes) but routed at FS.api.orgBaseUrl (a cross-origin absolute URL,
+     so the X-Request-Id same-origin guard omits that header automatically).
+     Callers in api/org.js only invoke this when orgBaseUrl is non-empty. */
+  function orgRequest(path, opts) {
+    opts = Object.assign({}, opts);
+    opts.baseUrl = (window.FS && window.FS.api && window.FS.api.orgBaseUrl) || '';
+    /* Org endpoints live under /api/org/* on the gateway, but orgBaseUrl ends
+       at /prod/api — so prefix the logical path (/me → /org/me). api/org.js
+       passes Lambda-internal route names (/me, /sites, …) and only calls this
+       when orgBaseUrl is set (its orgLive gate), so no report-gateway leak. */
+    return request('/org' + path, opts);
+  }
+
   if (!window.FS) window.FS = {};
   if (!window.FS.api) window.FS.api = {};
   window.FS.api.request   = request;
   window.FS.api.setBaseUrl = setBaseUrl;
+  window.FS.api.orgRequest = orgRequest;
 
 })();

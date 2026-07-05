@@ -81,6 +81,10 @@
        reads go live (Sprint-5 lesson: never ship writes without a backend). */
     writeMocks: env.writeMocks !== undefined ? !!env.writeMocks : true,
     baseUrl: env.baseUrl || '/api',
+    /* Second base URL for the org backend (test gateway). Empty '' = kill
+       switch: org reads/writes fall back to mocks. See api/org.js. */
+    orgBaseUrl: env.orgBaseUrl || '',
+    orgWrites: env.orgWrites !== undefined ? !!env.orgWrites : false,
     delay: delay,
     folderName: folderName,
     mockPresignedUrl: mockPresignedUrl,

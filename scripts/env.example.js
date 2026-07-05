@@ -9,5 +9,7 @@
 window.FS_ENV = {
   baseUrl: 'https://khfj3p1fkb.execute-api.ap-southeast-2.amazonaws.com/prod/api',
   useMocks: false,   // reads go to the real API
-  writeMocks: true,  // backend-less writes stay mocked (Phase 3 flips this)
+  writeMocks: true,  // non-org backend-less writes stay mocked
+  orgBaseUrl: 'https://wdsgobb7b0.execute-api.ap-southeast-2.amazonaws.com/prod/api',  // org backend (empty '' = kill switch → org回mock)
+  orgWrites: true,   // org-domain writes go live (batch 2)
 };
