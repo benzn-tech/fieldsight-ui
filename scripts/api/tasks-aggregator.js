@@ -109,17 +109,23 @@
       /* Pooled, not Promise.all: the cross-product reaches 150+ requests on
          the 'All' range — see FS.api.pooledAll. Failed fetches → null →
          filtered out (partial data beats a dead page). */
-      timelinePromise = window.FS.api.pooledAll(
-        datesInRange.reduce(function (acc, d) {
-          folders.forEach(function (f) {
-            acc.push(function () {
-              return window.FS.api.timeline.getTimeline({ date: d, user: f })
-                .then(function (r) { return { date: d, report: r }; });
-            });
+      var taskThunks = datesInRange.reduce(function (acc, d) {
+        folders.forEach(function (f) {
+          acc.push(function () {
+            return window.FS.api.timeline.getTimeline({ date: d, user: f })
+              .then(function (r) { return { date: d, report: r }; });
           });
-          return acc;
-        }, []), 8
-      ).then(function (rs) { return rs.filter(Boolean); });
+        });
+        return acc;
+      }, []);
+      timelinePromise = window.FS.api.pooledAll(taskThunks, 8).then(function (rs) {
+        var out = rs.filter(Boolean);
+        /* batch 2c Task 6 — all-failed → error, not a silently-empty page. */
+        if (taskThunks.length > 0 && out.length === 0) {
+          throw new Error('Could not load data — all requests failed. Please retry.');
+        }
+        return out;
+      });
     } else {
       timelinePromise = Promise.all(datesInRange.map(function (d) {
         return window.FS.api.timeline.getTimeline({ date: d, user: user })

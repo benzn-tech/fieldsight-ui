@@ -118,7 +118,14 @@
           return window.FS.api.timeline.getTimeline({ date: k.date, user: k.user.folder_name })
             .then(function (r) { return Object.assign({ report: r }, k); });
         };
-      }), 8).then(function (rs) { return rs.filter(Boolean); }),
+      }), 8).then(function (rs) {
+        var out = rs.filter(Boolean);
+        /* batch 2c Task 6 — all-failed → error, not a silently-empty page. */
+        if (perCall.length > 0 && out.length === 0) {
+          throw new Error('Could not load data — all requests failed. Please retry.');
+        }
+        return out;
+      }),
       window.FS.api.actions.getActionsRange({ from: dates[0], to: dates[dates.length - 1] }),
     ]);
 
