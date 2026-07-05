@@ -363,8 +363,24 @@
   function AddMemberModal(props) {
     var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
     var live  = orgLive();
-    var roles = roleOptions(); var sites = siteOptions();
-    var refForm = React.useState({ name: '', email: '', role: (roles[0] && roles[0].v) || 'worker', primary_site: (sites[0] && sites[0].v) || '' });
+    var roles = roleOptions(); var mockSites = siteOptions();
+    /* Live: the primary-site dropdown must come from the REAL org sites —
+       fixture site_ids don't exist in the org sites table, so sending one as
+       a membership is an invalid FK. Fetch them; default to no primary site
+       so a membership is only sent when the admin explicitly picks a real
+       org site. Mock: unchanged (fixture sites). */
+    var refOrgSites = React.useState([]); var orgSites = refOrgSites[0], setOrgSites = refOrgSites[1];
+    React.useEffect(function () {
+      if (!live) return undefined;
+      var cancelled = false;
+      window.FS.api.org.getOrgSites().then(function (res) {
+        if (cancelled || !res || res._accessDenied || res._notFound) return;
+        setOrgSites(((res && res.sites) || []).map(function (s) { return { v: s.site_id, l: s.name }; }));
+      }).catch(function () {});
+      return function () { cancelled = true; };
+    }, []);
+    var sites = live ? orgSites : mockSites;
+    var refForm = React.useState({ name: '', email: '', role: (roles[0] && roles[0].v) || 'worker', primary_site: live ? '' : ((mockSites[0] && mockSites[0].v) || '') });
     var form = refForm[0], setForm = refForm[1];
     var refBusy = React.useState(false); var busy = refBusy[0], setBusy = refBusy[1];
     var avatarRef = React.useRef(null);
@@ -417,7 +433,7 @@
         )),
         fFieldRow('Email', fText(form.email, function (v) { set('email', v); }, 'email')),
         fFieldRow('Position / role', fSelect(form.role, roles, function (v) { set('role', v); })),
-        fFieldRow('Primary site', fSelect(form.primary_site, sites, function (v) { set('primary_site', v); })),
+        fFieldRow('Primary site', fSelect(form.primary_site, (live ? [{ v: '', l: '— select site —' }].concat(sites) : sites), function (v) { set('primary_site', v); })),
         React.createElement('div', { className: 'fs-settings__actions' },
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: props.onClose }, 'Cancel'),
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--md', disabled: busy, onClick: submit }, busy ? 'Adding…' : 'Add member')

@@ -90,6 +90,7 @@
       await api.delay();
       res = { sites: (fx().sites || []).slice() };
     }
+    if (res && (res._accessDenied || res._notFound)) return res;
     return { sites: (res.sites || []).map(_toPageSite) };
   }
 
@@ -133,6 +134,7 @@
       await api.delay();
       res = { members: (fx().users || []).slice() };
     }
+    if (res && (res._accessDenied || res._notFound)) return res;
     (res.members || []).forEach(function (m) { m.folder_name = folderName(m); });
     return { members: (res.members || []).map(_toPageMember) };
   }
