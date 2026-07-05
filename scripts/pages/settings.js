@@ -33,6 +33,9 @@
   function readThemeResolved() { return window.FS && window.FS.theme ? window.FS.theme.get() : 'light'; }
   function readDensityStored() { return window.FS && window.FS.density ? window.FS.density.getStored() : 'comfortable'; }
   function toast(message, tone) { if (window.FS && window.FS.toast) window.FS.toast.show({ message: message, tone: tone || 'success' }); }
+  /* Module-scope (not Provider-closure) so ProfileTab's onPick can reach it
+     without threading a helper through ctx — matches toast()'s pattern above. */
+  function orgLive() { return !!(window.FS && window.FS.api && !window.FS.api.useMocks && window.FS.api.orgBaseUrl && window.FS.api.org); }
 
   /* ---------- option data ----------------------------------------------- */
   var TABS = [
@@ -107,18 +110,27 @@
        patchProfile stay in sync (single merge implementation). */
     function patchProfile(patch) { refProfile[1](function (p) { return Object.assign({}, p, patch); }); }
 
-    function orgLive() { return !!(window.FS && window.FS.api && !window.FS.api.useMocks && window.FS.api.orgBaseUrl && window.FS.api.org); }
-
-    /* Live mode only — hydrate identity fields (name/email) from the real
-       org profile once on mount; deriveProfile() already covers mock mode
-       and first paint. Avatar + format/timezone prefs are untouched here
-       (avatar upload wiring is batch 2c). Guarded against unmount. */
+    /* Live mode only — hydrate identity fields (name/email) and avatar from
+       the real org profile once on mount; deriveProfile() already covers
+       mock mode and first paint. Format/timezone prefs are untouched here.
+       Guarded against unmount, and against a resolved avatar clobbering an
+       image the user already picked while getMe()/resolveAssetUrl() were
+       still in flight (checked via functional setState against the LATEST
+       profile, not a closed-over snapshot). */
     React.useEffect(function () {
       var cancelled = false;
       if (orgLive()) {
         window.FS.api.org.getMe().then(function (me) {
           if (cancelled || !me || me._accessDenied || me._notFound) return;
           patchProfile({ firstName: me.first_name, lastName: me.last_name, email: me.email });
+          if (me.avatar_s3_key) {
+            window.FS.api.org.resolveAssetUrl(me.avatar_s3_key).then(function (url) {
+              if (cancelled || !url) return;
+              refProfile[1](function (prev) {
+                return prev._pendingAvatarKey ? prev : Object.assign({}, prev, { avatarUrl: url });
+              });
+            });
+          }
         }).catch(function (err) { console.warn('[settings] could not load /api/org/me', err); });
       }
       return function () { cancelled = true; };
@@ -136,20 +148,34 @@
         patchProfile: patchProfile,
         saveProfile: function () {
           var p = refProfile[0];
-          function commitLocal() {
-            writeJSON(PROFILE_KEY, p);
+          /* Takes the final profile object to persist (not a closed-over var) so the
+             live-mode avatar-resolve branch below can commit a copy with the
+             pending key swapped for its resolved URL, while the plain path just
+             commits p as-is. */
+          function commitLocal(finalProfile) {
+            writeJSON(PROFILE_KEY, finalProfile);
             if (window.AuthMock && window.AuthMock.updateProfile) {
-              window.AuthMock.updateProfile({ firstName: p.firstName, lastName: p.lastName, email: p.email, avatarUrl: p.avatarUrl });
+              window.AuthMock.updateProfile({ firstName: finalProfile.firstName, lastName: finalProfile.lastName, email: finalProfile.email, avatarUrl: finalProfile.avatarUrl });
             }
             toast('Profile saved');
           }
           if (orgLive()) {
-            window.FS.api.org.updateProfile({ first_name: p.firstName, last_name: p.lastName }).then(commitLocal).catch(function (err) {
+            var body = { first_name: p.firstName, last_name: p.lastName };
+            var sentAvatar = !!p._pendingAvatarKey;
+            if (sentAvatar) body.avatar_s3_key = p._pendingAvatarKey;
+            window.FS.api.org.updateProfile(body).then(function (res) {
+              if (!sentAvatar) { commitLocal(p); return; }
+              window.FS.api.org.resolveAssetUrl(res && res.avatar_s3_key).then(function (url) {
+                var finalUrl = url || p.avatarUrl;   // resolve failed: keep the data-URI preview rather than blanking the avatar
+                patchProfile({ avatarUrl: finalUrl, _pendingAvatarKey: undefined });
+                commitLocal(Object.assign({}, p, { avatarUrl: finalUrl, _pendingAvatarKey: undefined }));
+              });
+            }).catch(function (err) {
               console.warn('[settings] could not save /api/org/me', err);
-              toast('Could not save profile', 'error');
+              toast(sentAvatar ? 'Could not save profile — image upload may have expired, re-upload it' : 'Could not save profile', 'error');
             });
           } else {
-            commitLocal();
+            commitLocal(p);
           }
         },
         resetProfile: function () { refProfile[1](deriveProfile()); toast('Reverted to saved profile', 'info'); },
@@ -272,6 +298,18 @@
       var reader = new FileReader();
       reader.onload = function () { ctx.patchProfile({ avatarUrl: reader.result }); };
       reader.readAsDataURL(f);
+      /* Live mode: kick off the real presigned upload in parallel with the
+         instant data-URI preview above (uploadImage() doesn't need the
+         FileReader result, just the raw File). The pending key rides along
+         in profile state until Save sends it to PATCH /me. */
+      if (orgLive()) {
+        window.FS.api.org.uploadImage('avatar', f).then(function (key) {
+          if (key) ctx.patchProfile({ _pendingAvatarKey: key });   // null = mock/writes-off: local preview only
+        }).catch(function (err) {
+          console.warn('[settings] could not upload avatar', err);
+          toast('Could not upload image — use JPEG, PNG or WebP', 'error');
+        });
+      }
     }
     var avatarEl = Avatar
       ? React.createElement(Avatar, { name: (p.firstName + ' ' + p.lastName).trim() || 'User', src: p.avatarUrl || undefined, size: 'xl' })
