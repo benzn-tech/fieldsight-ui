@@ -31,6 +31,41 @@
     return m.name ? m.name.replace(/ /g, '_') : '';
   }
 
+  /* Page-shape adapters (batch 2b fan-out): map org API member/site payloads
+     to the field names Sites/Team page render code expects (device_id,
+     folder_name, site_id, icon, ...). PURE + idempotent-safe: running on an
+     already page-shaped mock object (fixture users/sites already carry
+     device_id/site_id/name/folder_name) must not blank those fields out —
+     fall back to the existing value whenever the source-shaped field is
+     absent. */
+  function _toPageMember(m) {
+    m = m || {};
+    var nameFromParts = [m.first_name, m.last_name].filter(Boolean).join(' ');
+    var membershipSites = (m.memberships || []).map(function (x) { return x.site_id; });
+    var membershipPrimary = ((m.memberships || [])[0] || {}).site_id;
+    return Object.assign({}, m, {
+      device_id: m.cognito_sub || m.device_id,
+      name: nameFromParts || m.name || m.email || '',
+      role: m.global_role || m.role,
+      folder_name: folderName(m),
+      sites: membershipSites.length ? membershipSites : (m.sites || []),
+      primary_site: membershipPrimary || m.primary_site || '',
+      avatarUrl: m.avatar_s3_key || m.avatarUrl || null,
+      archived: !!(m.archived_at || m.archived),
+    });
+  }
+
+  function _toPageSite(s) {
+    s = s || {};
+    return Object.assign({}, s, {
+      site_id: s.id || s.site_id,
+      region: s.region || '',
+      icon: s.icon_s3_key || s.icon || null,
+      user_count: s.user_count || 0,
+      archived: !!(s.archived_at || s.archived),
+    });
+  }
+
   // -------- profile --------
   async function getMe() {
     if (orgLive()) return api.orgRequest('/me');
@@ -48,11 +83,15 @@
   // -------- sites --------
   async function getOrgSites(opts) {
     opts = opts || {};
+    var res;
     if (orgLive()) {
-      return api.orgRequest('/sites', opts.includeArchived ? { params: { include_archived: '1' } } : undefined);
+      res = await api.orgRequest('/sites', opts.includeArchived ? { params: { include_archived: '1' } } : undefined);
+    } else {
+      await api.delay();
+      res = { sites: (fx().sites || []).slice() };
     }
-    await api.delay();
-    return { sites: (fx().sites || []).slice() };
+    if (res && (res._accessDenied || res._notFound)) return res;
+    return { sites: (res.sites || []).map(_toPageSite) };
   }
 
   async function createOrgSite(body) {
@@ -95,8 +134,9 @@
       await api.delay();
       res = { members: (fx().users || []).slice() };
     }
+    if (res && (res._accessDenied || res._notFound)) return res;
     (res.members || []).forEach(function (m) { m.folder_name = folderName(m); });
-    return res;
+    return { members: (res.members || []).map(_toPageMember) };
   }
 
   async function createMember(body) {
@@ -142,5 +182,6 @@
     archiveMember: archiveMember, unarchiveMember: unarchiveMember,
     uploadUrl: uploadUrl, assetUrl: assetUrl,
     _folderName: folderName,   /* exported for batch-2b fan-out reuse */
+    _toPageMember: _toPageMember, _toPageSite: _toPageSite,   /* page-shape adapters, batch-2b */
   };
 })();

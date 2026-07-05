@@ -41,6 +41,13 @@
 (function () {
   'use strict';
 
+  /* folder_name if present (fixtures + live /api/users alike), else
+     derived client-side from name. Real /api/users returns only
+     {device_id,name,role,sites} — no folder_name. */
+  function deriveFolder(u) {
+    return u.folder_name || (u.name ? u.name.replace(/ /g, '_') : '');
+  }
+
   /* Resolve the user param honouring worker-forced-self, mirroring
      the rule used by today.js + activity.js. */
   function resolveUser(explicitUser) {
@@ -82,11 +89,20 @@
        no explicit user is provided, matching compliance-aggregator. */
     var caller  = (window.AuthMock && window.AuthMock.currentUser) || {};
     var isAdmin = caller.role === 'admin' || caller.role === 'gm' || !!caller.isAdmin;
-    var folders = (!user && isAdmin)
-      ? ((window.FieldSight && window.FieldSight.fixtures
-          && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [])
-          .map(function (u) { return u.folder_name; }).filter(Boolean)
-      : null;
+    var folders = null;
+    if (!user && isAdmin) {
+      /* Sourced from the real GET /api/users (report identity) — live =
+         pass-through of /api/users, mock = fixtures (unchanged behaviour).
+         Falls back to the fixtures read on any /api/users error. */
+      try {
+        var usersRes = await window.FS.api.sites.getUsers();
+        folders = ((usersRes && usersRes.users) || []).map(deriveFolder).filter(Boolean);
+      } catch (e) {
+        folders = ((window.FieldSight && window.FieldSight.fixtures
+            && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [])
+            .map(deriveFolder).filter(Boolean);
+      }
+    }
 
     var timelinePromise;
     if (folders && folders.length > 0) {

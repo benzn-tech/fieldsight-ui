@@ -153,16 +153,34 @@
     return explicitUser || null;
   }
 
+  /* folder_name if present (fixtures + live /api/users alike), else
+     derived client-side from name. Real /api/users returns only
+     {device_id,name,role,sites} — no folder_name. */
+  function deriveFolder(u) {
+    return u.folder_name || (u.name ? u.name.replace(/ /g, '_') : '');
+  }
+
   /* Sprint 8 follow-up — admin fan-out across all known users when no
      explicit user is provided. Without this, getTimeline(date, user=null)
      for admin returns the available_users disambiguation envelope, which
      downstream loops skip — yielding empty Tasks/Safety/Quality/Evidence
-     pages for admin. We materialise (date × user) cross-product instead. */
-  function adminUserFolders() {
-    var fx = (window.FieldSight && window.FieldSight.fixtures
-      && window.FieldSight.fixtures.sites) || {};
-    return (fx.users || []).map(function (u) { return u.folder_name; })
-      .filter(Boolean);
+     pages for admin. We materialise (date × user) cross-product instead.
+
+     Sourced from the real GET /api/users (report identity) via
+     window.FS.api.sites.getUsers() — live = pass-through of /api/users,
+     mock = fixtures (unchanged behaviour, since mock getUsers() already
+     returns fixtures.sites.users with folder_name intact). Falls back to
+     the fixtures read on any /api/users error, keeping the previous
+     degraded behaviour instead of an empty fan-out. */
+  async function adminUserFolders() {
+    try {
+      var res = await window.FS.api.sites.getUsers();
+      return ((res && res.users) || []).map(deriveFolder).filter(Boolean);
+    } catch (e) {
+      var fx = (window.FieldSight && window.FieldSight.fixtures
+        && window.FieldSight.fixtures.sites) || {};
+      return (fx.users || []).map(deriveFolder).filter(Boolean);
+    }
   }
   function isAdminCaller() {
     var c = (window.AuthMock && window.AuthMock.currentUser) || {};
@@ -208,7 +226,7 @@
        the window gets included rather than being short-circuited by
        the available_users envelope. */
     if (!user && isAdminCaller()) {
-      var folders = adminUserFolders();
+      var folders = await adminUserFolders();
       var perDayAdmin = await Promise.all(
         datesInRange.reduce(function (acc, d) {
           folders.forEach(function (f) {

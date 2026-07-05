@@ -697,6 +697,57 @@ button:not([class*="fs-"]):focus-visible,
 }
 
 /* ==========================================================================
+   §SPRINT-2B · ORG STATUS BANNER (unprovisioned / archived)
+   Mirrors .fs-offline-banner's fixed-position pattern. Both light/dark
+   variants set background AND foreground explicitly (not just a text-color
+   override) since the raw --color-{info,warning}-NNN palette tokens are not
+   theme-flipped — see CLAUDE.md "Status colour tokens are not theme-flipped".
+   ========================================================================== */
+
+.fs-orgstatus-banner {
+  position:      fixed;
+  top:           0;
+  left:          0;
+  right:         0;
+  z-index:       399;
+  padding:       9px 16px;
+  font-family:   var(--font-sans);
+  font-size:     var(--fs-text-sm, 13px);
+  font-weight:   500;
+  text-align:    center;
+  pointer-events: none;
+}
+
+/* Stack below the offline banner on the rare occasion both show at once. */
+.fs-offline-banner + .fs-orgstatus-banner {
+  top: 38px;
+}
+
+.fs-orgstatus-banner--unprovisioned {
+  background:    var(--color-info-100, #dbeafe);
+  border-bottom: 1px solid var(--color-info-300, #93c5fd);
+  color:         var(--color-info-900, #1e3a8a);
+}
+
+[data-theme="dark"] .fs-orgstatus-banner--unprovisioned {
+  background:   var(--color-info-900, #1e3a8a);
+  border-color: var(--color-info-700, #1d4ed8);
+  color:        var(--color-info-200, #bfdbfe);
+}
+
+.fs-orgstatus-banner--archived {
+  background:    var(--color-warning-100, #fef3c7);
+  border-bottom: 1px solid var(--color-warning-300, #fcd34d);
+  color:         var(--color-warning-900, #78350f);
+}
+
+[data-theme="dark"] .fs-orgstatus-banner--archived {
+  background:   var(--color-warning-900, #451a03);
+  border-color: var(--color-warning-700, #b45309);
+  color:        var(--color-warning-200, #fde68a);
+}
+
+/* ==========================================================================
    §SPRINT-8.10.2 · COPY-LINK / SHARE BUTTON
    .fs-share-btn inherits .fs-utility-item base — no extra overrides needed
    ========================================================================== */
@@ -772,6 +823,7 @@ button:not([class*="fs-"]):focus-visible,
   .fs-bottom-nav__more-sheet-backdrop,
   .fs-toast-stack,
   .fs-offline-banner,
+  .fs-orgstatus-banner,
   .fs-search-palette,
   .fs-skip-nav,
   .fs-mobile-back,
