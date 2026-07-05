@@ -235,7 +235,11 @@
   function orgRequest(path, opts) {
     opts = Object.assign({}, opts);
     opts.baseUrl = (window.FS && window.FS.api && window.FS.api.orgBaseUrl) || '';
-    return request(path, opts);
+    /* Org endpoints live under /api/org/* on the gateway, but orgBaseUrl ends
+       at /prod/api — so prefix the logical path (/me → /org/me). api/org.js
+       passes Lambda-internal route names (/me, /sites, …) and only calls this
+       when orgBaseUrl is set (its orgLive gate), so no report-gateway leak. */
+    return request('/org' + path, opts);
   }
 
   if (!window.FS) window.FS = {};
