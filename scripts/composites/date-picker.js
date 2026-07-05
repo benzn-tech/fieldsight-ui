@@ -265,6 +265,7 @@
       || (window.FS.api.window && window.FS.api.window.MONTHS_LOOKBACK)
       || 24;
     var site = props.site || null;
+    var user = props.user || null;   /* narrows dots to one user's report days */
 
     var refDates = React.useState({ status: 'loading', map: {} });
     var datesS    = refDates[0];
@@ -299,7 +300,7 @@
 
     React.useEffect(function () {
       var cancelled = false;
-      window.FS.api.dates.getDates({ months: monthsRange, site: site }).then(function (res) {
+      window.FS.api.dates.getDates({ months: monthsRange, site: site, user: user }).then(function (res) {
         if (cancelled) return;
         setDatesS({ status: 'ok', map: res.dates || {} });
       }).catch(function () {
@@ -307,7 +308,7 @@
         setDatesS({ status: 'error', map: {} });
       });
       return function () { cancelled = true; };
-    }, [monthsRange, site]);
+    }, [monthsRange, site, user]);
 
     /* When the selected date (or, in range mode, the range start)
        changes externally, follow it in the modal. */

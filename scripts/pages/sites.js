@@ -289,7 +289,7 @@
         fFieldRow('Project name *', fText(form.name, function (v) { set('name', v); })),
         fFieldRow('Project icon', React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
           Avatar ? React.createElement(Avatar, { name: form.name || 'Project', src: form.icon || undefined, size: 'md', shape: 'square' }) : null,
-          React.createElement('input', { type: 'file', accept: 'image/*', ref: iconRef, onChange: onPickIcon, style: { display: 'none' } }),
+          React.createElement('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', ref: iconRef, onChange: onPickIcon, style: { display: 'none' } }),
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm', onClick: function () { if (iconRef.current) iconRef.current.click(); } }, 'Upload icon')
         )),
         fFieldRow('Location', fText(form.location, function (v) { set('location', v); })),
@@ -590,7 +590,7 @@
           ),
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', marginTop: '12px' } },
             Avatar ? React.createElement(Avatar, { name: site.name || site.site_id, src: iconPreview || site.icon || undefined, size: 'lg', shape: 'square' }) : null,
-            React.createElement('input', { type: 'file', accept: 'image/*', ref: iconRef, onChange: onPickIcon, style: { display: 'none' } }),
+            React.createElement('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', ref: iconRef, onChange: onPickIcon, style: { display: 'none' } }),
             React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm', onClick: function () { if (iconRef.current) iconRef.current.click(); } }, site.icon ? 'Change image' : 'Upload image'),
             /* live: backend PATCH ignores null icon_s3_key (no clear support yet —
                backend backlog: explicit-null icon clear), so hide Remove entirely

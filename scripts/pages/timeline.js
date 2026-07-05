@@ -123,7 +123,23 @@
         date:        date,
         onChange:    onChangeDate,
         monthsRange: 3,
+        /* Dots follow the ACTIVE user so they match the per-user report
+           fetch (admin dots were a union across all users — dotted dates
+           with no content for the selected user). No user → union stays,
+           which pairs with the admin "pick a user" state. */
+        user:        user || null,
       }) : null,
+      /* Admin/GM viewing a specific user: offer a way back to the
+         user-picker (available_users state) — previously the only way to
+         switch users was hand-editing the ?user= query param. */
+      (user && isAdminLike((window.AuthMock && window.AuthMock.currentUser) || {}))
+        ? React.createElement('button', {
+            type:      'button',
+            className: 'fs-btn fs-btn--tertiary fs-btn--sm',
+            style:     { marginTop: '6px' },
+            onClick:   function () { window.FS.Router.navigate('/timeline?date=' + (date || '')); },
+          }, 'View another user ↺')
+        : null,
     );
   }
 
