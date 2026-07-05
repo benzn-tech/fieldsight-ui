@@ -7,10 +7,17 @@ frontend:
         - cp -R scripts styles dist/
         - cp *.html dist/
         - cp app-shell-preview.html dist/index.html
+        # Booleans are normalized so junk env values ("True", "yes") can't emit
+        # invalid JS — a broken env.js silently reverts the WHOLE app to mock
+        # mode. useMocks/writeMocks only flip off on literal "false";
+        # orgWrites only flips on with literal "true".
         - >-
           printf 'window.FS_ENV = { baseUrl: "%s", useMocks: %s, writeMocks: %s, orgBaseUrl: "%s", orgWrites: %s };\n'
-          "${FS_BASEURL:-/api}" "${FS_USEMOCKS:-true}" "${FS_WRITEMOCKS:-true}"
-          "${FS_ORG_BASEURL:-}" "${FS_ORGWRITES:-false}"
+          "${FS_BASEURL:-/api}"
+          "$([ "${FS_USEMOCKS:-true}" = "false" ] && echo false || echo true)"
+          "$([ "${FS_WRITEMOCKS:-true}" = "false" ] && echo false || echo true)"
+          "${FS_ORG_BASEURL:-}"
+          "$([ "${FS_ORGWRITES:-false}" = "true" ] && echo true || echo false)"
           > dist/env.js
   artifacts:
     baseDirectory: dist

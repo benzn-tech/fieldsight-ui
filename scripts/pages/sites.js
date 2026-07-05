@@ -196,9 +196,9 @@
         if (window.FS.toast) window.FS.toast.show({ message: 'Project "' + site.name + '" created', tone: 'success' });
         if (props.onCreated) props.onCreated(site);
         if (props.onClose) props.onClose();
-      }).catch(function () {
+      }).catch(function (err) {
         setBusy(false);
-        if (window.FS.toast) window.FS.toast.show({ message: 'Could not create project', tone: 'error' });
+        if (window.FS.toast) window.FS.toast.show({ message: 'Could not create project' + (err && err.message ? ' \u2014 ' + err.message : ''), tone: 'error' });
       });
     }
     if (!Modal) return null;

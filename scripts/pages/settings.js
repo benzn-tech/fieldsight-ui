@@ -274,7 +274,7 @@
       React.createElement('div', { className: 'fs-settings__profile' },
         React.createElement('div', { className: 'fs-settings__avatar-col' },
           avatarEl,
-          React.createElement('input', { type: 'file', accept: 'image/*', ref: fileRef, onChange: onPick, style: { display: 'none' } }),
+          React.createElement('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', ref: fileRef, onChange: onPick, style: { display: 'none' } }),
           React.createElement('button', { type: 'button', className: 'fs-settings__link-btn', onClick: function () { if (fileRef.current) fileRef.current.click(); } }, 'Change picture')
         ),
         React.createElement('div', { className: 'fs-settings__profile-fields' },

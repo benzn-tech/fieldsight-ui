@@ -264,13 +264,38 @@
     }
 
     function changeRole(deviceId, role) {
-      if (window.FS.api.sites.updateUserRole) window.FS.api.sites.updateUserRole(deviceId, role);
+      /* Optimistic patch, but remember the previous role: in live mode the
+         org backend can legitimately refuse (anti-escalation, self-change,
+         unsupported role) and the row must roll back instead of silently
+         diverging from Aurora until reload. */
+      var prevRole = null;
       setState(function (s) {
         if (s.status !== 'ok') return s;
-        var patched = (s.users || []).map(function (u) { return u.device_id === deviceId ? Object.assign({}, u, { role: role }) : u; });
+        var patched = (s.users || []).map(function (u) {
+          if (u.device_id !== deviceId) return u;
+          prevRole = u.role;
+          return Object.assign({}, u, { role: role });
+        });
         return Object.assign({}, s, { users: patched, groups: groupUsersBySite(patched), totals: Object.assign({}, s.totals, { roles: countDistinctRoles(patched) }) });
       });
-      if (window.FS && window.FS.toast) window.FS.toast.show({ message: 'Position updated', tone: 'success' });
+      function revert() {
+        setState(function (s) {
+          if (s.status !== 'ok' || prevRole == null) return s;
+          var patched = (s.users || []).map(function (u) { return u.device_id === deviceId ? Object.assign({}, u, { role: prevRole }) : u; });
+          return Object.assign({}, s, { users: patched, groups: groupUsersBySite(patched), totals: Object.assign({}, s.totals, { roles: countDistinctRoles(patched) }) });
+        });
+      }
+      var pending = window.FS.api.sites.updateUserRole ? window.FS.api.sites.updateUserRole(deviceId, role) : null;
+      if (pending && typeof pending.then === 'function') {
+        pending.then(function () {
+          if (window.FS && window.FS.toast) window.FS.toast.show({ message: 'Position updated', tone: 'success' });
+        }).catch(function (err) {
+          revert();
+          if (window.FS && window.FS.toast) window.FS.toast.show({ message: 'Could not update position' + (err && err.message ? ' — ' + err.message : ''), tone: 'error' });
+        });
+      } else if (window.FS && window.FS.toast) {
+        window.FS.toast.show({ message: 'Position updated', tone: 'success' });
+      }
     }
 
     var ctx = {
@@ -298,7 +323,16 @@
   }
   function roleOptions() {
     var R = (window.FS && window.FS.ROLES) || {};
-    return Object.keys(R).map(function (k) { return { v: k, l: R[k].label || k }; });
+    var keys = Object.keys(R);
+    /* Live org mode: only offer roles the backend persists without lossy
+       remapping (sites.js ORG_ROLE_BY_UI_ROLE) — anything else would either
+       escalate ACL or rewrite the position on the next roster load. */
+    var api = window.FS && window.FS.api;
+    if (api && api.org && api.org.isLive() && api.sites && api.sites.liveRoleKeys) {
+      var allowed = api.sites.liveRoleKeys();
+      keys = keys.filter(function (k) { return allowed.indexOf(k) !== -1; });
+    }
+    return keys.map(function (k) { return { v: k, l: R[k].label || k }; });
   }
   function siteOptions() {
     var f = (window.FieldSight && window.FieldSight.fixtures && window.FieldSight.fixtures.sites) || { sites: [] };
@@ -323,9 +357,10 @@
         if (window.FS.toast) window.FS.toast.show({ message: form.name + ' added', tone: 'success' });
         if (props.onCreated) props.onCreated(user);
         if (props.onClose) props.onClose();
-      }).catch(function () { setBusy(false); if (window.FS.toast) window.FS.toast.show({ message: 'Could not add member', tone: 'error' }); });
+      }).catch(function (err) { setBusy(false); if (window.FS.toast) window.FS.toast.show({ message: 'Could not add member' + (err && err.message ? ' — ' + err.message : ''), tone: 'error' }); });
     }
     if (!Modal) return null;
+    var orgLive = !!(window.FS.api && window.FS.api.org && window.FS.api.org.isLive());
     return React.createElement(Modal, { open: true, size: 'md', title: 'Add member', onClose: props.onClose },
       React.createElement('div', { className: 'fs-settings__pw-form' },
         fFieldRow('Full name *', fText(form.name, function (v) { set('name', v); })),
@@ -334,7 +369,7 @@
           React.createElement('input', { type: 'file', accept: 'image/*', ref: avatarRef, onChange: onPickAvatar, style: { display: 'none' } }),
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm', onClick: function () { if (avatarRef.current) avatarRef.current.click(); } }, 'Upload picture')
         )),
-        fFieldRow('Email', fText(form.email, function (v) { set('email', v); }, 'email')),
+        fFieldRow(orgLive ? 'Email *' : 'Email', fText(form.email, function (v) { set('email', v); }, 'email')),
         fFieldRow('Position / role', fSelect(form.role, roles, function (v) { set('role', v); })),
         fFieldRow('Primary site', fSelect(form.primary_site, sites, function (v) { set('primary_site', v); })),
         React.createElement('div', { className: 'fs-settings__actions' },

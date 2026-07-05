@@ -14,15 +14,41 @@
   }
 
   async function getSites() {
-    if (!window.FS.api.useMocks) return window.FS.api.request('/sites');
-    await window.FS.api.delay();
-    var f  = fixtures().sites || { sites: [], users: [] };
-    var u  = (window.AuthMock && window.AuthMock.currentUser) || {};
-    return {
-      sites:        f.sites.slice(),   /* copy — keep state independent of the fixture so optimistic adds don't double up */
-      role:         u.role || 'site_manager',
-      display_name: u.name || 'Jarley Trainor',
-    };
+    var base;
+    if (!window.FS.api.useMocks) {
+      base = await window.FS.api.request('/sites');
+    } else {
+      await window.FS.api.delay();
+      var f  = fixtures().sites || { sites: [], users: [] };
+      var u  = (window.AuthMock && window.AuthMock.currentUser) || {};
+      base = {
+        sites:        f.sites.slice(),   /* copy — keep state independent of the fixture so optimistic adds don't double up */
+        role:         u.role || 'site_manager',
+        display_name: u.name || 'Jarley Trainor',
+      };
+    }
+    /* Phase 3: merge org-backend sites so projects created live SURVIVE a
+       reload (the legacy read only knows user_mapping sites). Matched by
+       name (org sites are seeded from the same user_mapping); org-only
+       sites are appended in legacy shape. Org read failures never break
+       the sites page. */
+    if (orgLive() && base && base.sites) {
+      try {
+        var orgRes = await window.FS.api.org.listSites();
+        var byName = {};
+        base.sites.forEach(function (s) { byName[s.name] = s; });
+        (orgRes.sites || []).forEach(function (os) {
+          var existing = byName[os.name];
+          if (existing) {
+            existing.org_site_id = os.id;
+            if (os.icon_url && !existing.icon) existing.icon = os.icon_url;
+          } else {
+            base.sites.push(orgSiteToLegacy(os));
+          }
+        });
+      } catch (e) { /* org unreachable → legacy list only */ }
+    }
+    return base;
   }
 
   async function getSiteUsers(site) {
@@ -73,14 +99,16 @@
   }
 
   /* UI role taxonomy (roles.js, 7+3) is richer than the backend's
-     admin/gm > pm > site_manager > worker. Provisional lossy map until the
-     backend grows the full taxonomy — the UI keeps rendering the UI role,
-     only the persisted ACL role is coarser. */
+     admin/gm > pm > site_manager > worker. Only roles that ROUND-TRIP
+     exactly may be sent live — a lossy map either escalates ACL (foreman →
+     site_manager would leak other workers' data, BUG-25 semantics) or
+     rewrites positions on the next roster load. Everything else is
+     rejected with a clear error until the backend grows the taxonomy;
+     the live pickers filter to liveRoleKeys(). */
   var ORG_ROLE_BY_UI_ROLE = {
-    admin: 'admin', gm: 'gm', director: 'gm',
-    construction_manager: 'pm', project_manager: 'pm', pm: 'pm',
-    hse_manager: 'pm', quality_manager: 'pm',
-    site_manager: 'site_manager', foreman: 'site_manager',
+    admin: 'admin', gm: 'gm',
+    project_manager: 'pm', pm: 'pm',
+    site_manager: 'site_manager',
     worker: 'worker',
   };
   var UI_ROLE_BY_ORG_ROLE = {
@@ -90,7 +118,18 @@
   var ORG_MEMBERSHIP_ROLES = { pm: 1, site_manager: 1, worker: 1 };
 
   function toOrgRole(uiRole) {
-    return ORG_ROLE_BY_UI_ROLE[uiRole] || 'worker';
+    return ORG_ROLE_BY_UI_ROLE[uiRole] || null;
+  }
+
+  function unsupportedRoleError(uiRole) {
+    var e = new Error("Position '" + uiRole + "' isn't supported by the org backend yet — pick Admin, GM, Project Manager, Site Manager or Worker");
+    e.status = 400;
+    return e;
+  }
+
+  /* UI role keys valid in live mode (team page filters its pickers). */
+  function liveRoleKeys() {
+    return Object.keys(ORG_ROLE_BY_UI_ROLE);
   }
 
   /* Map an org site's uuid onto the fixture slug the pages group by when
@@ -167,7 +206,24 @@
         location: input.location || null,
         client:   input.client || null,
       });
-      return orgSiteToLegacy(created.site);
+      var legacy = orgSiteToLegacy(created.site);
+      /* Echo UI-only fields (no backend columns yet) so the row the user
+         just filled in doesn't lie back at them; region/value/completion
+         are session-local until the backend grows them. */
+      legacy.region = input.region || legacy.region;
+      legacy.project_value_nzd = Number(input.project_value_nzd) || 0;
+      legacy.planned_completion = input.planned_completion || '';
+      if (input.icon) {
+        legacy.icon = input.icon;   /* local preview wins immediately */
+        try {
+          /* form.icon is a FileReader data URL → Blob → presigned PUT */
+          var blob = await (await fetch(input.icon)).blob();
+          await window.FS.api.org.uploadSiteIcon(created.site.id, blob);
+        } catch (e) {
+          if (window.FS.toast) window.FS.toast.show({ message: 'Project created, but the icon upload failed — ' + ((e && e.message) || 'server error'), tone: 'error' });
+        }
+      }
+      return legacy;
     }
     var site = {
       site_id:            (slugify(input.name) || 'site') + '-' + Date.now().toString(36),
@@ -194,6 +250,7 @@
       }
       var parts = (input.name || '').trim().split(/\s+/);
       var orgRole = toOrgRole(input.role || 'worker');
+      if (!orgRole) throw unsupportedRoleError(input.role);
       var mships = [];
       if (input.primary_site) {
         var orgSites = (await window.FS.api.org.listSites()).sites || [];
@@ -215,6 +272,10 @@
       var legacy = orgMemberToLegacy(res.member, {});
       /* keep the picker's slug so the new row groups under the chosen site */
       if (input.primary_site) { legacy.primary_site = input.primary_site; legacy.sites = [input.primary_site]; }
+      /* session-local preview only: the backend can't take an avatar for
+         ANOTHER user yet (upload-url avatar kind targets the caller) —
+         tracked as a Phase 3 loose end in PLAN.md */
+      if (input.avatarUrl) legacy.avatarUrl = input.avatarUrl;
       return legacy;
     }
     var user = {
@@ -235,8 +296,10 @@
 
   async function updateUserRole(deviceId, role) {
     if (orgLive()) {
+      var orgRole = toOrgRole(role);
+      if (!orgRole) throw unsupportedRoleError(role);
       /* live rows carry device_id = cognito_sub (orgMemberToLegacy) */
-      var res = await window.FS.api.org.setMemberRole(deviceId, toOrgRole(role));
+      var res = await window.FS.api.org.setMemberRole(deviceId, orgRole);
       return orgMemberToLegacy(res.member, {});
     }
     await window.FS.api.delay(300);
@@ -256,6 +319,7 @@
     createSite:     createSite,
     createUser:     createUser,
     updateUserRole: updateUserRole,
+    liveRoleKeys:   liveRoleKeys,
   };
 
 })();

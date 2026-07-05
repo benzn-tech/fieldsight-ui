@@ -217,7 +217,8 @@
       return { _notFound: true, status: 404, raw: body };
     }
     if (!res.ok) {
-      var err = new Error((body && body.message) || ('HTTP ' + res.status));
+      /* org lambda serializes as {error}, legacy paths as {message} */
+      var err = new Error((body && (body.message || body.error)) || ('HTTP ' + res.status));
       err.status = res.status;
       err.body   = body;
       throw err;
