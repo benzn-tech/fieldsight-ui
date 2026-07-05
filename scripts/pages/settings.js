@@ -103,6 +103,27 @@
 
     var state = refState[0], setState = refState[1];
 
+    /* Batch 2b task 2: shared setter so the mount effect below and ctxObj's
+       patchProfile stay in sync (single merge implementation). */
+    function patchProfile(patch) { refProfile[1](function (p) { return Object.assign({}, p, patch); }); }
+
+    function orgLive() { return !!(window.FS && window.FS.api && !window.FS.api.useMocks && window.FS.api.orgBaseUrl && window.FS.api.org); }
+
+    /* Live mode only — hydrate identity fields (name/email) from the real
+       org profile once on mount; deriveProfile() already covers mock mode
+       and first paint. Avatar + format/timezone prefs are untouched here
+       (avatar upload wiring is batch 2c). Guarded against unmount. */
+    React.useEffect(function () {
+      var cancelled = false;
+      if (orgLive()) {
+        window.FS.api.org.getMe().then(function (me) {
+          if (cancelled || !me || me._accessDenied || me._notFound) return;
+          patchProfile({ firstName: me.first_name, lastName: me.last_name, email: me.email });
+        }).catch(function (err) { console.warn('[settings] could not load /api/org/me', err); });
+      }
+      return function () { cancelled = true; };
+    }, []);
+
     function ctxObj() {
       return {
         tab: refTab[0], setTab: refTab[1],
@@ -112,14 +133,24 @@
         setLanding: function (p) { writeLandingOverride(p || null); setState(function (s) { return Object.assign({}, s, { landingOverride: p || null }); }); },
 
         profile: refProfile[0], setProfile: refProfile[1],
-        patchProfile: function (patch) { refProfile[1](function (p) { return Object.assign({}, p, patch); }); },
+        patchProfile: patchProfile,
         saveProfile: function () {
           var p = refProfile[0];
-          writeJSON(PROFILE_KEY, p);
-          if (window.AuthMock && window.AuthMock.updateProfile) {
-            window.AuthMock.updateProfile({ firstName: p.firstName, lastName: p.lastName, email: p.email, avatarUrl: p.avatarUrl });
+          function commitLocal() {
+            writeJSON(PROFILE_KEY, p);
+            if (window.AuthMock && window.AuthMock.updateProfile) {
+              window.AuthMock.updateProfile({ firstName: p.firstName, lastName: p.lastName, email: p.email, avatarUrl: p.avatarUrl });
+            }
+            toast('Profile saved');
           }
-          toast('Profile saved');
+          if (orgLive()) {
+            window.FS.api.org.updateProfile({ first_name: p.firstName, last_name: p.lastName }).then(commitLocal).catch(function (err) {
+              console.warn('[settings] could not save /api/org/me', err);
+              toast('Could not save profile', 'error');
+            });
+          } else {
+            commitLocal();
+          }
         },
         resetProfile: function () { refProfile[1](deriveProfile()); toast('Reverted to saved profile', 'info'); },
 
