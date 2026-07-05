@@ -230,17 +230,22 @@
       /* Pooled, not Promise.all: the cross-product reaches 150+ requests on
          the 'All' range — see FS.api.pooledAll. Failed fetches → null →
          filtered out (partial data beats a dead page). */
-      var perDayAdmin = (await window.FS.api.pooledAll(
-        datesInRange.reduce(function (acc, d) {
-          folders.forEach(function (f) {
-            acc.push(function () {
-              return window.FS.api.timeline.getTimeline({ date: d, user: f })
-                .then(function (r) { return { date: d, report: r }; });
-            });
+      var adminThunks = datesInRange.reduce(function (acc, d) {
+        folders.forEach(function (f) {
+          acc.push(function () {
+            return window.FS.api.timeline.getTimeline({ date: d, user: f })
+              .then(function (r) { return { date: d, report: r }; });
           });
-          return acc;
-        }, []), 8
-      )).filter(Boolean);
+        });
+        return acc;
+      }, []);
+      var perDayAdmin = (await window.FS.api.pooledAll(adminThunks, 8)).filter(Boolean);
+      /* batch 2c Task 6 — every request failing (auth outage, hard throttle)
+         should surface as an error, not render as a silently-empty page.
+         Input of zero thunks (no dates/users) is a legitimate empty. */
+      if (adminThunks.length > 0 && perDayAdmin.length === 0) {
+        throw new Error('Could not load data — all requests failed. Please retry.');
+      }
       var actionsByDateAdmin = await actionsByDatePromise;
       var deniedAdmin = perDayAdmin.filter(function (x) {
         return x.report && x.report._accessDenied;

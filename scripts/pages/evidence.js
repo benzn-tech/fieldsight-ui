@@ -185,7 +185,7 @@
         /* Pooled, not Promise.all: the cross-product reaches 150+ requests
            on the 'All' range — see FS.api.pooledAll. Failed fetches → null
            → skipped below (partial data beats a dead page). */
-        return window.FS.api.pooledAll((state.dates || []).reduce(function (acc, d) {
+        var evThunks = (state.dates || []).reduce(function (acc, d) {
           fanoutFolders.forEach(function (f) {
             acc.push(function () {
               return window.FS.api.timeline.getTimeline({ date: d, user: f })
@@ -193,7 +193,15 @@
             });
           });
           return acc;
-        }, []), 8);
+        }, []);
+        return window.FS.api.pooledAll(evThunks, 8).then(function (rs) {
+          /* batch 2c Task 6 — all-failed → error (lands in the .catch below
+             → photos error state), not a silently-empty gallery. */
+          if (evThunks.length > 0 && rs.filter(Boolean).length === 0) {
+            throw new Error('Could not load photos — all requests failed. Please retry.');
+          }
+          return rs;
+        });
       }).then(function (perDay) {
         if (cancelled) return;
         var rows = [];

@@ -102,12 +102,19 @@
     var retryCount = retryRef[0];
     var setRetry   = retryRef[1];
 
+    /* batch 2c Task 5 — "Show archived" toggle (live + user:manage only).
+       Mock sites.getSites() never receives the flag — mock fixtures have
+       no archived dimension, so the toggle stays hidden in mock mode. */
+    var refShowArchived = React.useState(false);
+    var showArchived    = refShowArchived[0];
+    var setShowArchived = refShowArchived[1];
+
     React.useEffect(function () {
       var cancelled = false;
       setState({ status: 'loading' });
 
       Promise.all([
-        (orgLive() ? window.FS.api.org.getOrgSites() : window.FS.api.sites.getSites()),
+        (orgLive() ? window.FS.api.org.getOrgSites({ includeArchived: showArchived }) : window.FS.api.sites.getSites()),
         window.FS.api.reports.getReportsHistory(50),
       ]).then(function (results) {
         if (cancelled) return;
@@ -143,18 +150,48 @@
           reportsBySite: reportsBySite,
           role:          (sitesRes && sitesRes.role) || caller.role || '',
         });
+
+        /* batch 2c: org-assets icon keys aren't directly renderable —
+           resolve each to a presigned display URL and patch them in.
+           Sites without an org-assets icon (or whose resolve fails) are
+           left as-is; Avatar falls back to initials for those. */
+        if (orgLive()) {
+          var toResolve = sites.filter(function (s) { return s.icon && /^org-assets\//.test(s.icon); });
+          if (toResolve.length) {
+            Promise.all(toResolve.map(function (s) {
+              return window.FS.api.org.resolveAssetUrl(s.icon).then(function (url) { return { site_id: s.site_id, url: url }; });
+            })).then(function (resolved) {
+              if (cancelled) return;
+              var byId = {};
+              resolved.forEach(function (r) { if (r.url) byId[r.site_id] = r.url; });
+              if (!Object.keys(byId).length) return;
+              setState(function (st) {
+                if (!st.sites) return st;
+                return Object.assign({}, st, {
+                  sites: st.sites.map(function (s) { return byId[s.site_id] ? Object.assign({}, s, { icon: byId[s.site_id] }) : s; }),
+                });
+              });
+            });
+          }
+        }
       }).catch(function (err) {
         if (cancelled) return;
         setState({ status: 'error', error: { code: (err && err.status) || 0, message: (err && err.message) || 'Could not load sites', retryable: true }, retry: function () { setRetry(function (n) { return n + 1; }); } });
       });
 
       return function () { cancelled = true; };
-    }, [depKey, retryCount]);
+    }, [depKey, retryCount, showArchived]);
 
     var ctx = {
       state: state,
       caller: caller,
+      showArchived:    showArchived,
+      setShowArchived: setShowArchived,
+      refetch: function () { setRetry(function (n) { return n + 1; }); },
       addSite: function (site) { setState(function (s) { return Object.assign({}, s, { sites: [site].concat(s.sites || []) }); }); },
+      /* Kept for the (unlikely) case something still calls it directly —
+         onArchive below now refetches instead so archived-list toggling
+         self-resolves the right-detail staleness (batch 2c Task 5). */
       removeSite: function (siteId) {
         setState(function (s) {
           if (!s.sites) return s;
@@ -195,19 +232,36 @@
   /* ---------- NewProjectModal (Phase B — admin create project) --------- */
   function NewProjectModal(props) {
     var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
+    /* batch 2c: NewProjectModal is rendered as a descendant of SitesProvider
+       (Middle → this modal, same as SitesMiddleColumn), so SitesContext is
+       reachable directly via useContext — simpler than prop-drilling
+       setSiteIcon down through onCreated. */
+    var ctx = React.useContext(SitesContext);
     var refForm = React.useState({ name: '', location: '', region: 'south-island', client: '', project_value_nzd: '', planned_completion: '' });
     var form = refForm[0], setForm = refForm[1];
     var refBusy = React.useState(false); var busy = refBusy[0], setBusy = refBusy[1];
     var iconRef = React.useRef(null);
     var Avatar = window.FieldSight && window.FieldSight.Avatar;
     function set(k, v) { setForm(function (f) { var n = Object.assign({}, f); n[k] = v; return n; }); }
-    function onPickIcon(e) { var f = e.target.files && e.target.files[0]; if (!f) return; var r = new FileReader(); r.onload = function () { set('icon', r.result); }; r.readAsDataURL(f); }
+    function onPickIcon(e) {
+      var f = e.target.files && e.target.files[0]; if (!f) return;
+      var r = new FileReader();
+      r.onload = function () { set('icon', r.result); };
+      r.readAsDataURL(f);
+      if (orgLive()) {
+        window.FS.api.org.uploadImage('site_icon', f).then(function (key) {
+          if (key) set('_iconKey', key);
+        }).catch(function () {
+          if (window.FS.toast) window.FS.toast.show({ message: 'Could not upload image — use JPEG, PNG or WebP', tone: 'error' });
+        });
+      }
+    }
     function submit() {
       if (!form.name.trim() || busy) return;
       setBusy(true);
       var live = orgLive();
       var creating = live
-        ? window.FS.api.org.createOrgSite({ name: form.name, location: form.location, client: form.client, industry: form.industry })
+        ? window.FS.api.org.createOrgSite({ name: form.name, location: form.location, client: form.client, icon_s3_key: form._iconKey || undefined })
         : window.FS.api.sites.createSite(form);
       creating.then(function (site) {
         setBusy(false);
@@ -215,6 +269,15 @@
         if (window.FS.toast) window.FS.toast.show({ message: 'Project "' + site.name + '" created', tone: 'success' });
         if (props.onCreated) props.onCreated(site);
         if (props.onClose) props.onClose();
+        /* Card renders with initials fallback (Avatar degrades gracefully
+           on the unresolved org-assets key) until this resolves, then
+           swaps in the real URL via context — same path the right-detail
+           swap uses. */
+        if (live && site.icon && /^org-assets\//.test(site.icon)) {
+          window.FS.api.org.resolveAssetUrl(site.icon).then(function (url) {
+            if (url && ctx && ctx.setSiteIcon) ctx.setSiteIcon(site.site_id, url);
+          });
+        }
       }).catch(function () {
         setBusy(false);
         if (window.FS.toast) window.FS.toast.show({ message: 'Could not create project', tone: 'error' });
@@ -297,27 +360,48 @@
       ? props.selectedItem.site_id
       : null;
     var canCreate = ctx.caller && (ctx.caller.isAdmin || (window.FS && window.FS.can && window.FS.can(ctx.caller, 'user:manage')));
+    /* batch 2c Task 5 — toggle is live-only (mock fixtures carry no
+       archived dimension) and gated the same as the archive action itself. */
+    var canToggleArchived = orgLive() && !!(window.FS && window.FS.can && window.FS.can(ctx.caller, 'user:manage'));
 
-    if (sites.length === 0) {
-      return React.createElement('div', { className: 'fs-sites' },
-        React.createElement('div', { className: 'fs-sites__empty' },
-          'No sites visible to your role.'),
-      );
-    }
-
-    return React.createElement('div', { className: 'fs-sites' },
-
-      React.createElement('div', { className: 'fs-sites__header', style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' } },
-        React.createElement('div', null,
-          React.createElement('h2', { className: 'fs-sites__title' }, 'Sites'),
-          React.createElement('div', { className: 'fs-sites__subtitle' },
-            sites.length + ' ' + (sites.length === 1 ? 'site' : 'sites') + ' visible to your role'),
-        ),
+    /* batch 2c review fix — header (toggle + New project) must render even
+       when the filtered list is empty: with showArchived=false, archiving
+       the LAST active site would otherwise hide the toggle with the early
+       return, leaving no UI path to reveal or restore archived sites. */
+    var header = React.createElement('div', { className: 'fs-sites__header', style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' } },
+      React.createElement('div', null,
+        React.createElement('h2', { className: 'fs-sites__title' }, 'Sites'),
+        React.createElement('div', { className: 'fs-sites__subtitle' },
+          sites.length + ' ' + (sites.length === 1 ? 'site' : 'sites') + ' visible to your role'),
+      ),
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+        canToggleArchived ? React.createElement('button', {
+          type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm',
+          onClick: function () { ctx.setShowArchived(!ctx.showArchived); },
+        }, ctx.showArchived ? 'Hide archived' : 'Show archived') : null,
         canCreate ? React.createElement('button', {
           type: 'button', className: 'fs-btn fs-btn--primary fs-btn--sm',
           onClick: function () { setNewOpen(true); },
         }, '+ New project') : null,
       ),
+    );
+    var modal = newOpen ? React.createElement(NewProjectModal, {
+      onClose:   function () { setNewOpen(false); },
+      onCreated: function (site) { ctx.addSite(site); },
+    }) : null;
+
+    if (sites.length === 0) {
+      return React.createElement('div', { className: 'fs-sites' },
+        header,
+        React.createElement('div', { className: 'fs-sites__empty' },
+          ctx.showArchived ? 'No sites yet — including archived.' : 'No sites visible to your role.'),
+        modal,
+      );
+    }
+
+    return React.createElement('div', { className: 'fs-sites' },
+
+      header,
 
       React.createElement('div', { className: 'fs-sites__list' },
         sites.map(function (site) {
@@ -343,10 +427,7 @@
         }),
       ),
 
-      newOpen ? React.createElement(NewProjectModal, {
-        onClose:   function () { setNewOpen(false); },
-        onCreated: function (site) { ctx.addSite(site); },
-      }) : null,
+      modal,
     );
   }
 
@@ -371,6 +452,15 @@
     var refArchiving = React.useState(false);
     var archiving    = refArchiving[0];
     var setArchiving = refArchiving[1];
+
+    /* batch 2c: local-only instant preview while the live upload/swap is
+       in flight. Deliberately NOT pushed through ctx.setSiteIcon until the
+       swap resolves (success, or confirmed writes-off) — on a hard failure
+       we just drop this and real state (and the fixture mirror) stay
+       untouched. */
+    var refIconPreview = React.useState(null);
+    var iconPreview    = refIconPreview[0];
+    var setIconPreview = refIconPreview[1];
 
     React.useEffect(function () {
       if (!sel || sel.kind !== 'site') {
@@ -407,7 +497,38 @@
       var liveSite = ctx.state.sites.filter(function (s) { return s.site_id === sel.site_id; })[0];
       if (liveSite) site = liveSite;
     }
-    function onPickIcon(e) { var f = e.target.files && e.target.files[0]; if (!f) return; var r = new FileReader(); r.onload = function () { if (ctx && ctx.setSiteIcon) ctx.setSiteIcon(sel.site_id, r.result); }; r.readAsDataURL(f); }
+    function onPickIcon(e) {
+      var f = e.target.files && e.target.files[0]; if (!f) return;
+      var r = new FileReader();
+      r.onload = function () {
+        var dataUrl = r.result;
+        if (!orgLive()) {
+          if (ctx && ctx.setSiteIcon) ctx.setSiteIcon(sel.site_id, dataUrl);
+          return;
+        }
+        setIconPreview(dataUrl);
+        window.FS.api.org.uploadImage('site_icon', f).then(function (key) {
+          if (!key) {
+            /* writes-off (org live, org writes disabled): no real upload
+               ran — keep the local preview as the final value, same
+               convention as mock mode / settings.js avatar upload. */
+            setIconPreview(null);
+            if (ctx && ctx.setSiteIcon) ctx.setSiteIcon(sel.site_id, dataUrl);
+            return;
+          }
+          return window.FS.api.org.updateOrgSite(sel.site_id, { icon_s3_key: key }).then(function (res) {
+            return window.FS.api.org.resolveAssetUrl(res && res.icon_s3_key);
+          }).then(function (url) {
+            setIconPreview(null);
+            if (ctx && ctx.setSiteIcon) ctx.setSiteIcon(sel.site_id, url || null);
+          });
+        }).catch(function () {
+          setIconPreview(null);
+          if (window.FS.toast) window.FS.toast.show({ message: 'Could not update project image', tone: 'error' });
+        });
+      };
+      r.readAsDataURL(f);
+    }
     var rows = (ctx && ctx.state && ctx.state.reportsBySite && ctx.state.reportsBySite[sel.site_id]) || [];
     var topReports = rows.slice(0, 5);
 
@@ -420,11 +541,34 @@
       setArchiving(true);
       window.FS.api.org.archiveSite(sel.site_id).then(function () {
         setArchiving(false);
-        if (ctx && ctx.removeSite) ctx.removeSite(sel.site_id);
         if (window.FS.toast) window.FS.toast.show({ message: 'Project archived', tone: 'success' });
+        if (ctx && ctx.refetch) ctx.refetch();
+        /* batch 2c Task 5 — with showArchived=false (the default) the
+           just-archived site drops out of the refetched list, so the
+           `liveSite` lookup below misses and this panel would otherwise
+           keep rendering the pre-archive `sel.site` snapshot (stale name/
+           icon, and an "Archive project" button offered again on an
+           already-archived site). props.onClose is AppShell's
+           setSelectedItem(null) (see RightDetail in app-shell.js) — the
+           same handler the header's × button uses — so calling it here
+           clears the selection and falls back to the "Select a site"
+           placeholder instead of showing stale data. */
+        if (props.onClose) props.onClose();
       }).catch(function () {
         setArchiving(false);
         if (window.FS.toast) window.FS.toast.show({ message: 'Could not archive project', tone: 'error' });
+      });
+    }
+    function onUnarchive() {
+      if (archiving) return;
+      setArchiving(true);
+      window.FS.api.org.unarchiveSite(sel.site_id).then(function () {
+        setArchiving(false);
+        if (window.FS.toast) window.FS.toast.show({ message: 'Project restored', tone: 'success' });
+        if (ctx && ctx.refetch) ctx.refetch();
+      }).catch(function () {
+        setArchiving(false);
+        if (window.FS.toast) window.FS.toast.show({ message: 'Could not restore project', tone: 'error' });
       });
     }
 
@@ -445,11 +589,15 @@
             site.location ? React.createElement('span', null, site.location) : null,
           ),
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', marginTop: '12px' } },
-            Avatar ? React.createElement(Avatar, { name: site.name || site.site_id, src: site.icon || undefined, size: 'lg', shape: 'square' }) : null,
+            Avatar ? React.createElement(Avatar, { name: site.name || site.site_id, src: iconPreview || site.icon || undefined, size: 'lg', shape: 'square' }) : null,
             React.createElement('input', { type: 'file', accept: 'image/*', ref: iconRef, onChange: onPickIcon, style: { display: 'none' } }),
             React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm', onClick: function () { if (iconRef.current) iconRef.current.click(); } }, site.icon ? 'Change image' : 'Upload image'),
-            site.icon ? React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--tertiary fs-btn--sm', onClick: function () { if (ctx && ctx.setSiteIcon) ctx.setSiteIcon(sel.site_id, null); } }, 'Remove') : null,
-            canArchive ? React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--tertiary fs-btn--sm', disabled: archiving, onClick: onArchive }, archiving ? 'Archiving…' : 'Archive project') : null,
+            /* live: backend PATCH ignores null icon_s3_key (no clear support yet —
+               backend backlog: explicit-null icon clear), so hide Remove entirely
+               rather than offer a button that silently no-ops. Mock keeps it. */
+            (!orgLive() && site.icon) ? React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--tertiary fs-btn--sm', onClick: function () { if (ctx && ctx.setSiteIcon) ctx.setSiteIcon(sel.site_id, null); } }, 'Remove') : null,
+            (canArchive && site.archived) ? React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--tertiary fs-btn--sm', disabled: archiving, onClick: onUnarchive }, archiving ? 'Restoring…' : 'Restore project') : null,
+            (canArchive && !site.archived) ? React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--tertiary fs-btn--sm', disabled: archiving, onClick: onArchive }, archiving ? 'Archiving…' : 'Archive project') : null,
           ),
         ),
         IconBtn ? React.createElement(IconBtn, {

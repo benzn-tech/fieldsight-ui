@@ -173,6 +173,39 @@
     return { url: null };
   }
 
+  var _ALLOWED_IMAGE_TYPES = { 'image/jpeg': 1, 'image/png': 1, 'image/webp': 1 };
+
+  async function uploadImage(kind, file) {
+    if (!file || !file.type || !_ALLOWED_IMAGE_TYPES[file.type]) {
+      throw new Error('Unsupported image type — use JPEG, PNG or WebP');
+    }
+    var res = await uploadUrl(kind, file.type);
+    if (!res || !res.url) return null;   // mock / writes-off: caller falls back to local preview
+    // Plain fetch, NOT rawRequest/request — rawRequest would JSON.stringify the
+    // Blob, force Content-Type application/json, and inject an Authorization
+    // header; each of those breaks the S3 presigned signature.
+    var resp = await fetch(res.url, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+    if (!resp.ok) throw new Error('Upload failed (' + resp.status + ')');
+    return res.key;   // pending key — persisted via PATCH /me avatar_s3_key or site create/patch icon_s3_key
+  }
+
+  var _assetUrlCache = {};
+
+  async function resolveAssetUrl(key) {
+    if (!key) return null;
+    if (/^(data:|https?:)/.test(key)) return key;   // mock data-URIs & already-resolved URLs pass through
+    if (!/^org-assets\//.test(key)) return null;
+    var cached = _assetUrlCache[key];
+    if (cached && cached.expiresAt > Date.now()) return cached.url;
+    var res;
+    try { res = await assetUrl(key); } catch (e) { return null; }
+    if (res && res.url) {
+      _assetUrlCache[key] = { url: res.url, expiresAt: Date.now() + 12 * 60 * 1000 };   // presign lives 15min; 12min cache leaves margin
+      return res.url;
+    }
+    return null;
+  }
+
   window.FS.api.org = {
     getMe: getMe,
     updateProfile: updateProfile,
@@ -181,6 +214,7 @@
     getMembers: getMembers, createMember: createMember, updateMemberRole: updateMemberRole,
     archiveMember: archiveMember, unarchiveMember: unarchiveMember,
     uploadUrl: uploadUrl, assetUrl: assetUrl,
+    uploadImage: uploadImage, resolveAssetUrl: resolveAssetUrl,
     _folderName: folderName,   /* exported for batch-2b fan-out reuse */
     _toPageMember: _toPageMember, _toPageSite: _toPageSite,   /* page-shape adapters, batch-2b */
   };
