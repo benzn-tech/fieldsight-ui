@@ -55,19 +55,27 @@
       });
     }
 
-    /* After tokens are set, hydrate the user payload via /api/sites
-       (BACKEND-CONTEXT §4.2 — returns role + display_name). */
+    /* After tokens are set, hydrate the real identity via GET /api/org/me
+       (sub/email/role/name/site_ids). A 403 means the account isn't in the
+       org DB yet or is archived — stay signed in but read-only, don't blank. */
     async function hydrateUser() {
       try {
-        var res = await window.FS.api.sites.getSites();
+        var me = await window.FS.api.org.getMe();
+        if (me && (me._accessDenied || me._notFound)) {
+          console.warn('[login] org account not provisioned or archived — read-only');
+          return;
+        }
         window.FS.session.set({
           user: {
-            role:         res.role,
-            display_name: res.display_name,
+            sub:          me.cognito_sub,
+            email:        me.email,
+            role:         me.global_role,
+            display_name: [me.first_name, me.last_name].filter(Boolean).join(' '),
+            sites:        me.site_ids || [],
           },
         });
       } catch (err) {
-        console.warn('[login] could not load /api/sites for user payload', err);
+        console.warn('[login] could not load /api/org/me', err);
       }
     }
 
