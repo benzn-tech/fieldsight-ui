@@ -150,6 +150,34 @@
     return (r && r.params) || {};
   }
 
+  /* Org API live gate (batch 2b Task 4): mirrors api/org.js's own orgLive()
+     check. LIVE -> window.FS.api.org.*; MOCK -> keep window.FS.api.sites.*
+     path unchanged (mock + org fixtures differ; never swap them). */
+  function orgLive() {
+    return !!(window.FS && window.FS.api && !window.FS.api.useMocks
+      && window.FS.api.orgBaseUrl && window.FS.api.org);
+  }
+
+  /* roleOptions() below sources its slugs from window.FS.ROLES (worker,
+     foreman, site_manager, project_manager, construction_manager, gm,
+     director, hse_manager, quality_manager, client_viewer) — the org API's
+     global_role vocab only knows {admin,gm,pm,site_manager,worker}. Map the
+     closest equivalent so live writes never send an invalid global_role. */
+  function toOrgRole(role) {
+    var ORG_ROLES = { admin: 1, gm: 1, pm: 1, site_manager: 1, worker: 1 };
+    if (ORG_ROLES[role]) return role;
+    var map = {
+      project_manager:     'pm',
+      foreman:             'worker',
+      construction_manager:'gm',
+      director:            'admin',
+      hse_manager:         'admin',
+      quality_manager:     'admin',
+      client_viewer:       'worker',
+    };
+    return map[role] || 'worker';
+  }
+
   /* ---------- TeamContext ------------------------------------------------ */
 
   var TeamContext = React.createContext(null);
@@ -176,13 +204,16 @@
       var cancelled = false;
       setState({ status: 'loading' });
 
-      window.FS.api.sites.getUsers().then(function (res) {
+      var loadUsers = orgLive() ? window.FS.api.org.getMembers() : window.FS.api.sites.getUsers();
+      loadUsers.then(function (res) {
         if (cancelled) return;
         if (res && res._accessDenied) {
           setState({ status: 'access_denied', message: res.error });
           return;
         }
-        var users = (res && res.users) || [];
+        /* org.getMembers() resolves {members:[...]}; sites.getUsers()
+           resolves {users:[...]} — normalize both shapes. */
+        var users = (res && (res.users || res.members)) || [];
 
         /* Sprint 9 B.2 — apply scope filter. PM sees only people on
            managed sites. Admin / gm / director / specialists pass
@@ -263,8 +294,26 @@
       });
     }
 
+    function removeUser(deviceId) {
+      setState(function (s) {
+        if (s.status !== 'ok') return s;
+        var users = (s.users || []).filter(function (u) { return u.device_id !== deviceId; });
+        var groups = groupUsersBySite(users);
+        return Object.assign({}, s, {
+          users: users, groups: groups,
+          totals: { users: users.length, sites: groups.filter(function (g) { return g.site_id !== '__none__'; }).length, roles: countDistinctRoles(users) },
+        });
+      });
+    }
+
     function changeRole(deviceId, role) {
-      if (window.FS.api.sites.updateUserRole) window.FS.api.sites.updateUserRole(deviceId, role);
+      /* deviceId IS the cognito_sub in live mode (adapter maps it in
+         _toPageMember), so this correctly keys the org write. */
+      if (orgLive()) {
+        window.FS.api.org.updateMemberRole(deviceId, toOrgRole(role));
+      } else if (window.FS.api.sites.updateUserRole) {
+        window.FS.api.sites.updateUserRole(deviceId, role);
+      }
       setState(function (s) {
         if (s.status !== 'ok') return s;
         var patched = (s.users || []).map(function (u) { return u.device_id === deviceId ? Object.assign({}, u, { role: role }) : u; });
@@ -279,6 +328,7 @@
       overrides:   overrides,
       applyReassign: applyReassign,
       addUser:     addUser,
+      removeUser:  removeUser,
       changeRole:  changeRole,
     };
     return React.createElement(TeamContext.Provider, { value: ctx }, props.children);
@@ -307,6 +357,7 @@
 
   function AddMemberModal(props) {
     var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
+    var live  = orgLive();
     var roles = roleOptions(); var sites = siteOptions();
     var refForm = React.useState({ name: '', email: '', role: (roles[0] && roles[0].v) || 'worker', primary_site: (sites[0] && sites[0].v) || '' });
     var form = refForm[0], setForm = refForm[1];
@@ -318,8 +369,31 @@
     function submit() {
       if (!form.name.trim() || busy) return;
       setBusy(true);
-      window.FS.api.sites.createUser(form).then(function (user) {
+      var nameParts = form.name.trim().split(/\s+/);
+      var firstName = nameParts[0] || '';
+      var lastName  = nameParts.slice(1).join(' ');
+      var orgRole   = toOrgRole(form.role);
+      var creating = live
+        ? window.FS.api.org.createMember({
+            email:       form.email,
+            first_name:  firstName,
+            last_name:   lastName,
+            global_role: orgRole,
+            memberships: form.primary_site ? [{
+              site_id: form.primary_site,
+              role:    (['pm', 'site_manager', 'worker'].indexOf(orgRole) >= 0 ? orgRole : 'worker'),
+            }] : [],
+          })
+        : window.FS.api.sites.createUser(form);
+      creating.then(function (resp) {
         setBusy(false);
+        /* Live createMember() resolves { user: {...}, memberships: [...] } —
+           merge onto one object before running the page-shape adapter
+           (spec §8b: never send an avatar for a new member, so none is
+           set here for the live path). */
+        var user = live
+          ? window.FS.api.org._toPageMember(Object.assign({}, resp.user, { memberships: resp.memberships }))
+          : resp;
         if (window.FS.toast) window.FS.toast.show({ message: form.name + ' added', tone: 'success' });
         if (props.onCreated) props.onCreated(user);
         if (props.onClose) props.onClose();
@@ -329,7 +403,9 @@
     return React.createElement(Modal, { open: true, size: 'md', title: 'Add member', onClose: props.onClose },
       React.createElement('div', { className: 'fs-settings__pw-form' },
         fFieldRow('Full name *', fText(form.name, function (v) { set('name', v); })),
-        fFieldRow('Picture', React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+        /* Picture picker is mock-only — spec §8b: can't set another
+           user's avatar via the live org API, so live omits it entirely. */
+        live ? null : fFieldRow('Picture', React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
           Avatar ? React.createElement(Avatar, { name: form.name || 'Member', src: form.avatarUrl || undefined, size: 'md' }) : null,
           React.createElement('input', { type: 'file', accept: 'image/*', ref: avatarRef, onChange: onPickAvatar, style: { display: 'none' } }),
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm', onClick: function () { if (avatarRef.current) avatarRef.current.click(); } }, 'Upload picture')
@@ -597,6 +673,10 @@
     var modalOpen    = refModalOpen[0];
     var setModalOpen = refModalOpen[1];
 
+    var refArchiving = React.useState(false);
+    var archiving    = refArchiving[0];
+    var setArchiving = refArchiving[1];
+
     if (!sel || sel.kind !== 'user') {
       return React.createElement('div', { className: 'fs-team-detail__placeholder' },
         React.createElement('div', { className: 'fs-team-detail__placeholder-title' },
@@ -637,6 +717,30 @@
     if (caller && (caller.isAdmin || caller.role === 'project_manager' || caller.role === 'pm')
         && managedSites && managedSites.length > 1) {
       canReassign = userOnSites(u, managedSites);
+    }
+
+    /* Archive member (batch 2b Task 4) — live-only write, gated on
+       user:manage, and never allowed against the caller's own account
+       (org backend also rejects self-archive per spec §8b item 3, but
+       we hide the control client-side too so it's never offered).
+       callerSub prefers the real Cognito session identity (live mode);
+       caller.device_id is the mock-mode fallback (unused while gated
+       on orgLive()). Restore / view-archived is out of scope (2c). */
+    var callerSub  = ((window.FS && window.FS.session && window.FS.session.user) || {}).sub || caller.device_id;
+    var canArchive = orgLive() && !!(window.FS && window.FS.can && window.FS.can(caller, 'user:manage'))
+      && u.device_id !== callerSub;
+
+    function onArchiveMember() {
+      if (archiving) return;
+      setArchiving(true);
+      window.FS.api.org.archiveMember(u.device_id).then(function () {
+        setArchiving(false);
+        if (ctx && ctx.removeUser) ctx.removeUser(u.device_id);
+        if (window.FS.toast) window.FS.toast.show({ message: 'Member archived', tone: 'success' });
+      }).catch(function () {
+        setArchiving(false);
+        if (window.FS.toast) window.FS.toast.show({ message: 'Could not archive member', tone: 'error' });
+      });
     }
 
     return React.createElement('div', { className: 'fs-team-detail' },
@@ -704,6 +808,12 @@
           className: 'fs-team-detail__action-btn fs-team-detail__action-btn--primary',
           onClick:   function () { setModalOpen(true); },
         }, 'Reassign to another site') : null,
+        canArchive ? React.createElement('button', {
+          type:      'button',
+          className: 'fs-team-detail__action-btn',
+          disabled:  archiving,
+          onClick:   onArchiveMember,
+        }, archiving ? 'Archiving…' : 'Archive member') : null,
       ),
 
       /* Reassign modal — only mounts when open + caller is a PM */
