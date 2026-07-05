@@ -148,14 +148,21 @@
         patchProfile: patchProfile,
         saveProfile: function () {
           var p = refProfile[0];
-          /* Takes the final profile object to persist (not a closed-over var) so the
-             live-mode avatar-resolve branch below can commit a copy with the
-             pending key swapped for its resolved URL, while the plain path just
-             commits p as-is. */
+          /* Takes the final profile object to persist (not a closed-over var).
+             LIVE GUARD (review fix batch 2c): never persist a presigned https
+             URL — it expires in 15 minutes, and localStorage/AuthMock feed the
+             sidebar avatar on every later boot, which would render a
+             permanently broken <img>. Durable values are data-URIs (and null);
+             an https avatarUrl in live mode keeps the previously stored one. */
           function commitLocal(finalProfile) {
-            writeJSON(PROFILE_KEY, finalProfile);
+            var toStore = finalProfile;
+            if (orgLive() && /^https?:/.test(finalProfile.avatarUrl || '')) {
+              var prev = readJSON(PROFILE_KEY);
+              toStore = Object.assign({}, finalProfile, { avatarUrl: prev.avatarUrl || null });
+            }
+            writeJSON(PROFILE_KEY, toStore);
             if (window.AuthMock && window.AuthMock.updateProfile) {
-              window.AuthMock.updateProfile({ firstName: finalProfile.firstName, lastName: finalProfile.lastName, email: finalProfile.email, avatarUrl: finalProfile.avatarUrl });
+              window.AuthMock.updateProfile({ firstName: toStore.firstName, lastName: toStore.lastName, email: toStore.email, avatarUrl: toStore.avatarUrl });
             }
             toast('Profile saved');
           }
@@ -166,9 +173,13 @@
             window.FS.api.org.updateProfile(body).then(function (res) {
               if (!sentAvatar) { commitLocal(p); return; }
               window.FS.api.org.resolveAssetUrl(res && res.avatar_s3_key).then(function (url) {
-                var finalUrl = url || p.avatarUrl;   // resolve failed: keep the data-URI preview rather than blanking the avatar
-                patchProfile({ avatarUrl: finalUrl, _pendingAvatarKey: undefined });
-                commitLocal(Object.assign({}, p, { avatarUrl: finalUrl, _pendingAvatarKey: undefined }));
+                /* React state gets the fresh presigned URL for display; the
+                   PERSISTED copy keeps the data-URI preview (p.avatarUrl at
+                   save time is the picked data-URI — the hydrate effect skips
+                   overwriting while _pendingAvatarKey is set), so nothing
+                   expiring ever lands in localStorage/AuthMock. */
+                patchProfile({ avatarUrl: url || p.avatarUrl, _pendingAvatarKey: undefined });
+                commitLocal(Object.assign({}, p, { _pendingAvatarKey: undefined }));
               });
             }).catch(function (err) {
               console.warn('[settings] could not save /api/org/me', err);

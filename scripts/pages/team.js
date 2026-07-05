@@ -452,7 +452,10 @@
       return function () { cancelled = true; };
     }, []);
     var sites = live ? orgSites : mockSites;
-    var refForm = React.useState({ name: '', email: '', role: (roles[0] && roles[0].v) || 'worker', primary_site: live ? '' : ((mockSites[0] && mockSites[0].v) || '') });
+    /* Live default is WORKER, explicitly — the live roleOptions() list is
+       admin-first, and inheriting roles[0] would silently default every new
+       member to full org admin (least-privilege, review fix batch 2c). */
+    var refForm = React.useState({ name: '', email: '', role: live ? 'worker' : ((roles[0] && roles[0].v) || 'worker'), primary_site: live ? '' : ((mockSites[0] && mockSites[0].v) || '') });
     var form = refForm[0], setForm = refForm[1];
     var refBusy = React.useState(false); var busy = refBusy[0], setBusy = refBusy[1];
     var avatarRef = React.useRef(null);

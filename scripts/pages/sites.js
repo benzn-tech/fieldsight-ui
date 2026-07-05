@@ -364,32 +364,44 @@
        archived dimension) and gated the same as the archive action itself. */
     var canToggleArchived = orgLive() && !!(window.FS && window.FS.can && window.FS.can(ctx.caller, 'user:manage'));
 
+    /* batch 2c review fix — header (toggle + New project) must render even
+       when the filtered list is empty: with showArchived=false, archiving
+       the LAST active site would otherwise hide the toggle with the early
+       return, leaving no UI path to reveal or restore archived sites. */
+    var header = React.createElement('div', { className: 'fs-sites__header', style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' } },
+      React.createElement('div', null,
+        React.createElement('h2', { className: 'fs-sites__title' }, 'Sites'),
+        React.createElement('div', { className: 'fs-sites__subtitle' },
+          sites.length + ' ' + (sites.length === 1 ? 'site' : 'sites') + ' visible to your role'),
+      ),
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+        canToggleArchived ? React.createElement('button', {
+          type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm',
+          onClick: function () { ctx.setShowArchived(!ctx.showArchived); },
+        }, ctx.showArchived ? 'Hide archived' : 'Show archived') : null,
+        canCreate ? React.createElement('button', {
+          type: 'button', className: 'fs-btn fs-btn--primary fs-btn--sm',
+          onClick: function () { setNewOpen(true); },
+        }, '+ New project') : null,
+      ),
+    );
+    var modal = newOpen ? React.createElement(NewProjectModal, {
+      onClose:   function () { setNewOpen(false); },
+      onCreated: function (site) { ctx.addSite(site); },
+    }) : null;
+
     if (sites.length === 0) {
       return React.createElement('div', { className: 'fs-sites' },
+        header,
         React.createElement('div', { className: 'fs-sites__empty' },
-          'No sites visible to your role.'),
+          ctx.showArchived ? 'No sites yet — including archived.' : 'No sites visible to your role.'),
+        modal,
       );
     }
 
     return React.createElement('div', { className: 'fs-sites' },
 
-      React.createElement('div', { className: 'fs-sites__header', style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' } },
-        React.createElement('div', null,
-          React.createElement('h2', { className: 'fs-sites__title' }, 'Sites'),
-          React.createElement('div', { className: 'fs-sites__subtitle' },
-            sites.length + ' ' + (sites.length === 1 ? 'site' : 'sites') + ' visible to your role'),
-        ),
-        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-          canToggleArchived ? React.createElement('button', {
-            type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm',
-            onClick: function () { ctx.setShowArchived(!ctx.showArchived); },
-          }, ctx.showArchived ? 'Hide archived' : 'Show archived') : null,
-          canCreate ? React.createElement('button', {
-            type: 'button', className: 'fs-btn fs-btn--primary fs-btn--sm',
-            onClick: function () { setNewOpen(true); },
-          }, '+ New project') : null,
-        ),
-      ),
+      header,
 
       React.createElement('div', { className: 'fs-sites__list' },
         sites.map(function (site) {
@@ -415,10 +427,7 @@
         }),
       ),
 
-      newOpen ? React.createElement(NewProjectModal, {
-        onClose:   function () { setNewOpen(false); },
-        onCreated: function (site) { ctx.addSite(site); },
-      }) : null,
+      modal,
     );
   }
 
