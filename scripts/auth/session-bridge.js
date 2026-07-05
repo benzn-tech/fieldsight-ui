@@ -90,7 +90,15 @@
     var patch = {};
 
     if (sessionUser.role) {
-      patch.role = sessionUser.role;
+      /* Org role vocab {admin,gm,pm,site_manager,worker} ≠ the UI page-role
+         registry (roles.js has no 'admin'/'pm' slug — an unmapped role gets
+         ZERO permissions: empty nav, every page redirects). Bridge org→UI:
+         'pm' maps to the UI slug 'project_manager'; 'admin' has no UI slug —
+         grant the isAdmin flag instead (FS.can() and canSeeNav() honor it
+         before any role lookup), keeping the raw 'admin' string for display
+         and for the aggregators' role === 'admin' checks. */
+      patch.role    = sessionUser.role === 'pm' ? 'project_manager' : sessionUser.role;
+      patch.isAdmin = sessionUser.role === 'admin';
     }
 
     if (sessionUser.email) {

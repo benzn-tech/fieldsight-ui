@@ -227,15 +227,20 @@
        the available_users envelope. */
     if (!user && isAdminCaller()) {
       var folders = await adminUserFolders();
-      var perDayAdmin = await Promise.all(
+      /* Pooled, not Promise.all: the cross-product reaches 150+ requests on
+         the 'All' range — see FS.api.pooledAll. Failed fetches → null →
+         filtered out (partial data beats a dead page). */
+      var perDayAdmin = (await window.FS.api.pooledAll(
         datesInRange.reduce(function (acc, d) {
           folders.forEach(function (f) {
-            acc.push(window.FS.api.timeline.getTimeline({ date: d, user: f })
-              .then(function (r) { return { date: d, report: r }; }));
+            acc.push(function () {
+              return window.FS.api.timeline.getTimeline({ date: d, user: f })
+                .then(function (r) { return { date: d, report: r }; });
+            });
           });
           return acc;
-        }, [])
-      );
+        }, []), 8
+      )).filter(Boolean);
       var actionsByDateAdmin = await actionsByDatePromise;
       var deniedAdmin = perDayAdmin.filter(function (x) {
         return x.report && x.report._accessDenied;

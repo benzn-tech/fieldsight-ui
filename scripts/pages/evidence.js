@@ -182,19 +182,24 @@
           });
 
       foldersPromise.then(function (fanoutFolders) {
-        return Promise.all((state.dates || []).reduce(function (acc, d) {
+        /* Pooled, not Promise.all: the cross-product reaches 150+ requests
+           on the 'All' range — see FS.api.pooledAll. Failed fetches → null
+           → skipped below (partial data beats a dead page). */
+        return window.FS.api.pooledAll((state.dates || []).reduce(function (acc, d) {
           fanoutFolders.forEach(function (f) {
-            acc.push(window.FS.api.timeline.getTimeline({ date: d, user: f })
-              .then(function (r) { return { date: d, report: r }; }));
+            acc.push(function () {
+              return window.FS.api.timeline.getTimeline({ date: d, user: f })
+                .then(function (r) { return { date: d, report: r }; });
+            });
           });
           return acc;
-        }, []));
+        }, []), 8);
       }).then(function (perDay) {
         if (cancelled) return;
         var rows = [];
         var total = 0;
         perDay.forEach(function (x) {
-          if (!x.report || x.report._notFound || x.report.available_users) return;
+          if (!x || !x.report || x.report._notFound || x.report.available_users) return;
           var photosForDate = [];
           (x.report.topics || []).forEach(function (t) {
             (t.related_photos || []).forEach(function (filename) {
