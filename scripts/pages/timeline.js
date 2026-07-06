@@ -122,7 +122,10 @@
       DatePicker && date ? React.createElement(DatePicker, {
         date:        date,
         onChange:    onChangeDate,
-        monthsRange: 3,
+        /* monthsRange deliberately omitted → DatePicker's own 24-month
+           default. The old `monthsRange: 3` cut /api/dates to a 90-day
+           lookback, so a user whose reports are older (e.g. Feb–Mar viewed
+           in July) got ZERO calendar dots. */
         /* Dots follow the ACTIVE user so they match the per-user report
            fetch (admin dots were a union across all users — dotted dates
            with no content for the selected user). No user → union stays,

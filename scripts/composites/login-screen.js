@@ -87,6 +87,18 @@
             orgStatus:    me.archived_at ? 'archived' : 'active',
           },
         });
+        /* THIS account's avatar for the nav (the bridge just cleared any
+           cross-account leftover). Fire-and-forget: nav shows initials
+           until it resolves; page refreshes fall back to initials too
+           (hydrateUser only runs at sign-in — acceptable, settings
+           re-resolves on open). */
+        if (me.avatar_s3_key && window.FS.api.org.resolveAssetUrl) {
+          window.FS.api.org.resolveAssetUrl(me.avatar_s3_key).then(function (url) {
+            if (url && window.AuthMock && window.AuthMock.updateProfile) {
+              window.AuthMock.updateProfile({ avatarUrl: url });
+            }
+          }).catch(function () {});
+        }
       } catch (err) {
         console.warn('[login] could not load /api/org/me', err);
       }

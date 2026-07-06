@@ -21,6 +21,14 @@
 
   var LANDING_KEY  = 'fs.settings.defaultLanding';
   var PROFILE_KEY  = 'fs.settings.profile';
+  /* Live mode: scope the stored profile to the signed-in account — the
+     plain global key let one account's saved profile (avatar!) leak into
+     the next account signed in on the same browser. Mock keeps the global
+     key (single persona, persistence across reloads is the feature). */
+  function profileKey() {
+    var u = (window.FS && window.FS.session && window.FS.session.user) || {};
+    return u.sub ? PROFILE_KEY + '.' + u.sub : PROFILE_KEY;
+  }
   var NOTIF_KEY    = 'fs.settings.notifications';
   var SECURITY_KEY = 'fs.settings.security';
 
@@ -74,7 +82,7 @@
   }
 
   function deriveProfile() {
-    var saved = readJSON(PROFILE_KEY);
+    var saved = readJSON(profileKey());
     var u = (window.AuthMock && window.AuthMock.currentUser) || {};
     var parts = (u.name || '').split(' ');
     return {
@@ -157,10 +165,10 @@
           function commitLocal(finalProfile) {
             var toStore = finalProfile;
             if (orgLive() && /^https?:/.test(finalProfile.avatarUrl || '')) {
-              var prev = readJSON(PROFILE_KEY);
+              var prev = readJSON(profileKey());
               toStore = Object.assign({}, finalProfile, { avatarUrl: prev.avatarUrl || null });
             }
-            writeJSON(PROFILE_KEY, toStore);
+            writeJSON(profileKey(), toStore);
             if (window.AuthMock && window.AuthMock.updateProfile) {
               window.AuthMock.updateProfile({ firstName: toStore.firstName, lastName: toStore.lastName, email: toStore.email, avatarUrl: toStore.avatarUrl });
             }
