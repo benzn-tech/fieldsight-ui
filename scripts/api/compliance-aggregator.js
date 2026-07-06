@@ -188,8 +188,12 @@
   }
 
   /* Internal: discover dates with reports in [from, to], then fan out
-     getTimeline for each. Returns { perDay: [{date, report}], denied? }. */
-  async function fanoutDates(from, to, user) {
+     getTimeline for each. Returns { perDay: [{date, report}], denied? }.
+
+     batch A2 Task 3 — `site` (4th param) is an EXPLICIT argument passed
+     down from getSafetyRange/getQualityRange; this function must NEVER
+     read window.FS.siteContext itself. */
+  async function fanoutDates(from, to, user, site) {
     var monthsLookback = (window.FS.api.window && window.FS.api.window.MONTHS_LOOKBACK) || 24;
     var datesRes = await window.FS.api.dates.getDates({ months: monthsLookback });
     if (datesRes && datesRes._accessDenied) {
@@ -224,9 +228,20 @@
 
     /* Admin path: cross-product (date × all users) so every report in
        the window gets included rather than being short-circuited by
-       the available_users envelope. */
-    if (!user && isAdminCaller()) {
-      var folders = await adminUserFolders();
+       the available_users envelope. Batch A2 Task 3 — also taken when
+       `site` is set (sm/pm site-scoped view, see getSafetyRange), in
+       which case folders are scoped to that site via getSiteUsers
+       (server-side permission-scoped) instead of the full user list. */
+    if (!user && (isAdminCaller() || site)) {
+      var folders;
+      if (site) {
+        try {
+          var su = await window.FS.api.sites.getSiteUsers(site);
+          folders = ((su && su.users) || []).map(deriveFolder).filter(Boolean);
+        } catch (e) { folders = await adminUserFolders(); }
+      } else {
+        folders = await adminUserFolders();
+      }
       /* Pooled, not Promise.all: the cross-product reaches 150+ requests on
          the 'All' range — see FS.api.pooledAll. Failed fetches → null →
          filtered out (partial data beats a dead page). */
@@ -324,7 +339,22 @@
     if (!from || !to) return { rows: [], from: from, to: to };
     var user = resolveUser(opts.user);
 
-    var fanout = await fanoutDates(from, to, user);
+    /* batch A2 Task 3 — opts.site is an EXPLICIT param passed by scoped
+       callers only. NEVER read window.FS.siteContext in this function —
+       Insights (insights-aggregator.js), the strategic dashboards
+       (strategic-aggregator.js), and the search palette
+       (search-palette.js) call this same export with no site and must
+       keep their global, unscoped view. When a site IS given and the
+       caller is neither a worker (forced-self path above, unaffected)
+       nor pinned by an explicit opts.user, prefer the site fan-out in
+       fanoutDates() over the resolved single-self folder — getSiteUsers
+       is server-side permission-scoped (a site manager's request
+       returns self + their workers), so widening from "just me" to
+       "my site" still respects the caller's ceiling. */
+    var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
+    if (opts.site && !opts.user && caller.role !== 'worker') user = null;
+
+    var fanout = await fanoutDates(from, to, user, opts.site);
     if (fanout._accessDenied) {
       return { _accessDenied: true, error: fanout.error };
     }
@@ -426,7 +456,18 @@
     if (!from || !to) return { rows: [], from: from, to: to };
     var user = resolveUser(opts.user);
 
-    var fanout = await fanoutDates(from, to, user);
+    /* batch A2 Task 3 — opts.site is an EXPLICIT param passed by scoped
+       callers only. NEVER read window.FS.siteContext in this function —
+       Insights, the strategic dashboards, and the search palette call
+       this same export with no site and must keep their global,
+       unscoped view (see getSafetyRange above for the full rationale).
+       Same sm/pm-with-site preference: prefer the site fan-out over the
+       resolved single-self folder when a site is given, the caller
+       isn't a worker, and no explicit opts.user pinned the query. */
+    var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
+    if (opts.site && !opts.user && caller.role !== 'worker') user = null;
+
+    var fanout = await fanoutDates(from, to, user, opts.site);
     if (fanout._accessDenied) {
       return { _accessDenied: true, error: fanout.error };
     }
