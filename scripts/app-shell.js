@@ -1036,6 +1036,26 @@ function SessionGate(opts) {
     return session ? session.isSignedIn() : true;
   });
 
+  /* Silent session restore: the access token lives ~1 h, but the refresh
+     token lives 30 days. Without this, any refresh/idle past the hour
+     dumps the user to LoginScreen even though session.refresh() would
+     succeed instantly. Gate the login screen behind one refresh attempt. */
+  const [restoring, setRestoring] = React.useState(function () {
+    return !!(session && !session.isSignedIn() && session.refreshToken);
+  });
+
+  React.useEffect(function () {
+    if (!restoring || !session) return undefined;
+    var cancelled = false;
+    session.refresh().then(function () {
+      if (!cancelled) {
+        setSignedIn(session.isSignedIn());
+        setRestoring(false);
+      }
+    });
+    return function () { cancelled = true; };
+  }, []);
+
   React.useEffect(function () {
     if (!session) return undefined;
     return session.onChange(function () {
@@ -1047,6 +1067,10 @@ function SessionGate(opts) {
   if (useMocks || !session) {
     return React.createElement(AppShell, opts);
   }
+
+  /* Sub-second blank while the silent refresh runs — flashing the login
+     screen and then swapping to the app is worse than a brief blank. */
+  if (restoring) return null;
 
   if (!signedIn) {
     if (!Login) {
