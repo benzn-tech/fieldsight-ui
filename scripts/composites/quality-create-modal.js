@@ -17,11 +17,19 @@
      deadline           Input[type=date], optional
      location           Input, optional
 
-   Real-backend path (useMocks=false, writeMocks=false — Phase 0 Task 2):
-     POST /api/quality-items
-     body: { site_id, observation, category, follow_up_required, deadline, location }
+   Live path (batch B Task 5 — orgAvailable = FS.api.org.createObservation
+   exists && !useMocks):
+     window.FS.api.org.createObservation({ kind: 'quality', site_slug,
+       observation })
+     site_slug is siteId (FS.siteContext, passed in by the page) or, when
+     nothing is anchored, the in-modal required Project select below.
+     category/follow_up_required/deadline/location are NOT part of this
+     endpoint's body (Task 4 scope only covers kind/site_slug/observation/
+     risk_level/recommended_action) — they are collected in the form for
+     product parity but not sent live yet.
 
-   Mock path: builds a local item object and calls onSuccess immediately.
+   Mock path (useMocks, or no org.createObservation): builds a local item
+     object and calls onSuccess immediately — unchanged from Sprint 8.1.3.
 
    CSS: .fs-quality-create-modal in styles/composites.css
 
@@ -62,6 +70,48 @@
     var errorMsg = refError[0];
     var setError = refError[1];
 
+    /* Batch B Task 5 — live write path via FS.api.org.createObservation.
+       isLive gates the in-modal project field (select vs read-only text);
+       orgAvailable additionally requires the org API to actually exist and
+       gates which branch handleSubmit takes. Neither check touches
+       writeMocks — org.createObservation makes that call itself. */
+    var isLive       = !window.FS.api.useMocks;
+    var orgAvailable = !!(window.FS.api.org && window.FS.api.org.createObservation && isLive);
+
+    var refSelectedSite = React.useState('');
+    var selectedSite    = refSelectedSite[0];
+    var setSelectedSite = refSelectedSite[1];
+
+    var refSitesList = React.useState([]);
+    var sitesList    = refSitesList[0];
+    var setSitesList = refSitesList[1];
+
+    /* One-shot fetch, mirrors the cancelled-guard pattern used by the
+       header project selector (app-shell.js MiddleColumn). Only needed
+       live: it feeds the required Project select's options (when siteId
+       is unset) and resolves a display name for the read-only site line
+       (when siteId IS set). Skipped entirely in mock mode. */
+    React.useEffect(function () {
+      if (!isLive) return undefined;
+      var cancelled = false;
+      window.FS.api.sites.getSites().then(function (res) {
+        if (cancelled) return;
+        setSitesList((res && res.sites) || []);
+      }).catch(function () {
+        if (cancelled) return;
+        setSitesList([]);
+      });
+      return function () { cancelled = true; };
+    }, []);
+
+    var needsSiteSelect  = isLive && !siteId;
+    var siteValue        = siteId || selectedSite;
+    var resolvedSiteName = (function () {
+      if (!siteId) return '';
+      var match = sitesList.filter(function (s) { return s.site_id === siteId; })[0];
+      return match ? match.name : siteId;
+    })();
+
     function set(field, value) {
       setForm(function (f) { return Object.assign({}, f, { [field]: value }); });
     }
@@ -69,6 +119,7 @@
     function validate() {
       if (!form.observation.trim()) return 'Observation is required.';
       if (!form.category) return 'Category is required.';
+      if (needsSiteSelect && !selectedSite) return 'Project is required.';
       return null;
     }
 
@@ -83,18 +134,28 @@
       try {
         var newItem;
 
-        if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
-          newItem = await window.FS.api.request('/quality-items', {
-            method: 'POST',
-            body: {
-              site_id:            siteId,
-              observation:        form.observation.trim(),
-              category:           form.category,
-              follow_up_required: form.follow_up_required,
-              deadline:           form.deadline || null,
-              location:           form.location.trim() || null,
-            },
+        if (orgAvailable) {
+          var obsRes = await window.FS.api.org.createObservation({
+            kind:        'quality',
+            site_slug:   siteValue,
+            observation: form.observation.trim(),
           });
+
+          newItem = {
+            id:                obsRes.id,
+            date:              window.FS.api.todayNZDT(),
+            item:              form.observation.trim(),
+            details:           null,
+            category:          form.category,
+            status:            obsRes.status,
+            follow_up_needed:  form.follow_up_required,
+            who_raised:        obsRes.author_name,
+            source:            'manual',
+            topic_id:          -1,
+            topic_title:       null,
+            site:              siteValue,
+            author_name:       obsRes.author_name,
+          };
         } else {
           await window.FS.api.delay(400);
           var who = (window.AuthMock && window.AuthMock.currentUser && window.AuthMock.currentUser.name) || 'Unknown';
@@ -122,11 +183,12 @@
         setStatus('error');
         setError((fetchErr && fetchErr.message) || 'Failed to log item. Please try again.');
         var toast2 = window.FS && window.FS.toast;
-        if (toast2) toast2.show({ message: 'Failed to log quality item', tone: 'error' });
+        if (toast2) toast2.show({ message: (fetchErr && fetchErr.message) || 'Failed to log quality item', tone: 'error' });
       }
     }
 
-    var isSubmitting = status === 'submitting';
+    var isSubmitting   = status === 'submitting';
+    var submitDisabled = isSubmitting || (needsSiteSelect && !selectedSite);
 
     var content = React.createElement('form', {
       className: 'fs-quality-create-modal',
@@ -134,6 +196,40 @@
     },
       React.createElement('h2', { className: 'fs-quality-create-modal__title' },
         'Log Quality Item'),
+
+      /* Project (batch B Task 5) — required select when live and no
+         project is anchored via FS.siteContext; read-only display when
+         one is. Mock mode never renders either (byte-for-byte unchanged). */
+      needsSiteSelect
+        ? React.createElement('label', { className: 'fs-quality-create-modal__field' },
+            React.createElement('span', { className: 'fs-quality-create-modal__label' },
+              'Project ', React.createElement('span', { className: 'fs-quality-create-modal__required' }, '*')),
+            React.createElement('select', {
+              className: 'fs-quality-create-modal__select',
+              value:     selectedSite,
+              onChange:  function (e) { setSelectedSite(e.target.value); },
+              required:  true,
+              disabled:  isSubmitting,
+            },
+              [React.createElement('option', { key: '__unset', value: '' }, 'Select a project…')].concat(
+                sitesList.map(function (s) {
+                  return React.createElement('option', { key: s.site_id, value: s.site_id }, s.name);
+                }),
+              ),
+            ),
+          )
+        : (isLive && siteId
+            ? React.createElement('label', { className: 'fs-quality-create-modal__field' },
+                React.createElement('span', { className: 'fs-quality-create-modal__label' }, 'Project'),
+                React.createElement('input', {
+                  type:      'text',
+                  className: 'fs-quality-create-modal__input',
+                  value:     resolvedSiteName,
+                  readOnly:  true,
+                  disabled:  true,
+                }),
+              )
+            : null),
 
       /* Observation */
       React.createElement('label', { className: 'fs-quality-create-modal__field' },
@@ -226,9 +322,9 @@
               type:     'submit',
               variant:  'primary',
               size:     'md',
-              disabled: isSubmitting,
+              disabled: submitDisabled,
             }, isSubmitting ? 'Logging…' : 'Log Item')
-          : React.createElement('button', { type: 'submit', disabled: isSubmitting },
+          : React.createElement('button', { type: 'submit', disabled: submitDisabled },
               isSubmitting ? 'Logging…' : 'Log Item'),
       ),
     );

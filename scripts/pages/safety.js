@@ -294,16 +294,22 @@
       toolbar,
 
       /* Create observation modal (Sprint 8.1.2)
-         Sprint 8 follow-up — admin has state.user=null; fall back to
-         the first site from fixtures so the modal mounts with a valid
-         siteId rather than ''. */
+         Batch B Task 5 — live mode sources siteId from the global
+         FS.siteContext (the report-side project slug), NOT state.user
+         (a user-scoping value from the aggregator that happened to be
+         admin-null, which is what made the old fixtures[0] fallback
+         WRONG for admin in live). When siteContext has nothing anchored,
+         the modal itself collects a Project via its required select.
+         Mock mode keeps the pre-existing fixtures[0] fallback verbatim. */
       ctx.showCreate && SafetyCreateModal
         ? React.createElement(SafetyCreateModal, {
-            siteId:    state.user
-                       || (((window.FieldSight && window.FieldSight.fixtures
-                            && window.FieldSight.fixtures.sites
-                            && window.FieldSight.fixtures.sites.sites) || [])[0] || {}).site_id
-                       || '',
+            siteId:    !window.FS.api.useMocks
+                       ? ((window.FS.siteContext && window.FS.siteContext.get()) || '')
+                       : (state.user
+                          || (((window.FieldSight && window.FieldSight.fixtures
+                               && window.FieldSight.fixtures.sites
+                               && window.FieldSight.fixtures.sites.sites) || [])[0] || {}).site_id
+                          || ''),
             onSuccess: handleNewFlag,
             onCancel:  function () { ctx.setShowCreate(false); },
           })
