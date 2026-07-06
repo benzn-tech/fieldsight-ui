@@ -176,17 +176,24 @@
       }) : null,
       /* Admin/GM viewing a specific user: offer a way back to the
          user-picker (available_users state) — previously the only way to
-         switch users was hand-editing the ?user= query param. */
+         switch users was hand-editing the ?user= query param. Batch A —
+         when a project is active, "back" means the aggregated per-site
+         day view (drop user, keep site) rather than the raw cross-site
+         user list. */
       (user && isAdminLike((window.AuthMock && window.AuthMock.currentUser) || {}))
         ? React.createElement('button', {
             type:      'button',
             className: 'fs-btn fs-btn--tertiary fs-btn--sm',
             style:     { marginTop: '6px' },
             onClick:   function () {
-              var qs = '?date=' + (date || '') + (site ? '&site=' + encodeURIComponent(site) : '');
+              if (site) {
+                window.FS.Router.navigate('/timeline?site=' + encodeURIComponent(site) + '&date=' + (date || ''));
+                return;
+              }
+              var qs = '?date=' + (date || '');
               window.FS.Router.navigate('/timeline' + qs);
             },
-          }, 'View another user ↺')
+          }, site ? '← All people on this site' : 'View another user ↺')
         : null,
     );
   }
@@ -270,6 +277,213 @@
           onClick:   function () { window.history.back(); },
         }, '← Back'),
       ),
+    );
+  }
+
+  /* Batch A — multi-project admin/gm caller with no project chosen yet:
+     pick which site's day to view (mirrors AvailableUsersState's card
+     shape). Only rendered once sitesList has resolved to more than one
+     option — see TimelineMiddleColumn's render-branch ordering. */
+  function SitePickerState(props) {
+    var Card = window.FieldSight.Card;
+    return React.createElement(Card, {
+      padding: 'lg', className: 'fs-timeline-page__picker',
+    },
+      React.createElement(Card.Body, null,
+        React.createElement('div', { className: 'fs-timeline-page__empty-title' },
+          'Pick a project'),
+        React.createElement('ul', { className: 'fs-timeline-page__users' },
+          (props.sitesList || []).map(function (s) {
+            return React.createElement('li', { key: s.site_id },
+              React.createElement('button', {
+                type:      'button',
+                className: 'fs-timeline-page__user',
+                onClick:   function () {
+                  if (props.onChangeSite) props.onChangeSite(s.site_id);
+                },
+              },
+                s.name,
+                s.location ? React.createElement('span', {
+                  style: { display: 'block', fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px' },
+                }, s.location) : null,
+              ),
+            );
+          }),
+        ),
+      ),
+    );
+  }
+
+  /* =====================================================================
+     AggregatedDayView — site-wide fan-out (Batch A core)
+     ---------------------------------------------------------------------
+     Rendered by TimelineMiddleColumn when a project is chosen but no
+     specific person is (site && !user). Fans out getSiteUsers ×
+     getTimeline across every user on the site (bounded concurrency via
+     pooledAll) and renders one section per person who has a report for
+     the date, reusing ReportKpis / ExecutiveSummaryCard / TopicCard
+     exactly as the single-user daily view does below. AskChat is
+     intentionally omitted — it's scoped to a single report; cross-report
+     Q&A is Phase 4.
+     ===================================================================== */
+  function AggregatedDayView(props) {
+    var fs                   = window.FieldSight;
+    var ErrorBanner          = fs.ErrorBanner;
+    var ExecutiveSummaryCard = fs.ExecutiveSummaryCard;
+    var TopicCard            = fs.TopicCard;
+
+    var refState = React.useState({ status: 'loading' });
+    var state    = refState[0];
+    var setState = refState[1];
+
+    var retryRef   = React.useState(0);
+    var retryCount = retryRef[0];
+    var setRetry   = retryRef[1];
+
+    React.useEffect(function () {
+      var cancelled = false;
+      setState({ status: 'loading' });
+
+      window.FS.api.sites.getSiteUsers(props.site).then(function (res) {
+        if (cancelled) return;
+        var users  = (res && res.users) || [];
+        var thunks = users.map(function (u) {
+          return function () {
+            return window.FS.api.timeline.getTimeline({ date: props.date, user: u.folder_name })
+              .then(function (r) { return { user: u, report: r }; });
+          };
+        });
+        window.FS.api.pooledAll(thunks, 8).then(function (raw) {
+          if (cancelled) return;
+          var results = raw.filter(Boolean);
+          if (thunks.length > 0 && results.length === 0) {
+            setState({
+              status:  'error',
+              message: 'Could not load reports — all requests failed. Please retry.',
+              retry:   function () { setRetry(function (n) { return n + 1; }); },
+            });
+            return;
+          }
+          var sections = results.filter(function (x) {
+            return x.report && !x.report._notFound && !x.report.available_users && !x.report._accessDenied;
+          }).sort(function (a, b) {
+            var an = (a.report.user_name || a.user.name || '').toLowerCase();
+            var bn = (b.report.user_name || b.user.name || '').toLowerCase();
+            return an < bn ? -1 : (an > bn ? 1 : 0);
+          });
+          setState({ status: 'ok', sections: sections });
+        });
+      }).catch(function () {
+        if (cancelled) return;
+        setState({
+          status:  'error',
+          message: 'Could not load reports — all requests failed. Please retry.',
+          retry:   function () { setRetry(function (n) { return n + 1; }); },
+        });
+      });
+
+      return function () { cancelled = true; };
+    }, [props.site, props.date, retryCount]);
+
+    if (state.status === 'loading') {
+      return React.createElement('div', { className: 'fs-timeline-page__loading' },
+        'Loading reports…');
+    }
+
+    if (state.status === 'error') {
+      return ErrorBanner
+        ? React.createElement(ErrorBanner, {
+            message:   state.message,
+            retryable: true,
+            onRetry:   state.retry,
+          })
+        : React.createElement(NoReportState, { message: state.message });
+    }
+
+    var sections = state.sections || [];
+    if (sections.length === 0) {
+      return React.createElement(NoReportState, {
+        message: 'No reports for this project on ' + formatDateLabel(props.date),
+      });
+    }
+
+    var selectedTopicId = props.selectedItem && props.selectedItem.kind === 'topic'
+      ? props.selectedItem.topic_id
+      : null;
+
+    return React.createElement(React.Fragment, null,
+      sections.map(function (section) {
+        var report         = section.report;
+        var sectionUser     = section.user.folder_name;
+        var sectionUserName = report.user_name;
+        var roleLabel = section.user.role
+          ? section.user.role.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); })
+          : null;
+
+        return React.createElement('div', {
+          key:       sectionUser,
+          className: 'fs-timeline-page__person-section',
+          style:     { marginBottom: '28px' },
+        },
+          React.createElement('div', {
+            style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' },
+          },
+            React.createElement('div', null,
+              React.createElement('div', {
+                style: { fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' },
+              }, sectionUserName || unfolder(sectionUser)),
+              roleLabel ? React.createElement('div', {
+                style: { fontSize: '12px', color: 'var(--text-tertiary)' },
+              }, roleLabel) : null,
+            ),
+            React.createElement('button', {
+              type:      'button',
+              className: 'fs-btn fs-btn--tertiary fs-btn--sm',
+              onClick:   function () {
+                window.FS.Router.navigate('/timeline?site=' + encodeURIComponent(props.site)
+                  + '&date=' + props.date + '&user=' + sectionUser);
+              },
+            }, 'View only'),
+          ),
+          React.createElement(ReportKpis, { report: report }),
+          (report.executive_summary || []).length > 0
+            ? React.createElement(ExecutiveSummaryCard, { bullets: report.executive_summary })
+            : null,
+          React.createElement('div', { className: 'fs-timeline-page__section-label' },
+            'Topics'),
+          React.createElement('div', { className: 'fs-timeline-page__topics' },
+            (report.topics || []).map(function (topic) {
+              return React.createElement(TopicCard, {
+                key:           topic.topic_id,
+                topic:         topic,
+                date:          props.date,
+                actionState:   {},
+                selected:      selectedTopicId === topic.topic_id,
+                defaultOpen:   false,
+                highlight:     false,
+                flagHighlight: null,
+                onSelect:      function () {
+                  if (props.onSelect) {
+                    props.onSelect({
+                      kind:       'topic',
+                      id:         'topic_' + topic.topic_id,
+                      topic_id:   topic.topic_id,
+                      topic:      topic,
+                      date:       props.date,
+                      /* RED LINE — this SECTION's own user, never the
+                         page-level `user` (undefined in this branch).
+                         Wrong value here shows person A's topics next to
+                         person B's transcript/audio/photos. */
+                      user:       sectionUser,
+                      user_name:  sectionUserName,
+                    });
+                  }
+                },
+              });
+            }),
+          ),
+        );
+      }),
     );
   }
 
@@ -403,6 +617,18 @@
     React.useEffect(function () {
       if (!date) return undefined;            /* bootstrap above is in flight */
       var cancelled = false;
+
+      /* Batch A — project chosen, no specific person: AggregatedDayView
+         owns its own getSiteUsers × getTimeline fan-out fetch below; skip
+         the single-user fetch entirely and set a minimal ok-state so
+         render reaches the aggregated branch. Worker-forced-self (above)
+         resolves `user` BEFORE this effect runs, so workers never land
+         here — site && !user is admin/gm-only. */
+      if (site && !user) {
+        setState({ status: 'ok', aggregated: true });
+        return undefined;
+      }
+
       setState({ status: 'loading' });
       Promise.all([
         window.FS.api.timeline.getTimeline({ date: date, user: user }),
@@ -535,7 +761,10 @@
       return React.createElement('div', {
         className: 'fs-timeline-page',
       },
-        React.createElement(PageHeader, { date: date, user: user }),
+        React.createElement(PageHeader, {
+          date: date, user: user,
+          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
         React.createElement('div', { className: 'fs-timeline-page__loading' },
           'Loading report…'),
       );
@@ -544,7 +773,10 @@
     if (state.status === 'error') {
       var ErrorBanner = window.FieldSight.ErrorBanner;
       return React.createElement('div', { className: 'fs-timeline-page' },
-        React.createElement(PageHeader, { date: date, user: user }),
+        React.createElement(PageHeader, {
+          date: date, user: user,
+          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
         ErrorBanner
           ? React.createElement(ErrorBanner, {
               message:   (state.error && state.error.message) || 'Could not load report',
@@ -561,13 +793,52 @@
     if (state.status === 'access_denied') {
       var AccessDenied = window.FieldSight.AccessDenied;
       return React.createElement('div', { className: 'fs-timeline-page' },
-        React.createElement(PageHeader, { date: date, user: user }),
+        React.createElement(PageHeader, {
+          date: date, user: user,
+          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
         AccessDenied
           ? React.createElement(AccessDenied, {
               scope:   state.scope,
               message: state.message,
             })
           : React.createElement(NoReportState, { message: state.message || 'Access denied.' }),
+      );
+    }
+
+    /* Batch A — multi-project admin/gm caller with no project chosen:
+       offer the project picker instead of the raw cross-site user list
+       (available_users below) once we know there's more than one option.
+       While sitesList is still resolving, sitesList.length is 0 so this
+       branch simply doesn't match yet — the 'loading' branch above (from
+       the still-in-flight, non-short-circuited fetch below) covers that
+       window without any extra state. */
+    if (!site && !user && sitesList.length > 1) {
+      return React.createElement('div', { className: 'fs-timeline-page' },
+        React.createElement(PageHeader, {
+          date: date, user: null,
+          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
+        React.createElement(SitePickerState, {
+          sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
+      );
+    }
+
+    /* Batch A core — project chosen, no specific person: fan out across
+       every user on the site (AggregatedDayView) instead of a single
+       report. The fetch effect above short-circuits to a minimal
+       ok-state for this case; AggregatedDayView does its own fetching. */
+    if (site && !user) {
+      return React.createElement('div', { className: 'fs-timeline-page' },
+        React.createElement(PageHeader, {
+          date: date, user: null,
+          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
+        React.createElement(AggregatedDayView, {
+          site: site, date: date,
+          onSelect: props.onSelect, selectedItem: props.selectedItem,
+        }),
       );
     }
 
@@ -579,7 +850,10 @@
     /* Admin disambiguation shape: { date, available_users:[...] } */
     if (report && report.available_users && !hasMeeting) {
       return React.createElement('div', { className: 'fs-timeline-page' },
-        React.createElement(PageHeader, { date: date, user: null }),
+        React.createElement(PageHeader, {
+          date: date, user: null,
+          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
         React.createElement(AvailableUsersState, {
           date: date, users: report.available_users, site: site,
         }),
@@ -589,7 +863,10 @@
     /* No-anything shape */
     if (!hasReport && !hasMeeting) {
       return React.createElement('div', { className: 'fs-timeline-page' },
-        React.createElement(PageHeader, { date: date, user: user }),
+        React.createElement(PageHeader, {
+          date: date, user: user,
+          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
         React.createElement(NoReportState, {
           message: (report && report.message) || ('No report for ' + unfolder(user || '') + ' on ' + date),
         }),
