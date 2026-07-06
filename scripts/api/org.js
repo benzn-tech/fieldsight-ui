@@ -206,6 +206,63 @@
     return null;
   }
 
+  // -------- observations (safety/quality) --------
+  var _mockObservations = [];
+
+  async function createObservation(body) {
+    if (orgWrite()) return api.orgRequest('/observations', { method: 'POST', body: body });
+    await api.delay(300);
+    var row = Object.assign({
+      id: 'mock-obs-' + Date.now().toString(36),
+      status: 'open',
+      archived_at: null,
+      created_at: new Date().toISOString(),
+      author_name: 'You',
+      author_sub: 'mock-sub',
+      report_date: (new Date()).toISOString().slice(0, 10),
+    }, body);
+    _mockObservations.unshift(row);
+    return row;
+  }
+
+  async function getObservations(opts) {
+    opts = opts || {};
+    if (orgLive()) {
+      return api.orgRequest('/observations', { params: {
+        kind: opts.kind, from: opts.from, to: opts.to, site_slug: opts.site_slug,
+        include_archived: opts.includeArchived ? '1' : undefined,
+      } });
+    }
+    await api.delay();
+    var rows = _mockObservations.filter(function (o) {
+      if (opts.kind && o.kind !== opts.kind) return false;
+      if (opts.site_slug && o.site_slug !== opts.site_slug) return false;
+      if (opts.from && o.report_date < opts.from) return false;
+      if (opts.to && o.report_date > opts.to) return false;
+      if (!opts.includeArchived && o.archived_at) return false;
+      return true;
+    });
+    return { observations: rows };
+  }
+
+  async function updateObservation(id, patch) {
+    if (orgWrite()) return api.orgRequest('/observations/' + encodeURIComponent(id), { method: 'PATCH', body: patch });
+    await api.delay();
+    var row = _mockObservations.filter(function (o) { return o.id === id; })[0];
+    if (!row) return null;
+    Object.assign(row, patch);
+    return Object.assign({}, row);
+  }
+
+  async function archiveObservation(id) {
+    if (orgWrite()) return api.orgRequest('/observations/' + encodeURIComponent(id) + '/archive', { method: 'POST' });
+    await api.delay();
+    var row = _mockObservations.filter(function (o) { return o.id === id; })[0];
+    if (!row) return null;
+    row.archived_at = new Date().toISOString();
+    return Object.assign({}, row);
+  }
+
   window.FS.api.org = {
     getMe: getMe,
     updateProfile: updateProfile,
@@ -215,6 +272,8 @@
     archiveMember: archiveMember, unarchiveMember: unarchiveMember,
     uploadUrl: uploadUrl, assetUrl: assetUrl,
     uploadImage: uploadImage, resolveAssetUrl: resolveAssetUrl,
+    createObservation: createObservation, getObservations: getObservations,
+    updateObservation: updateObservation, archiveObservation: archiveObservation,
     _folderName: folderName,   /* exported for batch-2b fan-out reuse */
     _toPageMember: _toPageMember, _toPageSite: _toPageSite,   /* page-shape adapters, batch-2b */
   };

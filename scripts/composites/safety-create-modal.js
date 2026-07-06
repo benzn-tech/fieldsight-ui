@@ -18,12 +18,19 @@
      location            Input, optional
      photos              file input, multiple, accept image/*, max 5
 
-   Real-backend path (useMocks=false, writeMocks=false — Phase 0 Task 2):
-     POST /api/safety-observations
-     body: { site_id, observation, risk_level, recommended_action, location, photo_keys[] }
-     photo_keys come from presigned PUT uploads via FS.api.media.presignedPut().
+   Live path (batch B Task 5 — orgAvailable = FS.api.org.createObservation
+   exists && !useMocks):
+     window.FS.api.org.createObservation({ kind: 'safety', site_slug,
+       observation, risk_level, recommended_action })
+     site_slug is siteId (FS.siteContext, passed in by the page) or, when
+     nothing is anchored, the in-modal required Project select below.
+     location/photo_keys are NOT part of this endpoint's body (Task 4
+     scope) — the presignedPut upload block further down is dead
+     (FS.api.media.presignedPut is not implemented anywhere in this repo)
+     and is left in place untouched; its result is simply unused now.
 
-   Mock path: builds a local flag object and calls onSuccess immediately.
+   Mock path (useMocks, or no org.createObservation): builds a local flag
+     object and calls onSuccess immediately — unchanged from Sprint 8.1.2.
 
    CSS: .fs-safety-create-modal in styles/composites.css
 
@@ -68,6 +75,48 @@
     var errorMsg = refError[0];
     var setError = refError[1];
 
+    /* Batch B Task 5 — live write path via FS.api.org.createObservation.
+       isLive gates the in-modal project field (select vs read-only text);
+       orgAvailable additionally requires the org API to actually exist and
+       gates which branch handleSubmit takes. Neither check touches
+       writeMocks — org.createObservation makes that call itself. */
+    var isLive       = !window.FS.api.useMocks;
+    var orgAvailable = !!(window.FS.api.org && window.FS.api.org.createObservation && isLive);
+
+    var refSelectedSite = React.useState('');
+    var selectedSite    = refSelectedSite[0];
+    var setSelectedSite = refSelectedSite[1];
+
+    var refSitesList = React.useState([]);
+    var sitesList    = refSitesList[0];
+    var setSitesList = refSitesList[1];
+
+    /* One-shot fetch, mirrors the cancelled-guard pattern used by the
+       header project selector (app-shell.js MiddleColumn). Only needed
+       live: it feeds the required Project select's options (when siteId
+       is unset) and resolves a display name for the read-only site line
+       (when siteId IS set). Skipped entirely in mock mode. */
+    React.useEffect(function () {
+      if (!isLive) return undefined;
+      var cancelled = false;
+      window.FS.api.sites.getSites().then(function (res) {
+        if (cancelled) return;
+        setSitesList((res && res.sites) || []);
+      }).catch(function () {
+        if (cancelled) return;
+        setSitesList([]);
+      });
+      return function () { cancelled = true; };
+    }, []);
+
+    var needsSiteSelect  = isLive && !siteId;
+    var siteValue        = siteId || selectedSite;
+    var resolvedSiteName = (function () {
+      if (!siteId) return '';
+      var match = sitesList.filter(function (s) { return s.site_id === siteId; })[0];
+      return match ? match.name : siteId;
+    })();
+
     function set(field, value) {
       setForm(function (f) { return Object.assign({}, f, { [field]: value }); });
     }
@@ -80,6 +129,7 @@
     function validate() {
       if (!form.observation.trim()) return 'Observation is required.';
       if (!form.risk_level) return 'Risk level is required.';
+      if (needsSiteSelect && !selectedSite) return 'Project is required.';
       return null;
     }
 
@@ -94,8 +144,11 @@
       try {
         var newFlag;
 
-        if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
-          /* Upload photos first (if any). */
+        if (orgAvailable) {
+          /* Upload photos first (if any) — dead/guarded, left untouched
+             (see header note): FS.api.media.presignedPut is not
+             implemented anywhere, so photoKeys stays [] and is not
+             forwarded to createObservation (its body has no photo_keys). */
           var photoKeys = [];
           if (photos.length > 0 && window.FS.api.media && window.FS.api.media.presignedPut) {
             photoKeys = await Promise.all(photos.map(async function (file) {
@@ -104,17 +157,42 @@
             }));
           }
 
-          newFlag = await window.FS.api.request('/safety-observations', {
-            method: 'POST',
-            body: {
-              site_id:            siteId,
-              observation:        form.observation.trim(),
-              risk_level:         form.risk_level,
-              recommended_action: form.recommended_action.trim() || null,
-              location:           form.location.trim() || null,
-              photo_keys:         photoKeys,
-            },
+          var obsRes = await window.FS.api.org.createObservation({
+            kind:                'safety',
+            site_slug:           siteValue,
+            observation:         form.observation.trim(),
+            risk_level:          form.risk_level,
+            recommended_action:  form.recommended_action.trim() || null,
           });
+          /* 401/403/404 resolve as envelopes, not rejections (Fable batch-B
+             review F3) — without this an expired session shows a success
+             toast for a row that never persisted. */
+          if (obsRes && (obsRes._accessDenied || obsRes._notFound)) {
+            throw new Error(obsRes.error || 'Could not save observation — please retry');
+          }
+
+          newFlag = {
+            id:                 obsRes.id,
+            /* obs_id/author_sub/closed mirror the aggregator's toRowShape —
+               without them the just-prepended row PATCHes /observations/
+               undefined and hides the author's own action button until
+               refetch (Fable batch-B review F2). */
+            obs_id:             obsRes.id,
+            author_sub:         obsRes.author_sub,
+            closed:             false,
+            date:               obsRes.report_date || window.FS.api.todayNZDT(),
+            observation:        form.observation.trim(),
+            risk_level:         form.risk_level,
+            recommended_action: form.recommended_action.trim() || null,
+            location:           form.location.trim() || null,
+            status:             obsRes.status,
+            who_raised:         obsRes.author_name,
+            source:             'manual',
+            topic_id:           -1,
+            topic_title:        'Site safety observations',
+            site:               siteValue,
+            author_name:        obsRes.author_name,
+          };
         } else {
           /* Mock path — simulate network delay and build a local flag. */
           await window.FS.api.delay(400);
@@ -146,14 +224,15 @@
         var toast2 = window.FS && window.FS.toast;
         if (toast2) {
           toast2.show({
-            message: 'Failed to raise observation',
+            message: (fetchErr && fetchErr.message) || 'Failed to raise observation',
             tone:    'error',
           });
         }
       }
     }
 
-    var isSubmitting = status === 'submitting';
+    var isSubmitting  = status === 'submitting';
+    var submitDisabled = isSubmitting || (needsSiteSelect && !selectedSite);
 
     var content = React.createElement('form', {
       className: 'fs-safety-create-modal',
@@ -161,6 +240,40 @@
     },
       React.createElement('h2', { className: 'fs-safety-create-modal__title' },
         'Raise Safety Observation'),
+
+      /* Project (batch B Task 5) — required select when live and no
+         project is anchored via FS.siteContext; read-only display when
+         one is. Mock mode never renders either (byte-for-byte unchanged). */
+      needsSiteSelect
+        ? React.createElement('label', { className: 'fs-safety-create-modal__field' },
+            React.createElement('span', { className: 'fs-safety-create-modal__label' },
+              'Project ', React.createElement('span', { className: 'fs-safety-create-modal__required' }, '*')),
+            React.createElement('select', {
+              className: 'fs-safety-create-modal__select',
+              value:     selectedSite,
+              onChange:  function (e) { setSelectedSite(e.target.value); },
+              required:  true,
+              disabled:  isSubmitting,
+            },
+              [React.createElement('option', { key: '__unset', value: '' }, 'Select a project…')].concat(
+                sitesList.map(function (s) {
+                  return React.createElement('option', { key: s.site_id, value: s.site_id }, s.name);
+                }),
+              ),
+            ),
+          )
+        : (isLive && siteId
+            ? React.createElement('label', { className: 'fs-safety-create-modal__field' },
+                React.createElement('span', { className: 'fs-safety-create-modal__label' }, 'Project'),
+                React.createElement('input', {
+                  type:      'text',
+                  className: 'fs-safety-create-modal__input',
+                  value:     resolvedSiteName,
+                  readOnly:  true,
+                  disabled:  true,
+                }),
+              )
+            : null),
 
       /* Observation */
       React.createElement('label', { className: 'fs-safety-create-modal__field' },
@@ -262,9 +375,9 @@
               type:     'submit',
               variant:  'primary',
               size:     'md',
-              disabled: isSubmitting,
+              disabled: submitDisabled,
             }, isSubmitting ? 'Raising…' : 'Raise Observation')
-          : React.createElement('button', { type: 'submit', disabled: isSubmitting },
+          : React.createElement('button', { type: 'submit', disabled: submitDisabled },
               isSubmitting ? 'Raising…' : 'Raise Observation'),
       ),
     );
