@@ -136,6 +136,17 @@
     var view    = refView[0];
     var setView = refView[1];
 
+    /* batch A2 Task 4 — read the global active-site selection; passed
+       EXPLICITLY into the aggregator call below (never read inside the
+       aggregator itself — see tasks-aggregator.js _AUDIT note). */
+    var refActiveSite = React.useState(function () { return (window.FS && window.FS.siteContext) ? window.FS.siteContext.get() : null; });
+    var activeSite    = refActiveSite[0];
+    var setActiveSite = refActiveSite[1];
+    React.useEffect(function () {
+      if (!(window.FS && window.FS.siteContext)) return undefined;
+      return window.FS.siteContext.onChange(setActiveSite);
+    }, []);
+
     React.useEffect(function () {
       /* RangeToolbar resolves the range asynchronously ('all' needs
          getSpan()) — wait for both ends before fetching. The toolbar is
@@ -148,6 +159,7 @@
       var today = window.FS.api.todayNZDT();
       var fetchOpts = { from: view.from, to: view.to };
       if (targetUser) fetchOpts.user = targetUser;
+      if (activeSite) fetchOpts.site = activeSite;
 
       window.FS.api.tasks.getActionsResolvedRange(fetchOpts).then(function (res) {
         if (cancelled) return;
@@ -171,7 +183,7 @@
       });
 
       return function () { cancelled = true; };
-    }, [depKey, retryCount, view.from, view.to]);
+    }, [depKey, retryCount, view.from, view.to, activeSite]);
 
     function removeRow(rowId) {
       setState(function (s) {

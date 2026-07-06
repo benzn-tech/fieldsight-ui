@@ -94,6 +94,17 @@
     var retryCount = retryRef[0];
     var setRetry   = retryRef[1];
 
+    /* batch A2 Task 4 — read the global active-site selection; passed
+       EXPLICITLY into the aggregator call below (never read inside the
+       aggregator itself — see user-activity-aggregator.js _AUDIT note). */
+    var refActiveSite = React.useState(function () { return (window.FS && window.FS.siteContext) ? window.FS.siteContext.get() : null; });
+    var activeSite    = refActiveSite[0];
+    var setActiveSite = refActiveSite[1];
+    React.useEffect(function () {
+      if (!(window.FS && window.FS.siteContext)) return undefined;
+      return window.FS.siteContext.onChange(setActiveSite);
+    }, []);
+
     React.useEffect(function () {
       var cancelled = false;
       setState({ status: 'loading' });
@@ -102,7 +113,7 @@
       var from  = window.FS.api.addDaysISO(today, -(daysToLoad - 1));
 
       window.FS.api.userActivity.getUserActivityRange({
-        from: from, to: today,
+        from: from, to: today, site: activeSite || undefined,
       }).then(function (res) {
         if (cancelled) return;
         if (res && res._accessDenied) {
@@ -128,7 +139,7 @@
       });
 
       return function () { cancelled = true; };
-    }, [depKey, daysToLoad, retryCount]);
+    }, [depKey, daysToLoad, retryCount, activeSite]);
 
     function loadMore() { setDaysToLoad(function (n) { return n + LOAD_STEP; }); }
 

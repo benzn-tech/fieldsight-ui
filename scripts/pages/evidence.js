@@ -57,6 +57,19 @@
     return u.folder_name || (u.name ? u.name.replace(/ /g, '_') : '');
   }
 
+  /* batch A2 Task 4 — the existing all-users fan-out source (GET /api/users,
+     falling back to fixtures on error). Extracted so the site-scoped path
+     below can fall back to the same unscoped source if getSiteUsers fails. */
+  function allUsersFoldersPromise() {
+    return window.FS.api.sites.getUsers().then(function (res) {
+      return ((res && res.users) || []).map(deriveFolder).filter(Boolean);
+    }).catch(function () {
+      var fxUsers = (window.FieldSight && window.FieldSight.fixtures
+        && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [];
+      return fxUsers.map(deriveFolder).filter(Boolean);
+    });
+  }
+
   function fmtDate(yyyymmdd) {
     if (!yyyymmdd) return '';
     var p = String(yyyymmdd).split('-').map(Number);
@@ -112,6 +125,18 @@
     var retryCount = retryRef[0];
     var setRetry   = retryRef[1];
 
+    /* batch A2 Task 4 — read the global active-site selection; passed
+       EXPLICITLY into the photos fan-out folders source below (never read
+       inside an aggregator itself). The dates-span discovery effect below
+       intentionally keeps the global span — see that effect's comment. */
+    var refActiveSite = React.useState(function () { return (window.FS && window.FS.siteContext) ? window.FS.siteContext.get() : null; });
+    var activeSite    = refActiveSite[0];
+    var setActiveSite = refActiveSite[1];
+    React.useEffect(function () {
+      if (!(window.FS && window.FS.siteContext)) return undefined;
+      return window.FS.siteContext.onChange(setActiveSite);
+    }, []);
+
     /* Photos cache — populated when the Photos tab activates (first
        open) and shared with the right-pane summary. */
     var refPhotos = React.useState({ status: 'idle', perDay: [], totalCount: 0 });
@@ -124,7 +149,14 @@
 
     React.useEffect(function () {
       /* RangeToolbar resolves the range asynchronously (e.g. 'all' needs
-         FS.api.window.getSpan()) — wait for both ends before fetching. */
+         FS.api.window.getSpan()) — wait for both ends before fetching.
+         batch A2 Task 4 — this discovery step deliberately does NOT take
+         activeSite: the date-span itself is global (which days have any
+         report at all), not site-scoped. Narrowing happens per-day in the
+         photos fan-out effect below, whose folders source IS site-scoped;
+         a date with no site-matching photos just yields zero rows for
+         that day (existing perDay.length === 0 skip), not an error —
+         acceptable here. */
       if (!view.from || !view.to) return undefined;
       var cancelled = false;
       setState({ status: 'loading' });
@@ -170,16 +202,20 @@
          from the real GET /api/users (report identity) — live =
          pass-through of /api/users, mock = fixtures (unchanged
          behaviour). Falls back to the fixtures read on any /api/users
-         error. */
+         error.
+
+         batch A2 Task 4 — when there's no forced single user AND an
+         active site is selected, narrow the fan-out to that site's users
+         via GET /site-users; any failure there falls back to the same
+         unscoped all-users source above (partial/unscoped data beats a
+         dead page). */
       var foldersPromise = state.user
         ? Promise.resolve([state.user])
-        : window.FS.api.sites.getUsers().then(function (res) {
-            return ((res && res.users) || []).map(deriveFolder).filter(Boolean);
-          }).catch(function () {
-            var fxUsers = (window.FieldSight && window.FieldSight.fixtures
-              && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [];
-            return fxUsers.map(deriveFolder).filter(Boolean);
-          });
+        : (activeSite
+            ? window.FS.api.sites.getSiteUsers(activeSite).then(function (res) {
+                return ((res && res.users) || []).map(deriveFolder).filter(Boolean);
+              }).catch(allUsersFoldersPromise)
+            : allUsersFoldersPromise());
 
       foldersPromise.then(function (fanoutFolders) {
         /* Pooled, not Promise.all: the cross-product reaches 150+ requests
@@ -236,7 +272,7 @@
       });
 
       return function () { cancelled = true; };
-    }, [activeTab, state.status, state.dates && state.dates.join(',')]);
+    }, [activeTab, state.status, state.dates && state.dates.join(','), activeSite]);
 
     function loadMore() { setDaysToLoad(function (n) { return n + LOAD_STEP; }); }
 
