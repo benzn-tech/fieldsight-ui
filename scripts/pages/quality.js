@@ -737,10 +737,12 @@
           variant: 'primary', size: 'sm', loading: manualPending,
           onClick: toggleManualStatus,
         }, sel.closed ? 'Reopen' : 'Mark closed') : null,
-        React.createElement(Button, {
+        /* Manual observations have no source report — the link would land on
+           a "_notFound" timeline (batch B review). */
+        sel.source !== 'manual' ? React.createElement(Button, {
           variant: 'secondary', size: 'sm', rightIcon: 'arrow-right',
           onClick: onOpenInTimeline,
-        }, 'Open source report'),
+        }, 'Open source report') : null,
       ),
     );
   }
