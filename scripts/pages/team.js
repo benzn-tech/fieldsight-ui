@@ -808,6 +808,14 @@
     var scopePrimary = siteDisplayName(u.primary_site);
     var today        = window.FS.api && window.FS.api.todayNZDT ? window.FS.api.todayNZDT() : '';
 
+    /* Task 4 (batch A) — deliberately does NOT forward u.primary_site (or
+       any of u.sites) as ?site=. In live mode these come from
+       org.getMembers()'s membership records — the ORG identity system's
+       site UUID — a different space from the report-side site slug that
+       /timeline's ?site= / loadTimelineSite() / getDates({site}) /
+       getSiteUsers(site) all key off (window.FS.api.sites.getSites()).
+       Same identity-systems gap as sites.js's openTimeline; parked for
+       the device-mgmt batch rather than "helpfully" wired here. */
     function navReports() {
       var qs = '?date=' + encodeURIComponent(today) + '&user=' + encodeURIComponent(u.folder_name || '');
       window.FS.Router.navigate('/timeline' + qs);

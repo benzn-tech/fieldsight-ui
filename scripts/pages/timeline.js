@@ -49,6 +49,23 @@
     return user && (user.role === 'admin' || user.role === 'gm' || user.isAdmin);
   }
 
+  /* Batch A — project-anchor plumbing (Task 2). Persists the last-viewed
+     site/project across timeline visits, mirroring the range-toolbar
+     loadStored/saveStored pattern (composites/range-toolbar.js:61-91). */
+  var TIMELINE_SITE_KEY = 'fs.settings.timelineSite';
+  function loadTimelineSite() {
+    try {
+      var v = JSON.parse(localStorage.getItem(TIMELINE_SITE_KEY) || 'null');
+      return (v && v.site) || null;
+    } catch (_) { return null; }
+  }
+  function saveTimelineSite(siteId) {
+    try {
+      if (siteId) localStorage.setItem(TIMELINE_SITE_KEY, JSON.stringify({ site: siteId }));
+      else localStorage.removeItem(TIMELINE_SITE_KEY);
+    } catch (_) {}
+  }
+
   /* Pick the most recent date with a report from /api/dates, or null.
      Mirrors the helper in today.js so the two pages share the same
      fallback semantics — when "today" has no report, the user lands
@@ -79,9 +96,11 @@
   /* ---------- shared header rendering ---------------------------------- */
 
   function PageHeader(props) {
-    var report = props.report;
-    var date   = props.date;
-    var user   = props.user;
+    var report    = props.report;
+    var date      = props.date;
+    var user      = props.user;
+    var site      = props.site;
+    var sitesList = props.sitesList || [];
     var DatePicker = window.FieldSight.DatePicker;
 
     var subtitleParts = [];
@@ -95,13 +114,31 @@
     var fromToday = (readRouteParams().from === 'today');
 
     /* Navigate the timeline route to a new date while preserving the
-       active user query param (Sprint 2.5 / Phase E). */
+       active user + site query params (Sprint 2.5 / Phase E; batch A). */
     function onChangeDate(newDate) {
       var params = readRouteParams();
       var u = params.user || (user || '');
-      var qs = '?date=' + newDate + (u ? '&user=' + u : '');
+      var s = params.site || (site || '');
+      var qs = '?date=' + newDate + (s ? '&site=' + encodeURIComponent(s) : '') + (u ? '&user=' + u : '');
       window.FS.Router.navigate('/timeline' + qs);
     }
+
+    /* Batch A — compact, always-visible project selector. Sits above the
+       DatePicker; switching projects is handled by props.onChangeSite
+       (Middle drops the active user and persists the choice). */
+    var siteSelectOptions = [{ v: '', l: '— Select a project —' }].concat(
+      sitesList.map(function (s) { return { v: s.site_id, l: s.name }; })
+    );
+    var siteSelect = React.createElement('select', {
+      className: 'fs-settings__select',
+      style:     { maxWidth: '260px' },
+      value:     site || '',
+      onChange:  function (e) { if (props.onChangeSite) props.onChangeSite(e.target.value); },
+    },
+      siteSelectOptions.map(function (o) {
+        return React.createElement('option', { key: o.v, value: o.v }, o.l);
+      }),
+    );
 
     return React.createElement('div', {
       className: 'fs-timeline-page__header',
@@ -119,6 +156,7 @@
         'Daily Report'),
       React.createElement('div', { className: 'fs-timeline-page__subtitle' },
         subtitleParts.join(' · ')),
+      siteSelect,
       DatePicker && date ? React.createElement(DatePicker, {
         date:        date,
         onChange:    onChangeDate,
@@ -131,17 +169,31 @@
            with no content for the selected user). No user → union stays,
            which pairs with the admin "pick a user" state. */
         user:        user || null,
+        /* Batch A — when no user is selected, dots follow the active
+           project instead of the (now-dropped) admin union. User wins
+           when both are present. */
+        site:        (user ? null : site),
       }) : null,
       /* Admin/GM viewing a specific user: offer a way back to the
          user-picker (available_users state) — previously the only way to
-         switch users was hand-editing the ?user= query param. */
+         switch users was hand-editing the ?user= query param. Batch A —
+         when a project is active, "back" means the aggregated per-site
+         day view (drop user, keep site) rather than the raw cross-site
+         user list. */
       (user && isAdminLike((window.AuthMock && window.AuthMock.currentUser) || {}))
         ? React.createElement('button', {
             type:      'button',
             className: 'fs-btn fs-btn--tertiary fs-btn--sm',
             style:     { marginTop: '6px' },
-            onClick:   function () { window.FS.Router.navigate('/timeline?date=' + (date || '')); },
-          }, 'View another user ↺')
+            onClick:   function () {
+              if (site) {
+                window.FS.Router.navigate('/timeline?site=' + encodeURIComponent(site) + '&date=' + (date || ''));
+                return;
+              }
+              var qs = '?date=' + (date || '');
+              window.FS.Router.navigate('/timeline' + qs);
+            },
+          }, site ? '← All people on this site' : 'View another user ↺')
         : null,
     );
   }
@@ -208,7 +260,9 @@
                 type: 'button',
                 className: 'fs-timeline-page__user',
                 onClick: function () {
-                  window.FS.Router.navigate('/timeline?date=' + props.date + '&user=' + u);
+                  var qs = '/timeline?date=' + props.date + '&user=' + u
+                    + (props.site ? '&site=' + encodeURIComponent(props.site) : '');
+                  window.FS.Router.navigate(qs);
                 },
               }, unfolder(u)),
             );
@@ -223,6 +277,222 @@
           onClick:   function () { window.history.back(); },
         }, '← Back'),
       ),
+    );
+  }
+
+  /* Batch A — multi-project admin/gm caller with no project chosen yet:
+     pick which site's day to view (mirrors AvailableUsersState's card
+     shape). Only rendered once sitesList has resolved to more than one
+     option — see TimelineMiddleColumn's render-branch ordering. */
+  function SitePickerState(props) {
+    var Card = window.FieldSight.Card;
+    return React.createElement(Card, {
+      padding: 'lg', className: 'fs-timeline-page__picker',
+    },
+      React.createElement(Card.Body, null,
+        React.createElement('div', { className: 'fs-timeline-page__empty-title' },
+          'Pick a project'),
+        React.createElement('ul', { className: 'fs-timeline-page__users' },
+          (props.sitesList || []).map(function (s) {
+            return React.createElement('li', { key: s.site_id },
+              React.createElement('button', {
+                type:      'button',
+                className: 'fs-timeline-page__user',
+                onClick:   function () {
+                  if (props.onChangeSite) props.onChangeSite(s.site_id);
+                },
+              },
+                s.name,
+                s.location ? React.createElement('span', {
+                  style: { display: 'block', fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px' },
+                }, s.location) : null,
+              ),
+            );
+          }),
+        ),
+      ),
+    );
+  }
+
+  /* =====================================================================
+     AggregatedDayView — site-wide fan-out (Batch A core)
+     ---------------------------------------------------------------------
+     Rendered by TimelineMiddleColumn when a project is chosen but no
+     specific person is (site && !user). Fans out getSiteUsers ×
+     getTimeline across every user on the site (bounded concurrency via
+     pooledAll) and renders one section per person who has a report for
+     the date, reusing ReportKpis / ExecutiveSummaryCard / TopicCard
+     exactly as the single-user daily view does below. AskChat is
+     intentionally omitted — it's scoped to a single report; cross-report
+     Q&A is Phase 4.
+     ===================================================================== */
+  function AggregatedDayView(props) {
+    var fs                   = window.FieldSight;
+    var ErrorBanner          = fs.ErrorBanner;
+    var ExecutiveSummaryCard = fs.ExecutiveSummaryCard;
+    var TopicCard            = fs.TopicCard;
+
+    var refState = React.useState({ status: 'loading' });
+    var state    = refState[0];
+    var setState = refState[1];
+
+    var retryRef   = React.useState(0);
+    var retryCount = retryRef[0];
+    var setRetry   = retryRef[1];
+
+    React.useEffect(function () {
+      var cancelled = false;
+      setState({ status: 'loading' });
+
+      window.FS.api.sites.getSiteUsers(props.site).then(function (res) {
+        if (cancelled) return;
+        var users  = (res && res.users) || [];
+        var thunks = users.map(function (u) {
+          return function () {
+            return window.FS.api.timeline.getTimeline({ date: props.date, user: u.folder_name })
+              .then(function (r) { return { user: u, report: r }; });
+          };
+        });
+        return window.FS.api.pooledAll(thunks, 8).then(function (raw) {
+          if (cancelled) return;
+          var results = raw.filter(Boolean);
+          if (thunks.length > 0 && results.length === 0) {
+            setState({
+              status:  'error',
+              message: 'Could not load reports — all requests failed. Please retry.',
+              retry:   function () { setRetry(function (n) { return n + 1; }); },
+            });
+            return;
+          }
+          var sections = results.filter(function (x) {
+            return x.report && !x.report._notFound && !x.report.available_users && !x.report._accessDenied;
+          }).sort(function (a, b) {
+            var an = (a.report.user_name || a.user.name || '').toLowerCase();
+            var bn = (b.report.user_name || b.user.name || '').toLowerCase();
+            return an < bn ? -1 : (an > bn ? 1 : 0);
+          });
+          setState({ status: 'ok', sections: sections });
+        });
+      }).catch(function () {
+        if (cancelled) return;
+        setState({
+          status:  'error',
+          message: 'Could not load reports — all requests failed. Please retry.',
+          retry:   function () { setRetry(function (n) { return n + 1; }); },
+        });
+      });
+
+      return function () { cancelled = true; };
+    }, [props.site, props.date, retryCount]);
+
+    if (state.status === 'loading') {
+      return React.createElement('div', { className: 'fs-timeline-page__loading' },
+        'Loading reports…');
+    }
+
+    if (state.status === 'error') {
+      return ErrorBanner
+        ? React.createElement(ErrorBanner, {
+            message:   state.message,
+            retryable: true,
+            onRetry:   state.retry,
+          })
+        : React.createElement(NoReportState, { message: state.message });
+    }
+
+    var sections = state.sections || [];
+    if (sections.length === 0) {
+      return React.createElement(NoReportState, {
+        message: 'No reports for this project on ' + formatDateLabel(props.date),
+      });
+    }
+
+    /* topic_id is per-report sequential (0,1,2…) — every section has a
+       topic 0. Selection identity in the aggregated view must therefore
+       be the NAMESPACED sel.id ('topic_<folder>_<n>'), never the bare
+       topic_id, or clicking A's topic 0 highlights B's and C's too
+       (Fable review A-1/A-2). */
+    var selectedAggId = props.selectedItem && props.selectedItem.kind === 'topic'
+      ? props.selectedItem.id
+      : null;
+
+    return React.createElement(React.Fragment, null,
+      sections.map(function (section) {
+        var report         = section.report;
+        var sectionUser     = section.user.folder_name;
+        var sectionUserName = report.user_name;
+        var roleLabel = section.user.role
+          ? section.user.role.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); })
+          : null;
+
+        return React.createElement('div', {
+          key:       sectionUser,
+          className: 'fs-timeline-page__person-section',
+          style:     { marginBottom: '28px' },
+        },
+          React.createElement('div', {
+            style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' },
+          },
+            React.createElement('div', null,
+              React.createElement('div', {
+                style: { fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' },
+              }, sectionUserName || unfolder(sectionUser)),
+              roleLabel ? React.createElement('div', {
+                style: { fontSize: '12px', color: 'var(--text-tertiary)' },
+              }, roleLabel) : null,
+            ),
+            React.createElement('button', {
+              type:      'button',
+              className: 'fs-btn fs-btn--tertiary fs-btn--sm',
+              onClick:   function () {
+                window.FS.Router.navigate('/timeline?site=' + encodeURIComponent(props.site)
+                  + '&date=' + props.date + '&user=' + encodeURIComponent(sectionUser));
+              },
+            }, 'View only'),
+          ),
+          React.createElement(ReportKpis, { report: report }),
+          (report.executive_summary || []).length > 0
+            ? React.createElement(ExecutiveSummaryCard, { bullets: report.executive_summary })
+            : null,
+          React.createElement('div', { className: 'fs-timeline-page__section-label' },
+            'Topics'),
+          React.createElement('div', { className: 'fs-timeline-page__topics' },
+            (report.topics || []).map(function (topic) {
+              return React.createElement(TopicCard, {
+                key:           topic.topic_id,
+                topic:         topic,
+                date:          props.date,
+                actionState:   {},
+                selected:      selectedAggId === ('topic_' + sectionUser + '_' + topic.topic_id),
+                defaultOpen:   false,
+                highlight:     false,
+                flagHighlight: null,
+                onSelect:      function () {
+                  if (props.onSelect) {
+                    props.onSelect({
+                      kind:       'topic',
+                      /* Namespaced by section owner — bare topic_id collides
+                         across sections AND leaves the right pane's
+                         reset-to-Overview effect (deps [sel.id]) stuck when
+                         switching between two people's same-numbered topic. */
+                      id:         'topic_' + sectionUser + '_' + topic.topic_id,
+                      topic_id:   topic.topic_id,
+                      topic:      topic,
+                      date:       props.date,
+                      /* RED LINE — this SECTION's own user, never the
+                         page-level `user` (undefined in this branch).
+                         Wrong value here shows person A's topics next to
+                         person B's transcript/audio/photos. */
+                      user:       sectionUser,
+                      user_name:  sectionUserName,
+                    });
+                  }
+                },
+              });
+            }),
+          ),
+        );
+      }),
     );
   }
 
@@ -261,12 +531,88 @@
       : null;
     if (targetFlagIdx !== null && isNaN(targetFlagIdx)) targetFlagIdx = null;
 
-    /* Resolve effective (date, user) honouring worker-forced-self rule. */
+    /* Resolve effective (date, user, site) honouring the three-tier role
+       rule (Task 4 — carried over from the Task 3 review):
+         • worker                        → forced to self, always (line
+                                            below, unconditional).
+         • site_manager / project_manager → forced to self ONLY when no
+                                            site is anchored. Once a site
+                                            IS anchored (URL ?site=, the
+                                            persisted last-viewed choice,
+                                            or the single-site auto-anchor
+                                            further below) they fall
+                                            through to AggregatedDayView
+                                            instead — the backend already
+                                            scopes their getSiteUsers /
+                                            getTimeline calls to
+                                            self + own-site workers
+                                            (site_manager) or their
+                                            managed sites (pm), so nothing
+                                            unsafe is exposed.
+         • admin / gm                    → always free; isAdminLike
+                                            short-circuits both checks. */
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
     var date   = params.date;            /* may be undefined → bootstrap resolves */
     var user   = params.user;
+
+    /* One-shot sites list fetch (mirrors AvailableUsersState's lack of
+       gating — mock getSites() always resolves; no useMocks branch here
+       since the api layer itself owns that switch). Declared BEFORE the
+       site resolution so the single-site auto-anchor can participate in
+       it — anchoring after the role-forcing checks left a single-site
+       site_manager/PM forced to self on their very first visit (Task 4
+       review carry-over). */
+    var refSitesList = React.useState([]);
+    var sitesList    = refSitesList[0];
+    var setSitesList = refSitesList[1];
+    React.useEffect(function () {
+      var cancelled = false;
+      window.FS.api.sites.getSites()
+        .then(function (res) {
+          if (cancelled) return;
+          setSitesList((res && res.sites) || []);
+        })
+        .catch(function () {
+          if (!cancelled) setSitesList([]);
+        });
+      return function () { cancelled = true; };
+    }, []);
+
+    /* Batch A — resolve the active site/project up front: URL wins, then
+       the last-persisted choice, then the single-site auto-anchor (a
+       caller scoped to exactly one project never had to choose; no
+       navigate/persist — persisting would poison localStorage for a
+       caller who later gains more sites). Deliberately computed BEFORE
+       the role-forcing checks below — they need to know whether a site
+       is anchored, including the auto-anchor case once sitesList lands
+       and re-renders. */
+    var site = params.site || loadTimelineSite()
+      || (sitesList.length === 1 ? sitesList[0].site_id : null);
+
+    /* Stale-anchor guard (Fable review B-2): a persisted/URL site the
+       caller can no longer access (account switch, revoked) renders a
+       blank selector and a misleading empty aggregated view. Once the
+       sites list has landed, an unknown site resolves to null and the
+       stale key is dropped (removeItem is idempotent — safe in render). */
+    if (site && sitesList.length > 0
+        && !sitesList.some(function (s) { return s.site_id === site; })) {
+      saveTimelineSite(null);
+      site = null;
+    }
+
     if (caller.role === 'worker') user = callerFolder();
-    if (!user && !isAdminLike(caller)) user = callerFolder();
+    if (!user && !site && !isAdminLike(caller)) user = callerFolder();
+
+    /* Switching projects resets the active person — a user picked for
+       one site rarely maps onto another. Persists the choice so it
+       survives reloads (loadTimelineSite above). */
+    function onChangeSite(siteId) {
+      saveTimelineSite(siteId || null);
+      var qs = siteId
+        ? '?site=' + encodeURIComponent(siteId) + (date ? '&date=' + date : '')
+        : '';
+      window.FS.Router.navigate('/timeline' + qs);
+    }
 
     var refState = React.useState({ status: 'loading' });
     var state    = refState[0];
@@ -291,7 +637,34 @@
       if (date) return undefined;
       var cancelled = false;
       var qsUser = user ? '&user=' + encodeURIComponent(user) : '';
+      var qsSite = site ? '&site=' + encodeURIComponent(site) : '';
       var today = window.FS.api.todayNZDT();
+
+      /* Batch A — site-aware bootstrap. Once a project is anchored,
+         resolve the initial date against THAT site's own report calendar
+         (24-month lookback, matching DatePicker's own default) instead of
+         probing today's single-user report below — `user` is frequently
+         empty here (site_manager/pm landing straight on
+         AggregatedDayView), so getTimeline(today, user) wouldn't reflect
+         the site's actual report activity. Falls back to `today` — same
+         as the no-site path below — when the site has no report dates at
+         all (or the calendar call is denied), so the page still
+         navigates and AggregatedDayView can render its own empty state
+         rather than leaving the page stuck in 'loading' forever.
+         Mock mode: getDates() ignores `site` and returns the full
+         fixture calendar — acceptable; findLatestReportDate then simply
+         resolves to the same latest date the no-site path would have
+         found anyway (BACKEND-CONTEXT §4.3 note in api/dates.js). */
+      if (site) {
+        window.FS.api.dates.getDates({ months: 24, site: site }).then(function (res) {
+          if (cancelled) return;
+          var resolved = (res && !res._accessDenied)
+            ? (findLatestReportDate(res.dates || {}) || today)
+            : today;
+          window.FS.Router.navigate('/timeline?date=' + resolved + qsUser + qsSite);
+        }).catch(function () { /* fall through; fetch effect won't run */ });
+        return function () { cancelled = true; };
+      }
 
       window.FS.api.timeline.getTimeline({ date: today, user: user })
         .then(function (r) {
@@ -304,16 +677,29 @@
         })
         .then(function (resolved) {
           if (cancelled || !resolved) return;
-          window.FS.Router.navigate('/timeline?date=' + resolved + qsUser);
+          window.FS.Router.navigate('/timeline?date=' + resolved + qsUser + qsSite);
         })
         .catch(function () { /* fall through; fetch effect won't run */ });
 
       return function () { cancelled = true; };
-    }, [date, user]);
+    }, [date, user, site]);
 
     React.useEffect(function () {
       if (!date) return undefined;            /* bootstrap above is in flight */
       var cancelled = false;
+
+      /* Batch A — project chosen, no specific person: AggregatedDayView
+         owns its own getSiteUsers × getTimeline fan-out fetch below; skip
+         the single-user fetch entirely and set a minimal ok-state so
+         render reaches the aggregated branch. Worker-forced-self (above)
+         resolves `user` BEFORE this effect runs, so workers never land
+         here — site && !user means admin/gm, OR a site_manager/PM with an
+         anchored site (their forced-self rule is site-conditional). */
+      if (site && !user) {
+        setState({ status: 'ok', aggregated: true });
+        return undefined;
+      }
+
       setState({ status: 'loading' });
       Promise.all([
         window.FS.api.timeline.getTimeline({ date: date, user: user }),
@@ -446,7 +832,10 @@
       return React.createElement('div', {
         className: 'fs-timeline-page',
       },
-        React.createElement(PageHeader, { date: date, user: user }),
+        React.createElement(PageHeader, {
+          date: date, user: user,
+          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
         React.createElement('div', { className: 'fs-timeline-page__loading' },
           'Loading report…'),
       );
@@ -455,7 +844,10 @@
     if (state.status === 'error') {
       var ErrorBanner = window.FieldSight.ErrorBanner;
       return React.createElement('div', { className: 'fs-timeline-page' },
-        React.createElement(PageHeader, { date: date, user: user }),
+        React.createElement(PageHeader, {
+          date: date, user: user,
+          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
         ErrorBanner
           ? React.createElement(ErrorBanner, {
               message:   (state.error && state.error.message) || 'Could not load report',
@@ -472,13 +864,52 @@
     if (state.status === 'access_denied') {
       var AccessDenied = window.FieldSight.AccessDenied;
       return React.createElement('div', { className: 'fs-timeline-page' },
-        React.createElement(PageHeader, { date: date, user: user }),
+        React.createElement(PageHeader, {
+          date: date, user: user,
+          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
         AccessDenied
           ? React.createElement(AccessDenied, {
               scope:   state.scope,
               message: state.message,
             })
           : React.createElement(NoReportState, { message: state.message || 'Access denied.' }),
+      );
+    }
+
+    /* Batch A — multi-project admin/gm caller with no project chosen:
+       offer the project picker instead of the raw cross-site user list
+       (available_users below) once we know there's more than one option.
+       While sitesList is still resolving, sitesList.length is 0 so this
+       branch simply doesn't match yet — the 'loading' branch above (from
+       the still-in-flight, non-short-circuited fetch below) covers that
+       window without any extra state. */
+    if (!site && !user && sitesList.length > 1) {
+      return React.createElement('div', { className: 'fs-timeline-page' },
+        React.createElement(PageHeader, {
+          date: date, user: null,
+          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
+        React.createElement(SitePickerState, {
+          sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
+      );
+    }
+
+    /* Batch A core — project chosen, no specific person: fan out across
+       every user on the site (AggregatedDayView) instead of a single
+       report. The fetch effect above short-circuits to a minimal
+       ok-state for this case; AggregatedDayView does its own fetching. */
+    if (site && !user) {
+      return React.createElement('div', { className: 'fs-timeline-page' },
+        React.createElement(PageHeader, {
+          date: date, user: null,
+          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
+        React.createElement(AggregatedDayView, {
+          site: site, date: date,
+          onSelect: props.onSelect, selectedItem: props.selectedItem,
+        }),
       );
     }
 
@@ -490,9 +921,12 @@
     /* Admin disambiguation shape: { date, available_users:[...] } */
     if (report && report.available_users && !hasMeeting) {
       return React.createElement('div', { className: 'fs-timeline-page' },
-        React.createElement(PageHeader, { date: date, user: null }),
+        React.createElement(PageHeader, {
+          date: date, user: null,
+          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
         React.createElement(AvailableUsersState, {
-          date: date, users: report.available_users,
+          date: date, users: report.available_users, site: site,
         }),
       );
     }
@@ -500,7 +934,10 @@
     /* No-anything shape */
     if (!hasReport && !hasMeeting) {
       return React.createElement('div', { className: 'fs-timeline-page' },
-        React.createElement(PageHeader, { date: date, user: user }),
+        React.createElement(PageHeader, {
+          date: date, user: user,
+          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
         React.createElement(NoReportState, {
           message: (report && report.message) || ('No report for ' + unfolder(user || '') + ' on ' + date),
         }),
@@ -542,7 +979,10 @@
     /* ---- Meeting view ---- */
     if (effectiveView === 'meeting') {
       return React.createElement('div', { className: 'fs-timeline-page' },
-        React.createElement(PageHeader, { date: date, user: user, report: report || meeting }),
+        React.createElement(PageHeader, {
+          date: date, user: user, report: report || meeting,
+          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
         React.createElement(ViewToggle),
 
         meeting.meeting_title ? React.createElement('div', {
@@ -609,7 +1049,10 @@
     return React.createElement('div', {
       className: 'fs-timeline-page',
     },
-      React.createElement(PageHeader, { date: date, user: user, report: report }),
+      React.createElement(PageHeader, {
+        date: date, user: user, report: report,
+        site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+      }),
       React.createElement(ViewToggle),
       React.createElement(ReportKpis, { report: report }),
       React.createElement(ExecutiveSummaryCard, {

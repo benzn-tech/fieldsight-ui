@@ -572,6 +572,17 @@
       });
     }
 
+    /* Task 4 (batch A) — deliberately does NOT forward sel.site_id as
+       ?site=. In live mode sel.site_id comes from org.getOrgSites()'s
+       _toPageSite() (api/org.js), i.e. the ORG identity system's site
+       UUID — a different space from the report-side site slug that
+       /timeline's ?site= / loadTimelineSite() / getDates({site}) /
+       getSiteUsers(site) all key off (window.FS.api.sites.getSites(),
+       used unconditionally by timeline.js, org-live-gate or not).
+       Forwarding the UUID here would silently mismatch and break the
+       timeline's site selector/AggregatedDayView. Parked as an
+       identity-systems gap for the device-mgmt batch; don't "fix" this
+       without a folder/UUID bridge like org.js's folderName(). */
     function openTimeline(folderName, dateOpt) {
       var qs = '?date=' + encodeURIComponent(dateOpt || (rows[0] && rows[0].date) || '');
       qs += '&user=' + encodeURIComponent(folderName);
