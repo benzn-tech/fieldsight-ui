@@ -522,17 +522,39 @@
       : null;
     if (targetFlagIdx !== null && isNaN(targetFlagIdx)) targetFlagIdx = null;
 
-    /* Resolve effective (date, user) honouring worker-forced-self rule. */
+    /* Resolve effective (date, user, site) honouring the three-tier role
+       rule (Task 4 — carried over from the Task 3 review):
+         • worker                        → forced to self, always (line
+                                            below, unconditional).
+         • site_manager / project_manager → forced to self ONLY when no
+                                            site is anchored. Once a site
+                                            IS anchored (URL ?site=, the
+                                            persisted last-viewed choice,
+                                            or the single-site auto-anchor
+                                            further below) they fall
+                                            through to AggregatedDayView
+                                            instead — the backend already
+                                            scopes their getSiteUsers /
+                                            getTimeline calls to
+                                            self + own-site workers
+                                            (site_manager) or their
+                                            managed sites (pm), so nothing
+                                            unsafe is exposed.
+         • admin / gm                    → always free; isAdminLike
+                                            short-circuits both checks. */
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
     var date   = params.date;            /* may be undefined → bootstrap resolves */
     var user   = params.user;
-    if (caller.role === 'worker') user = callerFolder();
-    if (!user && !isAdminLike(caller)) user = callerFolder();
 
-    /* Batch A — resolve the active site/project: URL wins, then the
-       last-persisted choice, else null (further narrowed below once the
-       sites list has loaded, for the single-site auto-anchor case). */
+    /* Batch A — resolve the active site/project up front (URL wins, then
+       the last-persisted choice, else null; further narrowed below once
+       the sites list has loaded, for the single-site auto-anchor case).
+       Deliberately computed BEFORE the role-forcing checks below — they
+       need to know whether a site is already anchored. */
     var site = params.site || loadTimelineSite() || null;
+
+    if (caller.role === 'worker') user = callerFolder();
+    if (!user && !site && !isAdminLike(caller)) user = callerFolder();
 
     /* One-shot sites list fetch (mirrors AvailableUsersState's lack of
        gating — mock getSites() always resolves; no useMocks branch here
@@ -595,6 +617,32 @@
       var qsUser = user ? '&user=' + encodeURIComponent(user) : '';
       var qsSite = site ? '&site=' + encodeURIComponent(site) : '';
       var today = window.FS.api.todayNZDT();
+
+      /* Batch A — site-aware bootstrap. Once a project is anchored,
+         resolve the initial date against THAT site's own report calendar
+         (24-month lookback, matching DatePicker's own default) instead of
+         probing today's single-user report below — `user` is frequently
+         empty here (site_manager/pm landing straight on
+         AggregatedDayView), so getTimeline(today, user) wouldn't reflect
+         the site's actual report activity. Falls back to `today` — same
+         as the no-site path below — when the site has no report dates at
+         all (or the calendar call is denied), so the page still
+         navigates and AggregatedDayView can render its own empty state
+         rather than leaving the page stuck in 'loading' forever.
+         Mock mode: getDates() ignores `site` and returns the full
+         fixture calendar — acceptable; findLatestReportDate then simply
+         resolves to the same latest date the no-site path would have
+         found anyway (BACKEND-CONTEXT §4.3 note in api/dates.js). */
+      if (site) {
+        window.FS.api.dates.getDates({ months: 24, site: site }).then(function (res) {
+          if (cancelled) return;
+          var resolved = (res && !res._accessDenied)
+            ? (findLatestReportDate(res.dates || {}) || today)
+            : today;
+          window.FS.Router.navigate('/timeline?date=' + resolved + qsUser + qsSite);
+        }).catch(function () { /* fall through; fetch effect won't run */ });
+        return function () { cancelled = true; };
+      }
 
       window.FS.api.timeline.getTimeline({ date: today, user: user })
         .then(function (r) {
