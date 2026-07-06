@@ -18,6 +18,8 @@
         FS.cognito.signIn(username, password)
         FS.cognito.respondToChallenge(...)  (NEW_PASSWORD_REQUIRED)
         FS.cognito.refreshTokens(refreshToken)
+        FS.cognito.forgotPassword(username)               (unauthenticated)
+        FS.cognito.confirmForgotPassword(username, code, newPassword)
 
    2. Hosted UI redirect (OAuth2 + PKCE — preferred for web):
         FS.auth.login()          → redirects to Cognito Hosted UI
@@ -27,7 +29,8 @@
    3. Token refresh — shared, called automatically by session.js.
 
    Exported:
-     window.FS.cognito.{ signIn, respondToChallenge, refreshTokens, config }
+     window.FS.cognito.{ signIn, respondToChallenge, refreshTokens,
+                          forgotPassword, confirmForgotPassword, config }
      window.FS.auth.{   login, handleCallback, logout }
    ========================================================================== */
 
@@ -114,6 +117,30 @@
     });
     /* Note: REFRESH_TOKEN_AUTH does NOT return a new RefreshToken — re-use
        the existing one until it expires (~30 days by default). */
+  }
+
+  /* Unauthenticated — only needs ClientId. Kicks off the "forgot password"
+     flow; Cognito emails/texts a confirmation code per the pool's configured
+     delivery medium. Returns { CodeDeliveryDetails }. */
+  async function forgotPassword(username) {
+    var cfg = config();
+    return idpCall('ForgotPassword', {
+      ClientId: cfg.clientId,
+      Username: username,
+    });
+  }
+
+  /* Unauthenticated — completes the "forgot password" flow using the code
+     delivered by forgotPassword(). Never log/store `code` or `newPassword`;
+     they exist only for the duration of this call. */
+  async function confirmForgotPassword(username, code, newPassword) {
+    var cfg = config();
+    return idpCall('ConfirmForgotPassword', {
+      ClientId:          cfg.clientId,
+      Username:          username,
+      ConfirmationCode:  code,
+      Password:          newPassword,
+    });
   }
 
   /* ---------- PKCE helpers ----------------------------------------------- */
@@ -232,10 +259,12 @@
   if (!window.FS) window.FS = {};
 
   window.FS.cognito = {
-    signIn:             signIn,
-    respondToChallenge: respondToChallenge,
-    refreshTokens:      refreshTokens,
-    config:             config,
+    signIn:                signIn,
+    respondToChallenge:    respondToChallenge,
+    refreshTokens:         refreshTokens,
+    forgotPassword:        forgotPassword,
+    confirmForgotPassword: confirmForgotPassword,
+    config:                config,
   };
 
   window.FS.auth = {
