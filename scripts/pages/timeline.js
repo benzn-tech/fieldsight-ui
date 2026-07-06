@@ -353,7 +353,7 @@
               .then(function (r) { return { user: u, report: r }; });
           };
         });
-        window.FS.api.pooledAll(thunks, 8).then(function (raw) {
+        return window.FS.api.pooledAll(thunks, 8).then(function (raw) {
           if (cancelled) return;
           var results = raw.filter(Boolean);
           if (thunks.length > 0 && results.length === 0) {
@@ -407,8 +407,13 @@
       });
     }
 
-    var selectedTopicId = props.selectedItem && props.selectedItem.kind === 'topic'
-      ? props.selectedItem.topic_id
+    /* topic_id is per-report sequential (0,1,2…) — every section has a
+       topic 0. Selection identity in the aggregated view must therefore
+       be the NAMESPACED sel.id ('topic_<folder>_<n>'), never the bare
+       topic_id, or clicking A's topic 0 highlights B's and C's too
+       (Fable review A-1/A-2). */
+    var selectedAggId = props.selectedItem && props.selectedItem.kind === 'topic'
+      ? props.selectedItem.id
       : null;
 
     return React.createElement(React.Fragment, null,
@@ -441,7 +446,7 @@
               className: 'fs-btn fs-btn--tertiary fs-btn--sm',
               onClick:   function () {
                 window.FS.Router.navigate('/timeline?site=' + encodeURIComponent(props.site)
-                  + '&date=' + props.date + '&user=' + sectionUser);
+                  + '&date=' + props.date + '&user=' + encodeURIComponent(sectionUser));
               },
             }, 'View only'),
           ),
@@ -458,7 +463,7 @@
                 topic:         topic,
                 date:          props.date,
                 actionState:   {},
-                selected:      selectedTopicId === topic.topic_id,
+                selected:      selectedAggId === ('topic_' + sectionUser + '_' + topic.topic_id),
                 defaultOpen:   false,
                 highlight:     false,
                 flagHighlight: null,
@@ -466,7 +471,11 @@
                   if (props.onSelect) {
                     props.onSelect({
                       kind:       'topic',
-                      id:         'topic_' + topic.topic_id,
+                      /* Namespaced by section owner — bare topic_id collides
+                         across sections AND leaves the right pane's
+                         reset-to-Overview effect (deps [sel.id]) stuck when
+                         switching between two people's same-numbered topic. */
+                      id:         'topic_' + sectionUser + '_' + topic.topic_id,
                       topic_id:   topic.topic_id,
                       topic:      topic,
                       date:       props.date,
@@ -580,6 +589,17 @@
     var site = params.site || loadTimelineSite()
       || (sitesList.length === 1 ? sitesList[0].site_id : null);
 
+    /* Stale-anchor guard (Fable review B-2): a persisted/URL site the
+       caller can no longer access (account switch, revoked) renders a
+       blank selector and a misleading empty aggregated view. Once the
+       sites list has landed, an unknown site resolves to null and the
+       stale key is dropped (removeItem is idempotent — safe in render). */
+    if (site && sitesList.length > 0
+        && !sitesList.some(function (s) { return s.site_id === site; })) {
+      saveTimelineSite(null);
+      site = null;
+    }
+
     if (caller.role === 'worker') user = callerFolder();
     if (!user && !site && !isAdminLike(caller)) user = callerFolder();
 
@@ -673,7 +693,8 @@
          the single-user fetch entirely and set a minimal ok-state so
          render reaches the aggregated branch. Worker-forced-self (above)
          resolves `user` BEFORE this effect runs, so workers never land
-         here — site && !user is admin/gm-only. */
+         here — site && !user means admin/gm, OR a site_manager/PM with an
+         anchored site (their forced-self rule is site-conditional). */
       if (site && !user) {
         setState({ status: 'ok', aggregated: true });
         return undefined;
