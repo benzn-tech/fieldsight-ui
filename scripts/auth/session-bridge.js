@@ -101,6 +101,13 @@
       patch.isAdmin = sessionUser.role === 'admin';
     }
 
+    /* auth-mock's boot restore applies the GLOBAL localStorage profile
+       (fs.settings.profile) to whoever loads the page — in live mode that
+       leaks the PREVIOUS account's avatar into this session (cross-account
+       contamination). Clear it here (bridge only runs live); the real
+       account avatar is re-applied from /me by login hydrate / settings. */
+    patch.avatarUrl = null;
+
     if (sessionUser.email) {
       patch.email = sessionUser.email;
     }
