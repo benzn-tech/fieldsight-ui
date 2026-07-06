@@ -164,10 +164,23 @@
             risk_level:          form.risk_level,
             recommended_action:  form.recommended_action.trim() || null,
           });
+          /* 401/403/404 resolve as envelopes, not rejections (Fable batch-B
+             review F3) — without this an expired session shows a success
+             toast for a row that never persisted. */
+          if (obsRes && (obsRes._accessDenied || obsRes._notFound)) {
+            throw new Error(obsRes.error || 'Could not save observation — please retry');
+          }
 
           newFlag = {
             id:                 obsRes.id,
-            date:               window.FS.api.todayNZDT(),
+            /* obs_id/author_sub/closed mirror the aggregator's toRowShape —
+               without them the just-prepended row PATCHes /observations/
+               undefined and hides the author's own action button until
+               refetch (Fable batch-B review F2). */
+            obs_id:             obsRes.id,
+            author_sub:         obsRes.author_sub,
+            closed:             false,
+            date:               obsRes.report_date || window.FS.api.todayNZDT(),
             observation:        form.observation.trim(),
             risk_level:         form.risk_level,
             recommended_action: form.recommended_action.trim() || null,

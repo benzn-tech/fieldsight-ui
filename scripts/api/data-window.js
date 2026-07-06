@@ -79,7 +79,14 @@
       case '30d':
         return { from: window.FS.api.addDaysISO(today, -29), to: today };
       case 'all':
-        return { from: span.earliest || null, to: span.latest || null };
+        /* `to` extends to TODAY, not just the last report date — manual
+           observations carry report_date = today, and the observations GET
+           is filtered by from/to params alone, so capping at span.latest
+           made a just-created observation vanish on refetch (Fable batch-B
+           review F1). Report fetches are unaffected: fanoutDates only
+           visits hasReport dates. */
+        var allTo = span.latest && span.latest > today ? span.latest : today;
+        return { from: span.earliest || null, to: span.latest ? allTo : null };
       case 'custom':
         return { from: custom.from || null, to: custom.to || null };
       case 'today':

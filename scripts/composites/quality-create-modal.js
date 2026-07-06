@@ -140,14 +140,27 @@
             site_slug:   siteValue,
             observation: form.observation.trim(),
           });
+          /* 401/403/404 resolve as envelopes, not rejections (Fable batch-B
+             review F3) — without this an expired session shows a success
+             toast for a row that never persisted. */
+          if (obsRes && (obsRes._accessDenied || obsRes._notFound)) {
+            throw new Error(obsRes.error || 'Could not save observation — please retry');
+          }
 
           newItem = {
             id:                obsRes.id,
-            date:              window.FS.api.todayNZDT(),
+            /* obs_id/author_sub/closed mirror the aggregator's row shape
+               (Fable batch-B review F2); status uses the quality-page
+               vocabulary — 'open' (org) renders as neutral, the aggregator
+               maps open manual rows to 'observed' (review F4). */
+            obs_id:            obsRes.id,
+            author_sub:        obsRes.author_sub,
+            closed:            false,
+            date:              obsRes.report_date || window.FS.api.todayNZDT(),
             item:              form.observation.trim(),
             details:           null,
             category:          form.category,
-            status:            obsRes.status,
+            status:            'observed',
             follow_up_needed:  form.follow_up_required,
             who_raised:        obsRes.author_name,
             source:            'manual',

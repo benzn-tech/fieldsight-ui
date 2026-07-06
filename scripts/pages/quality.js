@@ -501,7 +501,13 @@
       setManualPending(true);
       window.FS.api.org.updateObservation(prevSel.obs_id, {
         status: nextClosed ? 'closed' : 'open',
-      }).then(function () {
+      }).then(function (res) {
+        /* 403/404 resolve as envelopes (Fable batch-B review F3): a PM whose
+           UI gate is broader than the backend's author-or-admin/gm rule must
+           see the rejection, not a fake success. */
+        if (res && (res._accessDenied || res._notFound)) {
+          throw new Error(res.error || 'You cannot update this observation');
+        }
         setManualPending(false);
         if (ctx.setSelected) {
           ctx.setSelected(Object.assign({}, prevSel, {
