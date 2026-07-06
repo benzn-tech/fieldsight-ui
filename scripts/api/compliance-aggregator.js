@@ -23,15 +23,18 @@
                topic_id:            number,
                topic_title:         string,
                topic_category:      'safety' | 'progress' | 'quality',
-               source:              'observation' | 'topic_flag',
+               source:              'observation' | 'topic_flag' | 'manual',
                observation:         string,
                risk_level:          'high' | 'medium' | 'low',
                recommended_action:  string | null,
-               location:            string | null,    // null for topic_flag
-               who_raised:          string | null,    // null for topic_flag
+               location:            string | null,    // null for topic_flag/manual
+               who_raised:          string | null,    // null for topic_flag/manual
                status:              'open' | 'resolved',  // see _AUDIT-2 below
                resolved_by:         string | null,
                resolved_at:         string | null,    // ISO
+               // 'manual' rows (batch B Task 6, merged from org.getObservations)
+               // additionally carry obs_id, author_sub, closed — see
+               // toManualSafetyRow() below.
              }
            ],
            from, to, user, dates: [...]
@@ -49,16 +52,19 @@
                topic_id:            number,    // -1 for report-level Q&C items
                topic_title:         string,    // 'Quality & Compliance' synth title for report-level
                topic_category:      'quality' | 'progress' | 'safety',
-               source:              'qc_item' | 'topic_quality',
+               source:              'qc_item' | 'topic_quality' | 'manual',
                item:                string,        // headline
                status:               string,        // 'completed' | 'concern' | etc for
                                                       // qc_item; 'observed' | 'resolved'
-                                                      // for topic_quality (see _AUDIT-2)
+                                                      // for topic_quality/manual (see _AUDIT-2)
                resolved_by:         string | null,   // topic_quality only
                resolved_at:         string | null,   // topic_quality only, ISO
                details:              string | null,
                follow_up_needed:    boolean,
-               who_raised:          string | null,    // null for qc_item
+               who_raised:          string | null,    // null for qc_item/manual
+               // 'manual' rows (batch B Task 6, merged from org.getObservations)
+               // additionally carry obs_id, author_sub, closed — see
+               // toManualQualityRow() below.
              }
            ],
            from, to, user, dates: [...]
@@ -331,6 +337,74 @@
     return tokenJaccard(normA, normB) >= 0.6;
   }
 
+  /* ─── Manual observation merge (batch B Task 6) ─────────────────────────
+     window.FS.api.org.getObservations() rows — {id, kind, site_slug,
+     report_date, author_sub, author_name, observation, risk_level,
+     recommended_action, status:'open'|'closed', archived_at, created_at}
+     (api/org.js) — mapped 1:1 onto the existing safety/quality row shapes
+     above so manual rows render through the SAME composites and right-
+     detail panels as report-derived rows, with `source: 'manual'` as the
+     only branch UI code needs. `status` is translated to the vocabulary
+     each page's totalsFromRows()/STATUS_TONE already key on ('resolved'/
+     'open' for safety, 'resolved'/'observed' for quality) so the KPI
+     strip needs zero changes; the separate `closed` boolean (org API's
+     own open/closed vocabulary) plus `obs_id`/`author_sub` are extra
+     fields the right-detail Mark closed/Reopen action needs and aren't
+     part of the report-derived shape.
+     site_slug is passed through as-is, not resolved to a display name —
+     matches the create-modal's own newFlag.site (safety-create-modal.js /
+     quality-create-modal.js) which already does the same; resolving it
+     would cost an extra org.getOrgSites() round trip on every range fetch
+     for a cosmetic-only "sites affected" grouping difference. */
+  function toManualSafetyRow(o) {
+    return {
+      id:                 o.id,
+      date:               o.report_date,
+      site:               o.site_slug || null,
+      user_name:          o.author_name || null,
+      user_folder:        o.author_name ? window.FS.api.folderName(o.author_name) : null,
+      topic_id:           -1,
+      topic_title:        'Site safety observations',
+      topic_category:     'safety',
+      source:             'manual',
+      observation:        o.observation,
+      risk_level:         o.risk_level,
+      recommended_action: o.recommended_action || null,
+      location:           null,
+      who_raised:         null,
+      status:             o.status === 'closed' ? 'resolved' : 'open',
+      resolved_by:        null,
+      resolved_at:        null,
+      obs_id:             o.id,
+      author_sub:         o.author_sub || null,
+      closed:             o.status === 'closed',
+    };
+  }
+
+  function toManualQualityRow(o) {
+    return {
+      id:               o.id,
+      date:             o.report_date,
+      site:             o.site_slug || null,
+      user_name:        o.author_name || null,
+      user_folder:      o.author_name ? window.FS.api.folderName(o.author_name) : null,
+      topic_id:         -1,
+      topic_title:      'Quality & Compliance',
+      topic_category:   'quality',
+      source:           'manual',
+      item:             o.observation,
+      status:           o.status === 'closed' ? 'resolved' : 'observed',
+      resolved_by:      null,
+      resolved_at:      null,
+      details:          null,
+      follow_up_needed: false,
+      who_raised:       null,
+      obs_id:           o.id,
+      author_sub:       o.author_sub || null,
+      closed:           o.status === 'closed',
+    };
+  }
+
   /* ─── Safety ─────────────────────────────────────────────────────────── */
 
   async function getSafetyRange(opts) {
@@ -445,6 +519,29 @@
       rows.push.apply(rows, topicFlagRows);
     });
 
+    /* batch B Task 6 — merge manual observations in AFTER the _AUDIT-5
+       dedupe pass above, which only ever compares report-sourced rows
+       against each other within the SAME report's forEach iteration —
+       appending here means manual rows (unique ids, own `source`) are
+       never touched by it, by construction, no dedupe change needed.
+       This deliberately ALSO feeds Insights (insights-aggregator.js),
+       the strategic dashboards, and the search palette — they all call
+       getSafetyRange with no opts.site, so manual observations are real
+       safety events and belong in that global, unscoped view too. The
+       A2 iron rule still holds: site never comes from
+       window.FS.siteContext here, only from the opts.site this function
+       itself was called with. A fetch failure must never take the whole
+       range down with it — report rows still render. */
+    try {
+      var manualRes = await window.FS.api.org.getObservations({
+        kind: 'safety', from: from, to: to, site_slug: opts.site || undefined,
+      });
+      var manualRows = ((manualRes && manualRes.observations) || []).map(toManualSafetyRow);
+      rows = rows.concat(manualRows);
+    } catch (e) {
+      console.warn('[compliance] manual observations unavailable — report rows only', e);
+    }
+
     return { rows: rows, from: from, to: to, user: user, dates: fanout.dates };
   }
 
@@ -535,6 +632,19 @@
         });
       });
     });
+
+    /* batch B Task 6 — see the matching comment in getSafetyRange above;
+       same rationale (dedupe exemption by construction, Insights/
+       strategic/search global-view intent, A2 iron rule, never-throw). */
+    try {
+      var manualRes = await window.FS.api.org.getObservations({
+        kind: 'quality', from: from, to: to, site_slug: opts.site || undefined,
+      });
+      var manualRows = ((manualRes && manualRes.observations) || []).map(toManualQualityRow);
+      rows = rows.concat(manualRows);
+    } catch (e) {
+      console.warn('[compliance] manual observations unavailable — report rows only', e);
+    }
 
     return { rows: rows, from: from, to: to, user: user, dates: fanout.dates };
   }

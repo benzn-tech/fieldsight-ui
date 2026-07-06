@@ -175,6 +175,10 @@
       showCreate:    showCreate,
       setShowCreate: setShowCreate,
       caller:        caller,
+      /* batch B Task 6 — manual Mark closed/Reopen action refetches the
+         range (rather than patching rows locally) so the merged manual
+         row comes back through the same toManualQualityRow() mapping. */
+      refetch:       function () { setRetry(function (n) { return n + 1; }); },
     };
     return React.createElement(QualityContext.Provider, { value: ctx },
       props.children);
@@ -374,6 +378,14 @@
                                 tone: 'warning', size: 'sm', variant: 'outline',
                               }, 'Follow-up')
                             : null,
+                          /* batch B Task 6 — manually-logged items, merged in
+                             by compliance-aggregator.js from
+                             org.getObservations. */
+                          row.source === 'manual'
+                            ? React.createElement(Badge, {
+                                tone: 'neutral', size: 'sm', variant: 'subtle',
+                              }, 'Manual')
+                            : null,
                         ),
                       ),
                     );
@@ -405,6 +417,7 @@
 
     var ctx = React.useContext(QualityContext);
     var sel = ctx && ctx.selectedItem;
+    var caller = (ctx && ctx.caller) || {};
 
     /* Task 2 (live-data fixes) — resolve/reopen toggle, piggybacking the
        existing actions-toggle endpoint (see compliance-aggregator.js
@@ -456,6 +469,64 @@
         setTogglePending(false);
         if (ctx.setSelected) ctx.setSelected(prevSel);
         applyStatus(prevSel.id, prevSel.status);
+      });
+    }
+
+    /* batch B Task 6 — Mark closed/Reopen for manually-logged items
+       (source === 'manual', merged in by compliance-aggregator.js from
+       org.getObservations). Distinct from toggleResolve() above: that
+       one only ever applies to 'topic_quality' rows and piggybacks the
+       actions-toggle join; manual rows use
+       org.updateObservation({status:'open'|'closed'}) instead. Gated to
+       the author or an admin/gm caller (mirrors team.js's
+       user:manage-gated archive pattern). No optimistic row-list flip —
+       just an immediate local `sel` update for a responsive detail
+       panel, plus a full range refetch so the list (Manual badge/status)
+       comes back through the real toManualQualityRow() mapping. */
+    var refManualPending = React.useState(false);
+    var manualPending    = refManualPending[0];
+    var setManualPending = refManualPending[1];
+
+    var sessionSub = ((window.FS && window.FS.session && window.FS.session.user) || {}).sub;
+    var canManageManual = !!(sel && sel.source === 'manual' && window.FS.can && (
+      window.FS.can(caller, 'user:manage') ||
+      (sel.author_sub && sel.author_sub === sessionSub)
+    ));
+
+    function toggleManualStatus() {
+      if (!sel || sel.source !== 'manual' || manualPending) return;
+      var prevSel    = sel;
+      var nextClosed = !prevSel.closed;
+
+      setManualPending(true);
+      window.FS.api.org.updateObservation(prevSel.obs_id, {
+        status: nextClosed ? 'closed' : 'open',
+      }).then(function () {
+        setManualPending(false);
+        if (ctx.setSelected) {
+          ctx.setSelected(Object.assign({}, prevSel, {
+            closed: nextClosed,
+            status: nextClosed ? 'resolved' : 'observed',
+          }));
+        }
+        var toast = window.FS && window.FS.toast;
+        if (toast) {
+          toast.show({
+            message: nextClosed ? 'Item marked closed.' : 'Item reopened.',
+            tone:    'success',
+          });
+        }
+        if (ctx.refetch) ctx.refetch();
+      }).catch(function (err) {
+        console.error('[QualityRightDetail] manual status update failed', err);
+        setManualPending(false);
+        var toast = window.FS && window.FS.toast;
+        if (toast) {
+          toast.show({
+            message: (err && err.message) || 'Could not update item',
+            tone:    'error',
+          });
+        }
       });
     }
 
@@ -535,9 +606,14 @@
         }, 'Follow-up needed')
       : null;
 
+    /* batch B Task 6 — 'manual' added alongside the two report-derived
+       sources; previously fell through to the 'Quality-tagged topic'
+       label, which is wrong for a manually-logged item. */
     var sourceLabel = sel.source === 'qc_item'
       ? 'Report-level Q&C item'
-      : 'Quality-tagged topic';
+      : sel.source === 'manual'
+        ? 'Manually logged item'
+        : 'Quality-tagged topic';
 
     var rows = [];
     if (sel.details) {
@@ -649,11 +725,18 @@
 
       linkedBlock,
 
+      /* batch B Task 6 — manual rows get the author/admin-gated Mark
+         closed/Reopen action instead of the generic resolve button
+         (which is scoped to 'topic_quality' only, above). */
       React.createElement('div', { className: 'fs-quality-detail__actions' },
         (Button && sel.source === 'topic_quality') ? React.createElement(Button, {
           variant: 'primary', size: 'sm', loading: togglePending,
           onClick: toggleResolve,
         }, sel.status === 'resolved' ? 'Reopen' : 'Mark resolved') : null,
+        (Button && sel.source === 'manual' && canManageManual) ? React.createElement(Button, {
+          variant: 'primary', size: 'sm', loading: manualPending,
+          onClick: toggleManualStatus,
+        }, sel.closed ? 'Reopen' : 'Mark closed') : null,
         React.createElement(Button, {
           variant: 'secondary', size: 'sm', rightIcon: 'arrow-right',
           onClick: onOpenInTimeline,

@@ -171,6 +171,10 @@
       showCreate:    showCreate,
       setShowCreate: setShowCreate,
       caller:        caller,
+      /* batch B Task 6 — manual Mark closed/Reopen action refetches the
+         range (rather than patching rows locally) so the merged manual
+         row comes back through the same toManualSafetyRow() mapping. */
+      refetch:       function () { setRetry(function (n) { return n + 1; }); },
     };
     return React.createElement(SafetyContext.Provider, { value: ctx },
       props.children);
@@ -370,6 +374,7 @@
                           recommended_action: row.recommended_action,
                           location:           row.location,
                           who_raised:         row.who_raised,
+                          source:             row.source,
                         },
                         dense: true,
                       }),
@@ -411,6 +416,7 @@
 
     var ctx = React.useContext(SafetyContext);
     var sel = ctx && ctx.selectedFlag;
+    var caller = (ctx && ctx.caller) || {};
 
     /* Task 2 (live-data fixes) — resolve/reopen toggle, piggybacking the
        existing actions-toggle endpoint (see compliance-aggregator.js
@@ -463,6 +469,65 @@
         setTogglePending(false);
         if (ctx.setSelected) ctx.setSelected(prevSel);
         applyStatus(prevSel.id, prevSel.status);
+      });
+    }
+
+    /* batch B Task 6 — Mark closed/Reopen for manually-raised observations
+       (source === 'manual', merged in by compliance-aggregator.js from
+       org.getObservations). Distinct from toggleResolve() above: manual
+       rows don't have the report-derived id shape ('<date>_flag_<idx>' /
+       '<date>_obs_<idx>') that toggleResolve's action-index regex needs,
+       and they use org.updateObservation({status:'open'|'closed'}) — a
+       different endpoint/vocabulary than the actions-toggle join. Gated
+       to the author or an admin/gm caller (mirrors team.js's
+       user:manage-gated archive pattern). No optimistic row-list flip —
+       just an immediate local `sel` update for a responsive detail panel,
+       plus a full range refetch so the list (and its Manual badge/status)
+       comes back through the real toManualSafetyRow() mapping. */
+    var refManualPending = React.useState(false);
+    var manualPending    = refManualPending[0];
+    var setManualPending = refManualPending[1];
+
+    var sessionSub = ((window.FS && window.FS.session && window.FS.session.user) || {}).sub;
+    var canManageManual = !!(sel && sel.source === 'manual' && window.FS.can && (
+      window.FS.can(caller, 'user:manage') ||
+      (sel.author_sub && sel.author_sub === sessionSub)
+    ));
+
+    function toggleManualStatus() {
+      if (!sel || sel.source !== 'manual' || manualPending) return;
+      var prevSel    = sel;
+      var nextClosed = !prevSel.closed;
+
+      setManualPending(true);
+      window.FS.api.org.updateObservation(prevSel.obs_id, {
+        status: nextClosed ? 'closed' : 'open',
+      }).then(function () {
+        setManualPending(false);
+        if (ctx.setSelected) {
+          ctx.setSelected(Object.assign({}, prevSel, {
+            closed: nextClosed,
+            status: nextClosed ? 'resolved' : 'open',
+          }));
+        }
+        var toast = window.FS && window.FS.toast;
+        if (toast) {
+          toast.show({
+            message: nextClosed ? 'Observation marked closed.' : 'Observation reopened.',
+            tone:    'success',
+          });
+        }
+        if (ctx.refetch) ctx.refetch();
+      }).catch(function (err) {
+        console.error('[SafetyRightDetail] manual status update failed', err);
+        setManualPending(false);
+        var toast = window.FS && window.FS.toast;
+        if (toast) {
+          toast.show({
+            message: (err && err.message) || 'Could not update observation',
+            tone:    'error',
+          });
+        }
       });
     }
 
@@ -557,9 +622,14 @@
       tone: STATUS_TONE[sel.status] || 'neutral', size: 'sm', variant: 'outline',
     }, (sel.status || 'open').charAt(0).toUpperCase() + (sel.status || 'open').slice(1));
 
+    /* batch B Task 6 — 'manual' added alongside the two report-derived
+       sources; previously fell through to the 'Topic safety flag' label,
+       which is wrong for a manually-raised observation. */
     var sourceLabel = sel.source === 'observation'
       ? 'Site-level observation'
-      : 'Topic safety flag';
+      : sel.source === 'manual'
+        ? 'Manually raised observation'
+        : 'Topic safety flag';
 
     /* Build the field rows — skip rows whose value is null, since the
        two source shapes carry different fields. */
@@ -684,12 +754,20 @@
       /* Linked actions */
       linkedBlock,
 
-      /* Footer actions */
+      /* Footer actions
+         batch B Task 6 — manual rows get the author/admin-gated Mark
+         closed/Reopen action instead of the generic resolve button: its
+         id doesn't match toggleResolve()'s action-index regex, so that
+         button would silently no-op for them. */
       React.createElement('div', { className: 'fs-safety-detail__actions' },
-        Button ? React.createElement(Button, {
+        (sel.source !== 'manual' && Button) ? React.createElement(Button, {
           variant: 'primary', size: 'sm', loading: togglePending,
           onClick: toggleResolve,
         }, sel.status === 'resolved' ? 'Reopen' : 'Mark resolved') : null,
+        (sel.source === 'manual' && canManageManual && Button) ? React.createElement(Button, {
+          variant: 'primary', size: 'sm', loading: manualPending,
+          onClick: toggleManualStatus,
+        }, sel.closed ? 'Reopen' : 'Mark closed') : null,
         React.createElement(Button, {
           variant: 'secondary', size: 'sm', rightIcon: 'arrow-right',
           onClick: onOpenInTimeline,

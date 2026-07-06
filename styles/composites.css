@@ -539,6 +539,14 @@
 
 .fs-safety-flag-row__risk { flex-shrink: 0; }
 
+/* batch B Task 6 — risk badge + optional 'Manual' badge, stacked. */
+.fs-safety-flag-row__badges {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 .fs-safety-flag-row__main {
   flex: 1;
   min-width: 0;

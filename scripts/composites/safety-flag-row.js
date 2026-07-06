@@ -17,8 +17,12 @@
 
    Props:
      flag  { observation, risk_level, recommended_action,
-             location?, who_raised? }
+             location?, who_raised?, source? }
      dense  boolean — tighter padding when used in a list
+
+     batch B Task 6 — flag.source === 'manual' renders a small neutral
+     'Manual' badge stacked under the risk badge (manually-raised
+     observations, merged into /safety by compliance-aggregator.js).
      highlight  boolean — Sprint 6.7.2 precision spotlight. When set,
        scrolls into view and runs a 3-pulse flash (.fs-safety-flag-row--flash).
        Respects prefers-reduced-motion. Toggling false→true re-triggers.
@@ -69,12 +73,19 @@
     if (flag.who_raised) captionParts.push('raised by ' + flag.who_raised);
 
     return React.createElement('div', { className: className, ref: rootRef },
-      React.createElement(Badge, {
-        tone:      tone,
-        size:      'sm',
-        variant:   'subtle',
-        className: 'fs-safety-flag-row__risk',
-      }, risk.charAt(0).toUpperCase() + risk.slice(1) + ' risk'),
+      React.createElement('div', { className: 'fs-safety-flag-row__badges' },
+        React.createElement(Badge, {
+          tone:      tone,
+          size:      'sm',
+          variant:   'subtle',
+          className: 'fs-safety-flag-row__risk',
+        }, risk.charAt(0).toUpperCase() + risk.slice(1) + ' risk'),
+        flag.source === 'manual'
+          ? React.createElement(Badge, {
+              tone: 'neutral', size: 'sm', variant: 'subtle',
+            }, 'Manual')
+          : null,
+      ),
 
       React.createElement('div', { className: 'fs-safety-flag-row__main' },
         React.createElement('div', { className: 'fs-safety-flag-row__obs' },
