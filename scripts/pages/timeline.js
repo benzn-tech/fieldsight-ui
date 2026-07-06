@@ -49,6 +49,23 @@
     return user && (user.role === 'admin' || user.role === 'gm' || user.isAdmin);
   }
 
+  /* Batch A — project-anchor plumbing (Task 2). Persists the last-viewed
+     site/project across timeline visits, mirroring the range-toolbar
+     loadStored/saveStored pattern (composites/range-toolbar.js:61-91). */
+  var TIMELINE_SITE_KEY = 'fs.settings.timelineSite';
+  function loadTimelineSite() {
+    try {
+      var v = JSON.parse(localStorage.getItem(TIMELINE_SITE_KEY) || 'null');
+      return (v && v.site) || null;
+    } catch (_) { return null; }
+  }
+  function saveTimelineSite(siteId) {
+    try {
+      if (siteId) localStorage.setItem(TIMELINE_SITE_KEY, JSON.stringify({ site: siteId }));
+      else localStorage.removeItem(TIMELINE_SITE_KEY);
+    } catch (_) {}
+  }
+
   /* Pick the most recent date with a report from /api/dates, or null.
      Mirrors the helper in today.js so the two pages share the same
      fallback semantics — when "today" has no report, the user lands
@@ -79,9 +96,11 @@
   /* ---------- shared header rendering ---------------------------------- */
 
   function PageHeader(props) {
-    var report = props.report;
-    var date   = props.date;
-    var user   = props.user;
+    var report    = props.report;
+    var date      = props.date;
+    var user      = props.user;
+    var site      = props.site;
+    var sitesList = props.sitesList || [];
     var DatePicker = window.FieldSight.DatePicker;
 
     var subtitleParts = [];
@@ -95,13 +114,31 @@
     var fromToday = (readRouteParams().from === 'today');
 
     /* Navigate the timeline route to a new date while preserving the
-       active user query param (Sprint 2.5 / Phase E). */
+       active user + site query params (Sprint 2.5 / Phase E; batch A). */
     function onChangeDate(newDate) {
       var params = readRouteParams();
       var u = params.user || (user || '');
-      var qs = '?date=' + newDate + (u ? '&user=' + u : '');
+      var s = params.site || (site || '');
+      var qs = '?date=' + newDate + (s ? '&site=' + encodeURIComponent(s) : '') + (u ? '&user=' + u : '');
       window.FS.Router.navigate('/timeline' + qs);
     }
+
+    /* Batch A — compact, always-visible project selector. Sits above the
+       DatePicker; switching projects is handled by props.onChangeSite
+       (Middle drops the active user and persists the choice). */
+    var siteSelectOptions = [{ v: '', l: '— Select a project —' }].concat(
+      sitesList.map(function (s) { return { v: s.site_id, l: s.name }; })
+    );
+    var siteSelect = React.createElement('select', {
+      className: 'fs-settings__select',
+      style:     { maxWidth: '260px' },
+      value:     site || '',
+      onChange:  function (e) { if (props.onChangeSite) props.onChangeSite(e.target.value); },
+    },
+      siteSelectOptions.map(function (o) {
+        return React.createElement('option', { key: o.v, value: o.v }, o.l);
+      }),
+    );
 
     return React.createElement('div', {
       className: 'fs-timeline-page__header',
@@ -119,6 +156,7 @@
         'Daily Report'),
       React.createElement('div', { className: 'fs-timeline-page__subtitle' },
         subtitleParts.join(' · ')),
+      siteSelect,
       DatePicker && date ? React.createElement(DatePicker, {
         date:        date,
         onChange:    onChangeDate,
@@ -131,6 +169,10 @@
            with no content for the selected user). No user → union stays,
            which pairs with the admin "pick a user" state. */
         user:        user || null,
+        /* Batch A — when no user is selected, dots follow the active
+           project instead of the (now-dropped) admin union. User wins
+           when both are present. */
+        site:        (user ? null : site),
       }) : null,
       /* Admin/GM viewing a specific user: offer a way back to the
          user-picker (available_users state) — previously the only way to
@@ -140,7 +182,10 @@
             type:      'button',
             className: 'fs-btn fs-btn--tertiary fs-btn--sm',
             style:     { marginTop: '6px' },
-            onClick:   function () { window.FS.Router.navigate('/timeline?date=' + (date || '')); },
+            onClick:   function () {
+              var qs = '?date=' + (date || '') + (site ? '&site=' + encodeURIComponent(site) : '');
+              window.FS.Router.navigate('/timeline' + qs);
+            },
           }, 'View another user ↺')
         : null,
     );
@@ -208,7 +253,9 @@
                 type: 'button',
                 className: 'fs-timeline-page__user',
                 onClick: function () {
-                  window.FS.Router.navigate('/timeline?date=' + props.date + '&user=' + u);
+                  var qs = '/timeline?date=' + props.date + '&user=' + u
+                    + (props.site ? '&site=' + encodeURIComponent(props.site) : '');
+                  window.FS.Router.navigate(qs);
                 },
               }, unfolder(u)),
             );
@@ -268,6 +315,47 @@
     if (caller.role === 'worker') user = callerFolder();
     if (!user && !isAdminLike(caller)) user = callerFolder();
 
+    /* Batch A — resolve the active site/project: URL wins, then the
+       last-persisted choice, else null (further narrowed below once the
+       sites list has loaded, for the single-site auto-anchor case). */
+    var site = params.site || loadTimelineSite() || null;
+
+    /* One-shot sites list fetch (mirrors AvailableUsersState's lack of
+       gating — mock getSites() always resolves; no useMocks branch here
+       since the api layer itself owns that switch). */
+    var refSitesList = React.useState([]);
+    var sitesList    = refSitesList[0];
+    var setSitesList = refSitesList[1];
+    React.useEffect(function () {
+      var cancelled = false;
+      window.FS.api.sites.getSites()
+        .then(function (res) {
+          if (cancelled) return;
+          setSitesList((res && res.sites) || []);
+        })
+        .catch(function () {
+          if (!cancelled) setSitesList([]);
+        });
+      return function () { cancelled = true; };
+    }, []);
+
+    /* Single-site auto-anchor — a caller scoped to exactly one project
+       never had to choose; silently resolve to it (no navigate/persist —
+       persisting would poison localStorage for a caller who later gets
+       access to more sites). */
+    if (!site && sitesList.length === 1) site = sitesList[0].site_id;
+
+    /* Switching projects resets the active person — a user picked for
+       one site rarely maps onto another. Persists the choice so it
+       survives reloads (loadTimelineSite above). */
+    function onChangeSite(siteId) {
+      saveTimelineSite(siteId || null);
+      var qs = siteId
+        ? '?site=' + encodeURIComponent(siteId) + (date ? '&date=' + date : '')
+        : '';
+      window.FS.Router.navigate('/timeline' + qs);
+    }
+
     var refState = React.useState({ status: 'loading' });
     var state    = refState[0];
     var setState = refState[1];
@@ -291,6 +379,7 @@
       if (date) return undefined;
       var cancelled = false;
       var qsUser = user ? '&user=' + encodeURIComponent(user) : '';
+      var qsSite = site ? '&site=' + encodeURIComponent(site) : '';
       var today = window.FS.api.todayNZDT();
 
       window.FS.api.timeline.getTimeline({ date: today, user: user })
@@ -304,12 +393,12 @@
         })
         .then(function (resolved) {
           if (cancelled || !resolved) return;
-          window.FS.Router.navigate('/timeline?date=' + resolved + qsUser);
+          window.FS.Router.navigate('/timeline?date=' + resolved + qsUser + qsSite);
         })
         .catch(function () { /* fall through; fetch effect won't run */ });
 
       return function () { cancelled = true; };
-    }, [date, user]);
+    }, [date, user, site]);
 
     React.useEffect(function () {
       if (!date) return undefined;            /* bootstrap above is in flight */
@@ -492,7 +581,7 @@
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, { date: date, user: null }),
         React.createElement(AvailableUsersState, {
-          date: date, users: report.available_users,
+          date: date, users: report.available_users, site: site,
         }),
       );
     }
@@ -542,7 +631,10 @@
     /* ---- Meeting view ---- */
     if (effectiveView === 'meeting') {
       return React.createElement('div', { className: 'fs-timeline-page' },
-        React.createElement(PageHeader, { date: date, user: user, report: report || meeting }),
+        React.createElement(PageHeader, {
+          date: date, user: user, report: report || meeting,
+          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
         React.createElement(ViewToggle),
 
         meeting.meeting_title ? React.createElement('div', {
@@ -609,7 +701,10 @@
     return React.createElement('div', {
       className: 'fs-timeline-page',
     },
-      React.createElement(PageHeader, { date: date, user: user, report: report }),
+      React.createElement(PageHeader, {
+        date: date, user: user, report: report,
+        site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+      }),
       React.createElement(ViewToggle),
       React.createElement(ReportKpis, { report: report }),
       React.createElement(ExecutiveSummaryCard, {
