@@ -429,7 +429,13 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
       (SITE_SCOPED_ROUTES.indexOf(route) !== -1 && sitesList.length > 0) ? React.createElement('select', {
         className:    'fs-settings__select',
         style:        { maxWidth: '220px' },
-        value:        validatedActiveSite || '',
+        /* On /timeline the URL's ?site= outranks the context (deep links) —
+           the select must show what the PAGE shows, or the two project
+           indicators contradict each other (Fable review #5). Other scoped
+           routes have no site URL param, so context is the truth there. */
+        value:        (route === '/timeline'
+                        ? (((window.FS.Router.getCurrentRoute() || {}).params || {}).site || validatedActiveSite)
+                        : validatedActiveSite) || '',
         onChange:     onHeaderSiteChange,
         'aria-label': 'Active project',
       },

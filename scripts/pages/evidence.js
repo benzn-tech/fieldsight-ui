@@ -137,13 +137,25 @@
       return window.FS.siteContext.onChange(setActiveSite);
     }, []);
 
+    /* Fable review #3 — the photos effect guards on status==='ok', and only
+       the discovery effect (which deliberately excludes activeSite) resets
+       it. Without this, switching projects left the previous scope's
+       gallery on screen under the new selection. */
+    React.useEffect(function () {
+      setPhotos({ status: 'idle', perDay: [], totalCount: 0 });
+    }, [activeSite]);
+
     /* Photos cache — populated when the Photos tab activates (first
        open) and shared with the right-pane summary. */
     var refPhotos = React.useState({ status: 'idle', perDay: [], totalCount: 0 });
     var photos    = refPhotos[0];
     var setPhotos = refPhotos[1];
 
-    var user = caller.role === 'worker' || !isAdminLike(caller)
+    /* Fable review #4 — mirror the aggregators' A2 rule: with an anchored
+       site, sm/pm widen from forced-self to the site fan-out (getSiteUsers
+       is server-side permission-scoped to self + own-site workers). Workers
+       stay forced-self always. */
+    var user = caller.role === 'worker' || (!isAdminLike(caller) && !activeSite)
       ? callerFolder()
       : null;
 

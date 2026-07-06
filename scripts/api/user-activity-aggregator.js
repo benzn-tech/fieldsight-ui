@@ -74,7 +74,16 @@
     if (site && caller.role !== 'worker') {
       try {
         var su = await window.FS.api.sites.getSiteUsers(site);
-        return (su && su.users) || [];
+        /* Defensive folder_name normalization: /api/site-users DOES include
+           folder_name (get_accessible_users builds it — unlike /api/users,
+           which doesn't), so this is a passthrough in practice; the derive
+           fallback guards the downstream u.folder_name keying against any
+           future response-shape drift (Fable review #6). */
+        return (((su && su.users) || [])).map(function (u) {
+          return u.folder_name ? u : Object.assign({}, u, {
+            folder_name: (u.name || '').replace(/ /g, '_'),
+          });
+        });
       } catch (e) { /* fall through to role logic below */ }
     }
 

@@ -574,7 +574,11 @@
        stale context is cleared (idempotent — safe in render). */
     if (site && sitesList.length > 0
         && !sitesList.some(function (s) { return s.site_id === site; })) {
-      if (window.FS.siteContext) window.FS.siteContext.set(null);
+      /* Only clear the CONTEXT when the stale value actually came from it
+         (Fable review #1b): a garbage/revoked ?site= in a deep link must
+         not destroy the user's valid global selection — and set() is now
+         deduped, so this render-phase call can't loop either way. */
+      if (!params.site && window.FS.siteContext) window.FS.siteContext.set(null);
       site = null;
     }
 

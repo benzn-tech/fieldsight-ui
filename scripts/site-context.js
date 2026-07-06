@@ -73,6 +73,11 @@
       if (legacy) {
         persist(legacy);
         stored = legacy;
+        /* Truly one-time (Fable review #2): without deleting the legacy key,
+           choosing "— All projects —" (removeItem on activeSite) would
+           re-adopt the old timeline site on every reload, silently
+           resurrecting it across all six scoped pages. */
+        try { localStorage.removeItem(LEGACY_TIMELINE_SITE_KEY); } catch (_) {}
       }
     }
 
@@ -82,6 +87,10 @@
 
   function set(siteId) {
     var v = siteId || null;
+    /* Dedupe (Fable review #1a): set() used to emit unconditionally, so a
+       render-phase "clear stale value" call could loop render → emit →
+       setState → render forever. A no-op set is now structurally silent. */
+    if (cached && cache === v) return;
     persist(v);
     cache = v;
     cached = true;
