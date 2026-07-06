@@ -44,9 +44,8 @@
 
   function friendlyForgotError(err, step) {
     var code = (err && err.code) || '';
-    if (/UserNotFoundException/.test(code)) {
-      return 'No account found with that email. Check the address, or contact your site administrator.';
-    }
+    /* NOTE: UserNotFoundException on the SEND step is handled upstream as a
+       silent success (anti-enumeration) and never reaches this mapper. */
     if (/CodeMismatchException/.test(code)) {
       return "That code doesn't match. Double-check it and try again.";
     }
@@ -265,6 +264,14 @@
         setForgotStatus({ phase: 'idle' });
         setForgotStep(2);
       } catch (err) {
+        /* Anti-enumeration: an unknown email advances exactly like a known
+           one (the confirm step will simply fail its code check), so this
+           screen never confirms whether an account exists. */
+        if (/UserNotFoundException/.test((err && err.code) || '')) {
+          setForgotStatus({ phase: 'idle' });
+          setForgotStep(2);
+          return;
+        }
         setForgotStatus({ phase: 'error', error: err });
       }
     }
