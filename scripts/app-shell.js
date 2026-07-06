@@ -297,12 +297,73 @@ async function shareCurrentLink() {
 }
 
 /* ---------- MiddleColumn -------------------------------------------------- */
+
+/* Batch A2 Task 1 — routes scoped by the header project selector (FS.
+   siteContext). Strategic pages (Insights/Portfolio/Regional/Executive),
+   Today, Team/Sites and Ask are exempt BY DESIGN — see scripts/site-context.js. */
+const SITE_SCOPED_ROUTES = ['/timeline', '/safety', '/quality', '/tasks', '/evidence', '/activity'];
+
 function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, fullWidth, onSearchOpen }) {
   const t = window.FS.tokens;
 
   const routeLabel = (route || '/').replace(/^\//, '') || 'today';
   const title = routeLabel
     .split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+
+  /* Batch A2 Task 1 — header project selector (SITE_SCOPED_ROUTES only).
+     sitesList is fetched once per mount (mirrors the cancelled-guard
+     pattern used elsewhere, e.g. composites/audio-playlist.js:59-72);
+     activeSite mirrors FS.siteContext so the header re-renders whenever
+     any page changes the active project. */
+  const [sitesList, setSitesList] = React.useState([]);
+  React.useEffect(function () {
+    var cancelled = false;
+    window.FS.api.sites.getSites().then(function (res) {
+      if (cancelled) return;
+      setSitesList((res && res.sites) || []);
+    }).catch(function () {
+      if (cancelled) return;
+      setSitesList([]);
+    });
+    return function () { cancelled = true; };
+  }, []);
+
+  const [activeSite, setActiveSite] = React.useState(function () {
+    return window.FS.siteContext ? window.FS.siteContext.get() : null;
+  });
+  React.useEffect(function () {
+    if (!window.FS.siteContext) return;
+    return window.FS.siteContext.onChange(setActiveSite);
+  }, []);
+
+  /* Stale-value validation: if the persisted/legacy-adopted activeSite no
+     longer matches a real project (e.g. a fixture/backend change removed
+     it), fall back to '' in the UI and drop the stale key — done in an
+     effect, not during render, since it's a side effect on shared state. */
+  const validatedActiveSite = (sitesList.length > 0 && sitesList.some(function (s) { return s.site_id === activeSite; }))
+    ? activeSite
+    : '';
+  React.useEffect(function () {
+    if (activeSite && sitesList.length > 0 && !sitesList.some(function (s) { return s.site_id === activeSite; })) {
+      window.FS.siteContext.set(null);
+    }
+  }, [activeSite, sitesList]);
+
+  function onHeaderSiteChange(e) {
+    var v = e.target.value || null;
+    window.FS.siteContext.set(v);
+    /* Special case: /timeline's own URL `?site=` outranks the global
+       context for deep-link support (a shared link must keep showing the
+       linked project even if the visitor's last-picked context differs).
+       That means switching projects from the header has to rewrite the
+       URL too, or the page would keep reading the old ?site= value and
+       silently ignore the header change. Date is preserved; user is
+       deliberately dropped — a project switch resets the person filter. */
+    if (route === '/timeline') {
+      var p = window.FS.Router.getCurrentRoute().params || {};
+      window.FS.Router.navigate('/timeline' + (v ? '?site=' + encodeURIComponent(v) + (p.date ? '&date=' + p.date : '') : ''));
+    }
+  }
 
   /* Sprint 4.7 — full-width pages (currently /programme) ignore the
      middle-column width slider and let the column flex to fill the
@@ -363,6 +424,27 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
           style: { fontSize: '11px', color: 'var(--text-tertiary)', lineHeight: 1.2 },
         }, formatTodayDate()) : null,
       ),
+
+      /* Batch A2 Task 1 — header project selector, SITE_SCOPED_ROUTES only. */
+      (SITE_SCOPED_ROUTES.indexOf(route) !== -1 && sitesList.length > 0) ? React.createElement('select', {
+        className:    'fs-settings__select',
+        style:        { maxWidth: '220px' },
+        /* On /timeline the URL's ?site= outranks the context (deep links) —
+           the select must show what the PAGE shows, or the two project
+           indicators contradict each other (Fable review #5). Other scoped
+           routes have no site URL param, so context is the truth there. */
+        value:        (route === '/timeline'
+                        ? (((window.FS.Router.getCurrentRoute() || {}).params || {}).site || validatedActiveSite)
+                        : validatedActiveSite) || '',
+        onChange:     onHeaderSiteChange,
+        'aria-label': 'Active project',
+      },
+        [{ v: '', l: '— All projects —' }].concat(
+          sitesList.map(function (s) { return { v: s.site_id, l: s.name }; })
+        ).map(function (o) {
+          return React.createElement('option', { key: o.v, value: o.v }, o.l);
+        }),
+      ) : null,
 
       /* Right-side utility area: search + share + weather */
       React.createElement('div', { className: 'middle-column__utility' },

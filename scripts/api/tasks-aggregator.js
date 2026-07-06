@@ -61,11 +61,39 @@
     return explicitUser || null;
   }
 
+  /* Sourced from the real GET /api/users (report identity) — live =
+     pass-through of /api/users, mock = fixtures (unchanged behaviour).
+     Falls back to the fixtures read on any /api/users error. Mirrors
+     compliance-aggregator.js's adminUserFolders(). */
+  async function adminUserFolders() {
+    try {
+      var usersRes = await window.FS.api.sites.getUsers();
+      return ((usersRes && usersRes.users) || []).map(deriveFolder).filter(Boolean);
+    } catch (e) {
+      return ((window.FieldSight && window.FieldSight.fixtures
+          && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [])
+          .map(deriveFolder).filter(Boolean);
+    }
+  }
+
   async function getActionsResolvedRange(opts) {
     opts = opts || {};
     var from = opts.from, to = opts.to;
     if (!from || !to) return { rows: [], from: from, to: to };
     var user = resolveUser(opts.user);
+
+    /* batch A2 Task 3 — opts.site is an EXPLICIT param passed by scoped
+       callers only. NEVER read window.FS.siteContext in this function —
+       the search palette (search-palette.js) calls this same export
+       with no site and must keep its global, unscoped view. When a
+       site IS given and the caller is neither a worker (forced-self
+       path above, unaffected) nor pinned by an explicit opts.user,
+       prefer the site fan-out below over the resolved single-self
+       folder — getSiteUsers is server-side permission-scoped (a site
+       manager's request returns self + their workers), so widening
+       from "just me" to "my site" still respects the caller's ceiling. */
+    var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
+    if (opts.site && !opts.user && caller.role !== 'worker') user = null;
 
     /* 1) Discover days that actually have reports. /api/dates is the
        cheapest call — single round-trip, gives us a hasReport flag
@@ -87,20 +115,20 @@
        in parallel.
        Sprint 8 follow-up — admin fan-out across all known users when
        no explicit user is provided, matching compliance-aggregator. */
-    var caller  = (window.AuthMock && window.AuthMock.currentUser) || {};
     var isAdmin = caller.role === 'admin' || caller.role === 'gm' || !!caller.isAdmin;
     var folders = null;
-    if (!user && isAdmin) {
-      /* Sourced from the real GET /api/users (report identity) — live =
-         pass-through of /api/users, mock = fixtures (unchanged behaviour).
-         Falls back to the fixtures read on any /api/users error. */
-      try {
-        var usersRes = await window.FS.api.sites.getUsers();
-        folders = ((usersRes && usersRes.users) || []).map(deriveFolder).filter(Boolean);
-      } catch (e) {
-        folders = ((window.FieldSight && window.FieldSight.fixtures
-            && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [])
-            .map(deriveFolder).filter(Boolean);
+    /* Batch A2 Task 3 — also fans out when opts.site is set (sm/pm
+       site-scoped view, see comment above), sourcing folders from
+       getSiteUsers instead of the full user list; falls back to the
+       existing adminUserFolders() path on error. */
+    if (!user && (isAdmin || opts.site)) {
+      if (opts.site) {
+        try {
+          var siteUsersRes = await window.FS.api.sites.getSiteUsers(opts.site);
+          folders = ((siteUsersRes && siteUsersRes.users) || []).map(deriveFolder).filter(Boolean);
+        } catch (e) { folders = await adminUserFolders(); }
+      } else {
+        folders = await adminUserFolders();
       }
     }
 

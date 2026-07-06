@@ -49,23 +49,6 @@
     return user && (user.role === 'admin' || user.role === 'gm' || user.isAdmin);
   }
 
-  /* Batch A — project-anchor plumbing (Task 2). Persists the last-viewed
-     site/project across timeline visits, mirroring the range-toolbar
-     loadStored/saveStored pattern (composites/range-toolbar.js:61-91). */
-  var TIMELINE_SITE_KEY = 'fs.settings.timelineSite';
-  function loadTimelineSite() {
-    try {
-      var v = JSON.parse(localStorage.getItem(TIMELINE_SITE_KEY) || 'null');
-      return (v && v.site) || null;
-    } catch (_) { return null; }
-  }
-  function saveTimelineSite(siteId) {
-    try {
-      if (siteId) localStorage.setItem(TIMELINE_SITE_KEY, JSON.stringify({ site: siteId }));
-      else localStorage.removeItem(TIMELINE_SITE_KEY);
-    } catch (_) {}
-  }
-
   /* Pick the most recent date with a report from /api/dates, or null.
      Mirrors the helper in today.js so the two pages share the same
      fallback semantics — when "today" has no report, the user lands
@@ -100,7 +83,6 @@
     var date      = props.date;
     var user      = props.user;
     var site      = props.site;
-    var sitesList = props.sitesList || [];
     var DatePicker = window.FieldSight.DatePicker;
 
     var subtitleParts = [];
@@ -123,23 +105,6 @@
       window.FS.Router.navigate('/timeline' + qs);
     }
 
-    /* Batch A — compact, always-visible project selector. Sits above the
-       DatePicker; switching projects is handled by props.onChangeSite
-       (Middle drops the active user and persists the choice). */
-    var siteSelectOptions = [{ v: '', l: '— Select a project —' }].concat(
-      sitesList.map(function (s) { return { v: s.site_id, l: s.name }; })
-    );
-    var siteSelect = React.createElement('select', {
-      className: 'fs-settings__select',
-      style:     { maxWidth: '260px' },
-      value:     site || '',
-      onChange:  function (e) { if (props.onChangeSite) props.onChangeSite(e.target.value); },
-    },
-      siteSelectOptions.map(function (o) {
-        return React.createElement('option', { key: o.v, value: o.v }, o.l);
-      }),
-    );
-
     return React.createElement('div', {
       className: 'fs-timeline-page__header',
     },
@@ -156,7 +121,6 @@
         'Daily Report'),
       React.createElement('div', { className: 'fs-timeline-page__subtitle' },
         subtitleParts.join(' · ')),
-      siteSelect,
       DatePicker && date ? React.createElement(DatePicker, {
         date:        date,
         onChange:    onChangeDate,
@@ -436,7 +400,7 @@
             React.createElement('div', null,
               React.createElement('div', {
                 style: { fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' },
-              }, sectionUserName || unfolder(sectionUser)),
+              }, unfolder(section.report.user_name || (section.user && section.user.name) || '')),
               roleLabel ? React.createElement('div', {
                 style: { fontSize: '12px', color: 'var(--text-tertiary)' },
               }, roleLabel) : null,
@@ -514,6 +478,20 @@
       });
     }, []);
 
+    /* Batch A2 Task 2 — the header's /timeline special case rewrites the
+       URL on change (app-shell.js onHeaderSiteChange), which the Router
+       subscription above already catches. This subscription covers
+       context changes made elsewhere (another page, or a future caller
+       of FS.siteContext.set) that don't touch /timeline's own URL —
+       re-resolve params so the site-resolution block below picks up the
+       new value. */
+    React.useEffect(function () {
+      if (!(window.FS && window.FS.siteContext)) return undefined;
+      return window.FS.siteContext.onChange(function () {
+        setParams(Object.assign({}, (window.FS.Router.getCurrentRoute() || {}).params || {}));
+      });
+    }, []);
+
     /* Sprint 6.6.4 — deep-link target topic. When /safety or /quality
        launches into /timeline?topic=N, we auto-open + flash that
        topic; all other topics auto-collapse (focus mode). Parsed
@@ -578,25 +556,29 @@
       return function () { cancelled = true; };
     }, []);
 
-    /* Batch A — resolve the active site/project up front: URL wins, then
-       the last-persisted choice, then the single-site auto-anchor (a
-       caller scoped to exactly one project never had to choose; no
-       navigate/persist — persisting would poison localStorage for a
-       caller who later gains more sites). Deliberately computed BEFORE
-       the role-forcing checks below — they need to know whether a site
-       is anchored, including the auto-anchor case once sitesList lands
-       and re-renders. */
-    var site = params.site || loadTimelineSite()
+    /* Batch A2 Task 2 — resolve the active site/project up front: URL wins,
+       then the global FS.siteContext (header-driven, shared across pages),
+       then the single-site auto-anchor (a caller scoped to exactly one
+       project never had to choose; no navigate/persist — persisting would
+       poison localStorage for a caller who later gains more sites).
+       Deliberately computed BEFORE the role-forcing checks below — they
+       need to know whether a site is anchored, including the auto-anchor
+       case once sitesList lands and re-renders. */
+    var site = params.site || (window.FS.siteContext && window.FS.siteContext.get())
       || (sitesList.length === 1 ? sitesList[0].site_id : null);
 
     /* Stale-anchor guard (Fable review B-2): a persisted/URL site the
        caller can no longer access (account switch, revoked) renders a
        blank selector and a misleading empty aggregated view. Once the
        sites list has landed, an unknown site resolves to null and the
-       stale key is dropped (removeItem is idempotent — safe in render). */
+       stale context is cleared (idempotent — safe in render). */
     if (site && sitesList.length > 0
         && !sitesList.some(function (s) { return s.site_id === site; })) {
-      saveTimelineSite(null);
+      /* Only clear the CONTEXT when the stale value actually came from it
+         (Fable review #1b): a garbage/revoked ?site= in a deep link must
+         not destroy the user's valid global selection — and set() is now
+         deduped, so this render-phase call can't loop either way. */
+      if (!params.site && window.FS.siteContext) window.FS.siteContext.set(null);
       site = null;
     }
 
@@ -604,10 +586,12 @@
     if (!user && !site && !isAdminLike(caller)) user = callerFolder();
 
     /* Switching projects resets the active person — a user picked for
-       one site rarely maps onto another. Persists the choice so it
-       survives reloads (loadTimelineSite above). */
+       one site rarely maps onto another. Persists the choice via the
+       global FS.siteContext so it's shared with the header selector and
+       every other site-scoped page (Batch A2 Task 2). Still needed here
+       for SitePickerState, which calls this directly. */
     function onChangeSite(siteId) {
-      saveTimelineSite(siteId || null);
+      if (window.FS.siteContext) window.FS.siteContext.set(siteId || null);
       var qs = siteId
         ? '?site=' + encodeURIComponent(siteId) + (date ? '&date=' + date : '')
         : '';
@@ -834,7 +818,7 @@
       },
         React.createElement(PageHeader, {
           date: date, user: user,
-          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+          site: site,
         }),
         React.createElement('div', { className: 'fs-timeline-page__loading' },
           'Loading report…'),
@@ -846,7 +830,7 @@
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: user,
-          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+          site: site,
         }),
         ErrorBanner
           ? React.createElement(ErrorBanner, {
@@ -866,7 +850,7 @@
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: user,
-          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+          site: site,
         }),
         AccessDenied
           ? React.createElement(AccessDenied, {
@@ -888,7 +872,7 @@
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: null,
-          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+          site: site,
         }),
         React.createElement(SitePickerState, {
           sitesList: sitesList, onChangeSite: onChangeSite,
@@ -904,7 +888,7 @@
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: null,
-          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+          site: site,
         }),
         React.createElement(AggregatedDayView, {
           site: site, date: date,
@@ -923,7 +907,7 @@
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: null,
-          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+          site: site,
         }),
         React.createElement(AvailableUsersState, {
           date: date, users: report.available_users, site: site,
@@ -936,7 +920,7 @@
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: user,
-          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+          site: site,
         }),
         React.createElement(NoReportState, {
           message: (report && report.message) || ('No report for ' + unfolder(user || '') + ' on ' + date),
@@ -981,7 +965,7 @@
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: user, report: report || meeting,
-          site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+          site: site,
         }),
         React.createElement(ViewToggle),
 
@@ -1051,7 +1035,7 @@
     },
       React.createElement(PageHeader, {
         date: date, user: user, report: report,
-        site: site, sitesList: sitesList, onChangeSite: onChangeSite,
+        site: site,
       }),
       React.createElement(ViewToggle),
       React.createElement(ReportKpis, { report: report }),

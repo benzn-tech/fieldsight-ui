@@ -108,6 +108,17 @@
     var retryCount = retryRef[0];
     var setRetry   = retryRef[1];
 
+    /* batch A2 Task 4 — read the global active-site selection; passed
+       EXPLICITLY into the aggregator call below (never read inside the
+       aggregator itself — see compliance-aggregator.js _AUDIT note). */
+    var refActiveSite = React.useState(function () { return (window.FS && window.FS.siteContext) ? window.FS.siteContext.get() : null; });
+    var activeSite    = refActiveSite[0];
+    var setActiveSite = refActiveSite[1];
+    React.useEffect(function () {
+      if (!(window.FS && window.FS.siteContext)) return undefined;
+      return window.FS.siteContext.onChange(setActiveSite);
+    }, []);
+
     React.useEffect(function () {
       /* RangeToolbar resolves the range asynchronously (e.g. 'all' needs
          FS.api.window.getSpan()) — wait for both ends before fetching. */
@@ -116,7 +127,7 @@
       setState({ status: 'loading' });
 
       window.FS.api.compliance.getSafetyRange({
-        from: view.from, to: view.to,
+        from: view.from, to: view.to, site: activeSite || undefined,
       }).then(function (res) {
         if (cancelled) return;
         if (res && res._accessDenied) {
@@ -140,7 +151,7 @@
       });
 
       return function () { cancelled = true; };
-    }, [depKey, view.from, view.to, retryCount]);
+    }, [depKey, view.from, view.to, retryCount, activeSite]);
 
     var refSel = React.useState(null);
     var sel    = refSel[0];

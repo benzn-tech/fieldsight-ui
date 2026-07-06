@@ -54,11 +54,38 @@
     return (m[1].length === 1 ? '0' + m[1] : m[1]) + ':' + m[2];
   }
 
-  /* Resolve which user folders the caller is allowed to see. */
-  function resolveVisibleUsers() {
+  /* Resolve which user folders the caller is allowed to see.
+
+     batch A2 Task 3 — `site` is an EXPLICIT param passed by scoped
+     callers only. NEVER read window.FS.siteContext in this function.
+     When no site is passed at all, this is exactly the pre-existing
+     synchronous role logic below (unchanged). When a site IS passed:
+     worker callers still resolve to their forced-self path (ignoring
+     site — workers only ever see their own data); every other caller
+     defers to getSiteUsers(site), which is server-side permission-
+     scoped (a site manager's request for their own site returns self
+     + their workers). Any getSiteUsers failure falls through to the
+     existing role-based logic below rather than failing the page. */
+  async function resolveVisibleUsers(site) {
     var caller   = (window.AuthMock && window.AuthMock.currentUser) || {};
     var fixtures = (window.FieldSight && window.FieldSight.fixtures && window.FieldSight.fixtures.sites) || { users: [] };
     var allUsers = fixtures.users || [];
+
+    if (site && caller.role !== 'worker') {
+      try {
+        var su = await window.FS.api.sites.getSiteUsers(site);
+        /* Defensive folder_name normalization: /api/site-users DOES include
+           folder_name (get_accessible_users builds it — unlike /api/users,
+           which doesn't), so this is a passthrough in practice; the derive
+           fallback guards the downstream u.folder_name keying against any
+           future response-shape drift (Fable review #6). */
+        return (((su && su.users) || [])).map(function (u) {
+          return u.folder_name ? u : Object.assign({}, u, {
+            folder_name: (u.name || '').replace(/ /g, '_'),
+          });
+        });
+      } catch (e) { /* fall through to role logic below */ }
+    }
 
     if (caller.role === 'worker') {
       var folder = window.FS.api.folderName(caller.name || '');
@@ -76,6 +103,12 @@
     });
   }
 
+  /* batch A2 Task 3 — opts.site is an EXPLICIT param passed by scoped
+     callers only; see resolveVisibleUsers() above for the full
+     rationale. This function must NEVER read window.FS.siteContext —
+     callers that omit opts.site (there are none currently, but any
+     future strategic/global caller of this export) must keep the
+     unscoped, role-based view. */
   async function getUserActivityRange(opts) {
     opts = opts || {};
     var from = opts.from, to = opts.to;
@@ -92,7 +125,7 @@
       .filter(function (d) { return d >= from && d <= to && datesMap[d].hasReport; })
       .sort();
 
-    var visibleUsers = resolveVisibleUsers();
+    var visibleUsers = await resolveVisibleUsers(opts.site);
     if (visibleUsers.length === 0 || dates.length === 0) {
       return { users: visibleUsers.map(toBlankAggregation),
                from: from, to: to, dates: dates };
