@@ -546,19 +546,13 @@
     var date   = params.date;            /* may be undefined → bootstrap resolves */
     var user   = params.user;
 
-    /* Batch A — resolve the active site/project up front (URL wins, then
-       the last-persisted choice, else null; further narrowed below once
-       the sites list has loaded, for the single-site auto-anchor case).
-       Deliberately computed BEFORE the role-forcing checks below — they
-       need to know whether a site is already anchored. */
-    var site = params.site || loadTimelineSite() || null;
-
-    if (caller.role === 'worker') user = callerFolder();
-    if (!user && !site && !isAdminLike(caller)) user = callerFolder();
-
     /* One-shot sites list fetch (mirrors AvailableUsersState's lack of
        gating — mock getSites() always resolves; no useMocks branch here
-       since the api layer itself owns that switch). */
+       since the api layer itself owns that switch). Declared BEFORE the
+       site resolution so the single-site auto-anchor can participate in
+       it — anchoring after the role-forcing checks left a single-site
+       site_manager/PM forced to self on their very first visit (Task 4
+       review carry-over). */
     var refSitesList = React.useState([]);
     var sitesList    = refSitesList[0];
     var setSitesList = refSitesList[1];
@@ -575,11 +569,19 @@
       return function () { cancelled = true; };
     }, []);
 
-    /* Single-site auto-anchor — a caller scoped to exactly one project
-       never had to choose; silently resolve to it (no navigate/persist —
-       persisting would poison localStorage for a caller who later gets
-       access to more sites). */
-    if (!site && sitesList.length === 1) site = sitesList[0].site_id;
+    /* Batch A — resolve the active site/project up front: URL wins, then
+       the last-persisted choice, then the single-site auto-anchor (a
+       caller scoped to exactly one project never had to choose; no
+       navigate/persist — persisting would poison localStorage for a
+       caller who later gains more sites). Deliberately computed BEFORE
+       the role-forcing checks below — they need to know whether a site
+       is anchored, including the auto-anchor case once sitesList lands
+       and re-renders. */
+    var site = params.site || loadTimelineSite()
+      || (sitesList.length === 1 ? sitesList[0].site_id : null);
+
+    if (caller.role === 'worker') user = callerFolder();
+    if (!user && !site && !isAdminLike(caller)) user = callerFolder();
 
     /* Switching projects resets the active person — a user picked for
        one site rarely maps onto another. Persists the choice so it
