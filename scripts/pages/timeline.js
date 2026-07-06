@@ -214,6 +214,14 @@
             );
           }),
         ),
+        /* Escape hatch — arriving here via "View another user ↺" left no
+           way back to the report being viewed (user feedback 2026-07-06). */
+        React.createElement('button', {
+          type:      'button',
+          className: 'fs-btn fs-btn--tertiary fs-btn--sm',
+          style:     { marginTop: '10px' },
+          onClick:   function () { window.history.back(); },
+        }, '← Back'),
       ),
     );
   }

@@ -27,9 +27,9 @@
      placeholder     string for the input (e.g. "Ask about this topic…")
      suggestions     string[] of pre-canned questions (clickable chips)
      compact         boolean — render in a tighter layout for sidebars
-     initialQuestion optional string — prefills the input once on mount
-                     (Task C: Search's "Ask FieldSight" hand-off). Does
-                     NOT auto-send; the user still presses Ask/Enter.
+     initialQuestion optional string — auto-sends once on mount (Search's
+                     "Ask FieldSight" hand-off: the question was already
+                     committed in the palette, so it fires immediately).
 
    Exported to:
      window.FieldSight.AskChat
@@ -61,13 +61,13 @@
 
     var listRef = React.useRef(null);
 
-    /* Task C — one-shot prefill from an `initialQuestion` prop (Search's
-       "Ask FieldSight" hand-off). Runs once on mount only ([] deps); a
-       later change to the prop is intentionally ignored — this seeds a
-       starting value, it does not keep the input in sync with the prop.
-       Never auto-sends; the user still submits explicitly. */
+    /* Task C — one-shot hand-off from Search's "Ask FieldSight" row. Runs
+       once on mount only ([] deps). AUTO-SENDS: the user already typed and
+       committed the question in the search palette — landing them on a
+       silently prefilled input read as "nothing happened" (user feedback
+       2026-07-06). */
     React.useEffect(function () {
-      if (props.initialQuestion) setQ(props.initialQuestion);
+      if (props.initialQuestion) send(props.initialQuestion);
     }, []);
 
     /* Auto-scroll the message list to the bottom whenever it grows. */
