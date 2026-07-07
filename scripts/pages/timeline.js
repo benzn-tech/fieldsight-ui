@@ -143,21 +143,27 @@
          switch users was hand-editing the ?user= query param. Batch A —
          when a project is active, "back" means the aggregated per-site
          day view (drop user, keep site) rather than the raw cross-site
-         user list. */
+         user list.
+
+         F2 — this back control is URL-based (never window.history.back(),
+         which is fragile on deep links: refresh, bookmark, or a link
+         shared from elsewhere leaves no browser history entry to pop) and
+         ALWAYS renders whenever an admin/gm is viewing a specific user —
+         previously it was folded into the same conditional as the
+         "View another user" toggle further below, giving the two
+         directions of the same bidirectional control different visibility
+         rules. Both directions now share one URL contract: drop ?user=,
+         keep date + site. */
       (user && isAdminLike((window.AuthMock && window.AuthMock.currentUser) || {}))
         ? React.createElement('button', {
             type:      'button',
             className: 'fs-btn fs-btn--tertiary fs-btn--sm',
             style:     { marginTop: '6px' },
             onClick:   function () {
-              if (site) {
-                window.FS.Router.navigate('/timeline?site=' + encodeURIComponent(site) + '&date=' + (date || ''));
-                return;
-              }
-              var qs = '?date=' + (date || '');
-              window.FS.Router.navigate('/timeline' + qs);
+              window.FS.Router.navigate('/timeline?date=' + (date || '')
+                + (site ? '&site=' + encodeURIComponent(site) : ''));
             },
-          }, site ? '← All people on this site' : 'View another user ↺')
+          }, site ? '← All people on this site' : '← Back to overview')
         : null,
     );
   }
@@ -232,13 +238,22 @@
             );
           }),
         ),
-        /* Escape hatch — arriving here via "View another user ↺" left no
-           way back to the report being viewed (user feedback 2026-07-06). */
+        /* Escape hatch — arriving here via the "← Back to overview" /
+           "View another user ↺" toggle left no way back to the report
+           being viewed (user feedback 2026-07-06).
+           F2 — URL-based, not window.history.back(): a deep link straight
+           into this picker state has no browser history entry to pop, so
+           history.back() silently did nothing. Drop ?user= (there wasn't
+           one set here anyway) and keep date/site — if no user was ever
+           set, this is just '/timeline?date=...'. */
         React.createElement('button', {
           type:      'button',
           className: 'fs-btn fs-btn--tertiary fs-btn--sm',
           style:     { marginTop: '10px' },
-          onClick:   function () { window.history.back(); },
+          onClick:   function () {
+            window.FS.Router.navigate('/timeline?date=' + (props.date || '')
+              + (props.site ? '&site=' + encodeURIComponent(props.site) : ''));
+          },
         }, '← Back'),
       ),
     );
