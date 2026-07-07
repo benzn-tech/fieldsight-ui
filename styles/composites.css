@@ -2291,7 +2291,7 @@
   background: var(--surface-panel);
 }
 .fs-ask-chat__cite--link { cursor: pointer; }
-.fs-ask-chat__cite--link:hover { background: var(--surface-selected); border-color: var(--color-accent-300); }
+.fs-ask-chat__cite--link:hover { background: var(--surface-panel-muted); border-color: var(--color-accent-300); }
 .fs-ask-chat__cite--link:focus-visible {
   outline: 2px solid var(--color-accent-500);
   outline-offset: 1px;
