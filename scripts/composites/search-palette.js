@@ -305,6 +305,13 @@
     });
     var recent  = refRecent[0]; var setRecent = refRecent[1];
 
+    /* F1 — inline RAG Ask hand-off. null = normal search list; { question }
+       swaps the results body for an inline AskChat (no navigation). Local
+       state only — closing the palette unmounts SearchPalette and this
+       resets for free, no explicit cleanup needed. */
+    var refAsk  = React.useState(null);
+    var askMode = refAsk[0]; var setAskMode = refAsk[1];
+
     var inputRef = React.useRef(null);
     var listRef  = React.useRef(null);
 
@@ -355,27 +362,38 @@
       try { sessionStorage.setItem('fs.search.recent', JSON.stringify(next)); } catch (_) {}
     }
 
-    /* Ask hand-off (Task C) — stash the query for Timeline's report-level
-       AskChat to prefill-and-clear, then route to the latest report date
-       for the resolved user folder. getSpan() is already warm by the time
-       this fires (kicked off by _loadCache on palette open), so the async
-       hop is imperceptible in practice; still tolerate a slow/failed span
-       lookup by falling back to today. */
+    /* F1 — inline RAG Ask hand-off. Starts AskChat right inside the palette
+       (global scope: no date/user/topic_id, so backend Phase 5 grounds
+       across the caller's whole ACL rather than one report). Does NOT call
+       onClose — the palette stays open showing the answer.
+       Guard: if AskChat isn't loaded (script missing/load-order issue),
+       fall back to the original Task C behaviour — stash the query for
+       Timeline's report-level AskChat to prefill-and-clear, then route to
+       the latest report date for the resolved user folder. getSpan() is
+       already warm by the time this fires (kicked off by _loadCache on
+       palette open), so the async hop is imperceptible in practice; still
+       tolerate a slow/failed span lookup by falling back to today. */
     function doAsk(q) {
       if (!q) return;
       saveRecent(q);
-      try { sessionStorage.setItem('fs.ask.prefill', q); } catch (_) {}
-      var folder = _resolveAskFolder();
-      function go(dateStr) {
-        window.FS.Router.navigate('/timeline?date=' + encodeURIComponent(dateStr)
-          + '&user=' + encodeURIComponent(folder));
+
+      if (!(window.FieldSight && window.FieldSight.AskChat)) {
+        try { sessionStorage.setItem('fs.ask.prefill', q); } catch (_) {}
+        var folder = _resolveAskFolder();
+        function go(dateStr) {
+          window.FS.Router.navigate('/timeline?date=' + encodeURIComponent(dateStr)
+            + '&user=' + encodeURIComponent(folder));
+        }
+        window.FS.api.window.getSpan().then(function (span) {
+          go((span && span.latest) || window.FS.api.todayNZDT());
+        }).catch(function () {
+          go(window.FS.api.todayNZDT());
+        });
+        onClose();
+        return;
       }
-      window.FS.api.window.getSpan().then(function (span) {
-        go((span && span.latest) || window.FS.api.todayNZDT());
-      }).catch(function () {
-        go(window.FS.api.todayNZDT());
-      });
-      onClose();
+
+      setAskMode({ question: q });
     }
 
     function doSelect(item) {
@@ -459,13 +477,40 @@
           React.createElement('kbd', { className: 'fs-search-palette__esc-hint' }, 'Esc'),
         ),
 
-        /* ---- Results list ---------------------------------------------- */
+        /* ---- Results list ------------------------------------------------
+           F1 — when askMode is set, this whole body is swapped for the
+           inline AskChat panel (below); everything else (no-match/grouped/
+           recent/hint + the "Ask FieldSight" row) only renders when
+           askMode is null. */
         React.createElement('div', {
           ref:          listRef,
           className:    'fs-search-palette__results',
-          role:         'listbox',
-          'aria-label': 'Search results',
+          role:         askMode ? 'region' : 'listbox',
+          'aria-label': askMode ? 'Ask FieldSight' : 'Search results',
         },
+          askMode
+            ? React.createElement('div', { className: 'fs-search-palette__ask' },
+                React.createElement('button', {
+                  type:         'button',
+                  className:    'fs-search-palette__ask-back',
+                  onClick:      function () { setAskMode(null); },
+                },
+                  NavIcon && React.createElement(NavIcon, {
+                    name:  'chevron-left',
+                    size:  14,
+                    color: 'var(--text-tertiary)',
+                  }),
+                  'Back to search',
+                ),
+                React.createElement('div', { className: 'fs-search-palette__ask-question' },
+                  askMode.question),
+                React.createElement(window.FieldSight.AskChat, {
+                  compact:         true,
+                  initialQuestion: askMode.question,
+                  scope:           'both',
+                }),
+              )
+            :
           /* No match */
           query.trim() && results.length === 0
             ? React.createElement('div', { className: 'fs-search-palette__empty' },
@@ -552,8 +597,10 @@
              Selecting it stashes the query for Timeline's report-level
              AskChat to prefill and routes there. Styled inline (border +
              accent tint, tokens-only) rather than via composites.css so
-             this stays a JS-only change — no new CSS class needed. */
-          askItem
+             this stays a JS-only change — no new CSS class needed.
+             Hidden while askMode is active (F1) — the ask panel above
+             replaces it. */
+          !askMode && askItem
             ? React.createElement('button', {
                 type:            'button',
                 role:            'option',

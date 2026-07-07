@@ -7039,6 +7039,45 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color:      var(--text-tertiary);
 }
 
+/* Inline Ask hand-off (F1) — replaces the results list when the "Ask
+   FieldSight" row is selected; AskChat renders in place, no navigation.
+   AskChat brings its own styling — this wrapper just adds palette-
+   consistent padding + the back affordance above it. */
+.fs-search-palette__ask {
+  display:        flex;
+  flex-direction: column;
+  gap:            10px;
+  padding:        12px 16px 16px;
+}
+
+.fs-search-palette__ask-back {
+  display:        inline-flex;
+  align-items:    center;
+  gap:            4px;
+  align-self:     flex-start;
+  padding:        4px 8px 4px 4px;
+  background:     transparent;
+  border:         none;
+  border-radius:  var(--radius-sm, 4px);
+  cursor:         pointer;
+  font-family:    var(--font-sans);
+  font-size:      var(--fs-text-xs, 11px);
+  font-weight:    600;
+  color:          var(--text-tertiary);
+  transition:     color 100ms ease, background 100ms ease;
+}
+
+.fs-search-palette__ask-back:hover {
+  color:      var(--color-accent-700);
+  background: var(--surface-panel-muted);
+}
+
+.fs-search-palette__ask-question {
+  font-size:   var(--fs-text-sm, 13px);
+  font-weight: 600;
+  color:       var(--text-primary);
+}
+
 @media (max-width: 640px) {
   .fs-search-palette {
     padding-top: 0;
