@@ -380,11 +380,18 @@
                             : null,
                           /* batch B Task 6 — manually-logged items, merged in
                              by compliance-aggregator.js from
-                             org.getObservations. */
+                             org.getObservations.
+                             feat 4b — 'live' items merged in the same way
+                             from org.getLiveItems. */
                           row.source === 'manual'
                             ? React.createElement(Badge, {
                                 tone: 'neutral', size: 'sm', variant: 'subtle',
                               }, 'Manual')
+                            : null,
+                          row.source === 'live'
+                            ? React.createElement(Badge, {
+                                tone: 'info', size: 'sm', variant: 'subtle',
+                              }, 'Live')
                             : null,
                         ),
                       ),

@@ -245,6 +245,21 @@
     return { observations: rows };
   }
 
+  // -------- live items (session-sourced extraction, feat 4b) --------
+  /* GET /api/org/live-items?date=YYYY-MM-DD → { topics: [...] }. Date-scoped
+     only — ACL is date-wide across accessible sites, NO site param (unlike
+     getObservations' site_slug). Mirrors getObservations' live/mock split;
+     mock returns an empty topics list (safe — no live rows merged in,
+     matches the mocked-observations posture of "nothing until seeded"). */
+  async function getLiveItems(opts) {
+    opts = opts || {};
+    if (orgLive()) {
+      return api.orgRequest('/live-items', { params: { date: opts.date } });
+    }
+    await api.delay();
+    return { topics: [] };
+  }
+
   async function updateObservation(id, patch) {
     if (orgWrite()) return api.orgRequest('/observations/' + encodeURIComponent(id), { method: 'PATCH', body: patch });
     await api.delay();
@@ -274,6 +289,7 @@
     uploadImage: uploadImage, resolveAssetUrl: resolveAssetUrl,
     createObservation: createObservation, getObservations: getObservations,
     updateObservation: updateObservation, archiveObservation: archiveObservation,
+    getLiveItems: getLiveItems,
     _folderName: folderName,   /* exported for batch-2b fan-out reuse */
     _toPageMember: _toPageMember, _toPageSite: _toPageSite,   /* page-shape adapters, batch-2b */
   };
