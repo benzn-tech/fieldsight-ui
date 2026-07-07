@@ -36,8 +36,6 @@
 (function () {
   'use strict';
 
-  var DEFAULT_PROGRAMME_ID = 'sb1108-2026-q2';
-
   var TIER_PIXELS = { day: 24, week: 6, month: 2 };
 
   /* ---------- Helpers --------------------------------------------------- */
@@ -85,6 +83,40 @@
   function diffDays(a, b) {
     var ms = new Date(b + 'T00:00:00Z').getTime() - new Date(a + 'T00:00:00Z').getTime();
     return Math.round(ms / 86400000);
+  }
+
+  /* F4 (UI batch 2026-07-08) — derive a programme-level date range from
+     its leaves, for the moments (fresh import, bootstrap-from-empty)
+     where there's no persisted top-level start_date/end_date yet to
+     trust. Falls back to the given bounds when there are no leaves. */
+  function deriveDateRange(leaves, fallbackStart, fallbackEnd) {
+    if (!leaves || !leaves.length) {
+      return { start_date: fallbackStart, end_date: fallbackEnd };
+    }
+    var start = leaves.reduce(function (m, t) { return (!m || t.start < m) ? t.start : m; }, null);
+    var end   = leaves.reduce(function (m, t) { return (!m || t.end   > m) ? t.end   : m; }, null);
+    return { start_date: start, end_date: end };
+  }
+
+  /* F4 — the page's OWN project picker (Option B), sourced from
+     org.getOrgSites() — the ORG SITE UUID space, never the report-side
+     slug. Reused for both the full-screen "select a project" prompt and
+     the compact in-header picker once a programme is loaded. */
+  function renderSitePicker(ctx, extraStyle) {
+    var sites = (ctx.orgSitesState && ctx.orgSitesState.sites) || [];
+    if (!sites.length) return null;
+    return React.createElement('select', {
+      className:    'fs-settings__select',
+      style:        Object.assign({ maxWidth: '220px' }, extraStyle || {}),
+      value:        ctx.orgSiteId || '',
+      onChange:     function (e) { ctx.setOrgSiteId(e.target.value || null); },
+      'aria-label': 'Programme project',
+    },
+      [React.createElement('option', { key: '__none', value: '' }, '— Select a project —')]
+        .concat(sites.map(function (s) {
+          return React.createElement('option', { key: s.site_id, value: s.site_id }, s.name);
+        })),
+    );
   }
 
   /* Roll up child date range + progress for a group row. Used to
@@ -155,44 +187,141 @@
     var collapsed    = refCollapsed[0];
     var setCollapsed = refCollapsed[1];
 
+    /* ---- F4 (UI batch 2026-07-08) — org site resolution, Option B -----
+       The org-api /programme endpoint is keyed by the ORG SITE UUID
+       (org.js getOrgSites()'s site_id, i.e. _toPageSite's s.id) — a
+       different id space from FS.siteContext, which holds the
+       report-side site slug from api/sites.js. scripts/pages/sites.js
+       (~line 575) documents that the slug↔UUID bridge is unreliable and
+       was deliberately parked rather than "fixed" with a name match.
+       So this page owns its OWN site picker sourced straight from
+       org.getOrgSites() (source of truth for the UUID space) — the
+       globally active site is only ever used as a best-effort
+       PRE-SELECTION hint (matched by name), never as the identity
+       passed to the backend. This is the one and only place an
+       orgSiteId gets minted for the page; every getProgramme/
+       saveProgramme call below uses it, never a slug. */
+    var refOrgSites = React.useState({ status: 'loading', sites: [] });
+    var orgSitesState    = refOrgSites[0];
+    var setOrgSitesState = refOrgSites[1];
+
+    var refOrgSiteId    = React.useState(null);
+    var orgSiteId       = refOrgSiteId[0];
+    var setOrgSiteIdRaw = refOrgSiteId[1];
+
+    var refOrgSitesRetry = React.useState(0);
+    var orgSitesRetry    = refOrgSitesRetry[0];
+    var setOrgSitesRetry = refOrgSitesRetry[1];
+
+    var didPreselect = React.useRef(false);
+
+    /* Public setter — a manual pick always outranks the auto-match hint,
+       even if it hasn't run yet. */
+    function setOrgSiteId(id) {
+      didPreselect.current = true;
+      setOrgSiteIdRaw(id || null);
+    }
+
     React.useEffect(function () {
       var cancelled = false;
-      setState({ status: 'loading' });
-
-      window.FS.api.programme.getProgramme(DEFAULT_PROGRAMME_ID).then(function (p) {
+      setOrgSitesState({ status: 'loading', sites: [] });
+      Promise.all([
+        window.FS.api.org.getOrgSites(),
+        window.FS.api.sites.getSites().catch(function () { return { sites: [] }; }),
+      ]).then(function (res) {
         if (cancelled) return;
-        if (p && p._accessDenied) {
-          setState({ status: 'access_denied', message: p.error });
+        var orgRes    = res[0];
+        var reportRes = res[1];
+        if (orgRes && orgRes._accessDenied) {
+          setOrgSitesState({ status: 'access_denied', sites: [], message: orgRes.error });
           return;
         }
-        if (!p || p._notFound) {
-          setState({ status: 'error', error: { message: 'Programme not found.' } });
+        var orgSites = (orgRes && orgRes.sites) || [];
+        setOrgSitesState({ status: 'ok', sites: orgSites });
+
+        if (!didPreselect.current) {
+          didPreselect.current = true;
+          var activeSlug   = window.FS.siteContext ? window.FS.siteContext.get() : null;
+          var reportSites  = (reportRes && reportRes.sites) || [];
+          var activeReportSite = activeSlug
+            ? reportSites.filter(function (s) { return s.site_id === activeSlug; })[0]
+            : null;
+          var match = activeReportSite
+            ? orgSites.filter(function (s) { return s.name === activeReportSite.name; })[0]
+            : null;
+          /* Sole-site deployments don't need a name match to be sure. */
+          if (!match && orgSites.length === 1) match = orgSites[0];
+          if (match) setOrgSiteIdRaw(match.site_id);
+        }
+      }).catch(function () {
+        if (cancelled) return;
+        setOrgSitesState({ status: 'error', sites: [] });
+      });
+      return function () { cancelled = true; };
+    }, [depKey, orgSitesRetry]);
+
+    /* ---- Dirty / save state (Sprint F4 — explicit Save, not autosave) */
+    var refDirty  = React.useState(false);
+    var dirty     = refDirty[0];
+    var setDirty  = refDirty[1];
+    var refSaving = React.useState(false);
+    var saving    = refSaving[0];
+    var setSaving = refSaving[1];
+
+    React.useEffect(function () {
+      if (!orgSiteId) {
+        setState({ status: 'no_site' });
+        return undefined;
+      }
+      var cancelled = false;
+      setState({ status: 'loading' });
+      setDirty(false);
+
+      window.FS.api.programme.getProgramme(orgSiteId).then(function (res) {
+        if (cancelled) return;
+        if (res && res._accessDenied) {
+          setState({ status: 'access_denied', message: res.error });
           return;
         }
-        var leaves   = (p.tasks || []).filter(function (t) { return t.status !== 'group'; });
-        var parents  = (p.tasks || []).filter(function (t) { return t.status === 'group'; });
+        if (res && res._notFound) {
+          setState({
+            status: 'error',
+            error:  { message: 'Programme endpoint unavailable.', retryable: true },
+            retry:  function () { setRetry(function (n) { return n + 1; }); },
+          });
+          return;
+        }
+        var doc = res && res.programme;
+        if (!doc) {
+          /* Contract: { programme: null } = no programme uploaded for
+             this site yet. Distinct from _notFound (endpoint broken). */
+          setState({ status: 'empty' });
+          return;
+        }
+        var leaves  = (doc.leaves  || []).slice();
+        var parents = (doc.parents || []).slice();
         /* Sprint 5.6 — recompute the critical path from the dependency
-           graph on every load. The fixture's hand-coded critical_path
-           is now a hint, not the authority. The engine result is
-           mathematically the longest-cumulative-duration chain, so
-           subsequent cascades + edits stay self-consistent. Falls
-           back to the fixture value if the engine isn't loaded
-           (graceful degradation in unit-style harnesses). */
+           graph on every load; the engine result is the authority, not
+           whatever the doc happens to carry. */
         var sched = window.FieldSight && window.FieldSight.programmeSchedule;
-        var critIds = sched
-          ? sched.computeCriticalPath(leaves, p.start_date)
-          : (p.critical_path || []);
-        var critical = new Set(critIds);
+        var critIds = sched ? sched.computeCriticalPath(leaves, doc.start_date) : [];
         setState({
           status:   'ok',
-          programme: p,
+          programme: {
+            site_id:      orgSiteId,
+            programme_id: orgSiteId,   /* 1:1 per site now — also keys baseline localStorage below */
+            name:         doc.name || 'Programme',
+            start_date:   doc.start_date,
+            end_date:     doc.end_date,
+            updated_at:   doc.updated_at || null,
+          },
           leaves:   leaves,
           parents:  parents,
-          critical: critical,
+          critical: new Set(critIds),
           today:    window.FS.api.todayNZDT(),
         });
         /* Sprint 8.3.3 — restore saved baseline from localStorage */
-        var saved = window.FS.api.programme.getBaseline(p.programme_id);
+        var saved = window.FS.api.programme.getBaseline(orgSiteId);
         if (saved) setBaselineData(saved);
       }).catch(function (err) {
         if (cancelled) return;
@@ -200,7 +329,7 @@
       });
 
       return function () { cancelled = true; };
-    }, [depKey, retryCount]);
+    }, [depKey, retryCount, orgSiteId]);
 
     function toggleGroup(groupId) {
       setCollapsed(function (prev) {
@@ -265,6 +394,7 @@
       var end     = opts.end;
       if (!task_id || !start || !end) return;
 
+      setDirty(true);
       setState(function (s) {
         if (s.status !== 'ok') return s;
         /* Clamp to programme bounds — backend would do this server-side. */
@@ -294,6 +424,7 @@
       var task_id = opts.task_id;
       var patch   = opts.patch || {};
       if (!task_id) return;
+      setDirty(true);
       setState(function (s) {
         return applyTaskMutation(s, task_id, function (t) {
           return Object.assign({}, t, patch);
@@ -306,6 +437,7 @@
        references can't cause cascade infinite-loops. Recomputes CPM
        over the remaining leaves. */
     function deleteTask(taskId) {
+      setDirty(true);
       setState(function (s) {
         if (s.status !== 'ok') return s;
         var nextLeaves = s.leaves
@@ -332,6 +464,7 @@
        No cascade needed (new task has no dependents yet). */
     function addTask(opts) {
       opts = opts || {};
+      setDirty(true);
       setState(function (s) {
         if (s.status !== 'ok') return s;
         var parent = (s.parents || []).filter(function (p) {
@@ -374,24 +507,113 @@
       });
     }
 
-    /* Sprint 5.4 — full snapshot replace after CSV import.
-       Preserves programme-level metadata (name, dates) from the current
-       programme; swaps the entire parents[] + leaves[] graph. CPM is
-       recomputed from scratch so the import doesn't rely on the CSV
-       carrying a valid critical_path hint. */
+    /* Sprint 5.4 / F4 — full snapshot replace after CSV/XLSX/MS-Project
+       import. Also the entry point for "Upload programme" from the
+       empty-state card (status 'empty' → 'ok'), since a fresh import
+       IS the programme's first content — there's no prior
+       s.programme/s.leaves to preserve in that case. The imported
+       leaves are authoritative for the date range too (deriveDateRange)
+       so the Gantt lays out correctly immediately, without waiting for
+       a save + reload round trip. CPM is recomputed from scratch so the
+       import doesn't rely on the file carrying a valid critical-path
+       hint. */
     function replaceTasks(nextParents, nextLeaves) {
+      setDirty(true);
       setState(function (s) {
-        if (s.status !== 'ok') return s;
+        if (s.status !== 'ok' && s.status !== 'empty') return s;
+        var today = window.FS.api.todayNZDT();
+        var priorStart = s.status === 'ok' ? s.programme.start_date : today;
+        var priorEnd   = s.status === 'ok' ? s.programme.end_date   : today;
+        var range = deriveDateRange(nextLeaves, priorStart, priorEnd);
+        var programme = s.status === 'ok'
+          ? Object.assign({}, s.programme, range)
+          : {
+              site_id: orgSiteId, programme_id: orgSiteId, name: 'Programme',
+              start_date: range.start_date, end_date: range.end_date, updated_at: null,
+            };
         var sched = window.FieldSight && window.FieldSight.programmeSchedule;
         var critIds = sched
-          ? sched.computeCriticalPath(nextLeaves, s.programme.start_date)
+          ? sched.computeCriticalPath(nextLeaves, range.start_date)
           : [];
-        return Object.assign({}, s, {
-          parents:  nextParents,
-          leaves:   nextLeaves,
-          critical: new Set(critIds),
+        return {
+          status:    'ok',
+          programme: programme,
+          parents:   nextParents,
+          leaves:    nextLeaves,
+          critical:  new Set(critIds),
+          today:     s.today || today,
           /* Reset selection — the old selected task may no longer exist */
-        });
+        };
+      });
+    }
+
+    /* F4 — "+ Add task" from the empty-state card. There's no WBS group
+       to attach a first task to yet (ProgrammeTaskEditor's create mode
+       only shows the group picker when parentOptions.length > 0 — see
+       composites/programme-task-editor.js), so seed one default group.
+       Transitions 'empty' → 'ok' with zero leaves; the caller opens the
+       create-task modal right after, which now has somewhere to attach
+       to. No-op if a programme is already loaded. */
+    function bootstrapProgramme() {
+      setState(function (s) {
+        if (s.status === 'ok') return s;
+        var today = window.FS.api.todayNZDT();
+        var defaultParent = { task_id: 'T-100', wbs: '1.0', name: 'Tasks', parent_id: null, status: 'group' };
+        return {
+          status:    'ok',
+          programme: {
+            site_id: orgSiteId, programme_id: orgSiteId, name: 'Programme',
+            start_date: today, end_date: window.FS.api.addDaysISO(today, 30),
+            updated_at: null,
+          },
+          leaves:   [],
+          parents:  [defaultParent],
+          critical: new Set(),
+          today:    today,
+        };
+      });
+      setDirty(true);
+    }
+
+    /* F4 — explicit Save (canWrite-gated button in the header, NOT
+       autosave). PUTs { name, start_date, end_date, parents, leaves } —
+       the exact shape getProgramme's GET rehydrates state from above, so
+       a save + reload round trip is a no-op. */
+    function doSaveProgramme() {
+      var s = state;
+      if (s.status !== 'ok' || !orgSiteId || saving) return;
+      var doc = {
+        name:       s.programme.name,
+        start_date: s.programme.start_date,
+        end_date:   s.programme.end_date,
+        parents:    s.parents,
+        leaves:     s.leaves,
+      };
+      setSaving(true);
+      window.FS.api.programme.saveProgramme(orgSiteId, doc).then(function (res) {
+        setSaving(false);
+        if (res && res._accessDenied) {
+          if (window.FS.toast) window.FS.toast.show({ message: res.error || 'Not allowed to save this programme.', tone: 'error' });
+          return;
+        }
+        if (res && res._notFound) {
+          if (window.FS.toast) window.FS.toast.show({ message: 'Could not save — programme endpoint unavailable.', tone: 'error' });
+          return;
+        }
+        setDirty(false);
+        if (window.FS.toast) window.FS.toast.show({ message: '已保存', tone: 'success' });
+        var saved = res && res.programme;
+        if (saved && saved.updated_at) {
+          setState(function (prev) {
+            if (prev.status !== 'ok') return prev;
+            return Object.assign({}, prev, {
+              programme: Object.assign({}, prev.programme, { updated_at: saved.updated_at }),
+            });
+          });
+        }
+      }).catch(function () {
+        setSaving(false);
+        if (window.FS.toast) window.FS.toast.show({ message: 'Could not save programme. Try again.', tone: 'error' });
       });
     }
 
@@ -417,6 +639,15 @@
 
     var ctx = {
       state:        state,
+      /* F4 — org site resolution (Option B) + explicit save */
+      orgSitesState:      orgSitesState,
+      orgSiteId:          orgSiteId,
+      setOrgSiteId:       setOrgSiteId,
+      retryOrgSites:      function () { setOrgSitesRetry(function (n) { return n + 1; }); },
+      dirty:              dirty,
+      saving:             saving,
+      doSaveProgramme:    doSaveProgramme,
+      bootstrapProgramme: bootstrapProgramme,
       view:         view,    setView:    setView,
       tier:         tier,    setTier:    setTier,
       collapsed:    collapsed,
@@ -798,7 +1029,58 @@
       });
     }, [s.status, s.leaves]);
 
-    if (s.status === 'loading') {
+    /* F4 — org-site gating precedes programme data entirely: nothing in
+       ctx.state is meaningful until an ORG SITE UUID has been chosen
+       (see ProgrammeProvider's org-site-resolution effect). */
+    if (ctx.orgSitesState.status === 'loading') {
+      return React.createElement('div', { className: 'fs-programme' },
+        React.createElement('div', { className: 'fs-programme__loading' },
+          'Loading projects…'),
+      );
+    }
+    if (ctx.orgSitesState.status === 'access_denied') {
+      var AccessDeniedSites = fs.AccessDenied;
+      return React.createElement('div', { className: 'fs-programme' },
+        AccessDeniedSites
+          ? React.createElement(AccessDeniedSites, {
+              scope:   'projects',
+              message: ctx.orgSitesState.message,
+            })
+          : React.createElement('div', null, 'Access denied.'),
+      );
+    }
+    if (ctx.orgSitesState.status === 'error') {
+      var ErrorBannerSites = fs.ErrorBanner;
+      return React.createElement('div', { className: 'fs-programme' },
+        ErrorBannerSites
+          ? React.createElement(ErrorBannerSites, {
+              message:   'Could not load projects',
+              retryable: true,
+              onRetry:   ctx.retryOrgSites,
+            })
+          : React.createElement('div', { className: 'fs-programme__empty' },
+              'Could not load projects.'),
+      );
+    }
+    if (!ctx.orgSitesState.sites.length) {
+      return React.createElement('div', { className: 'fs-programme' },
+        React.createElement('div', { className: 'fs-programme__empty' },
+          'No projects available.'),
+      );
+    }
+    if (!ctx.orgSiteId) {
+      return React.createElement('div', { className: 'fs-programme' },
+        React.createElement('div', { className: 'fs-programme__empty-card' },
+          React.createElement('div', { className: 'fs-programme__empty-card-title' },
+            'Select a project'),
+          React.createElement('div', { className: 'fs-programme__empty-card-body' },
+            'Choose a project to view its Programme.'),
+          renderSitePicker(ctx, { marginTop: '14px' }),
+        ),
+      );
+    }
+
+    if (s.status === 'loading' || s.status === 'no_site') {
       return React.createElement('div', { className: 'fs-programme' },
         React.createElement('div', { className: 'fs-programme__loading' },
           'Loading programme…'),
@@ -829,8 +1111,9 @@
       );
     }
 
-    var p           = s.programme;
-    var selectedId  = props.selectedItem && props.selectedItem.kind === 'programme_task'
+    var isEmpty    = s.status === 'empty';
+    var p           = isEmpty ? null : s.programme;
+    var selectedId  = (!isEmpty && props.selectedItem && props.selectedItem.kind === 'programme_task')
       ? props.selectedItem.task_id
       : null;
 
@@ -838,14 +1121,21 @@
 
       /* Header */
       React.createElement('div', { className: 'fs-programme__header' },
-        React.createElement('h2', { className: 'fs-programme__title' }, p.name),
-        React.createElement('div', { className: 'fs-programme__subtitle' },
-          fmtDate(p.start_date) + ' → ' + fmtDate(p.end_date)
-            + ' · ' + s.leaves.length + ' tasks'
-            + ' · ' + (s.critical && s.critical.size) + ' on critical path'),
+        React.createElement('div', { className: 'fs-programme__header-row' },
+          React.createElement('h2', { className: 'fs-programme__title' },
+            isEmpty ? 'Programme' : p.name),
+          renderSitePicker(ctx),
+        ),
+        !isEmpty
+          ? React.createElement('div', { className: 'fs-programme__subtitle' },
+              fmtDate(p.start_date) + ' → ' + fmtDate(p.end_date)
+                + ' · ' + s.leaves.length + ' tasks'
+                + ' · ' + (s.critical && s.critical.size) + ' on critical path'
+                + (ctx.dirty ? ' · unsaved changes' : ''))
+          : null,
 
-        /* View + tier toggles */
-        React.createElement('div', { className: 'fs-programme__toolbar' },
+        /* View + tier toggles — nothing to toggle until a programme exists */
+        !isEmpty ? React.createElement('div', { className: 'fs-programme__toolbar' },
           React.createElement('div', { className: 'fs-programme__view-toggle' },
             React.createElement('button', {
               type:      'button',
@@ -919,40 +1209,77 @@
                 onClick:  function () { setImporting(true); },
               }, 'Import…')
             : null,
-        ),
+
+          /* F4 — explicit Save (canWrite-gated; NOT autosave). Disabled
+             when there's nothing unsaved so it doesn't invite a no-op
+             round trip. */
+          ctx.canWrite
+            ? React.createElement(Button || 'button', Object.assign(
+                Button ? { variant: 'primary', size: 'sm', disabled: !ctx.dirty || ctx.saving }
+                       : { type: 'button', disabled: !ctx.dirty || ctx.saving },
+                { onClick: ctx.doSaveProgramme, title: 'Save programme to server' }
+              ), ctx.saving ? 'Saving…' : '保存 / Save')
+            : null,
+        ) : null,
       ),
 
       /* Body */
-      ctx.view === 'gantt'
-        ? React.createElement(GanttView, {
-            selectedItem: props.selectedItem,
-            onSelect:     onSelect,
-          })
-        : React.createElement(ProgrammeKanbanBoard, {
-            parents:       s.parents,
-            leaves:        s.leaves,
-            today:         s.today,
-            selectedId:    selectedId,
-            criticalSet:   s.critical,
-            collapsedSet:  ctx.collapsed,
-            onToggleGroup: ctx.toggleGroup,
-            onSelect:      function (t) {
-              onSelect({
-                kind:    'programme_task',
-                id:      'task_' + t.task_id,
-                task_id: t.task_id,
-                task:    t,
-              });
-            },
-          }),
+      isEmpty
+        ? React.createElement('div', { className: 'fs-programme__empty-card' },
+            React.createElement('div', { className: 'fs-programme__empty-card-title' },
+              '本项目暂无 Programme / No programme yet'),
+            React.createElement('div', { className: 'fs-programme__empty-card-body' },
+              ctx.canWrite
+                ? '上传排期表，或直接添加任务开始搭建这个工地的 Programme。 / Upload a schedule, or start adding tasks to build this project’s programme.'
+                : '尚未上传 Programme。 / No programme has been uploaded for this project yet.'),
+            ctx.canWrite
+              ? React.createElement('div', { className: 'fs-programme__empty-card-actions' },
+                  Button ? React.createElement(Button, {
+                    variant: 'primary', size: 'md',
+                    onClick: function () { setImporting(true); },
+                  }, '上传 Programme / Upload programme') : null,
+                  Button ? React.createElement(Button, {
+                    variant: 'secondary', size: 'md',
+                    onClick: function () { ctx.bootstrapProgramme(); setAdding(true); },
+                  }, '+ 新建任务 / Add task') : null,
+                )
+              : React.createElement('div', { className: 'fs-programme__empty-card-readonly' },
+                  '尚未上传'),
+          )
+        : (ctx.view === 'gantt'
+            ? React.createElement(GanttView, {
+                selectedItem: props.selectedItem,
+                onSelect:     onSelect,
+              })
+            : React.createElement(ProgrammeKanbanBoard, {
+                parents:       s.parents,
+                leaves:        s.leaves,
+                today:         s.today,
+                selectedId:    selectedId,
+                criticalSet:   s.critical,
+                collapsedSet:  ctx.collapsed,
+                onToggleGroup: ctx.toggleGroup,
+                onSelect:      function (t) {
+                  onSelect({
+                    kind:    'programme_task',
+                    id:      'task_' + t.task_id,
+                    task_id: t.task_id,
+                    task:    t,
+                  });
+                },
+              })),
 
-      /* Sprint 5.2 — add-task modal (create mode) */
+      /* Sprint 5.2 — add-task modal (create mode). Also reachable from
+         the empty-state "+ Add task" button, which calls
+         ctx.bootstrapProgramme() first — by the time onSubmit fires
+         (a later user interaction), s.leaves/s.parents are always
+         defined, so the || [] fallback here is just defensive. */
       Editor
         ? React.createElement(Editor, {
             open:    adding,
             mode:    'create',
-            leaves:  s.leaves,
-            parents: s.parents,
+            leaves:  s.leaves  || [],
+            parents: s.parents || [],
             onClose: function () { setAdding(false); },
             onSubmit: function (opts) {
               ctx.addTask(opts);
@@ -961,7 +1288,9 @@
           })
         : null,
 
-      /* Sprint 5.4 — CSV import modal */
+      /* Sprint 5.4 — CSV import modal. Also reachable from the
+         empty-state "Upload programme" button — ctx.replaceTasks
+         handles the 'empty' → 'ok' transition itself. */
       ImportModal
         ? React.createElement(ImportModal, {
             open:     importing,

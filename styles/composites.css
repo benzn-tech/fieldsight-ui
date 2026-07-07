@@ -3389,6 +3389,15 @@
   min-height: 0;
 }
 .fs-programme__header { padding: 0 4px; }
+/* F4 (UI batch 2026-07-08) — title + own project picker (Option B) share
+   a row so the picker is always reachable, loaded or not. */
+.fs-programme__header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
 .fs-programme__title {
   margin: 0;
   font-size: 18px;
@@ -3406,6 +3415,41 @@
   text-align: center;
   color: var(--text-tertiary);
   font-size: 13px;
+}
+
+/* F4 — richer empty-state / "select a project" card (heading + subtext +
+   prominent actions), distinct from the plain text-only .fs-programme__empty
+   above (used for terse "no projects at all" / dead-endish messages). */
+.fs-programme__empty-card {
+  padding: 48px 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.fs-programme__empty-card-title {
+  font-size: 16px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.fs-programme__empty-card-body {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  max-width: 440px;
+}
+.fs-programme__empty-card-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.fs-programme__empty-card-readonly {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-tertiary);
+  font-style: italic;
 }
 
 .fs-programme__toolbar {
