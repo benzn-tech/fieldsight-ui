@@ -133,13 +133,68 @@ function BottomNav({ user, currentRoute, onNavigate }) {
   );
 }
 
+/* ---------- Weather: WMO weathercode → {icon, label} -------------------
+   Open-Meteo returns a numeric WMO 4677 weather code (both the archive
+   and forecast APIs). Icon names are lucide keys (see NavIcon in
+   left-nav.js — kebab-case, converted to PascalCase at render time). */
+const WMO_WEATHER_CODES = {
+  0:  { icon: 'sun',             label: 'Clear sky' },
+  1:  { icon: 'cloud-sun',       label: 'Mainly clear' },
+  2:  { icon: 'cloud-sun',       label: 'Partly cloudy' },
+  3:  { icon: 'cloud',           label: 'Overcast' },
+  45: { icon: 'cloud-fog',       label: 'Fog' },
+  48: { icon: 'cloud-fog',       label: 'Depositing rime fog' },
+  51: { icon: 'cloud-drizzle',   label: 'Light drizzle' },
+  53: { icon: 'cloud-drizzle',   label: 'Moderate drizzle' },
+  55: { icon: 'cloud-drizzle',   label: 'Dense drizzle' },
+  56: { icon: 'cloud-drizzle',   label: 'Light freezing drizzle' },
+  57: { icon: 'cloud-drizzle',   label: 'Dense freezing drizzle' },
+  61: { icon: 'cloud-rain',      label: 'Slight rain' },
+  63: { icon: 'cloud-rain',      label: 'Moderate rain' },
+  65: { icon: 'cloud-rain',      label: 'Heavy rain' },
+  66: { icon: 'cloud-rain',      label: 'Light freezing rain' },
+  67: { icon: 'cloud-rain',      label: 'Heavy freezing rain' },
+  71: { icon: 'cloud-snow',      label: 'Slight snow' },
+  73: { icon: 'cloud-snow',      label: 'Moderate snow' },
+  75: { icon: 'cloud-snow',      label: 'Heavy snow' },
+  77: { icon: 'cloud-snow',      label: 'Snow grains' },
+  80: { icon: 'cloud-rain',      label: 'Slight showers' },
+  81: { icon: 'cloud-rain',      label: 'Moderate showers' },
+  82: { icon: 'cloud-rain',      label: 'Violent showers' },
+  85: { icon: 'cloud-snow',      label: 'Slight snow showers' },
+  86: { icon: 'cloud-snow',      label: 'Heavy snow showers' },
+  95: { icon: 'cloud-lightning', label: 'Thunderstorm' },
+  96: { icon: 'cloud-lightning', label: 'Thunderstorm, slight hail' },
+  99: { icon: 'cloud-lightning', label: 'Thunderstorm, heavy hail' },
+};
+function wmoLookup(code) {
+  return WMO_WEATHER_CODES[code] || { icon: 'cloud', label: 'Unknown' };
+}
+
+/* sb1108-ellesmere (Christchurch) — sensible NZ fallback when there is no
+   active site (siteContext) or the active site has no `coord` yet. Mirrors
+   the value on that fixture in scripts/mock/sites.fixture.js. */
+const WEATHER_DEFAULT_COORD = { lat: -43.5321, lng: 172.6362 };
+
+/* Module-level cache: `${lat},${lng},${date},${h|r}` → parsed result.
+   Cheap insurance against refetch storms (route/site churn while a
+   popover is open, StrictMode double-invoke, etc). Never expired —
+   this is a prototype tab's lifetime, not a long-running app. */
+const weatherFetchCache = {};
+
 /* ---------- Weather Indicator + Popover -------------------------------- */
-/* Click reveals a popover with current conditions, next 12h hourly,
-   and a 7-day daily forecast. Mock data only — Sprint 2 wires the
-   real MetService API. */
+/* Click reveals a popover with current/selected-date conditions, next 12h
+   hourly, and a 7-day daily forecast. The headline indicator follows the
+   selected date (route ?date=) and active site (FS.siteContext) via a
+   plain fetch() against Open-Meteo (no key, no Cognito):
+     - selectedDate < today (NZDT)   → archive API (historical daily)
+     - today / future / no date     → forecast API (current_weather)
+   Falls back to the static MockData.WEATHER fixture on fetch failure or
+   when no coordinates are available, so the indicator never disappears
+   or crashes the shell. */
 function WeatherIndicator() {
   const NavIcon = window.FieldSight && window.FieldSight.NavIcon;
-  const weatherData = window.FieldSight.MockData
+  const mockWeather = window.FieldSight.MockData
     ? window.FieldSight.MockData.WEATHER
     : null;
 
@@ -166,9 +221,121 @@ function WeatherIndicator() {
     return function() { document.removeEventListener('keydown', onKey); };
   }, [open]);
 
-  if (!weatherData) return null;
+  /* Selected date — from the route's ?date= param (e.g. /timeline?date=
+     2026-04-10). Router.subscribe() already wraps 'hashchange' and emits
+     synchronously on subscribe, so this doubles as the initial read. */
+  const [routeParams, setRouteParams] = React.useState(function() {
+    return (window.FS && window.FS.Router) ? window.FS.Router.getCurrentRoute().params : {};
+  });
+  React.useEffect(function() {
+    if (!(window.FS && window.FS.Router)) return undefined;
+    return window.FS.Router.subscribe(function(r) { setRouteParams(r.params || {}); });
+  }, []);
 
-  const current = weatherData.current;
+  /* Active site — FS.siteContext, same pub/sub the header project
+     selector uses. */
+  const [activeSiteId, setActiveSiteId] = React.useState(function() {
+    return (window.FS && window.FS.siteContext) ? window.FS.siteContext.get() : null;
+  });
+  React.useEffect(function() {
+    if (!(window.FS && window.FS.siteContext)) return undefined;
+    return window.FS.siteContext.onChange(function(siteId) { setActiveSiteId(siteId); });
+  }, []);
+
+  /* BUG-19: never new Date('YYYY-MM-DD') (UTC drift in NZ) — string
+     compare 'YYYY-MM-DD' dates directly, and use FS.api.todayNZDT(). */
+  const todayISO = (window.FS && window.FS.api) ? window.FS.api.todayNZDT() : null;
+  const selectedDate = routeParams.date || todayISO;
+  const isHistorical = !!(todayISO && selectedDate && selectedDate < todayISO);
+
+  const sitesList = (window.FieldSight.fixtures && window.FieldSight.fixtures.sites
+    && window.FieldSight.fixtures.sites.sites) || [];
+  const activeSite = activeSiteId
+    ? sitesList.find(function(s) { return s.site_id === activeSiteId; })
+    : null;
+  const coord = (activeSite && activeSite.coord) || WEATHER_DEFAULT_COORD;
+
+  /* status: 'loading' | 'success' | 'error' */
+  const [liveState, setLiveState] = React.useState({ status: 'loading', data: null });
+
+  React.useEffect(function() {
+    if (!coord || !selectedDate) { setLiveState({ status: 'error', data: null }); return undefined; }
+
+    const cacheKey = coord.lat + ',' + coord.lng + ',' + selectedDate + ',' + (isHistorical ? 'h' : 'r');
+    const cached = weatherFetchCache[cacheKey];
+    if (cached) { setLiveState({ status: 'success', data: cached }); return undefined; }
+
+    let cancelled = false;
+    setLiveState({ status: 'loading', data: null });
+
+    const url = isHistorical
+      ? 'https://archive-api.open-meteo.com/v1/archive?latitude=' + coord.lat
+        + '&longitude=' + coord.lng + '&start_date=' + selectedDate
+        + '&end_date=' + selectedDate
+        + '&daily=temperature_2m_max,temperature_2m_min,weathercode,windspeed_10m_max'
+        + '&timezone=Pacific/Auckland'
+      : 'https://api.open-meteo.com/v1/forecast?latitude=' + coord.lat
+        + '&longitude=' + coord.lng + '&current_weather=true&timezone=Pacific/Auckland';
+
+    fetch(url)
+      .then(function(res) {
+        if (!res.ok) throw new Error('weather http ' + res.status);
+        return res.json();
+      })
+      .then(function(json) {
+        if (cancelled) return;
+        let result;
+        if (isHistorical) {
+          const daily = json && json.daily;
+          if (!daily || !Array.isArray(daily.weathercode) || daily.weathercode.length === 0
+              || daily.weathercode[0] == null) {
+            throw new Error('no historical data');
+          }
+          const wmo = wmoLookup(daily.weathercode[0]);
+          result = {
+            temp:           Math.round(daily.temperature_2m_max[0]),
+            tempLow:        Math.round(daily.temperature_2m_min[0]),
+            condition:      wmo.icon,
+            conditionLabel: wmo.label,
+            wind:           Math.round(daily.windspeed_10m_max[0]) + ' km/h',
+            humidity:       null,
+            tag:            '历史 · ' + selectedDate,
+          };
+        } else {
+          const cw = json && json.current_weather;
+          if (!cw || cw.temperature == null) throw new Error('no realtime data');
+          const wmo = wmoLookup(cw.weathercode);
+          result = {
+            temp:           Math.round(cw.temperature),
+            condition:      wmo.icon,
+            conditionLabel: wmo.label,
+            wind:           Math.round(cw.windspeed) + ' km/h',
+            humidity:       null,
+            tag:            '实时',
+          };
+        }
+        weatherFetchCache[cacheKey] = result;
+        setLiveState({ status: 'success', data: result });
+      })
+      .catch(function() {
+        if (!cancelled) setLiveState({ status: 'error', data: null });
+      });
+
+    return function() { cancelled = true; };
+  }, [coord.lat, coord.lng, selectedDate, isHistorical]);
+
+  /* Resolve what to actually render: live result, else the mock fixture
+     (tag-less — mock has no historical/realtime distinction), else
+     nothing while a first fetch is in flight. */
+  const display = liveState.status === 'success'
+    ? liveState.data
+    : (liveState.status === 'error' && mockWeather)
+      ? Object.assign({ tag: null }, mockWeather.current)
+      : null;
+
+  const loading = liveState.status === 'loading' && !display;
+
+  if (!display && !loading) return null;
 
   return React.createElement('div', {
     ref: wrapRef,
@@ -176,29 +343,42 @@ function WeatherIndicator() {
   },
     React.createElement('button', {
       type: 'button',
-      onClick: function() { setOpen(function(o) { return !o; }); },
+      onClick: function() { if (display) setOpen(function(o) { return !o; }); },
       className: 'fs-utility-item' + (open ? ' fs-utility-item--active' : ''),
-      title: 'Site weather · ' + current.temp + '°C · ' + current.wind,
-      'aria-label': 'Site weather, ' + current.temp + ' degrees',
+      disabled: !display,
+      title: display
+        ? ('Site weather · ' + display.temp + '°C · ' + display.wind + (display.tag ? ' · ' + display.tag : ''))
+        : 'Loading weather…',
+      'aria-label': display ? ('Site weather, ' + display.temp + ' degrees') : 'Loading weather',
       'aria-expanded': open,
     },
-      NavIcon && React.createElement(NavIcon, { name: current.condition, size: 16 }),
-      React.createElement('span', { className: 'fs-utility-item__text' },
-        current.temp + '°'),
+      loading
+        ? React.createElement('span', { className: 'fs-weather-indicator__spinner', 'aria-hidden': 'true' })
+        : [
+            NavIcon && React.createElement(NavIcon, { key: 'icon', name: display.condition, size: 16 }),
+            React.createElement('span', { key: 'text', className: 'fs-utility-item__text' },
+              display.temp + '°'),
+          ],
     ),
 
-    open ? React.createElement(WeatherPopover, {
-      data: weatherData,
+    (open && display) ? React.createElement(WeatherPopover, {
+      current: display,
+      hourly: (mockWeather && mockWeather.hourly) || [],
+      daily: (mockWeather && mockWeather.daily) || [],
       onClose: function() { setOpen(false); },
     }) : null,
   );
 }
 
 /* ---------- Weather popover content ----------------------------------- */
+/* `current` is date/site-aware (live Open-Meteo result or mock fallback);
+   `hourly`/`daily` stay mock — Open-Meteo forecast data for those strips
+   is a v2 nice-to-have, not required for the headline indicator to be
+   date-aware (see task brief). */
 function WeatherPopover(props) {
   const NavIcon = window.FieldSight && window.FieldSight.NavIcon;
-  const data = props.data;
-  const current = data.current;
+  const Badge = window.FieldSight && window.FieldSight.Badge;
+  const current = props.current;
 
   return React.createElement('div', {
     className: 'fs-weather-popover',
@@ -212,12 +392,17 @@ function WeatherPopover(props) {
         NavIcon && React.createElement(NavIcon, { name: current.condition, size: 36 }),
       ),
       React.createElement('div', null,
-        React.createElement('div', { className: 'fs-weather-popover__current-temp' },
-          current.temp + '°'),
+        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+          React.createElement('span', { className: 'fs-weather-popover__current-temp' },
+            current.temp + '°'),
+          (current.tag && Badge) ? React.createElement(Badge, {
+            tone: 'neutral', variant: 'subtle', size: 'sm', pill: true,
+          }, current.tag) : null,
+        ),
         React.createElement('div', { className: 'fs-weather-popover__current-label' },
           current.conditionLabel),
         React.createElement('div', { className: 'fs-weather-popover__current-meta' },
-          'Wind ' + current.wind + ' · Humidity ' + current.humidity),
+          'Wind ' + current.wind + (current.humidity ? ' · Humidity ' + current.humidity : '')),
       ),
     ),
 
@@ -225,7 +410,7 @@ function WeatherPopover(props) {
     React.createElement('div', { className: 'fs-weather-popover__section-label' },
       'Next 12 hours'),
     React.createElement('div', { className: 'fs-weather-popover__hourly' },
-      data.hourly.map(function(h, i) {
+      props.hourly.map(function(h, i) {
         return React.createElement('div', {
           key: i, className: 'fs-weather-popover__hour',
         },
@@ -242,7 +427,7 @@ function WeatherPopover(props) {
     React.createElement('div', { className: 'fs-weather-popover__section-label' },
       '7-day forecast'),
     React.createElement('div', { className: 'fs-weather-popover__daily' },
-      data.daily.map(function(d, i) {
+      props.daily.map(function(d, i) {
         return React.createElement('div', {
           key: i, className: 'fs-weather-popover__day',
         },
