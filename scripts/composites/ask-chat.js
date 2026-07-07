@@ -40,6 +40,57 @@
 (function () {
   'use strict';
 
+  /* Parse a chunk's source_s3_key (reports/{date}/{user_folder}/daily_report.json)
+     into the Timeline deep-link params. Returns null if the shape is unexpected
+     (transcript-window chunks still carry the report key, so this holds). */
+  function citationTarget(sourceKey) {
+    var parts = (sourceKey || '').split('/');
+    if (parts[0] !== 'reports' || parts.length < 3) return null;
+    return { date: parts[1], user: parts[2] };
+  }
+
+  /* Render the citations block under an assistant answer. Every field is passed
+     as a React text child (auto-escaped) — the snippet/topic/site come from
+     retrieved chunk text (transcripts) and must never reach innerHTML. */
+  function renderCitations(citations) {
+    if (!citations || !citations.length) return null;
+    return React.createElement('div', { className: 'fs-ask-chat__citations' },
+      React.createElement('div', { className: 'fs-ask-chat__citations-label' },
+        'Sources · ' + citations.length),
+      citations.map(function (c, i) {
+        var tgt = citationTarget(c.source_s3_key);
+        var meta = [c.site_name, c.report_date].filter(Boolean).join(' · ');
+        var onOpen = tgt && window.FS && window.FS.Router
+          ? function () {
+              window.FS.Router.navigate('/timeline?date=' + encodeURIComponent(tgt.date)
+                + '&user=' + encodeURIComponent(tgt.user));
+            }
+          : null;
+        return React.createElement('div', {
+          key: i,
+          className: 'fs-ask-chat__cite' + (onOpen ? ' fs-ask-chat__cite--link' : ''),
+          role: onOpen ? 'button' : null,
+          tabIndex: onOpen ? 0 : null,
+          onClick: onOpen,
+          onKeyDown: onOpen ? function (e) {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); }
+          } : null,
+        },
+          React.createElement('span', { className: 'fs-ask-chat__cite-num' }, '[' + (i + 1) + ']'),
+          React.createElement('div', { className: 'fs-ask-chat__cite-body' },
+            meta ? React.createElement('div', { className: 'fs-ask-chat__cite-meta' }, meta) : null,
+            c.topic_title
+              ? React.createElement('div', { className: 'fs-ask-chat__cite-title' }, c.topic_title)
+              : null,
+            c.snippet
+              ? React.createElement('div', { className: 'fs-ask-chat__cite-snippet' }, c.snippet)
+              : null,
+          ),
+        );
+      }),
+    );
+  }
+
   function AskChat(props) {
     var date     = props.date;
     var user     = props.user;
@@ -165,10 +216,7 @@
                 })
               : React.createElement('div', { className: 'fs-ask-chat__msg-text' },
                   m.text),
-            m.citations && m.citations.length > 0
-              ? React.createElement('div', { className: 'fs-ask-chat__citations' },
-                  'Citations: ' + m.citations.length)
-              : null,
+            m.role === 'assistant' ? renderCitations(m.citations) : null,
             m.role === 'assistant' && m.model
               ? React.createElement('div', { className: 'fs-ask-chat__model' },
                   m.model)
