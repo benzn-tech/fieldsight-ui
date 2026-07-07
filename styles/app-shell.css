@@ -264,6 +264,33 @@ button:not([class*="fs-"]):focus-visible,
   /* Numbers in monospace-ish width so they don't shift on hover */
 }
 
+.fs-utility-item:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.fs-utility-item:disabled:hover {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+/* Sprint 11 F3 — weather indicator loading state (Open-Meteo fetch in
+   flight). Reuses the .fs-btn__spinner keyframe (components.css) so
+   spinners stay visually consistent across the app. */
+.fs-weather-indicator__spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: fs-btn-spin 0.7s linear infinite;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fs-weather-indicator__spinner { animation-duration: 1.6s; }
+}
+
 /* =========================================================================
    Page-level layout helpers (Sprint 1.6+)
    ========================================================================= */

@@ -32,6 +32,7 @@
       project_value_nzd: 12_400_000,        /* used by /executive KPI rollup */
       planned_completion: '2026-09-30',
       user_count: 4,
+      coord:      { lat: -43.5321, lng: 172.6362 },  /* Sprint 11 F3 — Open-Meteo weather */
     },
     {
       site_id:    'mpi',
@@ -42,6 +43,7 @@
       project_value_nzd: 8_900_000,
       planned_completion: '2026-08-15',
       user_count: 2,
+      coord:      { lat: -36.8485, lng: 174.7633 },  /* Sprint 11 F3 — Open-Meteo weather */
     },
     {
       site_id:    'sb1131-northbrook-wanaka',
@@ -52,6 +54,7 @@
       project_value_nzd: 6_700_000,
       planned_completion: '2026-11-20',
       user_count: 2,
+      coord:      { lat: -44.7032, lng: 169.1321 },  /* Sprint 11 F3 — Open-Meteo weather */
     },
   ];
 

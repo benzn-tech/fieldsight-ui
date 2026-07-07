@@ -1,31 +1,50 @@
 /* ==========================================================================
-   FieldSight API · Programme (Sprint 4.4 — MVP)
+   FieldSight API · Programme (Sprint 4.4 — MVP; org-backend wiring UI
+   batch 2026-07-08 / F4)
    --------------------------------------------------------------------------
-   Hypothetical backend endpoints (NOT YET implemented server-side):
-     GET /api/programmes/:programme_id
-       → Full programme object: { programme_id, name, site_id, start_date,
-         end_date, baseline_*, critical_path[], tasks[] }
-     GET /api/programmes/:programme_id/tasks?from=&to=&user=
-       → Filtered tasks within a date window, optionally scoped to a
-         user (for the worker-forced-self rule).
+   getProgramme/saveProgramme hit the DEPLOYED org-api programme endpoints
+   (Aurora/S3-backed, same channel as api/org.js):
+     GET /api/org/programme?site=<ORG_SITE_UUID>  → { programme: <doc>|null }
+     PUT /api/org/programme?site=<ORG_SITE_UUID>  → { programme: <saved doc
+       with updated_at> } — admin/gm/pm + site access only, else 403.
 
-   Mock branch reads from window.FieldSight.fixtures.programme; backend
-   branch is a stub for the future migration. UI consumers see the same
-   row contract regardless.
+   CRITICAL: `site` is the ORG SITE UUID (org.js getOrgSites()'s site_id,
+   i.e. _toPageSite's s.id) — NOT the report-side site slug that
+   FS.siteContext / api/sites.js key off. Passing the slug 403s (a bug
+   already fixed server-side once — see scripts/pages/programme.js for how
+   the UI resolves the UUID). Callers here must already have the org UUID;
+   this module does no identity resolution of its own.
+
+   Doc shape (round-trips 1:1 — whatever saveProgramme PUTs is exactly what
+   getProgramme's next GET returns, plus a server-set `updated_at`):
+     { name, start_date, end_date, parents: [...], leaves: [...] }
+
+   getProgrammeTasksForRange still targets the old hypothetical
+   /programmes/:id/tasks report-side endpoint and has zero callers — left
+   as a dead stub (not part of this batch's scope).
+
+   Mock branch reads from window.FieldSight.fixtures.programme, adapted to
+   the same { programme } envelope so callers don't branch on useMocks.
 
    Worker rule (BACKEND-CONTEXT §3): when caller is a worker, scope the
    returned tasks to ones where the worker's folder name appears in
-   `assignees`. Mock api does this client-side.
+   `assignees`. Mock api does this client-side; the live endpoint does not
+   (out of scope for F4 — see task brief).
 
    Exported to:
      window.FS.api.programme = {
-       getProgramme(programme_id),
+       getProgramme(orgSiteId),
+       saveProgramme(orgSiteId, doc),
        getProgrammeTasksForRange({ programme_id, from, to, user? }),
      }
    ========================================================================== */
 
 (function () {
   'use strict';
+
+  function orgLive() {
+    return !window.FS.api.useMocks && !!window.FS.api.orgBaseUrl;
+  }
 
   function fixtures() {
     return (window.FieldSight && window.FieldSight.fixtures) || {};
@@ -57,20 +76,48 @@
     return !(task.end < from || task.start > to);
   }
 
-  async function getProgramme(programme_id) {
-    if (!window.FS.api.useMocks) {
-      return window.FS.api.request('/programmes/' + encodeURIComponent(programme_id));
+  /* orgSiteId — the ORG SITE UUID (see module header). Returns the raw
+     org-api envelope in live mode ({ programme: doc|null } or
+     { _accessDenied } / { _notFound }); mock mode adapts the single
+     fixture programme onto the same envelope, matched on the fixture's
+     site_id so switching sites in the UI's own picker demonstrates the
+     per-site empty state too. */
+  async function getProgramme(orgSiteId) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest('/programme', { params: { site: orgSiteId } });
     }
     await window.FS.api.delay();
     var p = fixtures().programme;
-    if (!p) return { _notFound: true, programme_id: programme_id };
-    if (p.programme_id !== programme_id) {
-      return { _notFound: true, programme_id: programme_id };
+    if (!p || (orgSiteId && p.site_id && p.site_id !== orgSiteId)) {
+      return { programme: null };
     }
     /* Deep-copy so callers can mutate state freely. */
     var copy = JSON.parse(JSON.stringify(p));
-    copy.tasks = applyWorkerScope(copy.tasks);
-    return copy;
+    var tasks = applyWorkerScope(copy.tasks);
+    return {
+      programme: {
+        name:       copy.name,
+        start_date: copy.start_date,
+        end_date:   copy.end_date,
+        parents:    tasks.filter(function (t) { return t.status === 'group'; }),
+        leaves:     tasks.filter(function (t) { return t.status !== 'group'; }),
+        updated_at: copy.updated_at || null,
+      },
+    };
+  }
+
+  /* doc = { name, start_date, end_date, parents, leaves } — see module
+     header for the round-trip contract. Mock mode is a no-op success
+     (mutations already live in page state; nothing durable to persist
+     without a real backend). */
+  async function saveProgramme(orgSiteId, doc) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest('/programme', {
+        method: 'PUT', params: { site: orgSiteId }, body: doc,
+      });
+    }
+    await window.FS.api.delay();
+    return { ok: true };
   }
 
   async function getProgrammeTasksForRange(opts) {
@@ -179,6 +226,7 @@
   if (!window.FS.api) window.FS.api = {};
   window.FS.api.programme = {
     getProgramme:               getProgramme,
+    saveProgramme:              saveProgramme,
     getProgrammeTasksForRange:  getProgrammeTasksForRange,
     updateTask:                 updateTask,
     createTask:                 createTask,
