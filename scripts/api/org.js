@@ -260,6 +260,20 @@
     return { topics: [] };
   }
 
+  // -------- strategic rollup (feat 4c) --------
+  /* GET /api/org/rollup/portfolio → { sites: [{ site_id (ORG UUID),
+     open_safety, open_high_safety, open_actions, total_actions,
+     overdue_actions, topics_count, participants, status }] }. Safety/
+     actions counts are all-time, topics_count is a 30-day window. ACL:
+     admin/gm see all company sites, everyone else sees their
+     memberships. Mock mirrors getLiveItems' "nothing until seeded"
+     posture — empty sites list, no fabricated rollup rows. */
+  async function getPortfolioRollup() {
+    if (orgLive()) return api.orgRequest('/rollup/portfolio');
+    await api.delay();
+    return { sites: [] };
+  }
+
   async function updateObservation(id, patch) {
     if (orgWrite()) return api.orgRequest('/observations/' + encodeURIComponent(id), { method: 'PATCH', body: patch });
     await api.delay();
@@ -290,6 +304,7 @@
     createObservation: createObservation, getObservations: getObservations,
     updateObservation: updateObservation, archiveObservation: archiveObservation,
     getLiveItems: getLiveItems,
+    getPortfolioRollup: getPortfolioRollup,
     _folderName: folderName,   /* exported for batch-2b fan-out reuse */
     _toPageMember: _toPageMember, _toPageSite: _toPageSite,   /* page-shape adapters, batch-2b */
   };
