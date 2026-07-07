@@ -630,12 +630,17 @@
 
     /* batch B Task 6 — 'manual' added alongside the two report-derived
        sources; previously fell through to the 'Topic safety flag' label,
-       which is wrong for a manually-raised observation. */
+       which is wrong for a manually-raised observation.
+       Fable-review F3 — 'live' added alongside; previously also fell
+       through to 'Topic safety flag', which is wrong for a session-
+       sourced live extraction. */
     var sourceLabel = sel.source === 'observation'
       ? 'Site-level observation'
       : sel.source === 'manual'
         ? 'Manually raised observation'
-        : 'Topic safety flag';
+        : sel.source === 'live'
+          ? 'Live extraction'
+          : 'Topic safety flag';
 
     /* Build the field rows — skip rows whose value is null, since the
        two source shapes carry different fields. */
@@ -764,9 +769,14 @@
          batch B Task 6 — manual rows get the author/admin-gated Mark
          closed/Reopen action instead of the generic resolve button: its
          id doesn't match toggleResolve()'s action-index regex, so that
-         button would silently no-op for them. */
+         button would silently no-op for them.
+         Fable-review F3 — 'live' rows excluded the same way: their id is
+         'live_<uuid>', which also doesn't match toggleResolve()'s
+         /_obs_(\d+)$/ regex (no-op), and they have no source report yet
+         to open (the nightly report hasn't landed) — Open source report
+         would navigate to a "_notFound" timeline. */
       React.createElement('div', { className: 'fs-safety-detail__actions' },
-        (sel.source !== 'manual' && Button) ? React.createElement(Button, {
+        (sel.source !== 'manual' && sel.source !== 'live' && Button) ? React.createElement(Button, {
           variant: 'primary', size: 'sm', loading: togglePending,
           onClick: toggleResolve,
         }, sel.status === 'resolved' ? 'Reopen' : 'Mark resolved') : null,
@@ -775,8 +785,9 @@
           onClick: toggleManualStatus,
         }, sel.closed ? 'Reopen' : 'Mark closed') : null,
         /* Manual observations have no source report — the link would land on
-           a "_notFound" timeline (batch B review). */
-        sel.source !== 'manual' ? React.createElement(Button, {
+           a "_notFound" timeline (batch B review). Same for 'live' rows
+           (Fable-review F3) — see comment above. */
+        (sel.source !== 'manual' && sel.source !== 'live') ? React.createElement(Button, {
           variant: 'secondary', size: 'sm', rightIcon: 'arrow-right',
           onClick: onOpenInTimeline,
         }, 'Open source report') : null,
