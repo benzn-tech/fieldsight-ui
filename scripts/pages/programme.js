@@ -601,7 +601,7 @@
           return;
         }
         setDirty(false);
-        if (window.FS.toast) window.FS.toast.show({ message: '已保存', tone: 'success' });
+        if (window.FS.toast) window.FS.toast.show({ message: 'Saved', tone: 'success' });
         var saved = res && res.programme;
         if (saved && saved.updated_at) {
           setState(function (prev) {
@@ -1218,7 +1218,7 @@
                 Button ? { variant: 'primary', size: 'sm', disabled: !ctx.dirty || ctx.saving }
                        : { type: 'button', disabled: !ctx.dirty || ctx.saving },
                 { onClick: ctx.doSaveProgramme, title: 'Save programme to server' }
-              ), ctx.saving ? 'Saving…' : '保存 / Save')
+              ), ctx.saving ? 'Saving…' : 'Save')
             : null,
         ) : null,
       ),
@@ -1227,24 +1227,24 @@
       isEmpty
         ? React.createElement('div', { className: 'fs-programme__empty-card' },
             React.createElement('div', { className: 'fs-programme__empty-card-title' },
-              '本项目暂无 Programme / No programme yet'),
+              'No programme yet'),
             React.createElement('div', { className: 'fs-programme__empty-card-body' },
               ctx.canWrite
-                ? '上传排期表，或直接添加任务开始搭建这个工地的 Programme。 / Upload a schedule, or start adding tasks to build this project’s programme.'
-                : '尚未上传 Programme。 / No programme has been uploaded for this project yet.'),
+                ? 'Upload a schedule or add tasks to get started.'
+                : 'No programme uploaded yet.'),
             ctx.canWrite
               ? React.createElement('div', { className: 'fs-programme__empty-card-actions' },
                   Button ? React.createElement(Button, {
                     variant: 'primary', size: 'md',
                     onClick: function () { setImporting(true); },
-                  }, '上传 Programme / Upload programme') : null,
+                  }, 'Upload programme') : null,
                   Button ? React.createElement(Button, {
                     variant: 'secondary', size: 'md',
                     onClick: function () { ctx.bootstrapProgramme(); setAdding(true); },
-                  }, '+ 新建任务 / Add task') : null,
+                  }, '+ Add task') : null,
                 )
               : React.createElement('div', { className: 'fs-programme__empty-card-readonly' },
-                  '尚未上传'),
+                  'No programme uploaded yet'),
           )
         : (ctx.view === 'gantt'
             ? React.createElement(GanttView, {

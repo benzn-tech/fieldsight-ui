@@ -336,6 +336,20 @@
       if (el) el.scrollIntoView({ block: 'nearest' });
     }, [selIdx]);
 
+    /* Minor A (Fable review) — global Escape, works even when focus has
+       moved off the search input (e.g. into AskChat's own input).
+       Mirrors the document-level Escape pattern in app-shell.js
+       WeatherIndicator. askMode → back to search; else → close palette. */
+    React.useEffect(function () {
+      function onKey(e) {
+        if (e.key !== 'Escape') return;
+        if (askMode) setAskMode(null);
+        else onClose();
+      }
+      document.addEventListener('keydown', onKey);
+      return function () { document.removeEventListener('keydown', onKey); };
+    }, [askMode, onClose]);
+
     var trimmedQuery = query.trim();
 
     /* Group results by type for sectioned display. Computed ahead of
@@ -408,6 +422,15 @@
     }
 
     function onKeyDown(e) {
+      /* F1 (Fable review) — askMode swaps the results body for the inline
+         AskChat panel; short-circuit here so Enter/Arrow keys don't drive
+         the now-hidden results list (Enter could re-select an invisible
+         row, or re-set askMode without re-sending — AskChat's
+         initialQuestion is mount-only). Escape isn't handled here either:
+         it bubbles to the document-level effect below, which backs out of
+         askMode instead of closing the whole palette. */
+      if (askMode) return;
+
       switch (e.key) {
         case 'Escape':
           onClose();
@@ -505,6 +528,12 @@
                 React.createElement('div', { className: 'fs-search-palette__ask-question' },
                   askMode.question),
                 React.createElement(window.FieldSight.AskChat, {
+                  /* F1 (Fable review) — key on the question so a second
+                     Ask from search (different question, same mounted
+                     panel) remounts AskChat instead of reusing the old
+                     instance; initialQuestion is mount-only and wouldn't
+                     otherwise re-send. */
+                  key:             askMode.question,
                   compact:         true,
                   initialQuestion: askMode.question,
                   scope:           'both',

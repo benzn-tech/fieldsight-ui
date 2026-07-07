@@ -176,11 +176,14 @@ function wmoLookup(code) {
    the value on that fixture in scripts/mock/sites.fixture.js. */
 const WEATHER_DEFAULT_COORD = { lat: -43.5321, lng: 172.6362 };
 
-/* Module-level cache: `${lat},${lng},${date},${h|r}` → parsed result.
+/* Module-level cache: `${lat},${lng},${date},${h|r}` → { data, ts }.
    Cheap insurance against refetch storms (route/site churn while a
-   popover is open, StrictMode double-invoke, etc). Never expired —
-   this is a prototype tab's lifetime, not a long-running app. */
+   popover is open, StrictMode double-invoke, etc). Historical ('h')
+   entries are cached indefinitely — the past doesn't change. Realtime
+   ('r') entries get a TTL below (Minor B, Fable review) so an all-day-open
+   tab doesn't keep showing the morning temperature. */
 const weatherFetchCache = {};
+const WEATHER_REALTIME_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 /* ---------- Weather Indicator + Popover -------------------------------- */
 /* Click reveals a popover with current/selected-date conditions, next 12h
@@ -263,7 +266,14 @@ function WeatherIndicator() {
 
     const cacheKey = coord.lat + ',' + coord.lng + ',' + selectedDate + ',' + (isHistorical ? 'h' : 'r');
     const cached = weatherFetchCache[cacheKey];
-    if (cached) { setLiveState({ status: 'success', data: cached }); return undefined; }
+    /* Minor B (Fable review) — historical entries are always fresh (the
+       past doesn't change); realtime entries go stale after the TTL so a
+       long-open tab refetches instead of showing the morning temperature
+       all day. */
+    if (cached && (isHistorical || (Date.now() - cached.ts) < WEATHER_REALTIME_TTL_MS)) {
+      setLiveState({ status: 'success', data: cached.data });
+      return undefined;
+    }
 
     let cancelled = false;
     setLiveState({ status: 'loading', data: null });
@@ -299,7 +309,7 @@ function WeatherIndicator() {
             conditionLabel: wmo.label,
             wind:           Math.round(daily.windspeed_10m_max[0]) + ' km/h',
             humidity:       null,
-            tag:            '历史 · ' + selectedDate,
+            tag:            'Historical · ' + selectedDate,
           };
         } else {
           const cw = json && json.current_weather;
@@ -311,10 +321,10 @@ function WeatherIndicator() {
             conditionLabel: wmo.label,
             wind:           Math.round(cw.windspeed) + ' km/h',
             humidity:       null,
-            tag:            '实时',
+            tag:            'Live',
           };
         }
-        weatherFetchCache[cacheKey] = result;
+        weatherFetchCache[cacheKey] = { data: result, ts: Date.now() };
         setLiveState({ status: 'success', data: result });
       })
       .catch(function() {
