@@ -23,6 +23,9 @@
      batch B Task 6 — flag.source === 'manual' renders a small neutral
      'Manual' badge stacked under the risk badge (manually-raised
      observations, merged into /safety by compliance-aggregator.js).
+     feat 4b — flag.source === 'live' renders a small info-tone 'Live'
+     badge the same way (session-sourced live extraction, merged in via
+     org.getLiveItems by compliance-aggregator.js).
      highlight  boolean — Sprint 6.7.2 precision spotlight. When set,
        scrolls into view and runs a 3-pulse flash (.fs-safety-flag-row--flash).
        Respects prefers-reduced-motion. Toggling false→true re-triggers.
@@ -84,6 +87,11 @@
           ? React.createElement(Badge, {
               tone: 'neutral', size: 'sm', variant: 'subtle',
             }, 'Manual')
+          : null,
+        flag.source === 'live'
+          ? React.createElement(Badge, {
+              tone: 'info', size: 'sm', variant: 'subtle',
+            }, 'Live')
           : null,
       ),
 

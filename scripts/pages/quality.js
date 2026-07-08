@@ -380,11 +380,18 @@
                             : null,
                           /* batch B Task 6 — manually-logged items, merged in
                              by compliance-aggregator.js from
-                             org.getObservations. */
+                             org.getObservations.
+                             feat 4b — 'live' items merged in the same way
+                             from org.getLiveItems. */
                           row.source === 'manual'
                             ? React.createElement(Badge, {
                                 tone: 'neutral', size: 'sm', variant: 'subtle',
                               }, 'Manual')
+                            : null,
+                          row.source === 'live'
+                            ? React.createElement(Badge, {
+                                tone: 'info', size: 'sm', variant: 'subtle',
+                              }, 'Live')
                             : null,
                         ),
                       ),
@@ -614,12 +621,17 @@
 
     /* batch B Task 6 — 'manual' added alongside the two report-derived
        sources; previously fell through to the 'Quality-tagged topic'
-       label, which is wrong for a manually-logged item. */
+       label, which is wrong for a manually-logged item.
+       Fable-review F3 — 'live' added alongside; previously also fell
+       through to 'Quality-tagged topic', which is wrong for a session-
+       sourced live extraction. */
     var sourceLabel = sel.source === 'qc_item'
       ? 'Report-level Q&C item'
       : sel.source === 'manual'
         ? 'Manually logged item'
-        : 'Quality-tagged topic';
+        : sel.source === 'live'
+          ? 'Live extraction'
+          : 'Quality-tagged topic';
 
     var rows = [];
     if (sel.details) {
@@ -744,8 +756,11 @@
           onClick: toggleManualStatus,
         }, sel.closed ? 'Reopen' : 'Mark closed') : null,
         /* Manual observations have no source report — the link would land on
-           a "_notFound" timeline (batch B review). */
-        sel.source !== 'manual' ? React.createElement(Button, {
+           a "_notFound" timeline (batch B review). Same for 'live' rows
+           (Fable-review F3) — the nightly report hasn't landed yet, so
+           Open source report would navigate to a "_notFound" timeline
+           too. */
+        (sel.source !== 'manual' && sel.source !== 'live') ? React.createElement(Button, {
           variant: 'secondary', size: 'sm', rightIcon: 'arrow-right',
           onClick: onOpenInTimeline,
         }, 'Open source report') : null,

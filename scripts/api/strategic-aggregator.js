@@ -33,10 +33,33 @@
    No new backend endpoint — all derivation is client-side, layered
    on top of existing aggregators. Backend mirror flagged in PLAN §6
    "Backend wiring for Sprint 9 schema".
+
+   feat 4c: getProjectRollup grew a LIVE path. When the org API is live
+   (orgLive()), it fetches GET /api/org/rollup/portfolio (real per-site
+   safety/action counts, keyed by ORG UUID) and merges it with
+   org.getOrgSites() (name/location/client, same ORG UUID key — no slug
+   bridge) into the SAME project row shape below, so RollupTable /
+   projectColumns render unchanged. quality_count is always 0 live
+   (leg-1 item store has no real quality count yet). region /
+   region_name / project_value_nzd / team_size / distinct_subs /
+   planned_completion aren't in the leg-1 payload — default gracefully
+   (null/0/'—'). Envelope guard (denied/not-found/empty/thrown) falls
+   back to the fixture-derived path below. getRegionRollup /
+   getOrgRollup are UNCHANGED — still fixture-derived in both modes
+   (leg-1 endpoint is portfolio/per-site only).
    ========================================================================== */
 
 (function () {
   'use strict';
+
+  /* Org API live gate (feat 4c): mirrors api/org.js's own orgLive() gate
+     (that function is a private closure, not exported — every caller
+     re-derives the same check). LIVE only when mocks are off AND the org
+     base URL is configured AND api/org.js has loaded its export block. */
+  function orgLive() {
+    return !!(window.FS && window.FS.api && !window.FS.api.useMocks
+      && window.FS.api.orgBaseUrl && window.FS.api.org);
+  }
 
   /* ─── Health-score policy ────────────────────────────────────────── */
 
@@ -255,8 +278,84 @@
     return { projects: projects, range: { from: from, to: to } };
   }
 
+  /* ─── LIVE per-site rollup (feat 4c) — merges real counts + org
+     metadata by ORG UUID, no slug bridge ────────────────────────────── */
+
+  var STATUS_TO_HEALTH = { green: 'A', yellow: 'C', red: 'D' };
+  var GRADE_ORDER_LIVE  = { D: 0, C: 1, B: 2, A: 3 };
+
+  /* Returns { projects } on success, or null when the caller should fall
+     back to the fixture-derived path (access denied / not found / empty
+     rollup / any thrown error — network, malformed payload, etc). Never
+     throws — getProjectRollup relies on that to decide fixture fallback. */
+  async function buildLiveProjectRollup() {
+    var org = window.FS && window.FS.api && window.FS.api.org;
+    if (!org || !org.getPortfolioRollup || !org.getOrgSites) return null;
+
+    try {
+      var rollupRes = await org.getPortfolioRollup();
+      if (!rollupRes || rollupRes._accessDenied || rollupRes._notFound) return null;
+      var rollupSites = rollupRes.sites || [];
+      if (rollupSites.length === 0) return null;   /* empty → fixture fallback */
+
+      var sitesRes = await org.getOrgSites();
+      if (!sitesRes || sitesRes._accessDenied || sitesRes._notFound) return null;
+      var orgSites = sitesRes.sites || [];
+      var metaById = {};
+      orgSites.forEach(function (s) { metaById[s.site_id] = s; });
+
+      var projects = rollupSites.map(function (r) {
+        var meta = metaById[r.site_id] || {};
+        var actionTotal   = r.total_actions   || 0;
+        var openActions   = r.open_actions    || 0;
+        var actionDone    = Math.max(0, actionTotal - openActions);
+        var completionRate = actionTotal > 0 ? (actionDone / actionTotal) : 0;
+        return {
+          site_id:            r.site_id,
+          name:               meta.name || r.site_id,
+          location:           meta.location || null,
+          region:             null,               /* fixture-only, not in leg-1 payload */
+          region_name:        null,                /* fixture-only, not in leg-1 payload */
+          client:             meta.client || null,
+          project_value_nzd:  null,                /* fixture-only, not in leg-1 payload */
+          planned_completion: '—',                 /* fixture-only, not in leg-1 payload */
+          team_size:          0,                   /* fixture-only, not in leg-1 payload */
+          safety_count:       r.open_safety      || 0,
+          safety_high:        r.open_high_safety || 0,
+          quality_count:      0,                   /* leg-1 item store has no real quality count yet */
+          distinct_subs:      0,                   /* fixture-only, not in leg-1 payload */
+          action_total:       actionTotal,
+          action_done:        actionDone,
+          action_overdue:     r.overdue_actions || 0,
+          completion_rate:    completionRate,
+          health:             STATUS_TO_HEALTH[r.status] || 'C',
+          status:             r.status || null,     /* raw backend status, harmless passthrough */
+          trend:              [],                   /* leg-1 has no trend series */
+        };
+      });
+
+      /* Same sort as the fixture path: worst health first, then
+         descending safety_count within a grade. */
+      projects.sort(function (a, b) {
+        var go = GRADE_ORDER_LIVE[a.health] - GRADE_ORDER_LIVE[b.health];
+        if (go !== 0) return go;
+        return b.safety_count - a.safety_count;
+      });
+
+      return { projects: projects };
+    } catch (e) {
+      return null;   /* network / parse error — fixture fallback */
+    }
+  }
+
   async function getProjectRollup(opts) {
     opts = opts || {};
+    if (orgLive()) {
+      var live = await buildLiveProjectRollup();
+      if (live) return { projects: live.projects, range: { from: opts.from, to: opts.to } };
+      /* live path unavailable/empty/denied — fall through to the
+         existing fixture-derived path below (don't crash, don't blank). */
+    }
     return buildPerSiteRollup(opts.from, opts.to);
   }
 

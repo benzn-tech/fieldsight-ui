@@ -23,18 +23,21 @@
                topic_id:            number,
                topic_title:         string,
                topic_category:      'safety' | 'progress' | 'quality',
-               source:              'observation' | 'topic_flag' | 'manual',
+               source:              'observation' | 'topic_flag' | 'manual' | 'live',
                observation:         string,
                risk_level:          'high' | 'medium' | 'low',
                recommended_action:  string | null,
-               location:            string | null,    // null for topic_flag/manual
-               who_raised:          string | null,    // null for topic_flag/manual
+               location:            string | null,    // null for topic_flag/manual/live
+               who_raised:          string | null,    // null for topic_flag/manual/live
                status:              'open' | 'resolved',  // see _AUDIT-2 below
                resolved_by:         string | null,
                resolved_at:         string | null,    // ISO
                // 'manual' rows (batch B Task 6, merged from org.getObservations)
                // additionally carry obs_id, author_sub, closed — see
                // toManualSafetyRow() below.
+               // 'live' rows (feat 4b, merged from org.getLiveItems)
+               // additionally carry obs_id, closed — see toLiveSafetyRow()
+               // below.
              }
            ],
            from, to, user, dates: [...]
@@ -52,19 +55,23 @@
                topic_id:            number,    // -1 for report-level Q&C items
                topic_title:         string,    // 'Quality & Compliance' synth title for report-level
                topic_category:      'quality' | 'progress' | 'safety',
-               source:              'qc_item' | 'topic_quality' | 'manual',
+               source:              'qc_item' | 'topic_quality' | 'manual' | 'live',
                item:                string,        // headline
                status:               string,        // 'completed' | 'concern' | etc for
                                                       // qc_item; 'observed' | 'resolved'
-                                                      // for topic_quality/manual (see _AUDIT-2)
+                                                      // for topic_quality/manual (see _AUDIT-2);
+                                                      // fixed 'observed' for live (v1, see
+                                                      // toLiveQualityRow)
                resolved_by:         string | null,   // topic_quality only
                resolved_at:         string | null,   // topic_quality only, ISO
                details:              string | null,
                follow_up_needed:    boolean,
-               who_raised:          string | null,    // null for qc_item/manual
+               who_raised:          string | null,    // null for qc_item/manual/live
                // 'manual' rows (batch B Task 6, merged from org.getObservations)
                // additionally carry obs_id, author_sub, closed — see
                // toManualQualityRow() below.
+               // 'live' rows (feat 4b, merged from org.getLiveItems) — see
+               // toLiveQualityRow() below.
              }
            ],
            from, to, user, dates: [...]
@@ -405,6 +412,122 @@
     };
   }
 
+  /* ─── Live-items merge (feat 4b) ─────────────────────────────────────────
+     window.FS.api.org.getLiveItems({date}) rows — { topics: [{id, site_id,
+     site_name, user_name, category, title, summary, report_date,
+     occurred_at, action_items, safety_observations, is_live}] } (api/org.js)
+     — session-sourced live extraction, not yet superseded by the nightly
+     report. Mapped onto the same row shapes as toManualSafetyRow/
+     toManualQualityRow above, `source: 'live'`, topic_id pinned to -1 like
+     the manual rows (there's no matching /timeline topic to deep-link to —
+     live items are a separate feed, not part of a report) while
+     topic_title carries the REAL topic.title (unlike manual's synthetic
+     title) since that's the only descriptive label available. site is
+     topic.site_name — a display string, matching every other row's `site`
+     field (report rows carry r.site the same way).
+
+     Fable-review F2 — opts.site IS NOT topic.site_id: opts.site is the
+     report-side SLUG (window.FS.siteContext / FS.api.sites.getSites()
+     site_id, e.g. 'sb1108-ellesmere'), while topic.site_id is an ORG
+     UUID — they never match, so a naive site_id compare silently drops
+     every live row in a site-scoped view. See resolveSiteNameForFilter()
+     below: filtering happens against topic.site_name instead, after
+     resolving the opts.site slug → display name once via the report-
+     side site list. */
+  function computeLiveDates(from, to, fanoutDates) {
+    /* Fable-review F1 — live items exist for TODAY and other
+       not-yet-reported dates by definition (a live extraction precedes
+       its nightly report), so the live-fetch date set must be built
+       INDEPENDENTLY of fanout.dates (report-having dates only) — otherwise
+       today silently has no live rows until the nightly report lands.
+       Enumerate every date in [from, min(to, todayNZDT())] inclusive
+       (BUG-19 — string iteration via addDaysISO, never
+       new Date('YYYY-MM-DD')), unioned with fanout.dates as a defensive
+       backstop (covers any report-day fixture data that lands after the
+       today clamp). */
+    var todayISO = window.FS.api.todayNZDT();
+    var liveTo = to < todayISO ? to : todayISO;
+    var set = {};
+    if (from <= liveTo) {
+      var d = from;
+      while (d <= liveTo) {
+        set[d] = true;
+        d = window.FS.api.addDaysISO(d, 1);
+        if (!d) break;
+      }
+    }
+    (fanoutDates || []).forEach(function (d) { set[d] = true; });
+    return Object.keys(set).sort();
+  }
+
+  /* Fable-review F2 — bridge the report-side site SLUG (opts.site) to the
+     org-side display NAME so it can be compared against topic.site_name
+     (see the live-items doc comment above for the full slug↔UUID identity
+     gap). Returns null when unset OR when the lookup misses; callers MUST
+     treat null as "no filter" (keep all rows), never as "match nothing" —
+     the live-items endpoint is already ACL-scoped server-side to sites the
+     caller can see, so over-showing on a lookup miss is strictly safer
+     than the previous drop-everything bug. */
+  async function resolveSiteNameForFilter(site) {
+    if (!site) return null;
+    try {
+      var res = await window.FS.api.sites.getSites();
+      var match = ((res && res.sites) || []).filter(function (s) {
+        return s.site_id === site;
+      })[0];
+      return match ? match.name : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function toLiveSafetyRow(topic, o) {
+    return {
+      id:                 'live_' + o.id,
+      date:               topic.report_date,
+      site:               topic.site_name || null,
+      user_name:          topic.user_name || null,
+      user_folder:        topic.user_name ? window.FS.api.folderName(topic.user_name) : null,
+      topic_id:           -1,
+      topic_title:        topic.title,
+      topic_category:     'safety',
+      source:             'live',
+      observation:        o.observation,
+      risk_level:         o.risk_level,
+      recommended_action: null,
+      location:           o.location || null,
+      who_raised:         null,
+      status:             o.status === 'closed' ? 'resolved' : 'open',
+      resolved_by:        null,
+      resolved_at:        null,
+      obs_id:             o.id,
+      closed:             o.status === 'closed',
+    };
+  }
+
+  /* Coarse v1 — the live quality signal is the topic itself (no per-item
+     breakdown yet, unlike safety_observations[]), so one row per is_live
+     quality-category topic, mirroring toManualQualityRow's shape. */
+  function toLiveQualityRow(topic) {
+    return {
+      id:               'live_' + topic.id,
+      date:             topic.report_date,
+      site:             topic.site_name || null,
+      user_name:        topic.user_name || null,
+      user_folder:      topic.user_name ? window.FS.api.folderName(topic.user_name) : null,
+      topic_id:         -1,
+      topic_title:      topic.title,
+      topic_category:   'quality',
+      source:           'live',
+      item:             topic.title,
+      status:           'observed',
+      resolved_by:      null,
+      resolved_at:      null,
+      details:          topic.summary || null,
+      follow_up_needed: false,
+      who_raised:       null,
+    };
+  }
+
   /* ─── Safety ─────────────────────────────────────────────────────────── */
 
   async function getSafetyRange(opts) {
@@ -542,6 +665,47 @@
       console.warn('[compliance] manual observations unavailable — report rows only', e);
     }
 
+    /* feat 4b — live-items merge, same resilience posture as the manual
+       merge immediately above. Fable-review F1 — the fetch date set is
+       computeLiveDates(from, to, fanout.dates), NOT fanout.dates alone
+       (report-having dates only would silently omit today — see
+       computeLiveDates()' doc comment above). Fetched pooled (not
+       Promise.all — mirror the admin cross-product pooling at
+       fanoutDates() above; a full 'All' range can span many dates and an
+       unbounded burst risks the same throttling pooledAll guards
+       against there). is_live topics' safety_observations[] map through
+       toLiveSafetyRow() regardless of topic.category — safety
+       observations aren't category-scoped in the report-derived rows
+       either (see the topic_flag loop above, which also doesn't filter by
+       category). Fable-review F2 — site filter matches topic.site_name
+       against the opts.site slug resolved to a display name (see
+       resolveSiteNameForFilter() above), not topic.site_id. A live-fetch
+       failure must never take the range down — report + manual rows
+       still render. */
+    try {
+      var liveDatesSafety = computeLiveDates(from, to, fanout.dates);
+      var liveThunksSafety = liveDatesSafety.map(function (d) {
+        return function () {
+          return window.FS.api.org.getLiveItems({ date: d });
+        };
+      });
+      var liveResultsSafety = (await window.FS.api.pooledAll(liveThunksSafety, 8)).filter(Boolean);
+      var siteNameFilterSafety = opts.site ? await resolveSiteNameForFilter(opts.site) : null;
+      var liveRowsSafety = [];
+      liveResultsSafety.forEach(function (res) {
+        ((res && res.topics) || []).forEach(function (topic) {
+          if (!topic.is_live) return;
+          if (siteNameFilterSafety && topic.site_name !== siteNameFilterSafety) return;  /* F2 — slug→name bridge, see resolveSiteNameForFilter() */
+          (topic.safety_observations || []).forEach(function (o) {
+            liveRowsSafety.push(toLiveSafetyRow(topic, o));
+          });
+        });
+      });
+      rows = rows.concat(liveRowsSafety);
+    } catch (e) {
+      console.warn('[compliance] live items unavailable — report/manual rows only', e);
+    }
+
     return { rows: rows, from: from, to: to, user: user, dates: fanout.dates };
   }
 
@@ -644,6 +808,35 @@
       rows = rows.concat(manualRows);
     } catch (e) {
       console.warn('[compliance] manual observations unavailable — report rows only', e);
+    }
+
+    /* feat 4b — live-items merge (see the matching comment in
+       getSafetyRange above; same rationale — F1 computeLiveDates()
+       independent of fanout.dates + pooledAll, F2 site_name bridge via
+       resolveSiteNameForFilter(), never-throw). Live quality signal is
+       coarse (topic itself, see toLiveQualityRow), so only topics tagged
+       category === 'quality' qualify — mirrors the topic_quality loop
+       above, which filters the same way. */
+    try {
+      var liveDatesQuality = computeLiveDates(from, to, fanout.dates);
+      var liveThunksQuality = liveDatesQuality.map(function (d) {
+        return function () {
+          return window.FS.api.org.getLiveItems({ date: d });
+        };
+      });
+      var liveResultsQuality = (await window.FS.api.pooledAll(liveThunksQuality, 8)).filter(Boolean);
+      var siteNameFilterQuality = opts.site ? await resolveSiteNameForFilter(opts.site) : null;
+      var liveRowsQuality = [];
+      liveResultsQuality.forEach(function (res) {
+        ((res && res.topics) || []).forEach(function (topic) {
+          if (!topic.is_live || topic.category !== 'quality') return;
+          if (siteNameFilterQuality && topic.site_name !== siteNameFilterQuality) return;  /* F2 — slug→name bridge, see resolveSiteNameForFilter() */
+          liveRowsQuality.push(toLiveQualityRow(topic));
+        });
+      });
+      rows = rows.concat(liveRowsQuality);
+    } catch (e) {
+      console.warn('[compliance] live items unavailable — report/manual rows only', e);
     }
 
     return { rows: rows, from: from, to: to, user: user, dates: fanout.dates };
