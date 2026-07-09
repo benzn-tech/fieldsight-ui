@@ -18,7 +18,8 @@
     if (q.length < 2) return { results: [], count: 0 };
 
     if (window.FS.api.useMocks) {
-      /* Mock mode keeps the palette's existing client-cache topic search. */
+      /* Mock mode: no server topic search — return empty so the palette's
+         client-side task/safety/site/people matches still drive the results. */
       return { results: [], count: 0, _mock: true };
     }
 

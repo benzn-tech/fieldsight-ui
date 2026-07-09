@@ -226,6 +226,12 @@
     var topicRows = refTopics[0]; var setTopicRows = refTopics[1];
     var refTLoad  = React.useState(false);
     var topicLoading = refTLoad[0]; var setTopicLoading = refTLoad[1];
+    /* Imp3 (Fable UI review) — topicsFor tracks the query the current
+       topicRows correspond to. Gating Ask / "No results" on this (instead of
+       the transient topicLoading) stops the Ask row flashing for one paint on
+       the query-change render, before the debounced effect has run. */
+    var refTFor   = React.useState('');
+    var topicsFor = refTFor[0]; var setTopicsFor = refTFor[1];
 
     var inputRef = React.useRef(null);
     var listRef  = React.useRef(null);
@@ -242,21 +248,29 @@
     React.useEffect(function () {
       var q = query.trim();
       setSelIdx(0);
-      if (!q) { setResults([]); setTopicRows([]); setTopicLoading(false); return; }
+      if (!q) { reqSeq.current++; setResults([]); setTopicRows([]); setTopicsFor(''); setTopicLoading(false); return; }
       setResults(_search(q));                 /* tasks/safety/sites/people, sync */
-      if (q.length < 2) { setTopicRows([]); setTopicLoading(false); return; }
+      if (q.length < 2) { reqSeq.current++; setTopicRows([]); setTopicsFor(q); setTopicLoading(false); return; }
       var mine = ++reqSeq.current;
       setTopicLoading(true);
       var t = setTimeout(function () {
-        window.FS.api.search.topics({ q: q })
+        /* Imp1 (Fable UI review) — degrade gracefully if search.js isn't
+           loaded on this page (e.g. components-preview): resolve empty instead
+           of throwing a TypeError inside the timer (outside the promise chain,
+           so .catch can't see it) which would wedge topicLoading forever. */
+        (window.FS.api.search
+          ? window.FS.api.search.topics({ q: q })
+          : Promise.resolve({ results: [] }))
           .then(function (r) {
             if (mine !== reqSeq.current) return;       /* superseded */
             setTopicRows((r && r.results) || []);
+            setTopicsFor(q);
             setTopicLoading(false);
           })
           .catch(function () {
             if (mine !== reqSeq.current) return;
             setTopicRows([]);
+            setTopicsFor(q);
             setTopicLoading(false);
           });
       }, 250);
@@ -311,8 +325,13 @@
 
     /* Mechanism 2 — Ask is a FALLBACK: only when nothing matched and we're
        not still waiting on the server topic search. */
+    /* topicsSettled: the server topic search has landed for THIS exact query
+       (or the query is too short to trigger one). Until it's true, the Ask
+       fallback and the "No results" line stay hidden so they can't flash on
+       the query-change frame before the debounced effect runs. */
+    var topicsSettled = (topicsFor === trimmedQuery) || trimmedQuery.length < 2;
     var nothingFound = flatItems.length === 0;
-    var askItem = (trimmedQuery && nothingFound && !topicLoading)
+    var askItem = (trimmedQuery && nothingFound && topicsSettled && !topicLoading)
       ? { type: 'ask', id: '__ask__', title: 'Ask FieldSight: “' + trimmedQuery + '”' }
       : null;
     if (askItem) flatItems = flatItems.concat([askItem]);
@@ -489,7 +508,7 @@
               )
             :
           /* No match */
-          query.trim() && results.length === 0 && !topicItems.length && !topicLoading
+          query.trim() && results.length === 0 && !topicItems.length && !topicLoading && topicsSettled
             ? React.createElement('div', { className: 'fs-search-palette__empty' },
                 'No results for “' + query.trim() + '”')
 
@@ -612,8 +631,8 @@
             : null,
 
           /* ---- "Ask FieldSight" hand-off (Task C) -------------------------
-             Distinct final row, appended whenever the query is non-empty —
-             whether or not any of the client-side result types matched.
+             Distinct final row — a ZERO-RESULT FALLBACK (mechanism 2): shown
+             only when nothing matched and the topic search has settled.
              Selecting it stashes the query for Timeline's report-level
              AskChat to prefill and routes there. Styled inline (border +
              accent tint, tokens-only) rather than via composites.css so
