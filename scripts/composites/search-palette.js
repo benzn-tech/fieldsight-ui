@@ -4,18 +4,17 @@
    Full-screen search overlay opened via Cmd/Ctrl+K or the search icon
    button in the middle-column header.
 
-   Search scope (client-side, against cached API data):
-     Tasks    — action_items[].text across last 14 days
-     Safety   — safety_flags + safety_observations
-     Sites    — sites[].name + sites[].location
-     People   — users derived from sites[].users
-     Topics   — topics[].topic_title + summary, fanned out across every
-                hasReport date × user in scope (own folder only for
-                non-admin; capped cross-product for admin/gm — see
-                TOPIC_FANOUT_CAP)
+   Search scope:
+     Tasks    — action_items[].text across last 14 days (client-side, cached)
+     Safety   — safety_flags + safety_observations (client-side, cached)
+     Sites    — sites[].name + sites[].location (client-side, cached)
+     People   — users derived from sites[].users (client-side, cached)
+     Topics   — server-side semantic search via window.FS.api.search.topics
+                (POST /api/search), debounced 250ms, results grouped by
+                report_date; shown once the request settles
 
-   Data is loaded once on first open and cached in module scope for the
-   rest of the session (survives palette close/reopen).
+   Tasks/safety/sites/people are loaded once on first open and cached in
+   module scope for the rest of the session (survives palette close/reopen).
 
    Keyboard:
      ArrowUp / ArrowDown  — navigate result list
@@ -36,90 +35,25 @@
   var TYPE_LABELS = { task: 'Tasks', safety: 'Safety', site: 'Sites', user: 'People', topic: 'Topics' };
   var TYPE_ICONS  = { task: 'check-square', safety: 'shield-alert', site: 'building-2', user: 'user', topic: 'file-text' };
 
-  /* Live-data fix batch (Task 3) — cross-day/cross-user cap on the topic
-     fan-out below. Admin callers have no single "own folder", so indexing
-     topics means walking a (date × user) cross-product; unbounded that's
-     `hasReport dates × all known users` fetches, easily 100+ round trips.
-     Cap at 30 pairs — beyond it, keep the most recent report dates (the
-     ones someone is most likely searching for) and drop the older ones. */
-  var TOPIC_FANOUT_CAP = 30;
+  /* Bucket topic result items by report date, most-recent first. */
+  function _groupTopicsByDate(items) {
+    var by = {};
+    items.forEach(function (it) { (by[it._date] = by[it._date] || []).push(it); });
+    return Object.keys(by).sort().reverse().map(function (d) {
+      return { date: d, items: by[d] };
+    });
+  }
 
   /* ---------------------------------------------------------------------- */
   /* Module-level data cache — survives palette close/reopen in a session    */
   /* ---------------------------------------------------------------------- */
 
   var _cache = { loaded: false, loading: false,
-                 tasks: [], safety: [], sites: [], users: [], topics: [] };
+                 tasks: [], safety: [], sites: [], users: [] };
 
   function _isAdminCaller() {
     var c = (window.AuthMock && window.AuthMock.currentUser) || {};
     return c.role === 'admin' || c.role === 'gm' || !!c.isAdmin;
-  }
-
-  /* Task 3 — topic index fan-out. Builds the (date × user) pairs to walk
-     for GET /api/timeline, then flattens every report's topics[] into
-     cache rows. Non-admin callers only ever have one folder (their own —
-     matches every other aggregator's resolveUser() clamp); admin/gm fan
-     out across every known user (CLAUDE.md "Admin permission flow" ·
-     compliance-aggregator.fanoutDates parity), capped at
-     TOPIC_FANOUT_CAP, most-recent dates kept first. */
-  function _topicFanoutPairs(reportDates) {
-    var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
-
-    if (!_isAdminCaller()) {
-      var folder = caller.name ? window.FS.api.folderName(caller.name) : null;
-      if (!folder) return [];
-      return reportDates.map(function (d) { return { date: d, user: folder }; });
-    }
-
-    var fx = (window.FieldSight && window.FieldSight.fixtures
-      && window.FieldSight.fixtures.sites) || {};
-    var folders = (fx.users || []).map(function (u) { return u.folder_name; }).filter(Boolean);
-    if (!folders.length) return [];
-
-    var total = reportDates.length * folders.length;
-    var sortedDates = reportDates.slice().sort().reverse(); /* most recent first */
-    var pairs = [];
-    for (var i = 0; i < sortedDates.length && pairs.length < TOPIC_FANOUT_CAP; i++) {
-      for (var j = 0; j < folders.length && pairs.length < TOPIC_FANOUT_CAP; j++) {
-        pairs.push({ date: sortedDates[i], user: folders[j] });
-      }
-    }
-    if (total > TOPIC_FANOUT_CAP) {
-      console.debug('[SearchPalette] topic fan-out capped at ' + TOPIC_FANOUT_CAP
-        + ' date\xd7user pairs (of ' + total + ' possible) — keeping the most recent dates');
-    }
-    return pairs;
-  }
-
-  /* Fetch + flatten topics for every (date, user) pair. Each pair is
-     independently tolerant of failure (denied/not-found/errored fetches
-     just contribute nothing) so one bad date never blanks the whole
-     topic index. */
-  async function _loadTopics(pairs) {
-    if (!pairs.length) return [];
-    var settled = await Promise.allSettled(pairs.map(function (p) {
-      return window.FS.api.timeline.getTimeline({ date: p.date, user: p.user })
-        .then(function (r) { return { date: p.date, user: p.user, report: r }; });
-    }));
-
-    var topics = [];
-    settled.forEach(function (s) {
-      if (s.status !== 'fulfilled') return;
-      var x = s.value;
-      var r = x.report;
-      if (!r || r._notFound || r._accessDenied || r.available_users) return;
-      (r.topics || []).forEach(function (t) {
-        topics.push({
-          title:    t.topic_title,
-          snippet:  (t.summary || '').slice(0, 80),
-          date:     x.date,
-          user:     x.user,
-          topic_id: t.topic_id,
-        });
-      });
-    });
-    return topics;
   }
 
   async function _loadCache() {
@@ -138,14 +72,6 @@
       });
       var from  = span.earliest || today;
 
-      /* Task 3 — hasReport dates drive the topic fan-out; computed here
-         (not inside _loadTopics) so the pair-count/cap decision stays
-         visible at the call site. */
-      var reportDates = Object.keys(span.dates || {}).filter(function (d) {
-        return span.dates[d] && span.dates[d].hasReport;
-      }).sort();
-      var topicPairs = _topicFanoutPairs(reportDates);
-
       var results = await Promise.all([
         window.FS.api.sites.getSites()
           .catch(function () { return { sites: [] }; }),
@@ -153,14 +79,11 @@
           .catch(function () { return { rows: [] }; }),
         window.FS.api.compliance.getSafetyRange({ from: from, to: today })
           .catch(function () { return { rows: [] }; }),
-        _loadTopics(topicPairs)
-          .catch(function () { return []; }),
       ]);
 
       _cache.sites  = (results[0] && results[0].sites) || [];
       _cache.tasks  = (results[1] && results[1].rows)  || [];
       _cache.safety = (results[2] && results[2].rows)  || [];
-      _cache.topics = results[3] || [];
 
       /* Derive unique users from sites */
       var usersMap = {};
@@ -183,7 +106,7 @@
 
   function _search(q) {
     var ql = q.toLowerCase();
-    var byType = { task: [], safety: [], site: [], user: [], topic: [] };
+    var byType = { task: [], safety: [], site: [], user: [] };
 
     _cache.tasks.forEach(function (row) {
       if (byType.task.length >= 5) return;
@@ -242,26 +165,10 @@
       }
     });
 
-    _cache.topics.forEach(function (row) {
-      if (byType.topic.length >= 5) return;
-      var hay = ((row.title || '') + ' ' + (row.snippet || '')).toLowerCase();
-      if (hay.indexOf(ql) !== -1) {
-        byType.topic.push({
-          type:     'topic',
-          id:       row.date + '_' + row.user + '_' + row.topic_id,
-          title:    row.title,
-          subtitle: (row.snippet ? row.snippet + ' \xb7 ' : '') + row.date,
-          /* topic_id routes as a raw string — never parseInt (timeline.js
-             deep-link matching is String(a) === String(b) throughout). */
-          route:    '/timeline?date=' + encodeURIComponent(row.date)
-                     + '&user=' + encodeURIComponent(row.user)
-                     + '&topic=' + encodeURIComponent(String(row.topic_id)),
-        });
-      }
-    });
-
     var out = [];
-    TYPE_ORDER.forEach(function (t) { out = out.concat(byType[t]); });
+    /* byType no longer has a 'topic' key (server-side now) — guard so the
+       TYPE_ORDER walk doesn't concat(undefined) into the result list. */
+    TYPE_ORDER.forEach(function (t) { if (byType[t]) out = out.concat(byType[t]); });
     return out;
   }
 
@@ -312,6 +219,20 @@
     var refAsk  = React.useState(null);
     var askMode = refAsk[0]; var setAskMode = refAsk[1];
 
+    /* Mechanism 1 — server-side semantic topic search (replaces the old
+       client fan-out). Async + debounced; results merged with the client-side
+       task/safety/site/people matches below. */
+    var refTopics = React.useState([]);
+    var topicRows = refTopics[0]; var setTopicRows = refTopics[1];
+    var refTLoad  = React.useState(false);
+    var topicLoading = refTLoad[0]; var setTopicLoading = refTLoad[1];
+    /* Imp3 (Fable UI review) — topicsFor tracks the query the current
+       topicRows correspond to. Gating Ask / "No results" on this (instead of
+       the transient topicLoading) stops the Ask row flashing for one paint on
+       the query-change render, before the debounced effect has run. */
+    var refTFor   = React.useState('');
+    var topicsFor = refTFor[0]; var setTopicsFor = refTFor[1];
+
     var inputRef = React.useRef(null);
     var listRef  = React.useRef(null);
 
@@ -321,12 +242,39 @@
       _loadCache();
     }, []);
 
-    /* Re-run search whenever query changes */
+    /* Re-run client search + kick a debounced server topic search on query
+       change. A stale-guard token drops out-of-order responses. */
+    var reqSeq = React.useRef(0);
     React.useEffect(function () {
       var q = query.trim();
-      if (!q) { setResults([]); setSelIdx(0); return; }
-      setResults(_search(q));
       setSelIdx(0);
+      if (!q) { reqSeq.current++; setResults([]); setTopicRows([]); setTopicsFor(''); setTopicLoading(false); return; }
+      setResults(_search(q));                 /* tasks/safety/sites/people, sync */
+      if (q.length < 2) { reqSeq.current++; setTopicRows([]); setTopicsFor(q); setTopicLoading(false); return; }
+      var mine = ++reqSeq.current;
+      setTopicLoading(true);
+      var t = setTimeout(function () {
+        /* Imp1 (Fable UI review) — degrade gracefully if search.js isn't
+           loaded on this page (e.g. components-preview): resolve empty instead
+           of throwing a TypeError inside the timer (outside the promise chain,
+           so .catch can't see it) which would wedge topicLoading forever. */
+        (window.FS.api.search
+          ? window.FS.api.search.topics({ q: q })
+          : Promise.resolve({ results: [] }))
+          .then(function (r) {
+            if (mine !== reqSeq.current) return;       /* superseded */
+            setTopicRows((r && r.results) || []);
+            setTopicsFor(q);
+            setTopicLoading(false);
+          })
+          .catch(function () {
+            if (mine !== reqSeq.current) return;
+            setTopicRows([]);
+            setTopicsFor(q);
+            setTopicLoading(false);
+          });
+      }, 250);
+      return function () { clearTimeout(t); };
     }, [query]);
 
     /* Scroll the focused result into view */
@@ -352,19 +300,38 @@
 
     var trimmedQuery = query.trim();
 
-    /* Group results by type for sectioned display. Computed ahead of
-       doSelect/onKeyDown below so the "Ask FieldSight" row (Task C) can
-       be folded into the same flat, arrow-key-navigable list as the
-       ordinary results — it's appended as the final entry whenever the
-       query is non-empty, whether or not any results matched. */
+    /* Client-side groups (task/safety/site/user) */
     var groups = [];
     TYPE_ORDER.forEach(function (type) {
+      if (type === 'topic') return;  /* topics come from the server now */
       var items = results.filter(function (r) { return r.type === type; });
       if (items.length) groups.push({ type: type, items: items });
     });
-    var flatItems = groups.reduce(function (acc, g) { return acc.concat(g.items); }, []);
 
-    var askItem = trimmedQuery
+    /* Server topic rows → result items, grouped by report_date */
+    var topicItems = topicRows.map(function (row) {
+      return {
+        type:     'topic',
+        id:       row.route,
+        title:    row.title,
+        subtitle: (row.site_name ? row.site_name + ' · ' : '') + row.report_date,
+        route:    row.route,
+        _date:    row.report_date,
+      };
+    });
+
+    var flatItems = groups.reduce(function (acc, g) { return acc.concat(g.items); }, [])
+                          .concat(topicItems);
+
+    /* Mechanism 2 — Ask is a FALLBACK: only when nothing matched and we're
+       not still waiting on the server topic search. */
+    /* topicsSettled: the server topic search has landed for THIS exact query
+       (or the query is too short to trigger one). Until it's true, the Ask
+       fallback and the "No results" line stay hidden so they can't flash on
+       the query-change frame before the debounced effect runs. */
+    var topicsSettled = (topicsFor === trimmedQuery) || trimmedQuery.length < 2;
+    var nothingFound = flatItems.length === 0;
+    var askItem = (trimmedQuery && nothingFound && topicsSettled && !topicLoading)
       ? { type: 'ask', id: '__ask__', title: 'Ask FieldSight: “' + trimmedQuery + '”' }
       : null;
     if (askItem) flatItems = flatItems.concat([askItem]);
@@ -541,7 +508,7 @@
               )
             :
           /* No match */
-          query.trim() && results.length === 0
+          query.trim() && results.length === 0 && !topicItems.length && !topicLoading && topicsSettled
             ? React.createElement('div', { className: 'fs-search-palette__empty' },
                 'No results for “' + query.trim() + '”')
 
@@ -616,13 +583,56 @@
                 }),
               )
 
-            /* Empty prompt */
-            : React.createElement('div', { className: 'fs-search-palette__hint' },
-                'Type to search across tasks, safety flags, sites, people, and topics'),
+            /* Empty prompt (only when the query itself is empty — a non-empty
+               query with zero client matches but pending/found server topics
+               is covered by the Topics block below, not this hint). */
+            : !query.trim()
+            ? React.createElement('div', { className: 'fs-search-palette__hint' },
+                'Type to search across tasks, safety flags, sites, people, and topics')
+            : null,
+
+          /* Server topic results, sub-grouped by report date. Gated on
+             !askMode too — the search input stays editable while the Ask
+             panel is showing, so topicItems/topicLoading can otherwise
+             change underneath it. */
+          (!askMode && query.trim() && (topicItems.length || topicLoading))
+            ? React.createElement('div', { className: 'fs-search-palette__group', key: '__topics__' },
+                React.createElement('div', {
+                  className: 'fs-search-palette__group-label', role: 'presentation',
+                }, 'Topics'),
+                topicLoading && !topicItems.length
+                  ? React.createElement('div', { className: 'fs-search-palette__hint' }, 'Searching topics…')
+                  : _groupTopicsByDate(topicItems).map(function (bucket) {
+                      return React.createElement('div', { key: bucket.date },
+                        React.createElement('div', {
+                          className: 'fs-search-palette__group-label',
+                          role: 'presentation',
+                          style: { opacity: 0.7, fontSize: '11px', paddingLeft: '4px' },
+                        }, bucket.date),
+                        bucket.items.map(function (item) {
+                          var idx = flatItems.indexOf(item);
+                          var isSel = idx === selIdx;
+                          return React.createElement('button', {
+                            key: item.id, type: 'button', role: 'option',
+                            'aria-selected': isSel, 'data-selected': String(isSel),
+                            className: 'fs-search-palette__result'
+                              + (isSel ? ' fs-search-palette__result--active' : ''),
+                            onClick: function () { doSelect(item); },
+                            onMouseEnter: function () { setSelIdx(idx); },
+                          },
+                            NavIcon && React.createElement(NavIcon, {
+                              name: 'file-text', size: 15, color: 'var(--text-tertiary)' }),
+                            React.createElement('div', { className: 'fs-search-palette__result-body' },
+                              React.createElement('span', { className: 'fs-search-palette__result-title' }, item.title),
+                              item.subtitle ? React.createElement('span', {
+                                className: 'fs-search-palette__result-sub' }, item.subtitle) : null));
+                        }));
+                    }))
+            : null,
 
           /* ---- "Ask FieldSight" hand-off (Task C) -------------------------
-             Distinct final row, appended whenever the query is non-empty —
-             whether or not any of the client-side result types matched.
+             Distinct final row — a ZERO-RESULT FALLBACK (mechanism 2): shown
+             only when nothing matched and the topic search has settled.
              Selecting it stashes the query for Timeline's report-level
              AskChat to prefill and routes there. Styled inline (border +
              accent tint, tokens-only) rather than via composites.css so
