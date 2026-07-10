@@ -35,15 +35,6 @@
   var TYPE_LABELS = { task: 'Tasks', safety: 'Safety', site: 'Sites', user: 'People', topic: 'Topics' };
   var TYPE_ICONS  = { task: 'check-square', safety: 'shield-alert', site: 'building-2', user: 'user', topic: 'file-text' };
 
-  /* Bucket topic result items by report date, most-recent first. */
-  function _groupTopicsByDate(items) {
-    var by = {};
-    items.forEach(function (it) { (by[it._date] = by[it._date] || []).push(it); });
-    return Object.keys(by).sort().reverse().map(function (d) {
-      return { date: d, items: by[d] };
-    });
-  }
-
   /* ---------------------------------------------------------------------- */
   /* Module-level data cache — survives palette close/reopen in a session    */
   /* ---------------------------------------------------------------------- */
@@ -316,25 +307,27 @@
         title:    row.title,
         subtitle: (row.site_name ? row.site_name + ' · ' : '') + row.report_date,
         route:    row.route,
-        _date:    row.report_date,
       };
     });
 
-    var flatItems = groups.reduce(function (acc, g) { return acc.concat(g.items); }, [])
-                          .concat(topicItems);
+    var clientFlat = groups.reduce(function (acc, g) { return acc.concat(g.items); }, []);
 
-    /* Mechanism 2 — Ask is a FALLBACK: only when nothing matched and we're
-       not still waiting on the server topic search. */
     /* topicsSettled: the server topic search has landed for THIS exact query
-       (or the query is too short to trigger one). Until it's true, the Ask
-       fallback and the "No results" line stay hidden so they can't flash on
-       the query-change frame before the debounced effect runs. */
+       (or it's too short to trigger one) — still gates the "No results" line so
+       it can't flash before the debounced effect runs. */
     var topicsSettled = (topicsFor === trimmedQuery) || trimmedQuery.length < 2;
-    var nothingFound = flatItems.length === 0;
-    var askItem = (trimmedQuery && nothingFound && topicsSettled && !topicLoading)
-      ? { type: 'ask', id: '__ask__', title: 'Ask FieldSight: “' + trimmedQuery + '”' }
+
+    /* Mechanism 2 — Ask is now ALWAYS available (user pref 2026-07-10): when the
+       query is non-empty an "Ask:" row sits ABOVE the Topics group so the user
+       can always fall through to the agent, whether or not keyword topics
+       matched. Ordered after the client groups / before topics so arrow-key
+       navigation matches the visual order. */
+    var askItem = trimmedQuery
+      ? { type: 'ask', id: '__ask__', title: trimmedQuery }
       : null;
-    if (askItem) flatItems = flatItems.concat([askItem]);
+    var flatItems = clientFlat
+      .concat(askItem ? [askItem] : [])
+      .concat(topicItems);
 
     function saveRecent(q) {
       if (!q) return;
@@ -591,54 +584,9 @@
                 'Type to search across tasks, safety flags, sites, people, and topics')
             : null,
 
-          /* Server topic results, sub-grouped by report date. Gated on
-             !askMode too — the search input stays editable while the Ask
-             panel is showing, so topicItems/topicLoading can otherwise
-             change underneath it. */
-          (!askMode && query.trim() && (topicItems.length || topicLoading))
-            ? React.createElement('div', { className: 'fs-search-palette__group', key: '__topics__' },
-                React.createElement('div', {
-                  className: 'fs-search-palette__group-label', role: 'presentation',
-                }, 'Topics'),
-                topicLoading && !topicItems.length
-                  ? React.createElement('div', { className: 'fs-search-palette__hint' }, 'Searching topics…')
-                  : _groupTopicsByDate(topicItems).map(function (bucket) {
-                      return React.createElement('div', { key: bucket.date },
-                        React.createElement('div', {
-                          className: 'fs-search-palette__group-label',
-                          role: 'presentation',
-                          style: { opacity: 0.7, fontSize: '11px', paddingLeft: '4px' },
-                        }, bucket.date),
-                        bucket.items.map(function (item) {
-                          var idx = flatItems.indexOf(item);
-                          var isSel = idx === selIdx;
-                          return React.createElement('button', {
-                            key: item.id, type: 'button', role: 'option',
-                            'aria-selected': isSel, 'data-selected': String(isSel),
-                            className: 'fs-search-palette__result'
-                              + (isSel ? ' fs-search-palette__result--active' : ''),
-                            onClick: function () { doSelect(item); },
-                            onMouseEnter: function () { setSelIdx(idx); },
-                          },
-                            NavIcon && React.createElement(NavIcon, {
-                              name: 'file-text', size: 15, color: 'var(--text-tertiary)' }),
-                            React.createElement('div', { className: 'fs-search-palette__result-body' },
-                              React.createElement('span', { className: 'fs-search-palette__result-title' }, item.title),
-                              item.subtitle ? React.createElement('span', {
-                                className: 'fs-search-palette__result-sub' }, item.subtitle) : null));
-                        }));
-                    }))
-            : null,
-
-          /* ---- "Ask FieldSight" hand-off (Task C) -------------------------
-             Distinct final row — a ZERO-RESULT FALLBACK (mechanism 2): shown
-             only when nothing matched and the topic search has settled.
-             Selecting it stashes the query for Timeline's report-level
-             AskChat to prefill and routes there. Styled inline (border +
-             accent tint, tokens-only) rather than via composites.css so
-             this stays a JS-only change — no new CSS class needed.
-             Hidden while askMode is active (F1) — the ask panel above
-             replaces it. */
+          /* "Ask:" row — ALWAYS shown above Topics (user pref 2026-07-10) so
+             the agent is always reachable; distinct accent-bordered pill.
+             Hidden while the AskChat panel (askMode) is open. */
           !askMode && askItem
             ? React.createElement('button', {
                 type:            'button',
@@ -648,9 +596,9 @@
                 className:       'fs-search-palette__result'
                                   + (flatItems.indexOf(askItem) === selIdx ? ' fs-search-palette__result--active' : ''),
                 style: {
-                  borderTop:  '1px solid var(--border-subtle)',
-                  marginTop:  '4px',
-                  paddingTop: '10px',
+                  border:       '1px solid var(--color-accent-400)',
+                  borderRadius: '8px',
+                  margin:       '4px 0 8px',
                 },
                 onClick:         function () { doSelect(askItem); },
                 onMouseEnter:    function () { setSelIdx(flatItems.indexOf(askItem)); },
@@ -663,11 +611,56 @@
                 React.createElement('div', { className: 'fs-search-palette__result-body' },
                   React.createElement('span', {
                     className: 'fs-search-palette__result-title',
-                    style:     { color: 'var(--color-accent-800)', fontWeight: 600 },
-                  }, askItem.title),
+                    style:     { fontWeight: 600 },
+                  },
+                    React.createElement('span', {
+                      style: { color: 'var(--color-accent-700)', marginRight: '6px' },
+                    }, 'Ask:'),
+                    React.createElement('span', {
+                      style: { color: 'var(--color-accent-800)' },
+                    }, askItem.title)),
                 ),
               )
             : null,
+
+          /* Server topic results, sub-grouped by report date. Gated on
+             !askMode too — the search input stays editable while the Ask
+             panel is showing, so topicItems/topicLoading can otherwise
+             change underneath it. */
+          (!askMode && query.trim() && (topicItems.length || topicLoading))
+            ? React.createElement('div', { className: 'fs-search-palette__group', key: '__topics__' },
+                React.createElement('div', {
+                  className: 'fs-search-palette__group-label', role: 'presentation',
+                }, 'Topics'),
+                topicLoading && !topicItems.length
+                  ? React.createElement('div', { className: 'fs-search-palette__hint' }, 'Searching topics…')
+                  : topicItems.map(function (item) {
+                      /* Relevance order from the backend (hybrid: word-match
+                         first, then cosine distance) — NOT re-grouped by date,
+                         which used to bury a relevant older topic under a
+                         recent-but-irrelevant one. The report date stays
+                         visible in each row's subtitle. */
+                      var idx = flatItems.indexOf(item);
+                      var isSel = idx === selIdx;
+                      return React.createElement('button', {
+                        key: item.id, type: 'button', role: 'option',
+                        'aria-selected': isSel, 'data-selected': String(isSel),
+                        className: 'fs-search-palette__result'
+                          + (isSel ? ' fs-search-palette__result--active' : ''),
+                        onClick: function () { doSelect(item); },
+                        onMouseEnter: function () { setSelIdx(idx); },
+                      },
+                        NavIcon && React.createElement(NavIcon, {
+                          name: 'file-text', size: 15, color: 'var(--text-tertiary)' }),
+                        React.createElement('div', { className: 'fs-search-palette__result-body' },
+                          React.createElement('span', { className: 'fs-search-palette__result-title' }, item.title),
+                          item.subtitle ? React.createElement('span', {
+                            className: 'fs-search-palette__result-sub' }, item.subtitle) : null));
+                    }))
+            : null,
+
+          /* (Ask row is rendered ABOVE the Topics group now — user pref
+             2026-07-10; see the "Ask:" block above.) */
         ),
       ),
     );
