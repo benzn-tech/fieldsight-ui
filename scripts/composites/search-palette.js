@@ -35,15 +35,6 @@
   var TYPE_LABELS = { task: 'Tasks', safety: 'Safety', site: 'Sites', user: 'People', topic: 'Topics' };
   var TYPE_ICONS  = { task: 'check-square', safety: 'shield-alert', site: 'building-2', user: 'user', topic: 'file-text' };
 
-  /* Bucket topic result items by report date, most-recent first. */
-  function _groupTopicsByDate(items) {
-    var by = {};
-    items.forEach(function (it) { (by[it._date] = by[it._date] || []).push(it); });
-    return Object.keys(by).sort().reverse().map(function (d) {
-      return { date: d, items: by[d] };
-    });
-  }
-
   /* ---------------------------------------------------------------------- */
   /* Module-level data cache — survives palette close/reopen in a session    */
   /* ---------------------------------------------------------------------- */
@@ -316,7 +307,6 @@
         title:    row.title,
         subtitle: (row.site_name ? row.site_name + ' · ' : '') + row.report_date,
         route:    row.route,
-        _date:    row.report_date,
       };
     });
 
@@ -644,31 +634,28 @@
                 }, 'Topics'),
                 topicLoading && !topicItems.length
                   ? React.createElement('div', { className: 'fs-search-palette__hint' }, 'Searching topics…')
-                  : _groupTopicsByDate(topicItems).map(function (bucket) {
-                      return React.createElement('div', { key: bucket.date },
-                        React.createElement('div', {
-                          className: 'fs-search-palette__group-label',
-                          role: 'presentation',
-                          style: { opacity: 0.7, fontSize: '11px', paddingLeft: '4px' },
-                        }, bucket.date),
-                        bucket.items.map(function (item) {
-                          var idx = flatItems.indexOf(item);
-                          var isSel = idx === selIdx;
-                          return React.createElement('button', {
-                            key: item.id, type: 'button', role: 'option',
-                            'aria-selected': isSel, 'data-selected': String(isSel),
-                            className: 'fs-search-palette__result'
-                              + (isSel ? ' fs-search-palette__result--active' : ''),
-                            onClick: function () { doSelect(item); },
-                            onMouseEnter: function () { setSelIdx(idx); },
-                          },
-                            NavIcon && React.createElement(NavIcon, {
-                              name: 'file-text', size: 15, color: 'var(--text-tertiary)' }),
-                            React.createElement('div', { className: 'fs-search-palette__result-body' },
-                              React.createElement('span', { className: 'fs-search-palette__result-title' }, item.title),
-                              item.subtitle ? React.createElement('span', {
-                                className: 'fs-search-palette__result-sub' }, item.subtitle) : null));
-                        }));
+                  : topicItems.map(function (item) {
+                      /* Relevance order from the backend (hybrid: word-match
+                         first, then cosine distance) — NOT re-grouped by date,
+                         which used to bury a relevant older topic under a
+                         recent-but-irrelevant one. The report date stays
+                         visible in each row's subtitle. */
+                      var idx = flatItems.indexOf(item);
+                      var isSel = idx === selIdx;
+                      return React.createElement('button', {
+                        key: item.id, type: 'button', role: 'option',
+                        'aria-selected': isSel, 'data-selected': String(isSel),
+                        className: 'fs-search-palette__result'
+                          + (isSel ? ' fs-search-palette__result--active' : ''),
+                        onClick: function () { doSelect(item); },
+                        onMouseEnter: function () { setSelIdx(idx); },
+                      },
+                        NavIcon && React.createElement(NavIcon, {
+                          name: 'file-text', size: 15, color: 'var(--text-tertiary)' }),
+                        React.createElement('div', { className: 'fs-search-palette__result-body' },
+                          React.createElement('span', { className: 'fs-search-palette__result-title' }, item.title),
+                          item.subtitle ? React.createElement('span', {
+                            className: 'fs-search-palette__result-sub' }, item.subtitle) : null));
                     }))
             : null,
 
