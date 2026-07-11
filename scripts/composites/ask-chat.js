@@ -68,8 +68,9 @@
                  it (matched by title — see timeline.js). */
               if (c.topic_title) url += '&topicTitle=' + encodeURIComponent(c.topic_title);
               /* Cross-project Ask citation → sync the top-bar project selector
-                 to the cited report's project (联动 — Timeline reads params.site). */
-              if (c.site_id) url += '&site=' + encodeURIComponent(c.site_id);
+                 to the cited report's project (联动 — Timeline reads params.site).
+                 site_slug is the selector's identifier (NOT the site UUID). */
+              if (c.site_slug) url += '&site=' + encodeURIComponent(c.site_slug);
               window.FS.Router.navigate(url);
             }
           : null;
