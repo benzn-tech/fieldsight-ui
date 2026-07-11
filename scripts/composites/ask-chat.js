@@ -62,8 +62,12 @@
         var meta = [c.site_name, c.report_date].filter(Boolean).join(' · ');
         var onOpen = tgt && window.FS && window.FS.Router
           ? function () {
-              window.FS.Router.navigate('/timeline?date=' + encodeURIComponent(tgt.date)
-                + '&user=' + encodeURIComponent(tgt.user));
+              var url = '/timeline?date=' + encodeURIComponent(tgt.date)
+                + '&user=' + encodeURIComponent(tgt.user);
+              /* Deep-link to the specific topic so the Timeline opens + flashes
+                 it (matched by title — see timeline.js). */
+              if (c.topic_title) url += '&topicTitle=' + encodeURIComponent(c.topic_title);
+              window.FS.Router.navigate(url);
             }
           : null;
         return React.createElement('div', {

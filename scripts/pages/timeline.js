@@ -515,6 +515,19 @@
       ? String(params.topic)
       : null;
 
+    /* Search results / Ask citations deep-link by topic TITLE, because the
+       backend has the Aurora topic UUID, not the report's per-report
+       sequential topic_id. Resolve the SAME spotlight by matching a report
+       topic's title. matchesTopicTarget() folds both keys together. */
+    var targetTopicTitle = params.topicTitle != null && params.topicTitle !== ''
+      ? String(params.topicTitle)
+      : null;
+    var hasTopicTarget = targetTopicId !== null || targetTopicTitle !== null;
+    function matchesTopicTarget(t) {
+      return (targetTopicId !== null && String(t.topic_id) === String(targetTopicId))
+          || (targetTopicTitle !== null && (t.topic_title || '') === targetTopicTitle);
+    }
+
     /* Sprint 6.7.2 — deeper precision: when /safety includes
        &flag=<idx>, highlight that specific safety_flag inside the
        target topic (not the whole topic card). null = whole-topic
@@ -786,14 +799,12 @@
        topic id changes (user clicked a different deep-link). */
     var autoSelectKeyRef = React.useRef(null);
     React.useEffect(function () {
-      if (state.status !== 'ok' || targetTopicId === null) return;
+      if (state.status !== 'ok' || !hasTopicTarget) return;
       var report = state.report;
       if (!report || report._notFound || report.available_users) return;
-      var key = date + '|' + targetTopicId;
+      var key = date + '|' + (targetTopicId || targetTopicTitle);
       if (autoSelectKeyRef.current === key) return;
-      var topic = (report.topics || []).filter(function (t) {
-        return String(t.topic_id) === String(targetTopicId);
-      })[0];
+      var topic = (report.topics || []).filter(matchesTopicTarget)[0];
       if (!topic) return;
       autoSelectKeyRef.current = key;
       if (props.onSelect) {
@@ -807,7 +818,7 @@
           user_name: report.user_name,
         });
       }
-    }, [state.status, targetTopicId, date]);
+    }, [state.status, targetTopicId, targetTopicTitle, date]);
 
     /* Task C — Search's "Ask FieldSight" hand-off (search-palette.js).
        Read-and-clear the sessionStorage prefill exactly once per mount,
@@ -1067,8 +1078,8 @@
              flash). Other topics force-collapse (defaultOpen=false)
              so the target reads as the focal point. When no target,
              defaultOpen=undefined leaves user-toggled state alone. */
-          var isTarget = targetTopicId !== null && String(topic.topic_id) === String(targetTopicId);
-          var defaultOpenProp = targetTopicId === null
+          var isTarget = matchesTopicTarget(topic);
+          var defaultOpenProp = !hasTopicTarget
             ? undefined
             : isTarget;
           return React.createElement(TopicCard, {
