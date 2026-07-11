@@ -67,6 +67,9 @@
               /* Deep-link to the specific topic so the Timeline opens + flashes
                  it (matched by title — see timeline.js). */
               if (c.topic_title) url += '&topicTitle=' + encodeURIComponent(c.topic_title);
+              /* Cross-project Ask citation → sync the top-bar project selector
+                 to the cited report's project (联动 — Timeline reads params.site). */
+              if (c.site_id) url += '&site=' + encodeURIComponent(c.site_id);
               window.FS.Router.navigate(url);
             }
           : null;
