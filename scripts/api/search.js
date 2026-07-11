@@ -26,6 +26,13 @@
     var body = { question: q };
     if (opts.from) body.date_from = opts.from;
     if (opts.to)   body.date_to   = opts.to;
+    /* Project-scoped search: when a project is selected in the top bar, scope
+       to it; "All projects" (null) searches everything. Ask stays cross-project
+       (ask.js never sends site). Callers can override via opts.site. */
+    var siteId = opts.site !== undefined
+      ? opts.site
+      : (window.FS.siteContext && window.FS.siteContext.get && window.FS.siteContext.get());
+    if (siteId) body.site = siteId;
 
     return window.FS.api.request('/search', {
       method:  'POST',

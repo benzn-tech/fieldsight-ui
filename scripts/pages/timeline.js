@@ -528,6 +528,20 @@
           || (targetTopicTitle !== null && (t.topic_title || '') === targetTopicTitle);
     }
 
+    /* 联动 — deep-link project sync: a route carrying &site (a cross-project
+       search result or Ask citation) points the top-bar project selector at
+       that project, so the selector always matches the content shown. Ref-
+       guarded to fire once per site change, not on every render. */
+    var syncedSiteRef = React.useRef(null);
+    React.useEffect(function () {
+      var s = params.site;
+      if (!s || syncedSiteRef.current === s) return;
+      syncedSiteRef.current = s;
+      if (window.FS.siteContext && window.FS.siteContext.get() !== s) {
+        window.FS.siteContext.set(s);
+      }
+    }, [params.site]);
+
     /* Sprint 6.7.2 — deeper precision: when /safety includes
        &flag=<idx>, highlight that specific safety_flag inside the
        target topic (not the whole topic card). null = whole-topic
