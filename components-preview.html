@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="styles/tokens.css" />
   <link rel="stylesheet" href="styles/app-shell.css?v=3" />
   <link rel="stylesheet" href="styles/components.css?v=5" />
-  <link rel="stylesheet" href="styles/composites.css?v=3" />
+  <link rel="stylesheet" href="styles/composites.css?v=4" />
 
   <style>
     html, body { overflow: auto; height: auto; }
@@ -124,6 +124,14 @@
   <!-- Sprint 10 B.4/B.5 — SchemaEditor + VersionHistoryPanel (exported from library.js) -->
   <script type="text/babel" src="scripts/pages/library.js?v=2"></script>
 
+  <!-- Sprint 11 (Task 6) — programme suggestion review queue. Fixture-only
+       smoke render (no api/programme.js / _fetch.js chain loaded here — this
+       preview is a component showcase, not a live integration test; matches
+       the existing SafetyCreateModal/QualityCreateModal triggers above,
+       which are equally unwired to a live api layer in this file). -->
+  <script src="scripts/mock/programme-suggestions.fixture.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/suggestion-review.js?v=1"></script>
+
   <script type="text/babel">
     const { Button, IconButton, Input, Textarea, Select, Card,
             Badge, NotificationDot, Avatar, AvatarGroup,
@@ -139,7 +147,9 @@
             /* Sprint 9.5 — new L5 composites */
             WordCloud, ColumnChart, HeatmapGrid,
             /* Sprint 10 B.4/B.5 — library editor composites */
-            SchemaEditor, VersionHistoryPanel } = window.FieldSight;
+            SchemaEditor, VersionHistoryPanel,
+            /* Sprint 11 (Task 6) — programme suggestion review queue */
+            SuggestionReview } = window.FieldSight;
 
     function Section({ title, children }) {
       return (
@@ -1500,6 +1510,31 @@
                   canManage={true}
                   onRestored={(updated) => alert('Restored! Template now has ' + (updated.versions || []).length + ' version(s)')}
                 />}
+              </div>
+            </Row>
+          </Section>
+
+          {/* Sprint 11 (Task 6) — programme<->item feedback: suggestion review queue.
+              Fixture-only smoke render — window.FieldSight.fixtures.programmeSuggestions
+              is the same fixture the mock branch of getSuggestions() reads from
+              (scripts/mock/programme-suggestions.fixture.js). Confirm/Adjust/Reject
+              are wired to window.FS.api.programme.* but that api chain isn't loaded
+              in this preview file (see the script-tag comment above), same posture
+              as the SafetyCreateModal/QualityCreateModal triggers elsewhere on
+              this page. */}
+          <Section title="Sprint 11 (T6) · SuggestionReview">
+            <Row label="3 pending suggestions">
+              <div style={{ flex: 1, minWidth: 0, maxWidth: '520px' }}>
+                {SuggestionReview && <SuggestionReview
+                  suggestions={(window.FieldSight.fixtures && window.FieldSight.fixtures.programmeSuggestions) || []}
+                  siteSlug="sb1108-ellesmere"
+                  onResolved={(id) => alert('resolved: ' + id)}
+                />}
+              </div>
+            </Row>
+            <Row label="empty">
+              <div style={{ flex: 1, minWidth: 0, maxWidth: '520px' }}>
+                {SuggestionReview && <SuggestionReview suggestions={[]} />}
               </div>
             </Row>
           </Section>

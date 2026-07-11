@@ -3488,6 +3488,34 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
+/* Sprint 11 (Task 6) — suggestion-review pending-count badge, opens the
+   review queue in the same slide-in drawer a selected task uses. */
+.fs-programme__suggestions-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  background: var(--surface-panel-muted);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--easing-out),
+              color var(--duration-fast) var(--easing-out),
+              border-color var(--duration-fast) var(--easing-out);
+}
+.fs-programme__suggestions-badge:hover { color: var(--text-primary); border-color: var(--border-default); }
+.fs-programme__suggestions-badge--active {
+  background: var(--surface-selected);
+  color: var(--text-primary);
+  font-weight: var(--font-weight-semibold);
+}
+@media (prefers-reduced-motion: reduce) {
+  .fs-programme__suggestions-badge { transition: none; }
+}
 
 /* Gantt -------------------------------------------------------------------- */
 .fs-gantt {
@@ -9989,3 +10017,125 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   font-size: 11px;
   color: var(--text-tertiary);
 }
+
+/* ==========================================================================
+   SuggestionReview — Sprint 11 (programme<->item feedback, Task 6)
+   ========================================================================== */
+.fs-suggestion-review {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fs-suggestion-review__header {
+  display: flex;
+  align-items: center;
+}
+.fs-suggestion-review__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.fs-suggestion-review__count {
+  color: var(--text-tertiary);
+  font-weight: var(--font-weight-regular);
+}
+.fs-suggestion-review__empty {
+  padding: 16px 0;
+  font-size: 13px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+.fs-suggestion-review__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fs-suggestion-review__card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+.fs-suggestion-review__card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fs-suggestion-review__card-topic {
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.fs-suggestion-review__card-summary {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.fs-suggestion-review__card-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.fs-suggestion-review__card-link {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-link);
+  cursor: pointer;
+}
+.fs-suggestion-review__card-link:hover { color: var(--text-link-hover); text-decoration: underline; }
+.fs-suggestion-review__card-target {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fs-suggestion-review__card-target-label { color: var(--text-tertiary); }
+.fs-suggestion-review__card-target-name { font-weight: var(--font-weight-medium); color: var(--text-primary); }
+.fs-suggestion-review__card-delta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.fs-suggestion-review__card-evidence {
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  padding-left: 8px;
+  border-left: 2px solid var(--border-subtle);
+}
+.fs-suggestion-review__card-chip { align-self: flex-start; }
+.fs-suggestion-review__card-actions,
+.fs-suggestion-review__adjust-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.fs-suggestion-review__adjust {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+.fs-suggestion-review__adjust-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.fs-suggestion-review__adjust-row > * { flex: 1; min-width: 120px; }

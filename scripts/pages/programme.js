@@ -215,6 +215,13 @@
 
     var didPreselect = React.useRef(false);
 
+    /* Sprint 11 (Task 6) — the report-side sites list (getSites()) is
+       already fetched below for the one-time preselect; stash it in a
+       ref (not state — it doesn't need to trigger a re-render on its
+       own) so resolveReportSlug() can reuse it for every subsequent
+       lookup, not just the first mount. */
+    var reportSitesRef = React.useRef([]);
+
     /* Public setter — a manual pick always outranks the auto-match hint,
        even if it hasn't run yet. */
     function setOrgSiteId(id) {
@@ -238,11 +245,12 @@
         }
         var orgSites = (orgRes && orgRes.sites) || [];
         setOrgSitesState({ status: 'ok', sites: orgSites });
+        reportSitesRef.current = (reportRes && reportRes.sites) || [];
 
         if (!didPreselect.current) {
           didPreselect.current = true;
           var activeSlug   = window.FS.siteContext ? window.FS.siteContext.get() : null;
-          var reportSites  = (reportRes && reportRes.sites) || [];
+          var reportSites  = reportSitesRef.current;
           var activeReportSite = activeSlug
             ? reportSites.filter(function (s) { return s.site_id === activeSlug; })[0]
             : null;
@@ -259,6 +267,81 @@
       });
       return function () { cancelled = true; };
     }, [depKey, orgSitesRetry]);
+
+    /* Sprint 11 (Task 6) — best-effort ORG SITE UUID -> report-side site
+       slug bridge, needed ONLY for SuggestionReview's evidence deep-link
+       (/timeline?...&site=<slug>). There is no reliable UUID<->slug
+       bridge anywhere in this codebase today — scripts/pages/sites.js
+       (~line 575) documents the same gap as deliberately parked ("don't
+       'fix' this without a folder/UUID bridge like org.js's
+       folderName()"). This reuses the identical name-match heuristic
+       the org-site preselect above already relies on as a
+       best-effort hint, so it inherits the same failure mode: silent
+       null on multi-site orgs whose names don't line up 1:1 between the
+       org and report site lists. Callers must treat a null return as
+       "omit &site=", never as "site is global" — see suggestion-review
+       .js's openEvidence(). */
+    function resolveReportSlug(uuid) {
+      if (!uuid) return null;
+      var orgSite = (orgSitesState.sites || []).filter(function (s) { return s.site_id === uuid; })[0];
+      if (!orgSite) return null;
+      var reportSite = (reportSitesRef.current || [])
+        .filter(function (s) { return s.name === orgSite.name; })[0];
+      return reportSite ? reportSite.site_id : null;
+    }
+
+    /* Sprint 11 (Task 6) — programme suggestion review queue. Lives on
+       ProgrammeProvider (not inside SuggestionReview itself) so the
+       toolbar's pending-count badge and the right-pane review list read
+       one shared fetch instead of duplicating the network call. Only
+       runs when the org backend is actually live — the backend for this
+       feature has no useMocks=false-but-not-live middle state to design
+       for (F4's "Don't ship UI write actions before the matching
+       backend exists" lesson: the block itself is also live-gated at
+       render time in ProgrammeMiddleColumn/ProgrammeRightDetail below). */
+    function orgApiLive() {
+      return !!(window.FS && window.FS.api && !window.FS.api.useMocks && window.FS.api.orgBaseUrl);
+    }
+
+    var refSuggestions = React.useState({ status: 'idle', rows: [] });
+    var suggestionsState    = refSuggestions[0];
+    var setSuggestionsState = refSuggestions[1];
+
+    var refSuggestionsRetry = React.useState(0);
+    var suggestionsRetry    = refSuggestionsRetry[0];
+    var setSuggestionsRetry = refSuggestionsRetry[1];
+
+    React.useEffect(function () {
+      if (!orgApiLive() || !orgSiteId) {
+        setSuggestionsState({ status: 'idle', rows: [] });
+        return undefined;
+      }
+      var cancelled = false;
+      setSuggestionsState(function (prev) { return { status: 'loading', rows: prev.rows }; });
+      window.FS.api.programme.getSuggestions({ site: orgSiteId, state: 'pending' }).then(function (res) {
+        if (cancelled) return;
+        if (res && (res._accessDenied || res._notFound)) {
+          setSuggestionsState({ status: 'error', rows: [] });
+          return;
+        }
+        setSuggestionsState({ status: 'ok', rows: (res && res.suggestions) || [] });
+      }).catch(function () {
+        if (cancelled) return;
+        setSuggestionsState({ status: 'error', rows: [] });
+      });
+      return function () { cancelled = true; };
+    }, [depKey, orgSiteId, suggestionsRetry]);
+
+    /* Optimistic local removal after a successful confirm/reject —
+       avoids a full refetch round trip for both the badge count and the
+       review list. */
+    function removeSuggestion(id) {
+      setSuggestionsState(function (prev) {
+        return Object.assign({}, prev, {
+          rows: (prev.rows || []).filter(function (r) { return r.id !== id; }),
+        });
+      });
+    }
 
     /* ---- Dirty / save state (Sprint F4 — explicit Save, not autosave) */
     var refDirty  = React.useState(false);
@@ -644,6 +727,12 @@
       orgSiteId:          orgSiteId,
       setOrgSiteId:       setOrgSiteId,
       retryOrgSites:      function () { setOrgSitesRetry(function (n) { return n + 1; }); },
+      resolveReportSlug:  resolveReportSlug,
+      /* Sprint 11 (Task 6) — suggestion review queue */
+      orgIsLive:          orgApiLive(),
+      suggestionsState:   suggestionsState,
+      removeSuggestion:   removeSuggestion,
+      retrySuggestions:   function () { setSuggestionsRetry(function (n) { return n + 1; }); },
       dirty:              dirty,
       saving:             saving,
       doSaveProgramme:    doSaveProgramme,
@@ -978,6 +1067,7 @@
        This-Week / Next-Week / Later bucket list from 4.4. */
     var ProgrammeKanbanBoard  = fs.ProgrammeKanbanBoard;
     var Button                = fs.Button;
+    var Badge                 = fs.Badge;
     var Editor                = fs.ProgrammeTaskEditor;
     var ImportModal           = fs.ProgrammeImportModal;
     var onSelect              = props.onSelect || function () {};
@@ -1124,6 +1214,28 @@
         React.createElement('div', { className: 'fs-programme__header-row' },
           React.createElement('h2', { className: 'fs-programme__title' },
             isEmpty ? 'Programme' : p.name),
+          /* Sprint 11 (Task 6) — pending suggestion-review count. Live-gated:
+             the backend only exists for the org-live channel, so this button
+             (and the matching right-pane block in ProgrammeRightDetail) never
+             appear against the mock fixture on the real page — only in
+             components-preview.html's standalone composite demo. */
+          ctx.orgIsLive && ctx.orgSiteId
+            ? React.createElement('button', {
+                type:      'button',
+                className: 'fs-programme__suggestions-badge'
+                  + ((props.selectedItem && props.selectedItem.kind === 'suggestions_panel')
+                      ? ' fs-programme__suggestions-badge--active' : ''),
+                onClick:   function () { onSelect({ kind: 'suggestions_panel', id: 'suggestions_panel' }); },
+                title:     'Review suggested programme updates',
+              },
+                'Suggested updates',
+                Badge ? React.createElement(Badge, {
+                  tone:    ctx.suggestionsState.rows.length ? 'info' : 'neutral',
+                  variant: ctx.suggestionsState.rows.length ? 'solid' : 'subtle',
+                  size:    'sm', pill: true,
+                }, String(ctx.suggestionsState.rows.length)) : null,
+              )
+            : null,
           renderSitePicker(ctx),
         ),
         !isEmpty
@@ -1313,6 +1425,7 @@
     var Button   = fs.Button;
     var IconBtn  = fs.IconButton;
     var Editor   = fs.ProgrammeTaskEditor;
+    var SuggestionReview = fs.SuggestionReview;
 
     var ctx = React.useContext(ProgrammeContext);
     var sel = props.selectedItem;
@@ -1399,6 +1512,36 @@
 
       return function () { cancelled = true; };
     }, [sel && sel.task && sel.task.task_id]);
+
+    /* Sprint 11 (Task 6) — suggestion review queue. Opened via the
+       "Suggested updates (n)" button in ProgrammeMiddleColumn's header
+       (onSelect({ kind: 'suggestions_panel' })), sharing the same
+       slide-in drawer a selected task uses. Project-scoped, not
+       task-scoped — reads ctx.suggestionsState (fetched once by
+       ProgrammeProvider, shared with the header's count badge). */
+    if (sel && sel.kind === 'suggestions_panel') {
+      return React.createElement('div', { className: 'fs-programme-detail' },
+        React.createElement('div', { className: 'fs-programme-detail__header' },
+          React.createElement('div', { className: 'fs-programme-detail__header-main' },
+            React.createElement('h2', { className: 'fs-programme-detail__title' }, 'Suggested updates'),
+          ),
+          IconBtn ? React.createElement(IconBtn, {
+            icon: 'x', ariaLabel: 'Close detail', size: 'sm',
+            onClick: function () { if (props.onClose) props.onClose(); },
+          }) : null,
+        ),
+        ctx && ctx.suggestionsState && ctx.suggestionsState.status === 'error'
+          ? React.createElement('div', { className: 'fs-programme-detail__empty' },
+              'Could not load suggested updates.')
+          : SuggestionReview
+          ? React.createElement(SuggestionReview, {
+              suggestions: (ctx && ctx.suggestionsState && ctx.suggestionsState.rows) || [],
+              siteSlug:    ctx && ctx.resolveReportSlug ? ctx.resolveReportSlug(ctx.orgSiteId) : null,
+              onResolved:  ctx && ctx.removeSuggestion,
+            })
+          : null,
+      );
+    }
 
     if (!sel || sel.kind !== 'programme_task') {
       return React.createElement('div', { className: 'fs-programme-detail__placeholder' },
