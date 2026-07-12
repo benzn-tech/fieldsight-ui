@@ -418,9 +418,29 @@
          the result is per-project-tagged and renderMaybeGrouped groups
          it exactly like the "today has data" multi-project case.
 
-         Worst case API calls: N folders × getDates (pooled, limit 8)
-         + up to N folders × getTimeline (pooled, limit 8) — bounded
-         concurrency the same way the primary fan-out already is.
+         feat/today-fallback-with-todos — "latest report" alone was too
+         naive: a project's most-recent report is often a content-less
+         radio-check (no action items), so the banner said "showing the
+         latest from each project" over an empty task list while an
+         OLDER report for that same project had real todos. Per folder,
+         we now walk that folder's hasReport dates NEWEST → OLDEST,
+         fetching getTimeline sequentially (one at a time — never fan
+         out within a folder) and stop at the first report that actually
+         has todos (non-empty urgent/myTasks/teamTasks — activity/onSite
+         don't count as todos). A folder that never turns up a report
+         with todos within MAX_LOOKBACK real reports examined is OMITTED
+         entirely — an "everything's quiet here" project isn't worth a
+         zero-item section.
+
+         Worst case API calls (expected case — every hasReport-flagged
+         date resolves to a real report, which is what hasReport means):
+         N folders × getDates (pooled, limit 8) + up to
+         N folders × MAX_LOOKBACK getTimeline (pooled across folders,
+         limit 8; sequential WITHIN a folder). _notFound/available_users/
+         _accessDenied responses don't consume a MAX_LOOKBACK slot (they
+         aren't reports to judge for todos) — defensively unbounded if a
+         folder's hasReport dates are wrong, but that's a data-integrity
+         bug elsewhere, not an expected path here.
 
          Actions/check-off overlay: SKIPPED here (empty actions map).
          Each folder resolves a DIFFERENT date, so overlaying check-off
@@ -431,6 +451,8 @@
          (chose "pass an empty actions map" per spec, not the merged-
          per-date getActions fan-out). */
       function loadPerProjectLatest() {
+        var MAX_LOOKBACK = 5;
+
         return Promise.all([adminFoldersPromise, siteSlugMapPromise]).then(function (results) {
           if (cancelled) return null;
           var folders     = results[0];
@@ -445,41 +467,72 @@
                 var dmap = (res && res.dates) || {};
                 var reportDays = Object.keys(dmap).filter(function (k) {
                   return dmap[k] && dmap[k].hasReport;
-                }).sort();
-                return { folder: f, latest: reportDays.length ? reportDays[reportDays.length - 1] : null };
+                }).sort().reverse(); /* newest first */
+                return { folder: f, dates: reportDays };
               });
             };
           });
 
           return window.FS.api.pooledAll(dateThunks, 8).then(function (resolved) {
             if (cancelled) return null;
-            var withLatest = (resolved || []).filter(function (x) { return x && x.latest; });
-            if (withLatest.length === 0) {
+            /* Folders with zero hasReport dates make zero getTimeline
+               calls — filtered out before the folderThunks fan-out. */
+            var withDates = (resolved || []).filter(function (x) { return x && x.dates && x.dates.length; });
+            if (withDates.length === 0) {
               return { ok: false, report: {} };
             }
 
-            var reportThunks = withLatest.map(function (x) {
+            /* One thunk per folder; each thunk walks its own dates
+               newest → oldest SEQUENTIALLY (chained .then, never fired
+               in parallel) and resolves to either the first
+               {folder, date, data} with todos, or null if none is found
+               within MAX_LOOKBACK real reports (or the folder runs out
+               of dates first). The per-folder thunks themselves still
+               run pooled (limit 8) across folders — only the walk
+               inside a single folder is sequential. */
+            var folderThunks = withDates.map(function (x) {
               return function () {
-                return window.FS.api.timeline.getTimeline({ date: x.latest, user: x.folder })
-                  .then(function (r) { return { folder: x.folder, date: x.latest, report: r }; });
+                var dates    = x.dates;
+                var idx      = 0;
+                var attempts = 0;
+
+                function tryNext() {
+                  if (idx >= dates.length || attempts >= MAX_LOOKBACK) {
+                    return Promise.resolve(null);
+                  }
+                  var date = dates[idx++];
+                  return window.FS.api.timeline.getTimeline({ date: date, user: x.folder })
+                    .then(function (report) {
+                      if (!report || report._notFound || report.available_users || report._accessDenied) {
+                        /* Not a real report — doesn't consume a
+                           MAX_LOOKBACK slot, try the next date. */
+                        return tryNext();
+                      }
+                      attempts++;
+                      var data = buildTodayFromReport(report, {}, caller, date, siteSlugMap, x.folder);
+                      var hasTodos = (data.urgent && data.urgent.length)
+                        || (data.myTasks && data.myTasks.length)
+                        || (data.teamTasks && data.teamTasks.length);
+                      if (hasTodos) {
+                        return { folder: x.folder, date: date, data: data };
+                      }
+                      return tryNext();
+                    });
+                }
+
+                return tryNext();
               };
             });
 
-            return window.FS.api.pooledAll(reportThunks, 8).then(function (fanned) {
+            return window.FS.api.pooledAll(folderThunks, 8).then(function (fanned) {
               if (cancelled) return null;
-              var valid = (fanned || []).filter(function (x) {
-                return x && x.report && !x.report._notFound
-                  && !x.report.available_users && !x.report._accessDenied;
-              });
+              var valid = (fanned || []).filter(Boolean);
               if (valid.length === 0) {
                 return { ok: false, report: {} };
               }
 
               var entries = valid.map(function (x) {
-                return {
-                  folder: x.folder,
-                  data:   buildTodayFromReport(x.report, {}, caller, x.date, siteSlugMap, x.folder),
-                };
+                return { folder: x.folder, data: x.data };
               });
               var merged = mergeTodayData(entries, folder);
 
@@ -940,7 +993,7 @@
               React.createElement('span', { className: 'fs-today__fallback-label' },
                 'No reports today'),
               React.createElement('span', { className: 'fs-today__fallback-note' },
-                '— showing the latest from each project'),
+                '— showing recent activity from each project'),
             )
           : React.createElement(React.Fragment, null,
               React.createElement('span', { className: 'fs-today__fallback-label' },
