@@ -599,9 +599,12 @@
    target. Uses accent-100 for the pulse — same token the --selected
    state uses, so no new palette work.
    Sprint 6.7.2 — same animation reused by .fs-safety-flag-row--flash
-   for precision spotlight on a single flag inside an open topic. */
+   for precision spotlight on a single flag inside an open topic.
+   A2-2 — same animation reused again by .fs-transcript-list__row--flash
+   for the Ask citation transcript-line deep link (transcript-list.js). */
 .fs-topic-card-wrap > .fs-topic-card--flash,
-.fs-safety-flag-row--flash {
+.fs-safety-flag-row--flash,
+.fs-transcript-list__row--flash {
   animation: fs-topic-card-flash 1800ms ease-out 1;
 }
 @keyframes fs-topic-card-flash {
@@ -614,7 +617,8 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .fs-topic-card-wrap > .fs-topic-card--flash,
-  .fs-safety-flag-row--flash {
+  .fs-safety-flag-row--flash,
+  .fs-transcript-list__row--flash {
     animation: none;
     background: var(--color-accent-100);
   }
@@ -1446,6 +1450,14 @@
   display: flex;
   gap: 10px;
   align-items: flex-start;
+}
+
+/* A2-2 — Ask citation transcript-line deep link. Rounds the corners for
+   the flash pulse only (the row itself carries no background/border
+   normally); animation + reduced-motion override live with the shared
+   fs-topic-card-flash keyframe above (~line 596). */
+.fs-transcript-list__row--flash {
+  border-radius: var(--radius-md);
 }
 
 .fs-transcript-list__chip {

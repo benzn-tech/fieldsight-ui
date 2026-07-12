@@ -67,6 +67,13 @@
               /* Deep-link to the specific topic so the Timeline opens + flashes
                  it (matched by title — see timeline.js). */
               if (c.topic_title) url += '&topicTitle=' + encodeURIComponent(c.topic_title);
+              /* A2-2 — transcript-window citations carry an absolute HH:MM:SS
+                 time_start (backend A2-1); topic citations have it null, so
+                 this only fires for transcript citations. Timeline reads
+                 params.turnTime and, once the cited topic opens, passes it
+                 down to TranscriptList as highlightTime so the exact line
+                 scrolls into view and flashes (transcript-list.js). */
+              if (c.time_start) url += '&turnTime=' + encodeURIComponent(c.time_start);
               /* Cross-project Ask citation → sync the top-bar project selector
                  to the cited report's project (联动 — Timeline reads params.site).
                  site_slug is the selector's identifier (NOT the site UUID). */
