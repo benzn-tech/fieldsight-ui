@@ -551,6 +551,17 @@
       : null;
     if (targetFlagIdx !== null && isNaN(targetFlagIdx)) targetFlagIdx = null;
 
+    /* A2-2 — Ask citation transcript-line deep link. An absolute
+       "HH:MM:SS" time-of-day string (same space as transcript segment
+       .start/.time_label — transcript-list.js), or null. Threaded through
+       the auto-select effect below into selectedItem.turnTime so it only
+       ever reaches the ONE topic being spotlighted (TimelineRightDetail
+       reads sel.turnTime, never the raw route param) — a topic opened by
+       hand never gets a stray flash. */
+    var targetTurnTime = params.turnTime != null && params.turnTime !== ''
+      ? String(params.turnTime)
+      : null;
+
     /* Resolve effective (date, user, site) honouring the three-tier role
        rule (Task 4 — carried over from the Task 3 review):
          • worker                        → forced to self, always (line
@@ -816,7 +827,11 @@
       if (state.status !== 'ok' || !hasTopicTarget) return;
       var report = state.report;
       if (!report || report._notFound || report.available_users) return;
-      var key = date + '|' + (targetTopicId || targetTopicTitle);
+      /* turnTime rides in the dedup key too: two Ask citations into the
+         SAME topic but different transcript moments must each re-fire
+         onSelect (and therefore re-flash at the new line), not get
+         swallowed by the ref-guard from the first click. */
+      var key = date + '|' + (targetTopicId || targetTopicTitle) + '|' + (targetTurnTime || '');
       if (autoSelectKeyRef.current === key) return;
       var topic = (report.topics || []).filter(matchesTopicTarget)[0];
       if (!topic) return;
@@ -830,9 +845,10 @@
           date:      date,
           user:      user,
           user_name: report.user_name,
+          turnTime:  targetTurnTime,
         });
       }
-    }, [state.status, targetTopicId, targetTopicTitle, date]);
+    }, [state.status, targetTopicId, targetTopicTitle, targetTurnTime, date]);
 
     /* Task C — Search's "Ask FieldSight" hand-off (search-palette.js).
        Read-and-clear the sessionStorage prefill exactly once per mount,
@@ -1393,10 +1409,14 @@
       });
     }, [isDaily, sel && sel.date]);
 
-    /* Reset to overview tab whenever a new topic is selected. */
+    /* Reset tab whenever a new topic is selected. A2-2 — when the
+       selection carries a turnTime (Ask citation → transcript-window
+       deep link), land straight on the Transcript tab so the flash is
+       actually visible instead of hiding behind Overview; daily topics
+       only (isMeeting has no transcript tab). */
     React.useEffect(function () {
-      setTab('overview');
-    }, [sel && sel.id]);
+      setTab(isDaily && sel && sel.turnTime ? 'transcript' : 'overview');
+    }, [sel && sel.id, isDaily, sel && sel.turnTime]);
 
     if (!isDaily && !isMeeting) {
       return React.createElement('div', {
@@ -1411,6 +1431,12 @@
 
     var topic = sel.topic;
     var range = parseTimeRange(topic.time_range);
+
+    /* A2-2 — only ever set by the auto-select effect in
+       TimelineMiddleColumn above (never read directly off the route),
+       so it's scoped to exactly the topic that deep-link spotlighted —
+       a topic the user opens by hand carries no turnTime. */
+    var highlightTime = sel.turnTime || null;
 
     var TranscriptList = fs.TranscriptList;
     var AudioPlaylist  = fs.AudioPlaylist;
@@ -1454,7 +1480,8 @@
         }),
         transcript: TranscriptList ? React.createElement(TranscriptList,
           Object.assign({}, mediaProps, {
-            participants: topic.participants || [],
+            participants:  topic.participants || [],
+            highlightTime: highlightTime,
           })) : null,
         audio:      AudioPlaylist  ? React.createElement(AudioPlaylist,  mediaProps) : null,
         video:      VideoPlayer    ? React.createElement(VideoPlayer,    mediaProps) : null,
