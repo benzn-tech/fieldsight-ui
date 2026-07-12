@@ -406,6 +406,101 @@
         });
       }
 
+      /* feat/today-fallback-per-project — multi-project fallback.
+         Reports are sparse and land on a DIFFERENT date per project, so
+         the single global `latest` date from getSpan() almost always
+         belongs to only ONE project — loadFor(latest, true) would
+         silently show just that project's todos with no grouping ever
+         visible. Instead: resolve EACH accessible folder's OWN latest
+         hasReport date (pooled FS.api.dates.getDates per folder), fetch
+         that folder's own-latest report (pooled getTimeline), and merge
+         via the SAME mergeTodayData the primary fan-out path uses — so
+         the result is per-project-tagged and renderMaybeGrouped groups
+         it exactly like the "today has data" multi-project case.
+
+         Worst case API calls: N folders × getDates (pooled, limit 8)
+         + up to N folders × getTimeline (pooled, limit 8) — bounded
+         concurrency the same way the primary fan-out already is.
+
+         Actions/check-off overlay: SKIPPED here (empty actions map).
+         Each folder resolves a DIFFERENT date, so overlaying check-off
+         state correctly would need one getActions() call per distinct
+         resolved date on top of the two fan-outs above; this is a
+         read-only "latest activity per project" view, not today's live
+         checklist, so the simpler-and-correct choice is no overlay
+         (chose "pass an empty actions map" per spec, not the merged-
+         per-date getActions fan-out). */
+      function loadPerProjectLatest() {
+        return Promise.all([adminFoldersPromise, siteSlugMapPromise]).then(function (results) {
+          if (cancelled) return null;
+          var folders     = results[0];
+          var siteSlugMap = results[1];
+
+          var dateThunks = folders.map(function (f) {
+            return function () {
+              return window.FS.api.dates.getDates({
+                months: window.FS.api.window.MONTHS_LOOKBACK,
+                user:   f,
+              }).then(function (res) {
+                var dmap = (res && res.dates) || {};
+                var reportDays = Object.keys(dmap).filter(function (k) {
+                  return dmap[k] && dmap[k].hasReport;
+                }).sort();
+                return { folder: f, latest: reportDays.length ? reportDays[reportDays.length - 1] : null };
+              });
+            };
+          });
+
+          return window.FS.api.pooledAll(dateThunks, 8).then(function (resolved) {
+            if (cancelled) return null;
+            var withLatest = (resolved || []).filter(function (x) { return x && x.latest; });
+            if (withLatest.length === 0) {
+              return { ok: false, report: {} };
+            }
+
+            var reportThunks = withLatest.map(function (x) {
+              return function () {
+                return window.FS.api.timeline.getTimeline({ date: x.latest, user: x.folder })
+                  .then(function (r) { return { folder: x.folder, date: x.latest, report: r }; });
+              };
+            });
+
+            return window.FS.api.pooledAll(reportThunks, 8).then(function (fanned) {
+              if (cancelled) return null;
+              var valid = (fanned || []).filter(function (x) {
+                return x && x.report && !x.report._notFound
+                  && !x.report.available_users && !x.report._accessDenied;
+              });
+              if (valid.length === 0) {
+                return { ok: false, report: {} };
+              }
+
+              var entries = valid.map(function (x) {
+                return {
+                  folder: x.folder,
+                  data:   buildTodayFromReport(x.report, {}, caller, x.date, siteSlugMap, x.folder),
+                };
+              });
+              var merged = mergeTodayData(entries, folder);
+
+              return {
+                ok:               true,
+                data:             merged,
+                actions:          {},
+                /* Mixed folder-dates — no single date to show. The
+                   render layer keys its "LATEST AVAILABLE <date>"
+                   banner off effectiveDate; perProjectLatest below
+                   tells it to swap to the "each project" copy instead. */
+                effectiveDate:    null,
+                isFallback:       true,
+                perProjectLatest: true,
+                today:            today,
+              };
+            });
+          });
+        });
+      }
+
       Promise.all([loadFor(today, false), programmePromise])
         .then(function (results) {
           if (cancelled) return;
@@ -429,6 +524,35 @@
           return window.FS.api.window.getSpan().then(function (span) {
             if (cancelled) return;
             var latest = span && span.latest;
+
+            if (multiProject) {
+              /* Multi-project fallback = per-folder latest (see
+                 loadPerProjectLatest above), NOT loadFor(latest, true)
+                 — the single global `latest` almost always belongs to
+                 only one project. `latest` (possibly null) still
+                 threads through to the empty-state CTA below when NO
+                 folder resolves a report of its own. */
+              return loadPerProjectLatest().then(function (result) {
+                if (cancelled || !result) return;
+                if (result.accessDenied) {
+                  setState({ status: 'access_denied', message: result.message, today: today });
+                  return;
+                }
+                if (result.ok) {
+                  setState(Object.assign({ status: 'ok' }, withProgramme(result, programmeRows)));
+                } else {
+                  setState({
+                    status:         'empty',
+                    report:         result.report,
+                    today:          today,
+                    programmeTasks: programmeRows,
+                    latest:         latest,
+                    folder:         folder,
+                  });
+                }
+              });
+            }
+
             if (!latest || latest === today) {
               /* Empty-state still shows today's programme tasks if any —
                  the programme is not gated on a daily report existing.
@@ -764,9 +888,16 @@
       );
     }
 
-    var data          = state.data;
-    var effectiveDate = state.effectiveDate;
-    var isFallback    = !!state.isFallback;
+    var data              = state.data;
+    var effectiveDate     = state.effectiveDate;
+    var isFallback        = !!state.isFallback;
+    /* feat/today-fallback-per-project — set by loadPerProjectLatest()
+       when today has no report AND the caller is multi-project: each
+       accessible project fanned out to ITS OWN latest report date
+       (mixed dates, so effectiveDate above is null). Swaps the fallback
+       banner copy below; renderMaybeGrouped groups the merged list by
+       project unchanged. */
+    var perProjectLatest  = !!state.perProjectLatest;
 
     /* Part B — group-by-project vs. per-card chip. Computed straight off
        the item lists actually being rendered (not a separately-tracked
@@ -799,14 +930,26 @@
     },
 
       /* Fallback banner — shown when today has no report yet and we're
-         displaying the latest available one instead. */
+         displaying the latest available one instead. perProjectLatest
+         swaps the single-date copy for the "each project" copy, since
+         effectiveDate is null (mixed folder-dates) — same wrapper +
+         label/note classes, no new visual style. */
       isFallback ? React.createElement('div', { className: 'fs-today__fallback-banner' },
-        React.createElement('span', { className: 'fs-today__fallback-label' },
-          'Latest available'),
-        React.createElement('span', { className: 'fs-today__fallback-date' },
-          fmtDate(effectiveDate)),
-        React.createElement('span', { className: 'fs-today__fallback-note' },
-          '· no report yet for today (' + fmtDate(state.today) + ')'),
+        perProjectLatest
+          ? React.createElement(React.Fragment, null,
+              React.createElement('span', { className: 'fs-today__fallback-label' },
+                'No reports today'),
+              React.createElement('span', { className: 'fs-today__fallback-note' },
+                '— showing the latest from each project'),
+            )
+          : React.createElement(React.Fragment, null,
+              React.createElement('span', { className: 'fs-today__fallback-label' },
+                'Latest available'),
+              React.createElement('span', { className: 'fs-today__fallback-date' },
+                fmtDate(effectiveDate)),
+              React.createElement('span', { className: 'fs-today__fallback-note' },
+                '· no report yet for today (' + fmtDate(state.today) + ')'),
+            ),
       ) : null,
 
       /* "View daily report" CTA — full-width banner above the brief.
@@ -814,8 +957,11 @@
          own (post-merge review feedback). Navigates to the canonical
          /timeline view scoped to the brief's (date, user). The
          &from=today flag tells TimelineMiddleColumn to render a
-         "← Back to today" link in its header (Sprint 4.5). */
-      React.createElement('button', {
+         "← Back to today" link in its header (Sprint 4.5). Hidden in
+         perProjectLatest mode — effectiveDate is null there (mixed
+         folder-dates), so there's no single report to deep-link to;
+         each project's own group is reached via its own cards instead. */
+      effectiveDate ? React.createElement('button', {
         type:      'button',
         className: 'fs-today__view-report-cta',
         onClick:   function () {
@@ -830,7 +976,7 @@
           'View daily report'),
         React.createElement('span', { className: 'fs-today__view-report-cta-arrow' },
           '→'),
-      ),
+      ) : null,
 
       /* MORNING BRIEF */
       React.createElement(fs.MorningBriefCard, { brief: data.morningBrief }),
@@ -902,7 +1048,11 @@
                 onSelect:      onSelect,
                 isMine:        true,
                 selected:      selectedId === task.id,
-                checkable:     task.topic_id != null && task.actionIndex != null,
+                /* perProjectLatest has no single effectiveDate (mixed
+                   folder-dates) — toggling would persist against a null
+                   date, so check-off is disabled there; it's a read-only
+                   "latest per project" view, not today's live checklist. */
+                checkable:     task.topic_id != null && task.actionIndex != null && !!effectiveDate,
                 date:          effectiveDate,
                 onCheckedOff:  onCheckedOff,
                 /* Part B — single-project caller gets a subtle project
