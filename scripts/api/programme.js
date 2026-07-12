@@ -36,6 +36,9 @@
        getProgramme(orgSiteId),
        saveProgramme(orgSiteId, doc),
        getProgrammeTasksForRange({ programme_id, from, to, user? }),
+       getSuggestions({ site, state }),           -- Sprint 11 Task 6
+       confirmSuggestion(id, { status?, progress_pct? }),
+       rejectSuggestion(id),
      }
    ========================================================================== */
 
@@ -198,6 +201,75 @@
      Sprint 8.3.3 — Baseline snapshot (localStorage, keyed by programmeId)
      ========================================================================= */
 
+  /* =========================================================================
+     Sprint 11 (Programme<->item feedback, Task 6) — suggestion review queue.
+     Session-sourced (live-item extraction) status/progress deltas awaiting
+     PM/CM confirmation before they land on a programme task. Same org-api
+     channel + ORG SITE UUID `site` param as getProgramme/saveProgramme
+     above (mirrors their exact orgRequest('/programme', { params: { site
+     } }) shape) — NOT the report-side site slug (see module header).
+       GET  /api/org/programme/suggestions?site=<UUID>&state=pending|all
+         -> { suggestions: [row, ...] }
+       POST /api/org/programme/suggestions/{id}/confirm
+         body { status?, progress_pct? } (reviewer overrides; omit both to
+         accept the suggested values)
+         -> { confirmed: true, task_id, applied_status, applied_progress }
+         -> 409 rejects (via _fetch.js request()'s !res.ok throw path) with
+            err.status === 409 and err.body === { error }; callers must
+            catch and read err.body.error, NOT expect a resolved { error }.
+       POST /api/org/programme/suggestions/{id}/reject -> { rejected: true }
+
+     Mock branch reads window.FieldSight.fixtures.programmeSuggestions (an
+     array of rows in the same shape) filtered by site_id + state, mirroring
+     how getProgramme filters its single fixture programme by site_id.
+     ========================================================================= */
+
+  async function getSuggestions(opts) {
+    opts = opts || {};
+    var site  = opts.site;
+    var state = opts.state || 'pending';
+    if (orgLive()) {
+      return window.FS.api.orgRequest('/programme/suggestions', {
+        params: { site: site, state: state },
+      });
+    }
+    await window.FS.api.delay();
+    var rows = (fixtures().programmeSuggestions || []).slice();
+    if (site)          rows = rows.filter(function (r) { return r.site_id === site; });
+    if (state !== 'all') rows = rows.filter(function (r) { return (r.state || 'pending') === state; });
+    return { suggestions: JSON.parse(JSON.stringify(rows)) };
+  }
+
+  /* overrides = { status?, progress_pct? } — reviewer edits from the
+     "Adjust…" inline control. Omit both to accept the row's suggested
+     values as-is. */
+  async function confirmSuggestion(id, overrides) {
+    overrides = overrides || {};
+    if (orgLive()) {
+      return window.FS.api.orgRequest(
+        '/programme/suggestions/' + encodeURIComponent(id) + '/confirm',
+        { method: 'POST', body: overrides });
+    }
+    await window.FS.api.delay();
+    var row = (fixtures().programmeSuggestions || []).filter(function (r) { return r.id === id; })[0];
+    return {
+      confirmed:         true,
+      task_id:            row ? row.task_id : null,
+      applied_status:      overrides.status        != null ? overrides.status        : (row ? row.suggested_status   : null),
+      applied_progress:    overrides.progress_pct   != null ? overrides.progress_pct  : (row ? row.suggested_progress : null),
+    };
+  }
+
+  async function rejectSuggestion(id) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest(
+        '/programme/suggestions/' + encodeURIComponent(id) + '/reject',
+        { method: 'POST' });
+    }
+    await window.FS.api.delay();
+    return { rejected: true };
+  }
+
   function saveBaseline(programmeId, tasks) {
     var key = 'fs.baseline.' + programmeId;
     var snapshot = tasks.map(function (t) {
@@ -234,6 +306,9 @@
     importTasks:                importTasks,
     saveBaseline:               saveBaseline,
     getBaseline:                getBaseline,
+    getSuggestions:             getSuggestions,
+    confirmSuggestion:          confirmSuggestion,
+    rejectSuggestion:           rejectSuggestion,
   };
 
 })();
