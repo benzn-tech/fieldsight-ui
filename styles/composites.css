@@ -66,6 +66,24 @@
   text-align: right;
 }
 
+/* feat/today-by-project — subtle per-card project chip. Shown only when
+   the caller has exactly one project (multi-project instead gets
+   project-headed groups — see .fs-today__project-group* below), so the
+   task-card__meta row never carries both at once. */
+.fs-task-card__site {
+  font-size: 11px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-tertiary);
+  background: var(--surface-panel-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 130px;
+}
+
 /* Today fallback banner — shown when the live "today" has no report
    yet and we're displaying the latest available one instead. (P-06.) */
 .fs-today__fallback-banner {
@@ -142,6 +160,55 @@
 }
 .fs-today__view-report-cta:hover .fs-today__view-report-cta-arrow {
   transform: translateX(2px);
+}
+
+
+/* feat/today-by-project — project-headed groups. Shown instead of a flat
+   list when the caller has MULTIPLE projects with items in a section
+   (Urgent / Tasks today / Team); a single-project caller keeps the flat
+   list and gets a per-card chip instead (.fs-task-card__site above).
+   Mirrors the date-grouping template in .fs-safety__group* — same
+   shape, grouped by project instead of date. Static (no animation), so
+   no prefers-reduced-motion override is needed here. */
+.fs-today__project-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.fs-today__project-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fs-today__project-group-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 4px;
+}
+.fs-today__project-group-label {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fs-today__project-group-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.fs-today__project-group-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 
