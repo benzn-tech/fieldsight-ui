@@ -68,7 +68,7 @@
 
   /* ---------- Helper: derive Today from a backend report --------------- */
 
-  function buildTodayFromReport(report, actions, caller, date) {
+  function buildTodayFromReport(report, actions, caller, date, siteSlugMap, idPrefix) {
     var sitesFx = (window.FieldSight && window.FieldSight.fixtures && window.FieldSight.fixtures.sites) || { users: [] };
     var match = (sitesFx.users || []).filter(function (u) { return u.name === (caller && caller.name); })[0];
     var primarySite = match ? match.primary_site : 'sb1108-ellesmere';
@@ -78,7 +78,168 @@
       primarySite:     primarySite,
       actionState:     actions || {},
       date:            date,
+      siteSlugByName:  siteSlugMap || {},
+      idPrefix:        idPrefix || null,
     });
+  }
+
+  /* ---------- Cross-project fan-out helpers (feat/today-by-project) ----
+     Today has no site selector by design — it's meant to be "everything
+     due today across ALL your projects". An admin/gm caller's own folder
+     has no single report of its own (getTimeline(date, user=null) for
+     admin returns the `available_users` disambiguation envelope, per
+     CLAUDE.md "Admin permission flow" — never data), so the single-report
+     fast path silently showed nothing (or a stray single report) for
+     that caller. isMultiProjectCaller() gates the real fan-out below.
+
+     adminUserFolders() / isMultiProjectCaller() intentionally mirror the
+     PRIVATE (non-exported) helpers of the same name in
+     tasks-aggregator.js / compliance-aggregator.js rather than importing
+     them — that's the existing convention in this codebase (each
+     aggregator keeps its own copy; there's no shared export to reuse). */
+  function isMultiProjectCaller(caller) {
+    caller = caller || {};
+    return caller.role === 'admin' || caller.role === 'gm' || !!caller.isAdmin;
+  }
+
+  function deriveFolderFromUser(u) {
+    return u.folder_name || (u.name ? u.name.replace(/ /g, '_') : '');
+  }
+
+  /* Sourced from GET /api/users (report identity) — live = pass-through
+     of /api/users, mock = fixtures.sites.users. Falls back to a direct
+     fixtures read on any /api/users error. Copy of
+     tasks-aggregator.js:adminUserFolders() / compliance-aggregator.js:
+     adminUserFolders() — same source, same fallback, intentional parity. */
+  async function adminUserFolders() {
+    try {
+      var usersRes = await window.FS.api.sites.getUsers();
+      return ((usersRes && usersRes.users) || []).map(deriveFolderFromUser).filter(Boolean);
+    } catch (e) {
+      return ((window.FieldSight && window.FieldSight.fixtures
+          && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [])
+          .map(deriveFolderFromUser).filter(Boolean);
+    }
+  }
+
+  /* report.site is a DISPLAY NAME only ('SB1108 Ellesmere College') — no
+     slug travels with a report. FS.api.sites.getSites() (report-side site
+     list, BACKEND-CONTEXT §4.2 GET /api/sites) is the source of truth for
+     name → site_id; built once per load, reused across every fanned-out
+     report. Defensive: an error collapses to an empty map, so every item
+     just carries site_slug: null (never blocks the page). */
+  async function getSiteSlugMap() {
+    try {
+      var res = await window.FS.api.sites.getSites();
+      var map = {};
+      ((res && res.sites) || []).forEach(function (s) {
+        if (s && s.name) map[s.name] = s.site_id;
+      });
+      return map;
+    } catch (e) {
+      return {};
+    }
+  }
+
+  /* Merge N adapt()-shaped envelopes (one per fanned-out report) into a
+     single Today data object. Concatenates the list fields (every item
+     already carries its own site_name/site_slug from today-adapter.js),
+     unions onSite by device id, and picks the caller's OWN report's
+     morningBrief when their folder is among the fanned-out set (falls
+     back to the first report's brief otherwise — a merged view has no
+     single "my brief" by construction). */
+  function mergeTodayData(entries, ownFolder) {
+    var urgent = [], myTasks = [], teamTasks = [], activity = [];
+    var onSiteById = {};
+    var brief = null;
+    var newestDate = null;
+
+    entries.forEach(function (e) {
+      var d = e.data;
+      if (!d) return;
+      urgent    = urgent.concat(d.urgent || []);
+      myTasks   = myTasks.concat(d.myTasks || []);
+      teamTasks = teamTasks.concat(d.teamTasks || []);
+      activity  = activity.concat(d.activity || []);
+      (d.onSite || []).forEach(function (p) { onSiteById[p.id] = p; });
+      if (!newestDate) newestDate = d.date;
+      if (!brief || e.folder === ownFolder) brief = d.morningBrief;
+    });
+
+    return {
+      date:         newestDate,
+      site:         null,       /* merged view has no single site */
+      site_slug:    null,
+      morningBrief: brief || { generatedAt: '—', bullets: [] },
+      urgent:       urgent,
+      myTasks:      myTasks,
+      teamTasks:    teamTasks,
+      activity:     activity,
+      onSite:       Object.keys(onSiteById).map(function (k) { return onSiteById[k]; }),
+    };
+  }
+
+  /* Distinct {slug, name} projects represented across the rendered item
+     lists — the render layer's single source of truth for "how many
+     projects am I looking at" (rather than trusting a separately-tracked
+     counter that could drift from what's actually on screen). Items
+     without a resolvable site are ignored for this count. */
+  function distinctProjects(data) {
+    var seen = {};
+    var list = [];
+    var pools = [data.urgent, data.myTasks, data.teamTasks, data.programmeTasks];
+    pools.forEach(function (pool) {
+      (pool || []).forEach(function (item) {
+        var slug = item.site_slug || item.site_name;
+        if (!slug || seen[slug]) return;
+        seen[slug] = true;
+        list.push({ slug: slug, name: item.site_name || slug });
+      });
+    });
+    return list;
+  }
+
+  /* Groups items by project (site_slug, falling back to site_name),
+     preserving first-seen order. Mirrors the date-grouping template in
+     safety.js (~344-393) — same shape, grouped by project instead of
+     date. */
+  function groupByProject(items) {
+    var order = [];
+    var map = {};
+    (items || []).forEach(function (item) {
+      var slug = item.site_slug || item.site_name || '__unknown__';
+      if (!map[slug]) {
+        map[slug] = { slug: slug, name: item.site_name || 'Other', rows: [] };
+        order.push(slug);
+      }
+      map[slug].rows.push(item);
+    });
+    return order.map(function (slug) { return map[slug]; });
+  }
+
+  /* Renders `items` either flat (single-project — unchanged layout) or
+     grouped into project-headed sections (multi-project). `renderItem`
+     is the existing per-row renderer each call site already has. */
+  function renderMaybeGrouped(items, isMultiProject, renderItem) {
+    if (!isMultiProject) {
+      return React.createElement('div', {
+        style: { display: 'flex', flexDirection: 'column', gap: '6px' },
+      }, (items || []).map(renderItem));
+    }
+    var groups = groupByProject(items);
+    return React.createElement('div', { className: 'fs-today__project-groups' },
+      groups.map(function (g) {
+        return React.createElement('div', { key: g.slug, className: 'fs-today__project-group' },
+          React.createElement('div', { className: 'fs-today__project-group-header' },
+            React.createElement('span', { className: 'fs-today__project-group-label' }, g.name),
+            React.createElement('span', { className: 'fs-today__project-group-count' }, g.rows.length),
+          ),
+          React.createElement('div', { className: 'fs-today__project-group-rows' },
+            g.rows.map(renderItem)
+          ),
+        );
+      })
+    );
   }
 
   /* ---------- TodayContext (Sprint 3, P-07) ---------------------------- */
@@ -128,32 +289,108 @@
       ).then(function (r) { return (r && r.rows) || []; })
        .catch(function () { return []; });
 
+      var multiProject = isMultiProjectCaller(caller);
+
+      /* Single-project fast path — UNCHANGED behaviour (still exactly
+         one getTimeline call), just also stamps site_name/site_slug onto
+         every derived item so TaskCard can show its project chip (Part
+         B). siteSlugMapPromise is fetched either way but is cheap (one
+         extra /api/sites call) and shared across a fallback-date retry
+         via the closure below. */
+      var siteSlugMapPromise   = getSiteSlugMap();
+      /* Hoisted alongside siteSlugMapPromise — the folder list doesn't
+         depend on `date`, so fetch it once per effect run and share it
+         across both the primary-date and fallback-date loadFor() calls
+         below, instead of re-fetching on the fallback retry. */
+      var adminFoldersPromise = multiProject ? adminUserFolders() : Promise.resolve([]);
+
       function loadFor(date, isFallback) {
+        if (!multiProject) {
+          return Promise.all([
+            window.FS.api.timeline.getTimeline({ date: date, user: folder }),
+            window.FS.api.actions.getActions(date),
+            siteSlugMapPromise,
+          ]).then(function (results) {
+            if (cancelled) return null;
+            var report     = results[0];
+            var actions    = results[1].actions || {};
+            var siteSlugMap = results[2];
+            /* P-12: 403 from the timeline endpoint surfaces as a
+               page-level access-denied state. Worker / site-manager
+               querying another user's report hits this. */
+            if (report && report._accessDenied) {
+              return { accessDenied: true, message: report.error };
+            }
+            if (!report || report._notFound || report.available_users) {
+              return { ok: false, report: report };
+            }
+            var data = buildTodayFromReport(report, actions, caller, date, siteSlugMap);
+            return {
+              ok:            true,
+              data:          data,
+              actions:       actions,
+              effectiveDate: date,
+              isFallback:    !!isFallback,
+              today:         today,
+            };
+          });
+        }
+
+        /* Admin / multi-project fan-out — CLAUDE.md "Admin permission
+           flow": getTimeline(date, user=null) for admin returns the
+           available_users disambiguation envelope, NOT data, so we
+           resolve the user list ourselves (adminUserFolders(), same
+           source as tasks-aggregator.js / compliance-aggregator.js) and
+           fan out (date × every known user), pooled via FS.api.pooledAll
+           — same bounded-concurrency helper the other aggregators use so
+           an org with many users doesn't trip API Gateway throttling. A
+           failing folder's fetch → null → filtered (partial data beats a
+           dead page), matching the pooledAll contract everywhere else. */
         return Promise.all([
-          window.FS.api.timeline.getTimeline({ date: date, user: folder }),
+          adminFoldersPromise,
+          siteSlugMapPromise,
           window.FS.api.actions.getActions(date),
         ]).then(function (results) {
           if (cancelled) return null;
-          var report  = results[0];
-          var actions = results[1].actions || {};
-          /* P-12: 403 from the timeline endpoint surfaces as a
-             page-level access-denied state. Worker / site-manager
-             querying another user's report hits this. */
-          if (report && report._accessDenied) {
-            return { accessDenied: true, message: report.error };
+          var folders     = results[0];
+          var siteSlugMap = results[1];
+          var actionsRes  = results[2];
+          if (actionsRes && actionsRes._accessDenied) {
+            return { accessDenied: true, message: actionsRes.error };
           }
-          if (!report || report._notFound || report.available_users) {
-            return { ok: false, report: report };
-          }
-          var data = buildTodayFromReport(report, actions, caller, date);
-          return {
-            ok:            true,
-            data:          data,
-            actions:       actions,
-            effectiveDate: date,
-            isFallback:    !!isFallback,
-            today:         today,
-          };
+          var actions = actionsRes.actions || {};
+
+          var thunks = folders.map(function (f) {
+            return function () {
+              return window.FS.api.timeline.getTimeline({ date: date, user: f })
+                .then(function (r) { return { folder: f, report: r }; });
+            };
+          });
+          return window.FS.api.pooledAll(thunks, 8).then(function (fanned) {
+            if (cancelled) return null;
+            var valid = fanned.filter(function (x) {
+              return x && x.report && !x.report._notFound
+                && !x.report.available_users && !x.report._accessDenied;
+            });
+            if (valid.length === 0) {
+              return { ok: false, report: {} };
+            }
+            var entries = valid.map(function (x) {
+              return {
+                folder: x.folder,
+                data:   buildTodayFromReport(x.report, actions, caller, date, siteSlugMap, x.folder),
+              };
+            });
+            var merged = mergeTodayData(entries, folder);
+            return {
+              ok:            true,
+              data:          merged,
+              actions:       actions,
+              effectiveDate: date,
+              isFallback:    !!isFallback,
+              today:         today,
+            };
+          });
         });
       }
 
@@ -531,6 +768,15 @@
     var effectiveDate = state.effectiveDate;
     var isFallback    = !!state.isFallback;
 
+    /* Part B — group-by-project vs. per-card chip. Computed straight off
+       the item lists actually being rendered (not a separately-tracked
+       counter) so it can never drift from what's on screen. Multiple
+       projects → project-headed groups per section; exactly one (or
+       zero — nothing resolvable) → flat lists with a chip on each
+       TaskCard instead (see renderMaybeGrouped / TaskCard `site` prop). */
+    var projects       = distinctProjects(data);
+    var isMultiProject = projects.length > 1;
+
     /* When the check-off anim finishes, drop the task locally. The
        optimistic toggle inside TaskCard already persisted via
        FS.api.actions.toggleAction. */
@@ -598,18 +844,14 @@
       data.urgent && data.urgent.length > 0
         ? React.createElement(React.Fragment, null,
             React.createElement(SectionLabel, { color: 'var(--color-danger-700)' }, 'Urgent now'),
-            React.createElement('div', {
-              style: { display: 'flex', flexDirection: 'column', gap: '6px' },
-            },
-              data.urgent.map(function (item) {
-                return React.createElement(fs.UrgentCard, {
-                  key:      item.id,
-                  item:     item,
-                  onSelect: onSelect,
-                  selected: selectedId === item.id,
-                });
-              })
-            ),
+            renderMaybeGrouped(data.urgent, isMultiProject, function (item) {
+              return React.createElement(fs.UrgentCard, {
+                key:      item.id,
+                item:     item,
+                onSelect: onSelect,
+                selected: selectedId === item.id,
+              });
+            }),
           )
         : null,
 
@@ -627,23 +869,24 @@
         ? React.createElement(React.Fragment, null,
             React.createElement(SubsectionLabel, null,
               'From your programme · ' + data.programmeTasks.length),
-            React.createElement('div', {
-              style: { display: 'flex', flexDirection: 'column', gap: '6px' },
-            },
-              data.programmeTasks.map(function (row) {
-                return React.createElement(fs.ProgrammeTaskCard, {
-                  key:      row.task_id,
-                  row:      row,
-                  onSelect: function () {
-                    /* 4.10.6 — navigate to /programme with deep-link
-                       so the right drawer opens on the same task. */
-                    window.FS.Router.navigate(
-                      '/programme?task=' + encodeURIComponent(row.task_id)
-                        + '&from=today');
-                  },
-                });
-              })
-            ),
+            renderMaybeGrouped(data.programmeTasks, isMultiProject, function (row) {
+              return React.createElement(fs.ProgrammeTaskCard, {
+                /* Sprint T-004 style task_id is only unique WITHIN one
+                   site's programme — the today-programme-adapter.js
+                   fan-out (feat/today-by-project) can now return the
+                   same task_id from two different sites, so the React
+                   key must include site_slug too. */
+                key:      (row.site_slug || '') + '_' + row.task_id,
+                row:      row,
+                onSelect: function () {
+                  /* 4.10.6 — navigate to /programme with deep-link
+                     so the right drawer opens on the same task. */
+                  window.FS.Router.navigate(
+                    '/programme?task=' + encodeURIComponent(row.task_id)
+                      + '&from=today');
+                },
+              });
+            }),
           )
         : null,
 
@@ -652,41 +895,39 @@
         ? React.createElement(React.Fragment, null,
             React.createElement(SubsectionLabel, null,
               'From recent reports · ' + data.myTasks.length),
-            React.createElement('div', {
-              style: { display: 'flex', flexDirection: 'column', gap: '6px' },
-            },
-              data.myTasks.map(function (task) {
-                return React.createElement(fs.TaskCard, {
-                  key:           task.id,
-                  task:          task,
-                  onSelect:      onSelect,
-                  isMine:        true,
-                  selected:      selectedId === task.id,
-                  checkable:     task.topic_id != null && task.actionIndex != null,
-                  date:          effectiveDate,
-                  onCheckedOff:  onCheckedOff,
-                });
-              })
-            ),
+            renderMaybeGrouped(data.myTasks, isMultiProject, function (task) {
+              return React.createElement(fs.TaskCard, {
+                key:           task.id,
+                task:          task,
+                onSelect:      onSelect,
+                isMine:        true,
+                selected:      selectedId === task.id,
+                checkable:     task.topic_id != null && task.actionIndex != null,
+                date:          effectiveDate,
+                onCheckedOff:  onCheckedOff,
+                /* Part B — single-project caller gets a subtle project
+                   chip per card instead of group headers (reuses the
+                   "SiteName · date" label pattern from search-palette.js
+                   / ask-chat.js, here just the site half). */
+                site:          !isMultiProject ? task.site_name : null,
+              });
+            }),
           )
         : null,
 
       data.teamTasks && data.teamTasks.length > 0 ? React.createElement(React.Fragment, null,
         React.createElement(SubsectionLabel, null,
           'Team · ' + data.teamTasks.length),
-        React.createElement('div', {
-          style: { display: 'flex', flexDirection: 'column', gap: '6px' },
-        },
-          data.teamTasks.map(function (task) {
-            return React.createElement(fs.TaskCard, {
-              key:      task.id,
-              task:     task,
-              onSelect: onSelect,
-              isMine:   false,
-              selected: selectedId === task.id,
-            });
-          })
-        ),
+        renderMaybeGrouped(data.teamTasks, isMultiProject, function (task) {
+          return React.createElement(fs.TaskCard, {
+            key:      task.id,
+            task:     task,
+            onSelect: onSelect,
+            isMine:   false,
+            selected: selectedId === task.id,
+            site:     !isMultiProject ? task.site_name : null,
+          });
+        }),
       ) : null,
 
       /* (Sprint 3, P-02) Recent activity removed — the same topics are

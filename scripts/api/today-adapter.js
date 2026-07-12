@@ -22,6 +22,27 @@
    Pure function — no fetches; takes the report + a small caller context
    and returns a TODAY-shaped object the existing composites consume.
 
+   feat/today-by-project — cross-project fan-out support (still a pure
+   function; today.js does the fetching + fan-out, this file only adds
+   the per-report stamping):
+     ctx.siteSlugByName  { 'SB1108 Ellesmere College': 'sb1108-ellesmere', ... }
+                         Optional name→slug map (built once by today.js via
+                         FS.api.sites.getSites(), the report-side site list —
+                         report.site is ONLY a display name, never a slug,
+                         so this is how the slug gets derived). Every
+                         derived item is stamped with `site_name` (=
+                         report.site, verbatim) and `site_slug` (looked up
+                         via this map; null on a lookup miss — callers must
+                         treat null as "no slug", never drop the item).
+     ctx.idPrefix        Optional string. When today.js fans a date out
+                         across MULTIPLE users' reports (admin/multi-project
+                         view), topic_id is only unique WITHIN one report —
+                         two different users can both have topic_id 0 on the
+                         same date. idPrefix (the report owner's folder
+                         name) namespaces every derived `id` so merged lists
+                         don't collide. Omitted on the single-report fast
+                         path, so existing ids are byte-identical to before.
+
    Exported to window.FS.api.todayAdapter.adapt(report, ctx)
    ========================================================================== */
 
@@ -92,11 +113,14 @@
     var primarySite     = ctx.primarySite     || 'sb1108-ellesmere';
     var actionState     = ctx.actionState     || {}; /* keyed by `${topic_id}_${index}` */
     var nowMinutes      = ctx.nowMinutes      != null ? ctx.nowMinutes : (16 * 60); /* 16:00 NZDT */
+    var siteSlugByName  = ctx.siteSlugByName  || {};
+    var idPrefix        = ctx.idPrefix ? (ctx.idPrefix + '_') : '';
 
     if (!report || report._notFound) {
       return {
         date:   ctx.date || null,
         site:   '',
+        site_slug: null,
         morningBrief: { generatedAt: '—', bullets: [] },
         urgent:  [],
         myTasks: [],
@@ -105,6 +129,21 @@
         onSite:   [],
       };
     }
+
+    /* site_name is report.site verbatim (the ONLY site field a report
+       carries — see the comment above, no slug exists on the report
+       itself). site_slug is looked up via ctx.siteSlugByName; null on a
+       miss (unmapped site / map not supplied) rather than throwing —
+       callers must treat null as "unknown project", not drop the item. */
+    var siteName = report.site || '';
+    var siteSlug = (siteName && siteSlugByName[siteName]) || null;
+    /* Per-report "on site now" should reflect the SITE THE REPORT CAME
+       FROM, not necessarily the viewing caller's own primary_site — that
+       distinction only collapses to the same thing on the single-report
+       fast path (caller === report owner). Falls back to ctx.primarySite
+       when the report's site can't be resolved to a slug, preserving the
+       exact previous behaviour for that path. */
+    var onSiteLookupSlug = siteSlug || primarySite;
 
     /* ---- morningBrief: executive_summary is array of strings (v3.0+) --
        date + userFolder are passed through so MorningBriefCard's
@@ -133,7 +172,7 @@
       if (t.category === 'safety' || hasSafetyFlags) {
         var firstFlag = hasSafetyFlags ? t.safety_flags[0] : null;
         urgent.push({
-          id:          'topic_' + t.topic_id,
+          id:          idPrefix + 'topic_' + t.topic_id,
           title:       t.topic_title,
           badgeLabel:  hasSafetyFlags ? (firstFlag.risk_level || 'medium') + ' risk' : 'Safety topic',
           badgeTone:   hasSafetyFlags && firstFlag.risk_level === 'high' ? 'danger' : 'warning',
@@ -142,13 +181,15 @@
           riskLevel:   firstFlag ? (firstFlag.risk_level || 'medium') : null,
           recommendedAction: firstFlag ? firstFlag.recommended_action : null,
           kind:        'urgent',
+          site_name:   siteName,
+          site_slug:   siteSlug,
         });
       }
     });
     (report.safety_observations || []).forEach(function (obs, i) {
       if (obs.risk_level !== 'high') return;
       urgent.push({
-        id:                'safety_obs_' + i,
+        id:                idPrefix + 'safety_obs_' + i,
         title:             obs.observation,
         badgeLabel:        'High risk',
         badgeTone:         'danger',
@@ -161,6 +202,8 @@
         recommendedAction: obs.recommended_action || null,
         location:          obs.location || null,
         kind:              'urgent',
+        site_name:         siteName,
+        site_slug:         siteSlug,
       });
     });
 
@@ -173,7 +216,7 @@
         var checked = !!(actionState[key] && actionState[key].checked);
         var status = deriveStatus(checked);
         var task = {
-          id:          'action_' + key,
+          id:          idPrefix + 'action_' + key,
           topic_id:    t.topic_id,
           actionIndex: idx,
           title:       a.action,
@@ -183,6 +226,8 @@
           priority:    priorityLabel(a.priority),
           dueTime:     dueTimeFromDeadline(a.deadline),
           kind:        'task',
+          site_name:   siteName,
+          site_slug:   siteSlug,
         };
         if (currentUserName && task.assignee === currentUserName) {
           myTasks.push(task);
@@ -203,21 +248,25 @@
     var activity = topicsSorted.map(function (t) {
       var speaker = (t.participants && t.participants[0]) || report.user_name || 'Site';
       return {
-        id:        'activity_' + t.topic_id,
+        id:        idPrefix + 'activity_' + t.topic_id,
         speaker:   speaker,
         snippet:   t.summary || t.topic_title,
         timeAgo:   relativeAgo(topicStartMinutes(t), nowMinutes),
         channel:   CATEGORY_CHANNEL[t.category] || 'General',
         topic_id:  t.topic_id,
         kind:      'activity',
+        site_name: siteName,
+        site_slug: siteSlug,
       };
     });
 
-    /* ---- onSite: pull users on the current user's primary_site -------- */
+    /* ---- onSite: pull users on the report's own site (falls back to
+       ctx.primarySite on a slug-lookup miss — see onSiteLookupSlug
+       above) -------------------------------------------------------- */
     var onSite = [];
     var sitesFx = (window.FieldSight && window.FieldSight.fixtures && window.FieldSight.fixtures.sites) || { users: [] };
     sitesFx.users.forEach(function (u) {
-      if ((u.sites || []).indexOf(primarySite) !== -1) {
+      if ((u.sites || []).indexOf(onSiteLookupSlug) !== -1) {
         onSite.push({ id: u.device_id, name: u.name });
       }
     });
@@ -225,6 +274,7 @@
     return {
       date:        report.report_date,
       site:        report.site,
+      site_slug:   siteSlug,
       morningBrief: morningBrief,
       urgent:      urgent,
       myTasks:     myTasks,

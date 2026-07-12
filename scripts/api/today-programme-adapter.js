@@ -22,10 +22,23 @@
    the ORG SITE UUID, not a programme_id (see api/programme.js header).
    Today has no active-site concept by design (site-context.js exempts
    it), so this adapter can't resolve "the" site the way the Programme
-   page's picker does. It falls back to the first org site returned by
-   org.getOrgSites() — correct for the current single-site deployment;
-   a caller with programme tasks across multiple sites would need a real
-   fan-out here, which is out of scope for this batch.
+   page's picker does. It USED TO fall back to the first org site
+   returned by org.getOrgSites() — correct only for the single-site
+   deployment this shipped against.
+
+   feat/today-by-project — real fan-out. Every org site returned by
+   org.getOrgSites() is now queried (pooled via FS.api.pooledAll, same
+   bounded-concurrency helper the admin cross-products in
+   tasks-aggregator.js / compliance-aggregator.js use), not just
+   sites[0]. The existing `folder` assignee filter is unchanged and does
+   the real access-scoping per BACKEND-CONTEXT §3: when a folder is
+   resolved (normal caller), only tasks that list them as an assignee on
+   THAT site survive; when folder is null (admin without an explicit
+   user), every task on every site is returned, matching the "fall
+   through and return everything they can see" comment below. Each
+   surviving row is stamped with `site_name` / `site_slug` from the org
+   site it came from. A single site's fetch failing is swallowed
+   (pooledAll → null → filtered) rather than failing the whole page.
 
    Returned shape:
      {
@@ -45,6 +58,9 @@
            day_total:     15,
            assignees:     ['Jarley_Trainor', 'Ben_Lin', 'David_Barillaro'],
            linked_action_items: [{ date, topic_id, action_index }, ...],
+           site_name:     'SB1108 Ellesmere College',
+           site_slug:     'sb1108-ellesmere',   // org site_id; null on a
+                                                 // malformed site record
          },
          ...
        ],
@@ -80,48 +96,64 @@
     if (!sitesRes || sitesRes._accessDenied || !(sitesRes.sites || []).length) {
       return { rows: [] };
     }
-    var orgSiteId = sitesRes.sites[0].site_id;
+    var orgSites = sitesRes.sites;
 
-    var res = await window.FS.api.programme.getProgramme(orgSiteId);
-    if (!res || res._notFound || res._accessDenied || !res.programme) {
-      return { rows: [] };
-    }
-    var doc    = res.programme;
-    var leaves = doc.leaves || [];
+    /* Pooled, not Promise.all — mirrors the admin cross-product pooling
+       in tasks-aggregator.js / compliance-aggregator.js. A failed site's
+       getProgramme() maps to null via pooledAll and is filtered out
+       below rather than failing the whole Today page. */
+    var siteThunks = orgSites.map(function (site) {
+      return function () {
+        return window.FS.api.programme.getProgramme(site.site_id)
+          .then(function (res) { return { site: site, res: res }; });
+      };
+    });
+    var perSite = (await window.FS.api.pooledAll(siteThunks, 8)).filter(Boolean);
 
     var sched = window.FieldSight && window.FieldSight.programmeSchedule;
-    var critical = new Set(sched ? sched.computeCriticalPath(leaves, doc.start_date) : []);
     var rows = [];
 
-    leaves.forEach(function (t) {
-      /* Today must fall within the task's date range. */
-      if (today < t.start || today > t.end) return;
-      /* Caller must be in the assignee list. (When folder is null —
-         e.g. admin without an explicit folder — fall through and
-         return everything they can see.) */
-      if (folder && (t.assignees || []).indexOf(folder) === -1) return;
+    perSite.forEach(function (entry) {
+      var site = entry.site;
+      var res  = entry.res;
+      if (!res || res._notFound || res._accessDenied || !res.programme) return;
 
-      var dayIndex = diffDays(t.start, today) + 1;          /* 1-based */
-      var dayTotal = (t.duration_days != null)
-        ? t.duration_days
-        : (diffDays(t.start, t.end) + 1);
+      var doc    = res.programme;
+      var leaves = doc.leaves || [];
+      var critical = new Set(sched ? sched.computeCriticalPath(leaves, doc.start_date) : []);
 
-      rows.push({
-        source:               'programme',
-        task_id:              t.task_id,
-        wbs:                  t.wbs,
-        name:                 t.name,
-        start:                t.start,
-        end:                  t.end,
-        duration_days:        dayTotal,
-        progress_pct:         t.progress_pct || 0,
-        status:               t.status,
-        critical:             critical.has(t.task_id),
-        day_index:            dayIndex,
-        day_total:            dayTotal,
-        assignees:            t.assignees || [],
-        linked_action_items:  t.linked_action_items || [],
-        tags:                 t.tags || [],
+      leaves.forEach(function (t) {
+        /* Today must fall within the task's date range. */
+        if (today < t.start || today > t.end) return;
+        /* Caller must be in the assignee list. (When folder is null —
+           e.g. admin without an explicit folder — fall through and
+           return everything they can see.) */
+        if (folder && (t.assignees || []).indexOf(folder) === -1) return;
+
+        var dayIndex = diffDays(t.start, today) + 1;          /* 1-based */
+        var dayTotal = (t.duration_days != null)
+          ? t.duration_days
+          : (diffDays(t.start, t.end) + 1);
+
+        rows.push({
+          source:               'programme',
+          task_id:              t.task_id,
+          wbs:                  t.wbs,
+          name:                 t.name,
+          start:                t.start,
+          end:                  t.end,
+          duration_days:        dayTotal,
+          progress_pct:         t.progress_pct || 0,
+          status:               t.status,
+          critical:             critical.has(t.task_id),
+          day_index:            dayIndex,
+          day_total:            dayTotal,
+          assignees:            t.assignees || [],
+          linked_action_items:  t.linked_action_items || [],
+          tags:                 t.tags || [],
+          site_name:            site.name || null,
+          site_slug:            site.site_id || null,
+        });
       });
     });
 

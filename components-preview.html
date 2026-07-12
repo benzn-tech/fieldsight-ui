@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="styles/tokens.css" />
   <link rel="stylesheet" href="styles/app-shell.css?v=3" />
   <link rel="stylesheet" href="styles/components.css?v=5" />
-  <link rel="stylesheet" href="styles/composites.css?v=5" />
+  <link rel="stylesheet" href="styles/composites.css?v=6" />
 
   <style>
     html, body { overflow: auto; height: auto; }
@@ -86,7 +86,7 @@
   <script type="text/babel" src="scripts/components/avatar.js?v=2"></script>
 
   <!-- Layer 5 composites (depend on L4 atoms above) -->
-  <script type="text/babel" src="scripts/composites/task-card.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/task-card.js?v=2"></script>
   <script type="text/babel" src="scripts/composites/urgent-card.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/activity-card.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/morning-brief-card.js?v=1"></script>
@@ -1066,6 +1066,45 @@
                   status: 'Open', statusTone: 'info',
                   dueTime: '15:30',
                 }} onSelect={t => console.log('select', t.id)} />
+              </div>
+            </Row>
+            <Row label="site chip (feat/today-by-project)">
+              <div style={{ flex: 1 }}>
+                <TaskCard task={{
+                  id: 'demo-3',
+                  title: 'Confirm scaffold tag-out before handover',
+                  assignee: 'Priya Sharma',
+                  status: 'Open', statusTone: 'info',
+                  dueTime: '11:00',
+                }} site="SB1131 - Northbrook Wanaka"
+                   onSelect={t => console.log('select', t.id)} />
+              </div>
+            </Row>
+          </Section>
+
+          <Section title="Today · project groups (feat/today-by-project)">
+            <Row label="multi-project header (fs-today__project-group)">
+              <div className="fs-today__project-groups" style={{ flex: 1 }}>
+                {[
+                  { slug: 'sb1108-ellesmere', name: 'SB1108 Ellesmere College', rows: [
+                    { id: 'pg-1', title: 'Pour concrete — Block 4 footing', assignee: 'Jarley Trainor', status: 'In progress', statusTone: 'warning', dueTime: '08:30' },
+                  ] },
+                  { slug: 'mpi', name: 'MPI', rows: [
+                    { id: 'pg-2', title: 'Electrical rough-in sign-off', assignee: 'James Lamb', status: 'Open', statusTone: 'info', dueTime: '13:00' },
+                  ] },
+                ].map(g => (
+                  <div key={g.slug} className="fs-today__project-group">
+                    <div className="fs-today__project-group-header">
+                      <span className="fs-today__project-group-label">{g.name}</span>
+                      <span className="fs-today__project-group-count">{g.rows.length}</span>
+                    </div>
+                    <div className="fs-today__project-group-rows">
+                      {g.rows.map(task => (
+                        <TaskCard key={task.id} task={task} onSelect={t => console.log('select', t.id)} />
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             </Row>
           </Section>

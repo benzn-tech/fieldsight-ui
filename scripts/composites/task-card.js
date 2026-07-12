@@ -25,6 +25,11 @@
      checkable      boolean — show check button instead of avatar
      date           'YYYY-MM-DD' — passed to FS.api.actions.toggleAction
      onCheckedOff   (task) => void — called once the fade-out finishes
+     site           string, optional (feat/today-by-project) — project
+                    display name. Renders as a small chip in the meta
+                    row so a single-project caller can still tell which
+                    project a task belongs to. Omitted/falsy → the meta
+                    row is byte-identical to before this prop existed.
 
    Exported to:
      window.FieldSight.TaskCard
@@ -121,6 +126,10 @@
               task.title),
           ),
           React.createElement('div', { className: 'fs-task-card__meta' },
+            props.site ? React.createElement('span', {
+              className: 'fs-task-card__site',
+              title:     props.site,
+            }, props.site) : null,
             React.createElement(Badge, { tone: task.statusTone, size: 'sm' },
               task.status),
             React.createElement('span', { className: 'fs-task-card__due' },
