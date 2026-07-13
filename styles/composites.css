@@ -66,6 +66,17 @@
   text-align: right;
 }
 
+/* feat/today-rolling-open-items — "Today" / "Nd ago" age text. Rolling
+   Today mixes cards sourced from many different report dates, so each
+   card surfaces how long it's been open. Plain text (not a chip) —
+   age is informational, not a status. */
+.fs-task-card__age {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 /* feat/today-by-project — subtle per-card project chip. Shown only when
    the caller has exactly one project (multi-project instead gets
    project-headed groups — see .fs-today__project-group* below), so the
@@ -83,37 +94,6 @@
   text-overflow: ellipsis;
   max-width: 130px;
 }
-
-/* Today fallback banner — shown when the live "today" has no report
-   yet and we're displaying the latest available one instead. (P-06.) */
-.fs-today__fallback-banner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px;
-  padding: 8px 12px;
-  margin: 4px 4px 12px;
-  border: 1px dashed var(--border-default);
-  border-radius: var(--radius-md);
-  background: var(--surface-panel-muted);
-  font-size: 11px;
-  color: var(--text-tertiary);
-}
-.fs-today__fallback-label {
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-.fs-today__fallback-date {
-  font-weight: var(--font-weight-medium);
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
-}
-.fs-today__fallback-note {
-  font-style: italic;
-}
-
 
 /* "View daily report" CTA — half-width banner above MorningBriefCard.
    Sprint 10 follow-up: full-width felt outsized for a single "go
@@ -166,10 +146,10 @@
 /* fix/today-timeline-and-focus — persistent, secondary "Open timeline"
    link. Unlike .fs-today__view-report-cta above (the primary CTA, only
    shown when a single effectiveDate is known), this renders at the top
-   of Today unconditionally, so /timeline stays reachable even in the
-   per-project-recent fallback (no single date to deep-link to).
-   Deliberately lighter than the CTA — a plain text link, not a filled
-   button. */
+   of Today unconditionally, so /timeline stays reachable even from the
+   rolling open-items list (mixed origin dates, no single date to
+   deep-link to). Deliberately lighter than the CTA — a plain text
+   link, not a filled button. */
 .fs-today__timeline-link-row {
   display: flex;
   justify-content: flex-end;

@@ -167,10 +167,119 @@
     return { rows: rows, today: today, user: folder };
   }
 
+  /* =========================================================================
+     feat/today-rolling-open-items — getUpcomingProgrammeTasks({from, to, user?})
+     -------------------------------------------------------------------------
+     Widened sibling of getTodayProgrammeTasks above: instead of "is this
+     task ACTIVE today" (today between start/end), this asks "is this
+     task's DEADLINE (its `end`) coming up in the next N days" — a task
+     that hasn't started yet but is due soon still surfaces, one that's
+     active today but not due for months does not. Overdue (`end` <
+     `from`) is explicitly OUT of scope here — deadlines are free-text /
+     unreliable per the Today rework spec, so this only ever looks
+     forward.
+
+     Same fan-out (every org site, pooled), same worker/assignee scoping,
+     same row shape as getTodayProgrammeTasks (plus one additive field,
+     deadline_in_days) so the existing ProgrammeTaskCard render and the
+     `data.programmeTasks` wiring in today.js need zero changes to
+     consume either function's output interchangeably.
+
+     Exported to:
+       window.FS.api.todayProgramme.getUpcomingProgrammeTasks({ from, to, user? })
+     ========================================================================= */
+  async function getUpcomingProgrammeTasks(opts) {
+    opts = opts || {};
+    var from = opts.from || (window.FS.api.todayNZDT && window.FS.api.todayNZDT());
+    var to   = opts.to;
+    if (!from || !to) return { rows: [] };
+
+    var folder = opts.user || callerFolder();
+
+    var sitesRes = await window.FS.api.org.getOrgSites().catch(function () { return null; });
+    if (!sitesRes || sitesRes._accessDenied || !(sitesRes.sites || []).length) {
+      return { rows: [] };
+    }
+    var orgSites = sitesRes.sites;
+
+    var siteThunks = orgSites.map(function (site) {
+      return function () {
+        return window.FS.api.programme.getProgramme(site.site_id)
+          .then(function (res) { return { site: site, res: res }; });
+      };
+    });
+    var perSite = (await window.FS.api.pooledAll(siteThunks, 8)).filter(Boolean);
+
+    var sched = window.FieldSight && window.FieldSight.programmeSchedule;
+    var rows = [];
+
+    perSite.forEach(function (entry) {
+      var site = entry.site;
+      var res  = entry.res;
+      if (!res || res._notFound || res._accessDenied || !res.programme) return;
+
+      var doc    = res.programme;
+      var leaves = doc.leaves || [];
+      var critical = new Set(sched ? sched.computeCriticalPath(leaves, doc.start_date) : []);
+
+      leaves.forEach(function (t) {
+        /* Deadline (end) must fall within [from, to] — never in the
+           past relative to `from` (that's "overdue", out of scope). */
+        if (!t.end || t.end < from || t.end > to) return;
+        if (folder && (t.assignees || []).indexOf(folder) === -1) return;
+
+        /* day_index/day_total only make sense once the task has
+           actually started — a near-deadline task that hasn't started
+           yet (t.start > from) omits both so ProgrammeTaskCard's
+           `row.day_index && row.day_total` guard hides the "Day N of
+           M" line instead of showing a confusing negative day count. */
+        var started  = from >= t.start;
+        var dayIndex = started ? diffDays(t.start, from) + 1 : null;
+        var dayTotal = started
+          ? ((t.duration_days != null) ? t.duration_days : (diffDays(t.start, t.end) + 1))
+          : null;
+
+        rows.push({
+          source:               'programme',
+          task_id:              t.task_id,
+          wbs:                  t.wbs,
+          name:                 t.name,
+          start:                t.start,
+          end:                  t.end,
+          duration_days:        t.duration_days != null ? t.duration_days : (diffDays(t.start, t.end) + 1),
+          progress_pct:         t.progress_pct || 0,
+          status:               t.status,
+          critical:             critical.has(t.task_id),
+          day_index:            dayIndex,
+          day_total:            dayTotal,
+          assignees:            t.assignees || [],
+          linked_action_items:  t.linked_action_items || [],
+          tags:                 t.tags || [],
+          site_name:            site.name || null,
+          site_slug:            site.site_id || null,
+          /* Additive — how many days until the deadline. Not consumed
+             by ProgrammeTaskCard today; here for the sort below and
+             for any future "Due in Nd" affordance. */
+          deadline_in_days:     diffDays(from, t.end),
+        });
+      });
+    });
+
+    /* Soonest deadline first, then critical, then progress desc. */
+    rows.sort(function (a, b) {
+      if (a.deadline_in_days !== b.deadline_in_days) return a.deadline_in_days - b.deadline_in_days;
+      if (a.critical !== b.critical) return a.critical ? -1 : 1;
+      return (b.progress_pct || 0) - (a.progress_pct || 0);
+    });
+
+    return { rows: rows, from: from, to: to, user: folder };
+  }
+
   if (!window.FS) window.FS = {};
   if (!window.FS.api) window.FS.api = {};
   window.FS.api.todayProgramme = {
-    getTodayProgrammeTasks: getTodayProgrammeTasks,
+    getTodayProgrammeTasks:    getTodayProgrammeTasks,
+    getUpcomingProgrammeTasks: getUpcomingProgrammeTasks,
   };
 
 })();
