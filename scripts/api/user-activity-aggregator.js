@@ -230,7 +230,7 @@
           if (seenAction[key]) return;
           seenAction[key] = true;
 
-          var auditKey = auditForDate[t.topic_id + '_' + idx] || {};
+          var auditKey = window.FS.api.actions.lookupAction(auditForDate, rec.user.folder_name, t.topic_id, idx) || {};
           bucket.counts.actions++;
           bucket.events.push({
             kind:        'action',
