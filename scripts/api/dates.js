@@ -30,11 +30,13 @@
 
   /* Session-stable read: the date index is generated server-side and not
      edited in-app, so a few minutes of staleness is safe — see
-     api/_cache.js. Cache key is (months, user) only — NOT `site` (see
-     PR description / delivery report for why that's safe today). */
+     api/_cache.js. Cache key includes `site` because in live mode it's
+     forwarded to the backend query (date-picker / timeline pass it); a
+     project switch within the TTL must not serve the previous site's
+     date-map. Harmless in mock mode (site is a fixture no-op → undefined). */
   function getDates(opts) {
     opts = opts || {};
-    var key = 'dt:' + (opts.months || '') + ':' + (opts.user || '');
+    var key = 'dt:' + (opts.months || '') + ':' + (opts.user || '') + ':' + (opts.site || '');
     return window.FS.api.cache.cached(key, undefined, function () {
       return fetchDates(opts);
     });
