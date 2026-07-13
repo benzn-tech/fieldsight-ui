@@ -720,6 +720,11 @@
 
 .fs-safety-flag-row--dense { padding: 8px 10px; }
 
+/* fix/topic-card-clickable-body — flag rows don't open the detail panel
+   (excluded in TopicCard's onBodyClick guard), so don't show a pointer
+   cursor inherited from .fs-topic-card__body that implies otherwise. */
+.fs-topic-card__body .fs-safety-flag-row { cursor: default; }
+
 .fs-safety-flag-row--high   { border-left: 3px solid var(--color-danger-500); }
 .fs-safety-flag-row--medium { border-left: 3px solid var(--color-warning-500); }
 .fs-safety-flag-row--low    { border-left: 3px solid var(--border-default); }
@@ -885,6 +890,13 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+  /* fix/topic-card-clickable-body — whole body opens the right detail
+     panel on click (see topic-card.js onBodyClick); cursor signals that
+     on the inert areas. Interactive children (action-item-row already
+     sets its own pointer cursor for the checkbox toggle; safety-flag-row
+     below is pinned back to default since its click is swallowed, not
+     wired to onSelect). */
+  cursor: pointer;
 }
 
 .fs-topic-card__summary {
