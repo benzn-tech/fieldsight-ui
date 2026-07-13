@@ -321,11 +321,14 @@
 
     /* fix/action-checkoff-sync (Bug 1) — this view renders ONE date
        (props.date) fanned out across every user on the site, so a
-       single getActions(date) call covers every section's TopicCards
-       (the audit key has no user dimension yet — see the follow-up
-       task note below). Mirrors TimelineMiddleColumn's own actions
-       fetch (~line 743) so checked state actually shows here instead
-       of the hardcoded {} this view used to pass down. */
+       single getActions(date) call covers every section's TopicCards.
+       user-dimension audit key plan (docs/superpowers/plans/2026-07-13-
+       user-dimension-audit-key.md, Task 5) — the audit key NOW carries
+       the section owner's folder (see the TopicCard mount + bus
+       subscription below), so two sections' topic 0 / action 0 on the
+       same date no longer collide. Mirrors TimelineMiddleColumn's own
+       actions fetch (~line 743) so checked state actually shows here
+       instead of the hardcoded {} this view used to pass down. */
     var refActionsState = React.useState({});
     var actionsMap    = refActionsState[0];
     var setActionsMap = refActionsState[1];
@@ -344,11 +347,11 @@
        view's own TopicCards, the right-detail OverviewTab, or a tick
        made from the single-user timeline for the same date) updates
        every section's TopicCard live, including ones currently
-       collapsed/unmounted. NOTE: the bus payload + audit key carry no
-       user dimension, so two different sections' topic 0 / action 0
-       on the same date collide on one record — same pre-existing
-       ambiguity as the getActions fetch above; a separate follow-up
-       task owns adding a user dimension to the audit key. */
+       collapsed/unmounted. user-dimension audit key plan (Task 5) — the
+       bus payload now carries user_folder, and the map key is derived
+       via FS.api.actions.actionKey(payload.user_folder, …) so two
+       different sections' topic 0 / action 0 on the same date land on
+       distinct composite keys instead of colliding. */
     React.useEffect(function () {
       var bus = window.FS && window.FS.actionsBus;
       if (!bus) return undefined;
@@ -356,7 +359,7 @@
       return bus.subscribe(function (payload) {
         if (!payload || payload.date !== myDate) return;
         setActionsMap(function (cur) {
-          var key = payload.topic_id + '_' + payload.action_index;
+          var key = window.FS.api.actions.actionKey(payload.user_folder, payload.topic_id, payload.action_index);
           var next = Object.assign({}, cur || {});
           next[key] = {
             checked:    !!payload.checked,
@@ -491,6 +494,7 @@
                 topic:         topic,
                 date:          props.date,
                 actionState:   actionsMap,
+                userFolder:    sectionUser,
                 selected:      selectedAggId === ('topic_' + sectionUser + '_' + topic.topic_id),
                 defaultOpen:   false,
                 highlight:     false,
@@ -861,7 +865,7 @@
         if (!payload || payload.date !== date) return;
         setState(function (s) {
           if (s.status !== 'ok') return s;
-          var key = payload.topic_id + '_' + payload.action_index;
+          var key = window.FS.api.actions.actionKey(payload.user_folder, payload.topic_id, payload.action_index);
           var nextActions = Object.assign({}, s.actions || {});
           nextActions[key] = {
             checked:    !!payload.checked,
@@ -1174,6 +1178,11 @@
             topic:       topic,
             date:        date,
             actionState: actionState,
+            /* user-dimension audit key plan (Task 5) — MUST derive from
+               report.user_name, never the page `user` param: the
+               self-view route has user=null (documented crux trap), and
+               report.user_name is always the actual report owner. */
+            userFolder:  report.user_name ? window.FS.api.folderName(report.user_name) : null,
             selected:    selectedTopicId === topic.topic_id,
             defaultOpen: defaultOpenProp,
             /* Sprint 7 follow-up — when &flag= is present, suppress
@@ -1296,12 +1305,13 @@
               'Action items'),
             actions.map(function (a, idx) {
               var key = topic.topic_id + '_' + idx;
-              var st  = (props.actionState || {})[key] || {};
+              var st  = window.FS.api.actions.lookupAction(props.actionState, props.userFolder, topic.topic_id, idx) || {};
               return React.createElement(ActionItemRow, {
                 key:            key,
                 date:           props.date,
                 topicId:        topic.topic_id,
                 actionIndex:    idx,
+                userFolder:     props.userFolder,
                 action:         a,
                 initialChecked: !!st.checked,
                 checkedBy:      st.checked_by,
@@ -1460,7 +1470,7 @@
       return bus.subscribe(function (payload) {
         if (!payload || payload.date !== myDate) return;
         setActions(function (cur) {
-          var key = payload.topic_id + '_' + payload.action_index;
+          var key = window.FS.api.actions.actionKey(payload.user_folder, payload.topic_id, payload.action_index);
           var next = Object.assign({}, cur || {});
           next[key] = {
             checked:    !!payload.checked,
@@ -1507,6 +1517,13 @@
     var PhotoGrid      = fs.PhotoGrid;
     var AskChat        = fs.AskChat;
 
+    /* user-dimension audit key plan (Task 5) — report OWNER's folder,
+       never the caller. sel.user is the section/topic owner folder set
+       by the AggregatedDayView + single-user onSelect payloads above;
+       sel.user_name is the display name fallback (folderName-derived)
+       for callers that only set that. */
+    var ownerFolder = sel.user || (sel.user_name && window.FS.api.folderName(sel.user_name)) || null;
+
     var mediaProps = {
       date:  sel.date,
       user:  sel.user || (sel.user_name && window.FS.api.folderName(sel.user_name)),
@@ -1539,7 +1556,7 @@
     } else {
       bodyByTab = {
         overview:   React.createElement(OverviewTab, {
-          topic: topic, date: sel.date, actionState: refActions[0],
+          topic: topic, date: sel.date, actionState: refActions[0], userFolder: ownerFolder,
         }),
         transcript: TranscriptList ? React.createElement(TranscriptList,
           Object.assign({}, mediaProps, {

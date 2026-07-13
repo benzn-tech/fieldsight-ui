@@ -19,6 +19,13 @@
      topic         DailyReport.topics[i]
      date          'YYYY-MM-DD' — needed for action toggle key
      actionState   { '<topic_id>_<action_index>': { checked, checked_by, checked_at } }
+                   (legacy bare keys and/or v2 composite '<folder>|<topic_id>_<action_index>'
+                   keys — always read via FS.api.actions.lookupAction, never a raw index)
+     userFolder    string (optional) — report OWNER's folder (never the caller/current
+                   user). Threads into the actionState lookup + down to each
+                   ActionItemRow so same-day, same-index actions from different
+                   report owners don't collide (user-dimension audit key plan
+                   docs/superpowers/plans/2026-07-13-user-dimension-audit-key.md §1.3).
      defaultOpen   boolean
      onSelect      (topic) => void  — open in right detail
      selected      boolean — applies a selected style to the card
@@ -58,6 +65,7 @@
     var topic       = props.topic || {};
     var actionState = props.actionState || {};
     var date        = props.date;
+    var userFolder  = props.userFolder;  /* report OWNER's folder — never the caller */
 
     var ref = React.useState(!!props.defaultOpen);
     var open    = ref[0];
@@ -236,12 +244,13 @@
               React.createElement('div', { className: 'fs-topic-card__actions' },
                 actions.map(function (a, idx) {
                   var key = topic.topic_id + '_' + idx;
-                  var state = actionState[key] || {};
+                  var state = window.FS.api.actions.lookupAction(actionState, userFolder, topic.topic_id, idx) || {};
                   return React.createElement(ActionItemRow, {
                     key:            key,
                     date:           date,
                     topicId:        topic.topic_id,
                     actionIndex:    idx,
+                    userFolder:     userFolder,
                     action:         a,
                     initialChecked: !!state.checked,
                     checkedBy:      state.checked_by,
