@@ -43,6 +43,15 @@
                          don't collide. Omitted on the single-report fast
                          path, so existing ids are byte-identical to before.
 
+   feat/user-dim-audit-key (Task 6) — audit-state lookups and every
+   derived task item now carry `folder` = the REPORT OWNER's folder
+   (see `ownerFolder` in adapt() below), so today.js's keep()/bus
+   removal predicate and task-card.js's toggleAction call can key the
+   check-off per-user instead of colliding on (topic_id, action_index)
+   alone across two different owners' reports on the same date. Reads
+   go through FS.api.actions.lookupAction (composite key with legacy
+   bare-key fallback) — never a raw actionState[key] lookup.
+
    Exported to window.FS.api.todayAdapter.adapt(report, ctx)
    ========================================================================== */
 
@@ -242,7 +251,7 @@
     ctx = ctx || {};
     var currentUserName = ctx.currentUserName || (window.AuthMock && window.AuthMock.currentUser && window.AuthMock.currentUser.name) || '';
     var primarySite     = ctx.primarySite     || 'sb1108-ellesmere';
-    var actionState     = ctx.actionState     || {}; /* keyed by `${topic_id}_${index}` */
+    var actionState     = ctx.actionState     || {}; /* composite/legacy map — read via FS.api.actions.lookupAction only */
     var nowMinutes      = ctx.nowMinutes      != null ? ctx.nowMinutes : (16 * 60); /* 16:00 NZDT */
     var siteSlugByName  = ctx.siteSlugByName  || {};
     var idPrefix        = ctx.idPrefix ? (ctx.idPrefix + '_') : '';
@@ -260,6 +269,18 @@
         onSite:   [],
       };
     }
+
+    /* feat/user-dim-audit-key (Task 6) — the REPORT OWNER's folder. Feeds
+       the audit-state composite key (lookupAction below) and is stamped
+       onto every task item as `folder`, so today.js's keep()/bus-removal
+       predicate and task-card.js's toggleAction call can thread the
+       owner through without re-deriving it. MUST be the RAW ctx.idPrefix
+       — the `idPrefix` local above is a DIFFERENT, id-NAMESPACING string
+       with a trailing '_' appended (see its declaration a few lines up);
+       reusing that would corrupt both the audit key and the user_folder
+       sent to toggleAction. Falls back to deriving from report.user_name
+       on the single-report fast path, where ctx.idPrefix is omitted. */
+    var ownerFolder = ctx.idPrefix || (report.user_name ? window.FS.api.folderName(report.user_name) : null);
 
     /* site_name is report.site verbatim (the ONLY site field a report
        carries — see the comment above, no slug exists on the report
@@ -344,7 +365,8 @@
     (report.topics || []).forEach(function (t) {
       (t.action_items || []).forEach(function (a, idx) {
         var key = t.topic_id + '_' + idx;
-        var checked = !!(actionState[key] && actionState[key].checked);
+        var auditEntry = window.FS.api.actions.lookupAction(actionState, ownerFolder, t.topic_id, idx);
+        var checked = !!(auditEntry && auditEntry.checked);
         var status = deriveStatus(checked);
         var task = {
           id:          idPrefix + 'action_' + key,
@@ -378,6 +400,11 @@
              its OWN origin date for per-item check-off (toggleAction)
              and age computation — mirrors morningBrief.date above. */
           date:        report.report_date || ctx.date || null,
+          /* feat/user-dim-audit-key (Task 6) — report OWNER's folder
+             (never AuthMock.currentUser / caller) — see ownerFolder
+             above. today.js's keep()/bus predicate and task-card.js's
+             toggleAction read this to key the audit lookup/write. */
+          folder:      ownerFolder,
           site_name:   siteName,
           site_slug:   siteSlug,
         };

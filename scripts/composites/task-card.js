@@ -19,7 +19,12 @@
 
    Props:
      task           { id, title, assignee, status, statusTone, dueTime,
-                      topic_id, actionIndex, ... }
+                      topic_id, actionIndex, folder, ... } — `folder` is
+                      the report OWNER's folder (feat/user-dim-audit-key,
+                      Task 6; stamped by today-adapter.js), sent as
+                      `user_folder` on the toggleAction call below so the
+                      audit check-off is keyed per-user, never the
+                      caller/currentUser.
      isMine         boolean — apply --mine accent border
      onSelect       (task) => void — click handler on the row body
      checkable      boolean — show check button instead of avatar
@@ -82,6 +87,10 @@
         action_index: task.actionIndex,
         checked:      true,
         action_text:  task.title,
+        /* feat/user-dim-audit-key (Task 6) — report OWNER's folder
+           (task.folder, stamped by today-adapter.js), never the
+           caller/currentUser. */
+        user_folder:  task.folder,
       }).catch(function (err) {
         /* If the persist call fails, abort the animation and let the
            user retry. */

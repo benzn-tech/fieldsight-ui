@@ -609,8 +609,15 @@
 
                 function keep(list, bucket, actionState, date) {
                   (list || []).forEach(function (item) {
-                    var auditKey = item.topic_id + '_' + item.actionIndex;
-                    var resolved = !!(actionState[auditKey] && actionState[auditKey].checked);
+                    /* feat/user-dim-audit-key (Task 6) — item.folder is
+                       the report OWNER's folder, stamped by
+                       today-adapter.js. lookupAction tries the
+                       composite key first, falls back to the legacy
+                       bare key only for true unmigrated records —
+                       never a raw actionState[bareKey] lookup
+                       (ANTI-REGRESSION IRON RULE). */
+                    var auditEntry = window.FS.api.actions.lookupAction(actionState, item.folder, item.topic_id, item.actionIndex);
+                    var resolved = !!(auditEntry && auditEntry.checked);
                     if (resolved) return; /* checked off — drop */
 
                     item.date       = item.date || date;
@@ -750,14 +757,15 @@
        rolling item; see loadRollingOpenItems' keep() above) — rather
        than the composed `.id`, which the bus event doesn't carry.
 
-       Ambiguity note: the bus payload/audit key carry no folder/user
-       dimension. topic_id restarts at 0 per report, so on a date where
-       TWO different folders both have an unresolved topic 0 / action 0,
-       this predicate can't tell them apart and could drop the wrong
-       folder's item. This is the SAME pre-existing audit-key ambiguity
-       flagged in loadRollingOpenItems above (date + '__' + id dedup
-       comment) and in AggregatedDayView (timeline.js) — a separate,
-       already-known follow-up task, not introduced here.
+       Ambiguity note (feat/user-dim-audit-key, Task 6 — RESOLVED): the
+       bus payload now carries `user_folder` and rolling items carry
+       `.folder` (today-adapter.js's ownerFolder, stamped in keep()
+       above), so the folder check below disambiguates two different
+       owners' unresolved topic 0 / action 0 on the same date — the
+       date+topic+index match alone used to be ambiguous there. The
+       folder check stays LENIENT when either side lacks a folder
+       (legacy items/payloads), so it never regresses clearing genuine
+       legacy Leftover items — see the plan's anti-regression note.
 
        Un-checking (checked === false) is intentionally left alone —
        re-adding a Leftover item needs its full adapter-shaped row data
@@ -769,9 +777,15 @@
       return bus.subscribe(function (payload) {
         if (!payload || !payload.checked) return;
         removeTasksMatching(function (t) {
-          return t.date === payload.date
-              && t.topic_id === payload.topic_id
-              && t.actionIndex === payload.action_index;
+          if (t.date !== payload.date
+              || t.topic_id !== payload.topic_id
+              || t.actionIndex !== payload.action_index) return false;
+          /* Both sides present and differ → not this owner, don't
+             remove. Either side missing (legacy item/payload has no
+             folder) → fall through to the looser date+topic+index
+             match above — intentionally NOT made stricter than that. */
+          if (payload.user_folder && t.folder && t.folder !== payload.user_folder) return false;
+          return true;
         });
       });
     }, []);
@@ -1387,6 +1401,10 @@
         action_index: item.actionIndex,
         checked:      true,
         action_text:  item.title,
+        /* feat/user-dim-audit-key (Task 6) — report OWNER's folder
+           (item.folder, stamped by today-adapter.js), never the
+           caller/currentUser. */
+        user_folder:  item.folder,
       }).then(function () {
         if (ctx && ctx.removeMyTask) ctx.removeMyTask(item.id);
         if (props.onClose) props.onClose();
