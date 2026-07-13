@@ -143,44 +143,67 @@
 }
 
 
-/* fix/today-timeline-and-focus — persistent, secondary "Open timeline"
-   link. Unlike .fs-today__view-report-cta above (the primary CTA, only
-   shown when a single effectiveDate is known), this renders at the top
-   of Today unconditionally, so /timeline stays reachable even from the
+/* fix/today-timeline-and-focus — persistent "Open timeline" affordance.
+   Unlike .fs-today__view-report-cta above (the primary CTA, only shown
+   when a single effectiveDate is known), this renders at the top of
+   Today unconditionally, so /timeline stays reachable even from the
    rolling open-items list (mixed origin dates, no single date to
-   deep-link to). Deliberately lighter than the CTA — a plain text
-   link, not a filled button. */
+   deep-link to).
+
+   fix/timeline-buttons-and-deadline — restyled from a small transparent
+   text link to the SAME blue-filled button look as
+   .fs-today__view-report-cta (bg/color/padding/font-size/weight/radius
+   + width:50%/min-width:220px block, left-aligned) so "Open timeline"
+   and "Back to Today" (.fs-timeline-page__back below) read as one
+   button family, not two different affordances. */
 .fs-today__timeline-link-row {
   display: flex;
-  justify-content: flex-end;
-  margin: 0 4px 6px;
+  justify-content: flex-start;
+  margin: 0 0 10px;
 }
 .fs-today__timeline-link {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 2px;
+  justify-content: space-between;
+  gap: 12px;
+  width: 50%;
+  min-width: 220px;
+  margin: 0;
+  padding: 10px 14px;
   font: inherit;
-  font-size: 12px;
-  font-weight: var(--font-weight-medium);
-  color: var(--text-tertiary);
-  background: transparent;
-  border: none;
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  color: #fff;
+  background: var(--color-primary-900);
+  border: 1px solid var(--color-primary-800);
+  border-radius: var(--radius-md);
   cursor: pointer;
+  text-align: left;
+  /* NOTE: --ease-out is the real token (tokens.css ~line 280); many
+     existing call sites in this file, including the other two nav
+     buttons in this family (.fs-today__view-report-cta /
+     .fs-timeline-page__back), reference a nonexistent --easing-out
+     instead (existing typo, out of scope to fix on those — dropping
+     their transition entirely rather than actually breaking anything
+     visible). New code here shouldn't propagate it. */
+  transition: background var(--duration-fast) var(--ease-out),
+              transform var(--duration-fast) var(--ease-out);
 }
 .fs-today__timeline-link:hover {
-  color: var(--text-link-hover);
-  text-decoration: underline;
+  background: var(--color-primary-800);
+}
+.fs-today__timeline-link:active {
+  transform: translateY(1px);
 }
 .fs-today__timeline-link:focus-visible {
   outline: 2px solid var(--border-focus);
   outline-offset: 2px;
-  border-radius: var(--radius-sm);
 }
 .fs-today__timeline-link-arrow {
-  font-size: 13px;
+  font-size: 16px;
   line-height: 1;
-  transition: transform var(--duration-fast) var(--easing-out);
+  opacity: 0.85;
+  transition: transform var(--duration-fast) var(--ease-out);
 }
 .fs-today__timeline-link:hover .fs-today__timeline-link-arrow {
   transform: translateX(2px);
@@ -912,7 +935,13 @@
    Sprint 4.10 — restyled to match the "View daily report" CTA on
    /today: full-width, dark navy primary button, with the arrow
    on the left and text following. Visually parallel to the
-   CTA so users perceive the round-trip as one symmetrical action. */
+   CTA so users perceive the round-trip as one symmetrical action.
+   fix/timeline-buttons-and-deadline — padding tightened from
+   12px/16px to 10px/14px to exactly match
+   .fs-today__view-report-cta / .fs-today__timeline-link's box, so all
+   three "timeline nav" buttons render at the same height. Stays
+   full-width (unlike the other two, which are the 50%/min-220px
+   compact block) since this is a full-width page-header element. */
 .fs-timeline-page__back {
   display: flex;
   align-items: center;
@@ -920,7 +949,7 @@
   gap: 12px;
   width: 100%;
   margin: 0 0 12px;
-  padding: 12px 16px;
+  padding: 10px 14px;
   font: inherit;
   font-size: 14px;
   font-weight: var(--font-weight-semibold);
