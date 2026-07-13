@@ -30,6 +30,13 @@
                     row so a single-project caller can still tell which
                     project a task belongs to. Omitted/falsy → the meta
                     row is byte-identical to before this prop existed.
+     ageLabel       string, optional (feat/today-rolling-open-items) —
+                    e.g. 'Today' / '3d ago'. How long this item has been
+                    open, for the Today rolling list where cards mix
+                    origin dates. Omitted/falsy → no age text rendered.
+     noDeadline     boolean, optional (feat/today-rolling-open-items) —
+                    renders a subtle "No deadline" chip (warning tone,
+                    never safety-red/blocked-magenta per CLAUDE.md).
 
    Exported to:
      window.FieldSight.TaskCard
@@ -130,6 +137,15 @@
               className: 'fs-task-card__site',
               title:     props.site,
             }, props.site) : null,
+            /* feat/today-rolling-open-items — age + no-deadline signals.
+               Both optional; omitted/falsy on any caller that doesn't
+               pass them → meta row is byte-identical to before. */
+            props.ageLabel ? React.createElement('span', {
+              className: 'fs-task-card__age',
+            }, props.ageLabel) : null,
+            props.noDeadline ? React.createElement(Badge, {
+              tone: 'warning', variant: 'outline', size: 'sm',
+            }, 'No deadline') : null,
             React.createElement(Badge, { tone: task.statusTone, size: 'sm' },
               task.status),
             React.createElement('span', { className: 'fs-task-card__due' },

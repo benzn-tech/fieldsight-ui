@@ -1,22 +1,34 @@
 /* ==========================================================================
-   FieldSight Today Page — Sprint 2.4 (PLAN.md Phase D)
+   FieldSight Today Page — feat/today-rolling-open-items
    --------------------------------------------------------------------------
-   Today is now a DERIVED view over the latest DailyReport for the
-   current user — no more bespoke mock-data shim. The same composites
-   (TaskCard / UrgentCard / ActivityCard / MorningBriefCard / OnSiteCard)
-   render unchanged; only the data source moved.
+   Today is a ROLLING open-items list, not a single-day snapshot. Three
+   parts, assembled independently and merged into one render-shaped
+   object:
 
-   Pipeline:
+     1. Today-scoped extras (morning brief, urgent, on-site) — from
+        TODAY's own report, when one exists. Absent otherwise.
+     2. Rolling unresolved tasks (the core) — every action item from
+        reports in the trailing ROLLING_LOOKBACK_DAYS window that is
+        NOT yet checked off, mine + team, tagged with age + a
+        no-deadline flag. An item keeps showing every day until it's
+        resolved, instead of vanishing when the calendar day changes.
+        Checking one off drops it (existing optimistic removeMyTask).
+     3. Near-deadline programme — programme tasks whose deadline (end)
+        falls within the next PROGRAMME_DEADLINE_DAYS days.
+
+   Pipeline (reused, not reimplemented):
      FS.api.timeline.getTimeline (DailyReport)  ─┐
-     FS.api.actions.getActions  (audit state)   ├─► todayAdapter.adapt
-     fixtures.sites (for primary_site lookup)   ─┘            │
-                                                              ▼
-                                          { morningBrief, urgent, my/team
-                                            tasks, activity, onSite }
+     FS.api.actions.getActionsRange (audit)     ├─► todayAdapter.adapt
+     fixtures.sites (for primary_site lookup)   ─┘   (same pure split
+                                                        used by both #1
+                                                        and #2 below)
 
    Sprint 2 task-check-off lands on REAL action items here:
      • TaskCard for an item Jarley owns gets a checkbox
-     • Click → optimistic toggle through FS.api.actions.toggleAction
+     • Click → optimistic toggle through FS.api.actions.toggleAction,
+       keyed by the ITEM'S OWN origin date (rolling items carry mixed
+       dates — there is no single page-level "today" to check off
+       against any more)
      • Animation: border pulse + line-through + fade-out (CSS, respects
        prefers-reduced-motion via tokens.css media query)
      • On animation end the row drops out of myTasks locally; full
@@ -31,18 +43,34 @@
 (function () {
   'use strict';
 
-  /* feat/today-focus-recent — recency cutoff for the multi-project
-     fallback (loadRecentPerProject below). A project whose newest
-     report is older than this many days is treated as stale for
-     Today's purposes — it belongs on /timeline or /tasks, not in the
-     "what's happening right now" feed. */
-  var RECENT_DAYS = 14;
+  /* feat/today-rolling-open-items — how far back the rolling open-items
+     scan looks for unresolved action items, and how far forward the
+     near-deadline programme lookahead reaches. Both windows anchor on
+     FS.api.todayNZDT() (BUG-19 — never new Date('YYYY-MM-DD')). */
+  var ROLLING_LOOKBACK_DAYS   = 30;
+  var PROGRAMME_DEADLINE_DAYS = 7;
+
+  /* UTC-safe day diff — mirrors today-programme-adapter.js:diffDays.
+     fromISO/toISO are 'YYYY-MM-DD'; parsing via 'T00:00:00Z' avoids the
+     NZDT local-midnight drift new Date('YYYY-MM-DD') is prone to
+     (BUG-19). Returns toISO - fromISO in whole days. */
+  function diffDaysISO(fromISO, toISO) {
+    var a = new Date(fromISO + 'T00:00:00Z').getTime();
+    var b = new Date(toISO   + 'T00:00:00Z').getTime();
+    return Math.round((b - a) / 86400000);
+  }
+
+  /* 'Today' / 'Nd ago' — the only age vocabulary this page uses. Overdue
+     framing is explicitly out of scope (deadlines are free-text /
+     unreliable) — age is the one reliable, read-only signal. */
+  function formatAgeLabel(ageDays) {
+    if (ageDays == null) return null;
+    if (ageDays <= 0) return 'Today';
+    return ageDays + 'd ago';
+  }
 
   /* Today's date in NZDT — see BUG-19. We compute "today" via
-     FS.api.todayNZDT() (Pacific/Auckland clock). If no report exists
-     for that date, fall back to the latest available date from
-     /api/dates so the prototype keeps rendering meaningfully when run
-     on any calendar day. (P-06.) */
+     FS.api.todayNZDT() (Pacific/Auckland clock). */
 
   /* ---------- SectionLabel (small uppercase heading) --------------------- */
   function SectionLabel(props) {
@@ -77,17 +105,16 @@
      fix/today-timeline-and-focus. Rendered at the top of BOTH the
      'empty' and 'ok' branches of TodayMiddleColumn's render, unlike the
      primary "View daily report" CTA (.fs-today__view-report-cta) below
-     it, which only shows when a single `effectiveDate` is known — the
-     per-project-recent fallback (perProjectLatest) has none, and used
-     to leave NO way back to /timeline from Today at all.
+     it, which only shows when a single `effectiveDate` is known (today
+     itself has a report) — the rolling open-items list mixes dates and
+     has no single date to deep-link to.
 
      Navigates to /timeline?date=<date>[&user=<user>]&from=today when a
-     date is known (empty-state's state.latest), or bare
-     /timeline?from=today otherwise. timeline.js's own M-2 bootstrap
-     effect self-resolves a dateless visit to the latest available date
-     (or an admin project/user picker when ambiguous) — see that file's
-     "no date in the URL" effect — so the bare link always lands
-     somewhere useful, never a dead page. */
+     date is known, or bare /timeline?from=today otherwise. timeline.js's
+     own M-2 bootstrap effect self-resolves a dateless visit to the
+     latest available date (or an admin project/user picker when
+     ambiguous) — see that file's "no date in the URL" effect — so the
+     bare link always lands somewhere useful, never a dead page. */
   function TimelineLink(props) {
     var dateOpt = props.date || null;
     var userOpt = props.user || null;
@@ -323,15 +350,18 @@
       var today    = window.FS.api.todayNZDT();
       var folder   = window.FS.api.folderName(caller.name);
 
-      /* Sprint 4.10.3 — Programme tasks for today run in parallel
-         with the daily-report load. They live under data.programmeTasks
-         so the My Tasks renderer can split them into a sub-group and
-         render the ProgrammeTaskCard variant. Promise resolves with
-         { rows: [...] } regardless of role / fixture state, so we
-         can pass it straight through Promise.all without bailout
-         logic. */
-      var programmePromise = (window.FS.api.todayProgramme
-        ? window.FS.api.todayProgramme.getTodayProgrammeTasks({ today: today, user: folder })
+      /* feat/today-rolling-open-items (§D) — widened from "scheduled
+         today" to "deadline within the next PROGRAMME_DEADLINE_DAYS
+         days" via the new getUpcomingProgrammeTasks adapter function
+         (additive sibling of getTodayProgrammeTasks — same row shape,
+         so ProgrammeTaskCard + the data.programmeTasks wiring below
+         are unchanged). Runs in parallel with the daily-report loads.
+         Promise resolves with { rows: [...] } regardless of role /
+         fixture state, so we can pass it straight through Promise.all
+         without bailout logic. */
+      var programmeDeadline = window.FS.api.addDaysISO(today, PROGRAMME_DEADLINE_DAYS);
+      var programmePromise = (window.FS.api.todayProgramme && window.FS.api.todayProgramme.getUpcomingProgrammeTasks
+        ? window.FS.api.todayProgramme.getUpcomingProgrammeTasks({ from: today, to: programmeDeadline, user: folder })
         : Promise.resolve({ rows: [] })
       ).then(function (r) { return (r && r.rows) || []; })
        .catch(function () { return []; });
@@ -347,11 +377,16 @@
       var siteSlugMapPromise   = getSiteSlugMap();
       /* Hoisted alongside siteSlugMapPromise — the folder list doesn't
          depend on `date`, so fetch it once per effect run and share it
-         across both the primary-date and fallback-date loadFor() calls
-         below, instead of re-fetching on the fallback retry. */
+         between loadFor() below and loadRollingOpenItems() further
+         down (both need "every accessible folder" for a multi-project
+         caller). */
       var adminFoldersPromise = multiProject ? adminUserFolders() : Promise.resolve([]);
 
-      function loadFor(date, isFallback) {
+      /* Today-scoped extras only (§B) — always called for TODAY itself,
+         never a fallback date any more (feat/today-rolling-open-items
+         dropped the "latest available" retry; the rolling loader below
+         is what covers older dates now). */
+      function loadFor(date) {
         if (!multiProject) {
           return Promise.all([
             window.FS.api.timeline.getTimeline({ date: date, user: folder }),
@@ -377,7 +412,6 @@
               data:          data,
               actions:       actions,
               effectiveDate: date,
-              isFallback:    !!isFallback,
               today:         today,
             };
           });
@@ -434,76 +468,65 @@
               data:          merged,
               actions:       actions,
               effectiveDate: date,
-              isFallback:    !!isFallback,
               today:         today,
             };
           });
         });
       }
 
-      /* Helper — merges the programme rows into the data envelope so
-         every setState site below can compose the same shape without
-         repeating the await. */
-      function withProgramme(envelope, programmeRows) {
-        if (!envelope || !envelope.data) return envelope;
-        return Object.assign({}, envelope, {
-          data: Object.assign({}, envelope.data, {
-            programmeTasks: programmeRows || [],
-          }),
-        });
-      }
+      /* feat/today-rolling-open-items (§A) — the core replacement for
+         loadRecentPerProject/loadPerProjectLatest. Scans the trailing
+         ROLLING_LOOKBACK_DAYS window across every accessible folder for
+         UNRESOLVED action items (mine + team) — an item keeps showing
+         every day until it's checked off, regardless of which calendar
+         day it was extracted on. Folder set mirrors the rest of this
+         file (CLAUDE.md "Admin permission flow"): admin/gm fan out
+         across adminFoldersPromise (already resolved above); everyone
+         else is scoped to their own folder only.
 
-      /* feat/today-fallback-per-project — multi-project fallback.
-         Reports are sparse and land on a DIFFERENT date per project, so
-         the single global `latest` date from getSpan() almost always
-         belongs to only ONE project — loadFor(latest, true) would
-         silently show just that project's todos with no grouping ever
-         visible. Instead: resolve EACH accessible folder's OWN latest
-         hasReport date (pooled FS.api.dates.getDates per folder) and
-         merge via the SAME mergeTodayData the primary fan-out path
-         uses — so the result is per-project-tagged and
-         renderMaybeGrouped groups it exactly like the "today has data"
-         multi-project case.
+         Steps:
+           1. Resolve report-dates per folder in [from, today] via
+              FS.api.dates.getDates (pooled) — the (date, folder) pairs
+              with hasReport true.
+           2. ONE FS.api.actions.getActionsRange({from, to}) call for
+              the whole window (not cached, but a single request).
+           3. Pooled FS.api.timeline.getTimeline per (date, folder) pair
+              — cached (PR #53), so repeat visits are cheap; first load
+              can issue up to pairs.length requests (pooled at 8).
+           4. buildTodayFromReport (SAME adapter call as loadFor above)
+              per report, using that report's OWN date's audit slice —
+              so status/checked state is correct for THAT date, not
+              today's. Items whose audit key is checked are dropped
+              (todayAdapter.adapt keeps checked items with status
+              'Done' rather than dropping them — see today-adapter.js
+              — so this filter is load-bearing, not a safety net).
+           5. Each surviving item is stamped with its origin date (also
+              carried by the adapter itself now — today-adapter.js §
+              feat/today-rolling-open-items), ageDays (diffDaysISO vs
+              today), and noDeadline (from the adapter's raw `deadline`
+              field, distinct from the always-populated `dueTime`).
+           6. Merge across dates: the SAME logical action (folder +
+              topic_id + actionIndex — exactly today-adapter.js's `id`
+              when idPrefix=folder, which this always passes) can be
+              re-extracted on a later report date. Dedupe keyed by
+              item.id, keeping the OLDEST occurrence (largest ageDays)
+              so the card reads as "carried over N days", not reset.
 
-         feat/today-focus-recent — replaces the old "walk each folder's
-         dates newest → oldest, fetching up to MAX_LOOKBACK reports
-         sequentially, stop at the first with todos" behaviour. That dug
-         up months-old rich reports (long todo lists, meeting
-         brainstorms) whenever a project's newest report happened to be
-         a thin radio-check — Today read as a full backlog dump instead
-         of "what's happening right now". Now, per folder:
-           1. Take ONLY that folder's newest hasReport date.
-           2. If it's older than RECENT_DAYS (module-level const, 14),
-              OMIT the folder entirely — no getTimeline call at all.
-              That project is stale for Today; /timeline and /tasks
-              still cover it.
-           3. Otherwise fetch that ONE report (a single getTimeline
-              call — never more than one per folder) and keep the
-              folder only if it has todos (non-empty urgent/myTasks/
-              teamTasks — activity/onSite don't count). No todos →
-              omit ("everything's quiet here" isn't worth a zero-item
-              section).
+         Returns { myTasks, teamTasks } — no effectiveDate (mixed
+         dates); check-off is per-item (§C) via each item's own .date. */
+      function loadRollingOpenItems() {
+        var from = window.FS.api.addDaysISO(today, -ROLLING_LOOKBACK_DAYS);
+        var EMPTY = { myTasks: [], teamTasks: [] };
 
-         Worst case API calls: N folders × getDates (pooled, limit 8) +
-         up to N folders × ONE getTimeline (pooled, limit 8) — down from
-         up to MAX_LOOKBACK(5) getTimeline calls per folder before.
+        var foldersPromise = multiProject ? adminFoldersPromise : Promise.resolve([folder]);
 
-         Actions/check-off overlay: SKIPPED here (empty actions map).
-         Each surviving folder resolves a DIFFERENT date, so overlaying
-         check-off state correctly would need one getActions() call per
-         distinct resolved date on top of the two fan-outs above; this
-         is a read-only "recent activity per project" view, not today's
-         live checklist, so the simpler-and-correct choice is no overlay
-         (chose "pass an empty actions map" per spec, not the merged-
-         per-date getActions fan-out). */
-      function loadRecentPerProject() {
-        var cutoff = window.FS.api.addDaysISO(today, -RECENT_DAYS);
-
-        return Promise.all([adminFoldersPromise, siteSlugMapPromise]).then(function (results) {
-          if (cancelled) return null;
-          var folders     = results[0];
+        return Promise.all([foldersPromise, siteSlugMapPromise]).then(function (results) {
+          if (cancelled) return EMPTY;
+          var folders     = (results[0] || []).filter(Boolean);
           var siteSlugMap = results[1];
+          if (folders.length === 0) return EMPTY;
 
+          /* 1) (date, folder) pairs with a real report in the window. */
           var dateThunks = folders.map(function (f) {
             return function () {
               return window.FS.api.dates.getDates({
@@ -511,169 +534,130 @@
                 user:   f,
               }).then(function (res) {
                 var dmap = (res && res.dates) || {};
-                var reportDays = Object.keys(dmap).filter(function (k) {
-                  return dmap[k] && dmap[k].hasReport;
-                }).sort().reverse(); /* newest first */
-                return { folder: f, dates: reportDays };
-              });
+                return Object.keys(dmap)
+                  .filter(function (d) { return dmap[d] && dmap[d].hasReport && d >= from && d <= today; })
+                  .map(function (d) { return { date: d, folder: f }; });
+              }).catch(function () { return []; });
             };
           });
 
-          return window.FS.api.pooledAll(dateThunks, 8).then(function (resolved) {
-            if (cancelled) return null;
-            /* Folders with zero hasReport dates, or whose newest date
-               falls outside the RECENT_DAYS window, make zero
-               getTimeline calls — filtered out before the folderThunks
-               fan-out below (dates[0] is newest-first, per the sort
-               above). */
-            var withDates = (resolved || []).filter(function (x) {
-              return x && x.dates && x.dates.length && x.dates[0] >= cutoff;
-            });
-            if (withDates.length === 0) {
-              return { ok: false, report: {} };
-            }
+          return window.FS.api.pooledAll(dateThunks, 8).then(function (perFolder) {
+            if (cancelled) return EMPTY;
+            var pairs = [];
+            (perFolder || []).forEach(function (list) { if (list) pairs = pairs.concat(list); });
+            if (pairs.length === 0) return EMPTY;
 
-            /* One thunk per folder — exactly ONE getTimeline call for
-               that folder's single newest (already recency-filtered)
-               report. Pooled across folders (limit 8); no per-folder
-               sequential walk anymore. */
-            var folderThunks = withDates.map(function (x) {
-              return function () {
-                var date = x.dates[0];
-                return window.FS.api.timeline.getTimeline({ date: date, user: x.folder })
-                  .then(function (report) {
-                    if (!report || report._notFound || report.available_users || report._accessDenied) {
-                      return null;
-                    }
-                    var data = buildTodayFromReport(report, {}, caller, date, siteSlugMap, x.folder);
-                    var hasTodos = (data.urgent && data.urgent.length)
-                      || (data.myTasks && data.myTasks.length)
-                      || (data.teamTasks && data.teamTasks.length);
-                    if (!hasTodos) return null;
-                    return { folder: x.folder, date: date, data: data };
-                  });
-              };
-            });
+            /* 2) One audit fan-out for the whole window. */
+            return window.FS.api.actions.getActionsRange({ from: from, to: today }).then(function (auditRange) {
+              if (cancelled) return EMPTY;
+              /* Partial data beats a dead page — the today-scoped
+                 brief/urgent/onSite load (loadFor above) succeeds
+                 independently of this leg. */
+              if (auditRange && auditRange._accessDenied) return EMPTY;
+              var byDate = auditRange.byDate || {};
 
-            return window.FS.api.pooledAll(folderThunks, 8).then(function (fanned) {
-              if (cancelled) return null;
-              var valid = (fanned || []).filter(Boolean);
-              if (valid.length === 0) {
-                return { ok: false, report: {} };
-              }
-
-              var entries = valid.map(function (x) {
-                return { folder: x.folder, data: x.data };
+              /* 3) Pooled report fan-out. */
+              var reportThunks = pairs.map(function (p) {
+                return function () {
+                  return window.FS.api.timeline.getTimeline({ date: p.date, user: p.folder })
+                    .then(function (report) { return { date: p.date, folder: p.folder, report: report }; })
+                    .catch(function () { return null; });
+                };
               });
-              var merged = mergeTodayData(entries, folder);
 
-              return {
-                ok:               true,
-                data:             merged,
-                actions:          {},
-                /* Mixed folder-dates — no single date to show. The
-                   render layer keys its "LATEST AVAILABLE <date>"
-                   banner off effectiveDate; perProjectLatest below
-                   tells it to swap to the "each project" copy instead. */
-                effectiveDate:    null,
-                isFallback:       true,
-                perProjectLatest: true,
-                today:            today,
-              };
+              return window.FS.api.pooledAll(reportThunks, 8).then(function (fanned) {
+                if (cancelled) return EMPTY;
+
+                var myById   = {};
+                var teamById = {};
+
+                function keep(list, bucket, actionState, date) {
+                  (list || []).forEach(function (item) {
+                    var auditKey = item.topic_id + '_' + item.actionIndex;
+                    var resolved = !!(actionState[auditKey] && actionState[auditKey].checked);
+                    if (resolved) return; /* checked off — drop */
+
+                    item.date       = item.date || date;
+                    item.ageDays    = diffDaysISO(item.date, today);
+                    item.noDeadline = !item.deadline;
+
+                    var existing = bucket[item.id];
+                    if (!existing || item.ageDays > existing.ageDays) {
+                      bucket[item.id] = item;
+                    }
+                  });
+                }
+
+                (fanned || []).forEach(function (x) {
+                  if (!x || !x.report) return;
+                  var report = x.report;
+                  if (report._notFound || report.available_users || report._accessDenied) return;
+
+                  var actionState = byDate[x.date] || {};
+                  var data = buildTodayFromReport(report, actionState, caller, x.date, siteSlugMap, x.folder);
+
+                  keep(data.myTasks,   myById,   actionState, x.date);
+                  keep(data.teamTasks, teamById, actionState, x.date);
+                });
+
+                return {
+                  myTasks:   Object.keys(myById).map(function (k) { return myById[k]; }),
+                  teamTasks: Object.keys(teamById).map(function (k) { return teamById[k]; }),
+                };
+              });
             });
           });
         });
       }
 
-      Promise.all([loadFor(today, false), programmePromise])
+      Promise.all([loadFor(today), loadRollingOpenItems(), programmePromise])
         .then(function (results) {
           if (cancelled) return;
-          var first          = results[0];
-          var programmeRows  = results[1];
+          var todayResult   = results[0];
+          var rolling       = results[1] || { myTasks: [], teamTasks: [] };
+          var programmeRows = results[2] || [];
 
-          if (!first) return;
-          if (first.accessDenied) {
-            setState({ status: 'access_denied', message: first.message, today: today });
+          if (!todayResult) return;
+          if (todayResult.accessDenied) {
+            setState({ status: 'access_denied', message: todayResult.message, today: today });
             return;
           }
-          if (first.ok) {
-            setState(Object.assign({ status: 'ok' }, withProgramme(first, programmeRows)));
-            return;
-          }
-          /* No report for today — try the latest available. Widened
-             discovery (Task C) via FS.api.window.getSpan() so the
-             fallback reaches historic report months instead of the
-             trailing 3-month window (data is Feb/Mar while "today"
-             runs months ahead of it). */
-          return window.FS.api.window.getSpan().then(function (span) {
-            if (cancelled) return;
-            var latest = span && span.latest;
 
-            if (multiProject) {
-              /* Multi-project fallback = per-folder recent-within-
-                 RECENT_DAYS (see loadRecentPerProject above), NOT
-                 loadFor(latest, true) — the single global `latest`
-                 almost always belongs to only one project. `latest`
-                 (possibly null) still threads through to the
-                 empty-state CTA below when NO folder resolves a
-                 recent report of its own. */
-              return loadRecentPerProject().then(function (result) {
-                if (cancelled || !result) return;
-                if (result.accessDenied) {
-                  setState({ status: 'access_denied', message: result.message, today: today });
-                  return;
-                }
-                if (result.ok) {
-                  setState(Object.assign({ status: 'ok' }, withProgramme(result, programmeRows)));
-                } else {
-                  setState({
-                    status:         'empty',
-                    report:         result.report,
-                    today:          today,
-                    programmeTasks: programmeRows,
-                    latest:         latest,
-                    folder:         folder,
-                  });
-                }
-              });
-            }
+          /* §B — today-scoped extras (brief/urgent/onSite) only when
+             today itself has a report; simply absent otherwise (no
+             latest-available fallback — the rolling list is the
+             substance now). */
+          var baseData = todayResult.ok ? todayResult.data : {
+            date:         null,
+            site:         null,
+            site_slug:    null,
+            morningBrief: { generatedAt: '—', bullets: [] },
+            urgent:       [],
+            onSite:       [],
+          };
 
-            if (!latest || latest === today) {
-              /* Empty-state still shows today's programme tasks if any —
-                 the programme is not gated on a daily report existing.
-                 `latest` (possibly null) threads through so the render
-                 branch can offer a "View latest report" CTA when one
-                 exists. */
-              setState({
-                status:         'empty',
-                report:         first.report,
-                today:          today,
-                programmeTasks: programmeRows,
-                latest:         latest,
-                folder:         folder,
-              });
-              return;
-            }
-            return loadFor(latest, true).then(function (second) {
-              if (cancelled || !second) return;
-              if (second.accessDenied) {
-                setState({ status: 'access_denied', message: second.message, today: today });
-                return;
-              }
-              if (second.ok) {
-                setState(Object.assign({ status: 'ok' }, withProgramme(second, programmeRows)));
-              } else {
-                setState({
-                  status:         'empty',
-                  report:         second.report,
-                  today:          today,
-                  programmeTasks: programmeRows,
-                  latest:         latest,
-                  folder:         folder,
-                });
-              }
-            });
+          var data = Object.assign({}, baseData, {
+            myTasks:        rolling.myTasks,
+            teamTasks:      rolling.teamTasks,
+            programmeTasks: programmeRows,
           });
+
+          /* "View daily report" CTA + check-off default only make sense
+             when TODAY itself has a report. */
+          var effectiveDate = todayResult.ok ? today : null;
+
+          var hasContent = !!effectiveDate
+            || (data.urgent && data.urgent.length > 0)
+            || (data.myTasks && data.myTasks.length > 0)
+            || (data.teamTasks && data.teamTasks.length > 0)
+            || (data.programmeTasks && data.programmeTasks.length > 0);
+
+          if (!hasContent) {
+            setState({ status: 'empty', today: today, folder: folder });
+            return;
+          }
+
+          setState({ status: 'ok', data: data, effectiveDate: effectiveDate, today: today });
         }).catch(function (err) {
           if (cancelled) return;
           setState({ status: 'error', error: { code: (err && err.status) || 0, message: (err && err.message) || 'Could not load today', retryable: true }, retry: function () { setRetry(function (n) { return n + 1; }); }, today: today });
@@ -937,59 +921,34 @@
       );
     }
 
+    /* feat/today-rolling-open-items (§E) — empty state now means "no
+       report today AND nothing unresolved in the rolling window AND
+       nothing due soon", not "no report for today specifically". The
+       old per-project "recent activity" fallback banner/CTA is gone —
+       there's nothing to fall back TO any more, the rolling list IS
+       the substance. TimelineLink stays so /timeline is always
+       reachable even from a genuinely quiet Today. */
     if (state.status === 'empty') {
-      var report = state.report || {};
-      var msg = (report.available_users && 'Pick a user from /timeline to view a daily report.')
-              || report.message
-              || 'No report yet for today.';
-      var emptyLatest = state.latest;
       return React.createElement('div', { className: 'fs-page fs-page--today' },
-
-        /* fix/today-timeline-and-focus — always-present, NOT gated on
-           emptyLatest (unlike the "View latest report" CTA just below,
-           which only shows once a fallback date is known). Falls back
-           to a bare /timeline link that self-resolves. */
-        React.createElement(TimelineLink, { date: emptyLatest, user: state.folder }),
-
-        React.createElement('div', { style: { padding: '24px', color: 'var(--text-tertiary)', fontSize: '13px' } },
-          msg),
-
-        /* Task C — when the widened data-window discovery (:198 above)
-           found a report on some earlier date but couldn't use it as a
-           fallback here (e.g. it's today itself, or the same-user load
-           still came back empty), offer a direct deep-link instead of
-           leaving the page a dead end. Reuses the OK-branch CTA markup
-           below (fs-today__view-report-cta). Guarded on latest existing. */
-        emptyLatest
-          ? React.createElement('button', {
-              type:      'button',
-              className: 'fs-today__view-report-cta',
-              onClick:   function () {
-                var qs = '?date=' + encodeURIComponent(emptyLatest);
-                if (state.folder) qs += '&user=' + encodeURIComponent(state.folder);
-                qs += '&from=today';
-                window.FS.Router.navigate('/timeline' + qs);
-              },
-            },
-              React.createElement('span', { className: 'fs-today__view-report-cta-text' },
-                'View latest report (' + fmtDate(emptyLatest) + ')'),
-              React.createElement('span', { className: 'fs-today__view-report-cta-arrow' },
-                '→'),
-            )
-          : null,
+        React.createElement(TimelineLink, { user: state.folder }),
+        React.createElement('div', {
+          style: {
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            textAlign: 'center', gap: '6px', padding: '40px 24px',
+          },
+        },
+          React.createElement('div', {
+            style: { fontSize: '14px', fontWeight: 600, color: 'var(--text-secondary)' },
+          }, "No open items — you're all caught up"),
+          React.createElement('div', {
+            style: { fontSize: '13px', color: 'var(--text-tertiary)' },
+          }, 'Nothing unresolved in the last ' + ROLLING_LOOKBACK_DAYS + ' days, and nothing due in the next ' + PROGRAMME_DEADLINE_DAYS + ' days.'),
+        ),
       );
     }
 
     var data              = state.data;
     var effectiveDate     = state.effectiveDate;
-    var isFallback        = !!state.isFallback;
-    /* feat/today-fallback-per-project — set by loadRecentPerProject()
-       when today has no report AND the caller is multi-project: each
-       accessible project (within RECENT_DAYS) fanned out to ITS OWN
-       newest report date (mixed dates, so effectiveDate above is
-       null). Swaps the fallback banner copy below; renderMaybeGrouped
-       groups the merged list by project unchanged. */
-    var perProjectLatest  = !!state.perProjectLatest;
 
     /* Part B — group-by-project vs. per-card chip. Computed straight off
        the item lists actually being rendered (not a separately-tracked
@@ -1007,14 +966,6 @@
       removeMy(task.id);
     }
 
-    /* Format the effective date for the fallback banner. */
-    function fmtDate(yyyymmdd) {
-      var p = (yyyymmdd || '').split('-').map(Number);
-      if (p.length !== 3) return yyyymmdd || '';
-      var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
-      var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      return d.getUTCDate() + ' ' + months[d.getUTCMonth()] + ' ' + p[0];
-    }
 
     return React.createElement('div', {
       style: { display: 'flex', flexDirection: 'column', gap: 0 },
@@ -1022,49 +973,19 @@
     },
 
       /* fix/today-timeline-and-focus — always-present header action,
-         NOT gated on effectiveDate/perProjectLatest (unlike the "View
-         daily report" CTA below). perProjectLatest has no single date
-         to deep-link to, so this passes none — bare /timeline
-         self-resolves via timeline.js's own bootstrap effect. */
+         NOT gated on effectiveDate (unlike the "View daily report" CTA
+         below). */
       React.createElement(TimelineLink, null),
-
-      /* Fallback banner — shown when today has no report yet and we're
-         displaying the latest available one instead. perProjectLatest
-         swaps the single-date copy for the "each project" copy, since
-         effectiveDate is null (mixed folder-dates) — same wrapper +
-         label/note classes, no new visual style. */
-      isFallback ? React.createElement('div', { className: 'fs-today__fallback-banner' },
-        perProjectLatest
-          ? React.createElement(React.Fragment, null,
-              React.createElement('span', { className: 'fs-today__fallback-label' },
-                'No reports today'),
-              React.createElement('span', { className: 'fs-today__fallback-note' },
-                '— recent activity · last ' + RECENT_DAYS + ' days'),
-            )
-          : React.createElement(React.Fragment, null,
-              React.createElement('span', { className: 'fs-today__fallback-label' },
-                'Latest available'),
-              React.createElement('span', { className: 'fs-today__fallback-date' },
-                fmtDate(effectiveDate)),
-              React.createElement('span', { className: 'fs-today__fallback-note' },
-                '· no report yet for today (' + fmtDate(state.today) + ')'),
-            ),
-      ) : null,
 
       /* "View daily report" CTA — full-width banner above the brief.
          Lifted out of MorningBriefCard so the action stands on its
          own (post-merge review feedback). Navigates to the canonical
          /timeline view scoped to the brief's (date, user). The
          &from=today flag tells TimelineMiddleColumn to render a
-         "← Back to today" link in its header (Sprint 4.5). Hidden in
-         perProjectLatest mode — effectiveDate is null there (mixed
-         folder-dates), so there's no single report to deep-link to.
-         fix/today-timeline-and-focus — that used to leave NO way to
-         reach /timeline from Today in this mode (cards only call
-         onSelect, they don't navigate); the always-present
-         TimelineLink rendered at the top of this page (see
-         `React.createElement(TimelineLink, ...)` above) now covers it
-         regardless of effectiveDate/perProjectLatest. */
+         "← Back to today" link in its header (Sprint 4.5). Only shown
+         when TODAY itself has a report (effectiveDate === today) —
+         feat/today-rolling-open-items dropped the "latest available"
+         fallback, so there's no other date this could deep-link to. */
       effectiveDate ? React.createElement('button', {
         type:      'button',
         className: 'fs-today__view-report-cta',
@@ -1082,8 +1003,10 @@
           '→'),
       ) : null,
 
-      /* MORNING BRIEF */
-      React.createElement(fs.MorningBriefCard, { brief: data.morningBrief }),
+      /* MORNING BRIEF — §B: today-scoped, only when TODAY itself has a
+         report (effectiveDate truthy). Otherwise simply absent, rather
+         than rendering an empty "Morning Brief" card with no bullets. */
+      effectiveDate ? React.createElement(fs.MorningBriefCard, { brief: data.morningBrief }) : null,
 
       /* Sprint 11 C.2 — Weekly completion KPI tile.
          Hidden when nothing closed/open in the current week (avoids
@@ -1105,12 +1028,15 @@
           )
         : null,
 
-      /* TASKS — Sprint 4.10: My-tasks list now mixes two sources:
-         (1) programme tasks scheduled on today (from FS.api.todayProgramme),
-         (2) action items derived from yesterday's daily report.
-         Same parent SectionLabel, two visually distinct sub-groups so the
-         user reads them as ONE list with provenance, not two lists. */
-      React.createElement(SectionLabel, null, 'Tasks today'),
+      /* TASKS — feat/today-rolling-open-items mixes two sources:
+         (1) near-deadline programme tasks (deadline within
+             PROGRAMME_DEADLINE_DAYS — FS.api.todayProgramme.
+             getUpcomingProgrammeTasks),
+         (2) rolling unresolved action items from the trailing
+             ROLLING_LOOKBACK_DAYS days (loadRollingOpenItems above).
+         Same parent SectionLabel, two visually distinct sub-groups so
+         the user reads them as ONE list with provenance, not two lists. */
+      React.createElement(SectionLabel, null, 'Tasks'),
 
       /* Sub-group 1 — Programme tasks (rendered FIRST since the
          programme work is the structural context for the day; action
@@ -1118,7 +1044,7 @@
       data.programmeTasks && data.programmeTasks.length > 0
         ? React.createElement(React.Fragment, null,
             React.createElement(SubsectionLabel, null,
-              'From your programme · ' + data.programmeTasks.length),
+              'Due within ' + PROGRAMME_DEADLINE_DAYS + ' days · ' + data.programmeTasks.length),
             renderMaybeGrouped(data.programmeTasks, isMultiProject, function (row) {
               return React.createElement(fs.ProgrammeTaskCard, {
                 /* Sprint T-004 style task_id is only unique WITHIN one
@@ -1140,11 +1066,15 @@
           )
         : null,
 
-      /* Sub-group 2 — Action items from the daily report. */
+      /* Sub-group 2 — rolling unresolved action items (§C — per-item
+         check-off). Each task carries its OWN origin date (stamped by
+         today-adapter.js / loadRollingOpenItems) since the list mixes
+         dates — there is no single page-level effectiveDate to check
+         off against any more. */
       data.myTasks && data.myTasks.length > 0
         ? React.createElement(React.Fragment, null,
             React.createElement(SubsectionLabel, null,
-              'From recent reports · ' + data.myTasks.length),
+              'Open items · ' + data.myTasks.length),
             renderMaybeGrouped(data.myTasks, isMultiProject, function (task) {
               return React.createElement(fs.TaskCard, {
                 key:           task.id,
@@ -1152,18 +1082,17 @@
                 onSelect:      onSelect,
                 isMine:        true,
                 selected:      selectedId === task.id,
-                /* perProjectLatest has no single effectiveDate (mixed
-                   folder-dates) — toggling would persist against a null
-                   date, so check-off is disabled there; it's a read-only
-                   "latest per project" view, not today's live checklist. */
-                checkable:     task.topic_id != null && task.actionIndex != null && !!effectiveDate,
-                date:          effectiveDate,
+                checkable:     task.topic_id != null && task.actionIndex != null && !!task.date,
+                date:          task.date,
                 onCheckedOff:  onCheckedOff,
                 /* Part B — single-project caller gets a subtle project
                    chip per card instead of group headers (reuses the
                    "SiteName · date" label pattern from search-palette.js
                    / ask-chat.js, here just the site half). */
                 site:          !isMultiProject ? task.site_name : null,
+                /* §E — age + no-deadline read-only signals. */
+                ageLabel:      formatAgeLabel(task.ageDays),
+                noDeadline:    !!task.noDeadline,
               });
             }),
           )
@@ -1174,12 +1103,14 @@
           'Team · ' + data.teamTasks.length),
         renderMaybeGrouped(data.teamTasks, isMultiProject, function (task) {
           return React.createElement(fs.TaskCard, {
-            key:      task.id,
-            task:     task,
-            onSelect: onSelect,
-            isMine:   false,
-            selected: selectedId === task.id,
-            site:     !isMultiProject ? task.site_name : null,
+            key:        task.id,
+            task:       task,
+            onSelect:   onSelect,
+            isMine:     false,
+            selected:   selectedId === task.id,
+            site:       !isMultiProject ? task.site_name : null,
+            ageLabel:   formatAgeLabel(task.ageDays),
+            noDeadline: !!task.noDeadline,
           });
         }),
       ) : null,
@@ -1188,9 +1119,14 @@
          now reachable on /timeline as the canonical surface. Today
          stays a quick dashboard: brief → urgent → tasks → on-site. */
 
-      /* ON SITE */
-      React.createElement(SectionLabel, null, 'On site now'),
-      React.createElement(fs.OnSiteCard, { people: data.onSite }),
+      /* ON SITE — §B: today-scoped, only when TODAY itself has a report.
+         Derived from the report's own site, so with no report there's
+         no reliable "who's on site" answer to show — a bare "0 on
+         site" would read as "nobody's here" rather than "unknown". */
+      effectiveDate ? React.createElement(React.Fragment, null,
+        React.createElement(SectionLabel, null, 'On site now'),
+        React.createElement(fs.OnSiteCard, { people: data.onSite }),
+      ) : null,
 
     );
   }
@@ -1240,19 +1176,22 @@
     /* M-4 — wire "Mark complete" to the same persistence path TaskCard
        uses: toggle the action via /api/actions, then drop the task
        optimistically from the page snapshot and close the right detail.
-       Surface only when the item is a task that carries the action key. */
-    var effectiveDate = (ctx && ctx.state && ctx.state.effectiveDate) || null;
-    var canCheckOff   = item.kind === 'task'
-                     && item.topic_id   != null
-                     && item.actionIndex != null
-                     && !!effectiveDate;
+       Surface only when the item is a task that carries the action key.
+       feat/today-rolling-open-items (§C) — gated on the ITEM's OWN
+       .date (stamped by today-adapter.js), not a page-level
+       effectiveDate: the rolling list mixes origin dates, so there is
+       no single date to fall back to any more. */
+    var canCheckOff = item.kind === 'task'
+                    && item.topic_id   != null
+                    && item.actionIndex != null
+                    && !!item.date;
 
     function onMarkComplete() {
       if (!canCheckOff) return;
       var api = window.FS && window.FS.api && window.FS.api.actions;
       if (!api) return;
       api.toggleAction({
-        date:         effectiveDate,
+        date:         item.date,
         topic_id:     item.topic_id,
         action_index: item.actionIndex,
         checked:      true,
@@ -1273,6 +1212,10 @@
         ['Status',   item.status],
         ['Priority', item.priority || 'Medium'],
       ];
+      /* §E — age + no-deadline read-only signals, mirrored here for the
+         right-detail view (the card list already surfaces them). */
+      if (item.ageDays != null) rows.push(['Open since', formatAgeLabel(item.ageDays)]);
+      if (item.noDeadline) rows.push(['Deadline', 'None set']);
     } else if (item.kind === 'urgent') {
       rows = [
         ['Severity',     item.badgeLabel],

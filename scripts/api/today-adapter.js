@@ -224,8 +224,21 @@
           status:      status.status,
           statusTone:  status.statusTone,
           priority:    priorityLabel(a.priority),
+          /* feat/today-rolling-open-items — raw deadline text (or null),
+             distinct from dueTime below (which is always a display
+             string, '—' when absent). Rolling Today needs the RAW
+             presence/absence to render an accurate "No deadline" chip —
+             dueTime alone can't tell '—' (no deadline) apart from a
+             deadline with no clock time in it. */
+          deadline:    a.deadline || null,
           dueTime:     dueTimeFromDeadline(a.deadline),
           kind:        'task',
+          /* feat/today-rolling-open-items — the report date this item
+             was extracted from. today.js's rolling loader fans out
+             across many report dates at once, so each item must carry
+             its OWN origin date for per-item check-off (toggleAction)
+             and age computation — mirrors morningBrief.date above. */
+          date:        report.report_date || ctx.date || null,
           site_name:   siteName,
           site_slug:   siteSlug,
         };
