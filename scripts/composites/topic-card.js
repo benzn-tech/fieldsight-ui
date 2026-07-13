@@ -106,6 +106,23 @@
       if (props.onSelect) props.onSelect(topic);
     }
 
+    /* fix/topic-card-clickable-body — let a click ANYWHERE in the
+       expanded body (summary text, section labels, empty space) also
+       open the right-detail panel, same payload as the header. Clicks
+       that originate inside an interactive child (the action-item
+       checkbox row, a safety-flag row, or any nested button/link/
+       input/label) are ignored here so they keep their own behaviour
+       (check-off toggle, etc.) instead of also opening the panel. */
+    function onBodyClick(e) {
+      var target = e && e.target;
+      if (target && target.closest && target.closest(
+        '.fs-action-item-row, .fs-safety-flag-row, button, a, input, label'
+      )) {
+        return;
+      }
+      if (props.onSelect) props.onSelect(topic);
+    }
+
     var participants = topic.participants || [];
     var decisions    = topic.key_decisions || [];
     var actions      = topic.action_items  || [];
@@ -188,7 +205,10 @@
         : null,
 
       /* Body */
-      open ? React.createElement('div', { className: 'fs-topic-card__body' },
+      open ? React.createElement('div', {
+        className: 'fs-topic-card__body',
+        onClick:   onBodyClick,
+      },
 
         topic.summary
           ? React.createElement('p', { className: 'fs-topic-card__summary' },
