@@ -163,6 +163,50 @@
 }
 
 
+/* fix/today-timeline-and-focus — persistent, secondary "Open timeline"
+   link. Unlike .fs-today__view-report-cta above (the primary CTA, only
+   shown when a single effectiveDate is known), this renders at the top
+   of Today unconditionally, so /timeline stays reachable even in the
+   per-project-recent fallback (no single date to deep-link to).
+   Deliberately lighter than the CTA — a plain text link, not a filled
+   button. */
+.fs-today__timeline-link-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 4px 6px;
+}
+.fs-today__timeline-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 2px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.fs-today__timeline-link:hover {
+  color: var(--text-link-hover);
+  text-decoration: underline;
+}
+.fs-today__timeline-link:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.fs-today__timeline-link-arrow {
+  font-size: 13px;
+  line-height: 1;
+  transition: transform var(--duration-fast) var(--easing-out);
+}
+.fs-today__timeline-link:hover .fs-today__timeline-link-arrow {
+  transform: translateX(2px);
+}
+
+
 /* feat/today-by-project — project-headed groups. Shown instead of a flat
    list when the caller has MULTIPLE projects with items in a section
    (Urgent / Tasks today / Team); a single-project caller keeps the flat
