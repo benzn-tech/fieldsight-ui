@@ -469,6 +469,7 @@
         action_index: 'quality',
         checked:      nextStatus === 'resolved',
         action_text:  sel.item,
+        user_folder:  sel.user_folder,
       }).then(function () {
         setTogglePending(false);
       }).catch(function (err) {

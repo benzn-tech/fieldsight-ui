@@ -15,7 +15,11 @@
 
    Returned row shape:
      {
-       id:           '<date>_<topic_id>_<action_index>',
+       id:           '<date>_<user_folder>_<topic_id>_<action_index>',  // opaque —
+                     // user_folder segment (Sprint 11.x user-dim audit key) prevents
+                     // same-date/same-tid/idx rows from different owners colliding
+                     // on React key / removeRow. No parser reads this id — see
+                     // docs/superpowers/plans/2026-07-13-user-dimension-audit-key.md
        date:         'YYYY-MM-DD',
        topic_id:     number,
        action_index: number,
@@ -190,11 +194,15 @@
     perDay.forEach(function (x) {
       var r = x.report;
       if (!r || r._notFound || r.available_users) return;
+      /* Report OWNER's folder — NOT the caller (AuthMock.currentUser). See
+         plan §1.3/owner≠caller. Hoisted once per report for the id + the
+         lookupAction() call below. */
+      var folder = r.user_name ? window.FS.api.folderName(r.user_name) : null;
       (r.topics || []).forEach(function (t) {
         (t.action_items || []).forEach(function (a, idx) {
-          var key   = (auditByDate[x.date] || {})[t.topic_id + '_' + idx] || {};
+          var key = window.FS.api.actions.lookupAction(auditByDate[x.date], folder, t.topic_id, idx) || {};
           rows.push({
-            id:             x.date + '_' + t.topic_id + '_' + idx,
+            id:             x.date + '_' + (folder || '') + '_' + t.topic_id + '_' + idx,
             date:           x.date,
             topic_id:       t.topic_id,
             action_index:   idx,
@@ -205,7 +213,7 @@
             topic_title:    t.topic_title,
             topic_category: t.category,
             user_name:      r.user_name,
-            user_folder:    r.user_name ? window.FS.api.folderName(r.user_name) : null,
+            user_folder:    folder,
             audit: {
               checked:    !!key.checked,
               checked_by: key.checked_by || null,
@@ -226,11 +234,18 @@
        GET /api/actions/all?from=YYYY-MM-DD&to=YYYY-MM-DD&user=<folder>
      Returns: { entries: [...], from, to, user }
        entry = {
-         action_id:        '<date>_<topic_id>_<action_index>',  // unique
-         topic_action_key: '<topic_id>_<action_index>',          // groups
-                                                                 // same logical
-                                                                 // action across
-                                                                 // dates
+         action_id:        '<date>_<key>',                       // unique
+         topic_action_key: '<user_folder>|<topic_id>_<action_index>'  // groups
+                            // same logical action across dates. Composite
+                            // (user-dim audit key) when the underlying audit
+                            // map key has a folder segment; bare
+                            // '<topic_id>_<action_index>' for true legacy
+                            // (unmigrated) records — see plan §1.2/§1.3.
+         user_folder:      string | null,                        // parsed
+                                                                 // from the
+                                                                 // composite
+                                                                 // key, null
+                                                                 // for legacy
          date:             'YYYY-MM-DD',
          topic_id, action_index,
          checked, checked_by, checked_at,
@@ -268,11 +283,18 @@
     Object.keys(byDate).sort().forEach(function (date) {
       var dayActions = byDate[date] || {};
       Object.keys(dayActions).forEach(function (key) {
-        var rec   = dayActions[key] || {};
-        var parts = key.split('_');
+        var rec = dayActions[key] || {};
+        /* User-dim audit key (plan §1.3): split on the FIRST '|'. Composite
+           keys are '<user_folder>|<tid>_<idx>'; true legacy (unmigrated)
+           records have no '|' at all — folder stays null and bare === key. */
+        var pipeAt  = key.indexOf('|');
+        var folder  = pipeAt === -1 ? null : key.slice(0, pipeAt);
+        var bare    = pipeAt === -1 ? key  : key.slice(pipeAt + 1);
+        var parts   = bare.split('_');
         entries.push({
           action_id:        date + '_' + key,
           topic_action_key: key,
+          user_folder:      folder,
           date:             date,
           topic_id:         parseInt(parts[0], 10),
           action_index:     parseInt(parts[1], 10),

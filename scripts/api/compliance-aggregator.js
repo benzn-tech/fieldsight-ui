@@ -224,7 +224,7 @@
     /* Task 2 (live-data fixes) — fetch the checked-actions map for every
        date in the range, in parallel with the timeline fanout below, so
        flag/topic rows can join their real resolved status instead of a
-       hard-coded literal. Actions are keyed by date only (not by user),
+       hard-coded literal. The per-date map already holds every user's rows (composite user_folder|topic_id_action_index keys, joined per-row via FS.api.actions.lookupAction() — Task 8, 2026-07-13-user-dimension-audit-key.md),
        so one fetch per unique date covers the admin cross-product too.
        Per-date failures are swallowed to an empty map — resilience over
        correctness of status (a flag simply shows as 'open' if the join
@@ -575,10 +575,10 @@
       var topicFlagRows = [];
       (r.topics || []).forEach(function (t) {
         (t.safety_flags || []).forEach(function (f, idx) {
-          var entry = checkedMap[t.topic_id + '_flag_' + idx];
+          var entry = window.FS.api.actions.lookupAction(checkedMap, folder, t.topic_id, 'flag_' + idx);
           var resolved = !!(entry && entry.checked);
           topicFlagRows.push({
-            id:                 x.date + '_' + t.topic_id + '_flag_' + idx,
+            id:                 x.date + '_' + (folder || '') + '_' + t.topic_id + '_flag_' + idx,
             date:               x.date,
             site:               r.site || null,
             user_name:          r.user_name || null,
@@ -616,10 +616,10 @@
         });
         if (isDup) return;
 
-        var entry = checkedMap['-1_obs_' + idx];
+        var entry = window.FS.api.actions.lookupAction(checkedMap, folder, -1, 'obs_' + idx);
         var resolved = !!(entry && entry.checked);
         rows.push({
-          id:                 x.date + '_obs_' + idx,
+          id:                 x.date + '_' + (folder || '') + '_obs_' + idx,
           date:               x.date,
           site:               r.site || null,
           user_name:          r.user_name || null,
@@ -747,7 +747,7 @@
          binary. */
       (r.quality_and_compliance || []).forEach(function (q, idx) {
         rows.push({
-          id:               x.date + '_qc_' + idx,
+          id:               x.date + '_' + (folder || '') + '_qc_' + idx,
           date:             x.date,
           site:             r.site || null,
           user_name:        r.user_name || null,
@@ -773,10 +773,10 @@
          topic's own topic_id (one row per topic, no idx needed). */
       (r.topics || []).forEach(function (t) {
         if (t.category !== 'quality') return;
-        var entry = checkedMap[t.topic_id + '_quality'];
+        var entry = window.FS.api.actions.lookupAction(checkedMap, folder, t.topic_id, 'quality');
         var resolved = !!(entry && entry.checked);
         rows.push({
-          id:               x.date + '_' + t.topic_id + '_topic',
+          id:               x.date + '_' + (folder || '') + '_' + t.topic_id + '_topic',
           date:             x.date,
           site:             r.site || null,
           user_name:        r.user_name || null,

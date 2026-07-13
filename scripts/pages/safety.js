@@ -462,6 +462,7 @@
         action_index: actionIndex,
         checked:      nextStatus === 'resolved',
         action_text:  sel.observation,
+        user_folder:  sel.user_folder,
       }).then(function () {
         setTogglePending(false);
       }).catch(function (err) {

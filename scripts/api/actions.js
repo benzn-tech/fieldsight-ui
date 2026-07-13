@@ -1,19 +1,44 @@
 /* ==========================================================================
    FieldSight API · Action items — BACKEND-CONTEXT §4.10  (Sprint 8.1.1)
+   User-dimension audit key — see
+   docs/superpowers/plans/2026-07-13-user-dimension-audit-key.md
    --------------------------------------------------------------------------
    GET    /api/actions?date=YYYY-MM-DD
-          → { date, actions: { '<topic_id>_<action_index>': { checked, checked_by, checked_at } } }
+          → { date,
+              actions:    { '<topic_id>_<action_index>': {checked, checked_by, checked_at} },  // legacy shape — collapses cross-user, kept for old-frontend transition only
+              actions_v2: { '<user_folder>|<topic_id>_<action_index>': {...} } }                // new shape — bare key only for true (unmigrated) legacy records
+          Live path normalizes: when actions_v2 is present on the response,
+          res.actions is REPLACED with res.actions_v2, so every existing
+          consumer reading res.actions transparently gets the new
+          per-user map. Old backend / mock path (no actions_v2) fall
+          through unchanged — no degradation.
 
    POST   /api/actions/toggle          (useMocks=false — Phase 0 Task 2)
-          body { date, topic_id, action_index, checked, action_text }
-          → { message: "Updated", checked: true }
+          body { date, topic_id, action_index, checked, action_text, user_folder }
+          → { message: "Updated", checked: true, user_folder }
+          user_folder = report OWNER's folder (never the caller / current
+          user — that's checked_by). Omit for legacy behaviour (writes the
+          old bare key).
 
    POST   /api/actions                 (useMocks=false, writeMocks=false — Sprint 8.1.1)
           body { date, topic_id, action_index, action_text, responsible, ... }
           → { id, ...action }
 
+   Key helpers — ALL readers/writers go through these, never hand-roll a key:
+     actionKey(user_folder, topic_id, action_index)
+       `<user_folder>|<topic_id>_<action_index>`, or bare `<topic_id>_<action_index>`
+       when user_folder is falsy.
+     lookupAction(map, user_folder, topic_id, action_index)
+       composite-key lookup with legacy bare-key fallback. ANTI-REGRESSION
+       IRON RULE: this bare-key fallback is the ONLY legacy fallback allowed
+       anywhere in the app — never fall back to querying the collapsed
+       `actions` map instead (post-migration that reintroduces the original
+       cross-user collision bug).
+
    Mock path: in-memory copy of fixtures.actions, mutations persist for the
    lifetime of the page (good enough to demo the optimistic-update pattern).
+   Mock keys go through actionKey() too (bare when no user_folder given),
+   so mock mode keeps exercising the legacy-fallback path.
 
    On real-backend failure:
      • Emits a revert event to FS.actionsBus so sibling ActionItemRows
@@ -32,13 +57,25 @@
     state = JSON.parse(JSON.stringify(f));
   }
 
-  function actionKey(topic_id, action_index) {
-    return topic_id + '_' + action_index;
+  /* actionKey/lookupAction signatures + semantics are locked by the plan
+     (§1.3) — later tasks depend on them exactly as written here. */
+  function actionKey(user_folder, topic_id, action_index) {
+    var bare = topic_id + '_' + action_index;
+    return user_folder ? (user_folder + '|' + bare) : bare;
+  }
+
+  function lookupAction(map, user_folder, topic_id, action_index) {
+    if (!map) return undefined;
+    var bare = topic_id + '_' + action_index;
+    return (user_folder ? map[user_folder + '|' + bare] : undefined) || map[bare];
   }
 
   async function getActions(date) {
     if (!window.FS.api.useMocks) {
-      return window.FS.api.request('/actions', { params: { date: date } });
+      return window.FS.api.request('/actions', { params: { date: date } }).then(function (res) {
+        if (res && res.actions_v2) res.actions = res.actions_v2;
+        return res;
+      });
     }
     await window.FS.api.delay();
     ensureState();
@@ -52,6 +89,7 @@
     var action_index = opts.action_index;
     var checked      = !!opts.checked;
     var action_text  = opts.action_text;
+    var user_folder  = opts.user_folder;  /* report OWNER's folder — never the caller */
 
     /* --- Real backend path (Phase 0 Task 2) ------------------------------
        Optimistic flow:
@@ -63,7 +101,7 @@
     if (!window.FS.api.useMocks) {
       return window.FS.api.request('/actions/toggle', {
         method: 'POST',
-        body:   { date: date, topic_id: topic_id, action_index: action_index, checked: checked, action_text: action_text },
+        body:   { date: date, topic_id: topic_id, action_index: action_index, checked: checked, action_text: action_text, user_folder: user_folder },
       }).then(function (res) {
         /* Emit confirmed bus event so any sibling row with the same key
            updates to the server-truth value. */
@@ -76,6 +114,7 @@
             checked:      checked,
             checked_by:   (res && res.checked_by) || null,
             checked_at:   (res && res.checked_at) || null,
+            user_folder:  user_folder,
           });
         }
         return res;
@@ -91,6 +130,7 @@
             checked_by:   null,
             checked_at:   null,
             _revert:      true,
+            user_folder:  user_folder,
           });
         }
         /* Toast the failure. */
@@ -110,7 +150,7 @@
     await window.FS.api.delay(60);
     ensureState();
 
-    var key = actionKey(topic_id, action_index);
+    var key = actionKey(user_folder, topic_id, action_index);
     var who = (window.AuthMock && window.AuthMock.currentUser && window.AuthMock.currentUser.name) || 'system';
 
     if (!state[date]) state[date] = {};
@@ -134,7 +174,7 @@
     await window.FS.api.delay(80);
     ensureState();
     var date = payload.date;
-    var key  = actionKey(payload.topic_id, payload.action_index || 0);
+    var key  = actionKey(payload.user_folder, payload.topic_id, payload.action_index || 0);
     if (!state[date]) state[date] = {};
     state[date][key] = {
       checked:    false,
@@ -197,6 +237,7 @@
     toggleAction:    toggleAction,
     createAction:    createAction,
     actionKey:       actionKey,
+    lookupAction:    lookupAction,
   };
 
 })();

@@ -196,17 +196,55 @@ Allowed prefixes: users/, audio_segments/, transcripts/, reports/, web_video/. T
 ### 4.10 Action items (interactive checkboxes)
 The frontend persists checkbox state across users / devices.
 POST /api/actions/toggle
-Body: { date, topic_id, action_index, checked, action_text }
-→ { message:"Updated", checked:true }
+Body: { date, topic_id, action_index, checked, action_text, user_folder? }
+→ { message:"Updated", checked:true, user_folder }
+`user_folder` (optional) is the report OWNER's folder — never the caller
+(that's `checked_by`, derived server-side). Omit for legacy behaviour
+(writes the old bare `${topic_id}_${action_index}` key). See "User-
+dimension audit key" below.
 GET /api/actions?date=YYYY-MM-DD
 → {
     date,
     actions: {
       "0_2": { checked:true, checked_by:"Jack Gibson", checked_at:"2026-04-29T01:18:42Z" },
-      // key = `${topic_id}_${action_index}`
+      // legacy shape — key = `${topic_id}_${action_index}`, collapses
+      // cross-user (two different report owners' "topic 0 / action 0" on
+      // the same date land on the same entry). Kept only for old-
+      // frontend transition; do not read this map in new frontend code.
+    },
+    actions_v2: {
+      "Jarley_Trainor|0_2": { checked:true, checked_by:"Jack Gibson", checked_at:"…" },
+      // new shape — composite key `${user_folder}|${topic_id}_${action_index}`.
+      // A bare `${topic_id}_${action_index}` key in actions_v2 means a
+      // TRUE unmigrated legacy record (no user_folder was ever recorded
+      // for it) — resolve those via the bare-key fallback below, never by
+      // falling back to the collapsed `actions` map.
     }
   }
 Both current state AND an immutable audit log are written to fieldsight-audit DynamoDB. No way to delete history — all toggles are kept.
+
+**User-dimension audit key.** DynamoDB SK is
+`USER#{user_folder}#TOPIC#{topic_id}#ACTION#{action_index}` (falls back to
+the old `TOPIC#{topic_id}#ACTION#{action_index}` form when no user_folder
+was supplied — true legacy records, or writes from an un-updated caller).
+PK is unchanged (`ACTIONS#{date}`) — one query still returns every user's
+actions for that date; there is no per-user fan-out cost.
+
+Frontend contract: **all reads go through
+`FS.api.actions.lookupAction(map, user_folder, topic_id, action_index)`**
+and **all writes/local-map keys go through
+`FS.api.actions.actionKey(user_folder, topic_id, action_index)`**
+(scripts/api/actions.js). `lookupAction` tries the composite key first,
+then falls back to the bare key — the ONLY legacy fallback allowed
+anywhere in the app. **Anti-regression rule: never fall back to the
+collapsed `actions` map instead** — after migration, a composite-key miss
+for one user does not mean "check the bare key in `actions`", it means
+"this user has no entry"; falling back to the collapsed map would
+reintroduce the original cross-user collision bug it was built to fix.
+The live `getActions()` path in actions.js normalizes this away from
+consumers: when `actions_v2` is present, `res.actions` is replaced with
+it, so every existing `res.actions` reader transparently gets the new
+per-user map without a call-site change.
 ### 4.11 Reports — history & regenerate
 GET /api/reports/history?limit=20
 → { reports: [{ key, type:"daily"|"weekly"|"monthly", date, generated_at, size }] }
@@ -476,7 +514,20 @@ spk_0, spk_1 from Transcribe diarization are not stable across recordings (the s
 ### 8.7 Empty-state arrays
 safety_observations, safety_flags, action_items, key_decisions, related_photos, topics can all be []. A day with no recordings still produces a report shell with empty topics.
 ### 8.8 Topic IDs & action keys
-Action checkbox state is keyed by ${topic_id}_${action_index}. If the report is regenerated, topic_ids may shift — historical action checkmarks could "move". Treat this as best-effort; for hard audit, use /api/actions history.
+Action checkbox state is keyed by ${topic_id}_${action_index} — plus, since
+the user-dimension audit key change, a `${user_folder}|` prefix (see §4.10).
+`topic_id` restarts at 0 in every report, so without the folder prefix two
+different report owners' same-day "topic 0 / action 0" collide on one
+DynamoDB record (the bug the folder prefix fixes). If the report is
+regenerated, topic_ids may shift — historical action checkmarks could
+"move". Treat this as best-effort; for hard audit, use /api/actions
+history.
+Composite key format: `${user_folder}|${topic_id}_${action_index}` (in
+`actions_v2`). A bare `${topic_id}_${action_index}` key found in
+`actions_v2` is a true unmigrated legacy record (predates the
+user-dimension change) — resolve it via
+`FS.api.actions.lookupAction()`'s bare-key fallback, never by reading the
+collapsed `actions` map. See §4.10 for the full anti-regression rule.
 ### 8.9 Time strings in topic data are display-formatted
 time_range: "08:15 – 09:00" is already in NZDT clock form. To compute durations you must parse it yourself — there's no start_seconds/end_seconds field on topics.
 ### 8.10 Photo & media bandwidth

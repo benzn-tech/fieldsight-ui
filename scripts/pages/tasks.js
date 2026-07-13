@@ -457,6 +457,7 @@
         action_index: row.action_index,
         checked:      true,
         action_text:  row.action,
+        user_folder:  row.user_folder,
       }).then(function () {
         if (ctx && ctx.removeRow) ctx.removeRow(row.id);
         if (props.onClose) props.onClose();
@@ -566,7 +567,11 @@
 
   function ActionHistoryPanel(props) {
     var row = props.row;
-    var key = row.topic_id + '_' + row.action_index;
+    /* User-dim audit key (plan §1.3) — match either the composite key
+       (row.user_folder present) or the bare legacy key, so records written
+       before the migration still surface in history. */
+    var bareKey = row.topic_id + '_' + row.action_index;
+    var compositeKey = row.user_folder ? (row.user_folder + '|' + bareKey) : bareKey;
 
     var dataRef = React.useState({ status: 'loading' });
     var data    = dataRef[0]; var setData = dataRef[1];
@@ -586,7 +591,7 @@
           return;
         }
         var entries = (res.entries || []).filter(function (e) {
-          return e.topic_action_key === key;
+          return e.topic_action_key === compositeKey || e.topic_action_key === bareKey;
         });
 
         /* Q-S11-3 — admin/gm see all events; regular users see only
@@ -608,7 +613,7 @@
         if (!cancelled) setData({ status: 'hidden' });
       });
       return function () { cancelled = true; };
-    }, [key]);
+    }, [bareKey, compositeKey]);
 
     if (data.status !== 'ok') return null;
 
