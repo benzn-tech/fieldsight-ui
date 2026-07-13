@@ -4,10 +4,12 @@
    One row in a topic's action_items list. Renders:
      [checkbox] action text · responsible · deadline · priority pill
 
-   The checkbox state is keyed by `${topic_id}_${action_index}`
-   (BACKEND-CONTEXT §4.10 / §8.8). On change we do an OPTIMISTIC update:
-   flip local state immediately, fire FS.api.actions.toggleAction, and
-   revert if the call rejects.
+   The checkbox state is keyed by `${userFolder}|${topic_id}_${action_index}`
+   (bare `${topic_id}_${action_index}` when userFolder is falsy — legacy
+   fallback; BACKEND-CONTEXT §4.10 / §8.8, user-dimension audit key plan
+   §1.3). On change we do an OPTIMISTIC update: flip local state
+   immediately, fire FS.api.actions.toggleAction, and revert if the call
+   rejects.
 
    Note BUG §8.8: topic_ids may shift if the report is regenerated, which
    can "move" a checkmark. Accepted risk for now; hard audit goes through
@@ -17,6 +19,12 @@
      date          'YYYY-MM-DD'
      topicId       number
      actionIndex   number
+     userFolder    string (optional) — report OWNER's folder (never the
+                   caller/current user). Threads into the bus identity key
+                   and toggleAction's user_folder so same-day, same-index
+                   actions from different report owners don't collide.
+                   Missing/falsy → legacy bare-key behaviour (tolerated;
+                   see docs/superpowers/plans/2026-07-13-user-dimension-audit-key.md).
      action        { action, responsible, deadline, priority }
      initialChecked  boolean
      checkedBy     string (optional, shown as caption when checked)
@@ -58,6 +66,7 @@
     var date          = props.date;
     var topicId       = props.topicId;
     var actionIndex   = props.actionIndex;
+    var userFolder    = props.userFolder;  /* report OWNER's folder — never the caller */
     var action        = props.action || {};
     var checkedBy     = props.checkedBy;
     var checkedAt     = props.checkedAt;
@@ -84,15 +93,15 @@
     React.useEffect(function () {
       var bus = window.FS && window.FS.actionsBus;
       if (!bus) return undefined;
-      var myKey = date + '|' + topicId + '_' + actionIndex;
+      var myKey = date + '|' + (userFolder || '') + '|' + topicId + '_' + actionIndex;
       return bus.subscribe(function (payload) {
         if (!payload) return;
-        var theirKey = payload.date + '|' + payload.topic_id + '_' + payload.action_index;
+        var theirKey = payload.date + '|' + (payload.user_folder || '') + '|' + payload.topic_id + '_' + payload.action_index;
         if (theirKey !== myKey) return;
         if (pendingRef.current) return;
         setChecked(!!payload.checked);
       });
-    }, [date, topicId, actionIndex]);
+    }, [date, topicId, actionIndex, userFolder]);
 
     function onChange(e) {
       if (pendingRef.current) return;
@@ -108,6 +117,7 @@
         action_index: actionIndex,
         checked:      next,
         action_text:  action.action,
+        user_folder:  userFolder,
       }) : Promise.resolve();
 
       p.then(function (res) {
@@ -130,6 +140,7 @@
             checked:      next,
             checked_by:   (res && res.checked_by) || null,
             checked_at:   (res && res.checked_at) || null,
+            user_folder:  userFolder,
           });
         }
         if (props.onToggled) props.onToggled({ checked: next });
