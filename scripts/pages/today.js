@@ -871,6 +871,73 @@
     return [];
   }
 
+  /* ---------- Shared detail-row builder (feat/related-quicklook-popup) -
+     Extracted from TodayRightDetail's inline rows switch so BOTH the
+     main right-detail panel and the Related quick-look popup render the
+     identical row shape for a given item: 'task' -> Assignee/Due/Status/
+     Priority (+ Open since / Deadline: None set when present), 'urgent'
+     -> Severity/Triggered by/Detail, 'activity' -> Speaker/When/Source/
+     Channel. Pure — no React, just [label, value] pairs. */
+  function buildDetailRows(item) {
+    var rows = [];
+    if (item.kind === 'task') {
+      rows = [
+        ['Assignee', item.assignee],
+        ['Due',      item.dueTime],
+        ['Status',   item.status],
+        ['Priority', item.priority || 'Medium'],
+      ];
+      /* §E — age + no-deadline read-only signals, mirrored here for the
+         right-detail view (the card list already surfaces them). */
+      if (item.ageDays != null) rows.push(['Open since', formatAgeLabel(item.ageDays)]);
+      if (item.noDeadline) rows.push(['Deadline', 'None set']);
+    } else if (item.kind === 'urgent') {
+      rows = [
+        ['Severity',     item.badgeLabel],
+        ['Triggered by', item.triggeredBy || 'Manual flag'],
+        ['Detail',       item.body],
+      ];
+    } else if (item.kind === 'activity') {
+      rows = [
+        ['Speaker',  item.speaker],
+        ['When',     item.timeAgo],
+        ['Source',   'PTT transcript'],
+        ['Channel',  item.channel || 'General'],
+      ];
+    }
+    return rows;
+  }
+
+  /* Renders a [label, value][] rows array in the same label-column /
+     value-column layout TodayRightDetail has always used. Shared by the
+     main detail panel and the Related quick-look popup. */
+  function renderDetailRows(rows) {
+    return React.createElement('div', {
+      style: { display: 'flex', flexDirection: 'column', gap: 0 },
+    },
+      rows.map(function (r, i) {
+        return React.createElement('div', {
+          key: i,
+          style: {
+            display: 'flex', gap: '12px', padding: '10px 0',
+            borderBottom: i < rows.length - 1 ? '1px solid var(--border-subtle)' : 'none',
+          },
+        },
+          React.createElement('div', {
+            style: {
+              fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 600,
+              width: '88px', flexShrink: 0,
+              textTransform: 'uppercase', letterSpacing: '0.06em', paddingTop: '2px',
+            },
+          }, r[0]),
+          React.createElement('div', {
+            style: { fontSize: '14px', color: 'var(--text-primary)', flex: 1, lineHeight: 1.45 },
+          }, r[1]),
+        );
+      })
+    );
+  }
+
   /* =====================================================================
      TodayProvider — owns the page state and exposes it via TodayContext.
      AppShell wraps Middle + Right in this so both columns see the same
@@ -1580,35 +1647,41 @@
       });
     }
 
-    var rows = [];
-    if (item.kind === 'task') {
-      rows = [
-        ['Assignee', item.assignee],
-        ['Due',      item.dueTime],
-        ['Status',   item.status],
-        ['Priority', item.priority || 'Medium'],
-      ];
-      /* §E — age + no-deadline read-only signals, mirrored here for the
-         right-detail view (the card list already surfaces them). */
-      if (item.ageDays != null) rows.push(['Open since', formatAgeLabel(item.ageDays)]);
-      if (item.noDeadline) rows.push(['Deadline', 'None set']);
-    } else if (item.kind === 'urgent') {
-      rows = [
-        ['Severity',     item.badgeLabel],
-        ['Triggered by', item.triggeredBy || 'Manual flag'],
-        ['Detail',       item.body],
-      ];
-    } else if (item.kind === 'activity') {
-      rows = [
-        ['Speaker',  item.speaker],
-        ['When',     item.timeAgo],
-        ['Source',   'PTT transcript'],
-        ['Channel',  item.channel || 'General'],
-      ];
-    }
+    var rows = buildDetailRows(item);
 
     var related  = getRelated(data, item);
     var timeline = getTimeline(item);
+
+    /* feat/related-quicklook-popup — id of the Related card currently
+       previewed in the quick-look popup; null = closed. Opening/closing
+       this is a purely local, inline overlay — it never touches
+       AppShell's selectedItem or the URL, so it can never be confused
+       with navigation. Only one id at a time, so only one popup can be
+       open. Declared here (not hoisted above the `!sel` early return
+       above) to match this component's existing hook placement — `ctx`
+       (React.useContext) just above is already past that early return. */
+    var previewRef   = React.useState(null);
+    var previewId    = previewRef[0];
+    var setPreviewId = previewRef[1];
+
+    function openRelatedPreview(id) { setPreviewId(id); }
+    function closeRelatedPreview()  { setPreviewId(null); }
+
+    /* Look up the previewed item's FULL data the same way the main panel
+       itself does — findItemById against the same TodayContext snapshot
+       `related` was built from — so the popup renders the identical row
+       shape (via buildDetailRows/renderDetailRows) as the main detail.
+       Falls back to the Related card's own {title, subtitle} if the item
+       has since dropped out of every pool (e.g. checked off elsewhere
+       while the popup was closed) rather than rendering a blank popup. */
+    var previewCard = previewId
+      ? (related.filter(function (r) { return r.id === previewId; })[0] || null)
+      : null;
+    var previewItem = previewId ? findItemById(data, previewId) : null;
+    var previewRows = previewItem ? buildDetailRows(previewItem) : [];
+    var previewTitle = (previewItem && (previewItem.title || previewItem.snippet))
+      || (previewCard && previewCard.title)
+      || '(item)';
 
     return React.createElement('div', {
       style: {
@@ -1658,30 +1731,7 @@
         }, item.priority) : null,
       ) : null,
 
-      React.createElement('div', {
-        style: { display: 'flex', flexDirection: 'column', gap: 0 },
-      },
-        rows.map(function (r, i) {
-          return React.createElement('div', {
-            key: i,
-            style: {
-              display: 'flex', gap: '12px', padding: '10px 0',
-              borderBottom: i < rows.length - 1 ? '1px solid var(--border-subtle)' : 'none',
-            },
-          },
-            React.createElement('div', {
-              style: {
-                fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 600,
-                width: '88px', flexShrink: 0,
-                textTransform: 'uppercase', letterSpacing: '0.06em', paddingTop: '2px',
-              },
-            }, r[0]),
-            React.createElement('div', {
-              style: { fontSize: '14px', color: 'var(--text-primary)', flex: 1, lineHeight: 1.45 },
-            }, r[1]),
-          );
-        })
-      ),
+      renderDetailRows(rows),
 
       related.length > 0 ? React.createElement(React.Fragment, null,
         React.createElement('div', {
@@ -1695,13 +1745,19 @@
         React.createElement('div', {
           style: { display: 'flex', flexDirection: 'column', gap: '6px' },
         },
-          /* M-4 — Related rows are informational; clicking did nothing
-             but log a stub. Right detail can't currently change the
-             middle's selectedItem (that lives in AppShell), so surface
-             these as static cards rather than fake-interactive ones. */
+          /* feat/related-quicklook-popup — Related cards are now
+             clickable: onClick opens an inline quick-look popup showing
+             that item's full detail (findItemById lookup above), NOT a
+             navigation — AppShell's selectedItem and the URL are both
+             untouched. Passing onClick makes Card render a real
+             <button> (see components/card.js), which picks up
+             .fs-card--clickable (cursor/hover/:focus-visible, reduced-
+             motion aware) and native Enter/Space activation for free —
+             no separate role/tabIndex/keydown wiring needed. */
           related.map(function (r, i) {
             return React.createElement(Card, {
               key: i, padding: 'sm', variant: 'ghost',
+              onClick: function () { openRelatedPreview(r.id); },
             },
               React.createElement(Card.Body, null,
                 React.createElement('div', {
@@ -1743,6 +1799,29 @@
           size: 'sm', leftIcon: 'check',
           onClick: onMarkComplete,
         }, 'Mark complete'),
+      ) : null,
+
+      /* feat/related-quicklook-popup — reuses the existing ModalOverlay
+         composite (title + body + onClose): ESC and backdrop-click both
+         close it, focus moves into the panel on open and returns to the
+         trigger card on close, it's portaled to document.body (so it
+         isn't clipped by this panel's own overflow:auto), and its CSS
+         already has a prefers-reduced-motion override (composites.css
+         ~4689). Always mounted with `open` toggling visibility, so the
+         ESC/backdrop wiring stays live without a remount on every click.
+         Purely additive: never reads or writes AppShell's selectedItem,
+         never navigates. */
+      fs.ModalOverlay ? React.createElement(fs.ModalOverlay, {
+        open:    !!previewId,
+        onClose: closeRelatedPreview,
+        title:   previewTitle,
+        size:    'sm',
+      },
+        (previewItem && previewRows.length > 0)
+          ? renderDetailRows(previewRows)
+          : React.createElement('div', {
+              style: { fontSize: '13px', color: 'var(--text-tertiary)' },
+            }, (previewCard && previewCard.subtitle) || 'Details unavailable.'),
       ) : null,
 
     );
