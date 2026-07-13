@@ -528,12 +528,14 @@
               feat/today-rolling-open-items), ageDays (diffDaysISO vs
               today), and noDeadline (from the adapter's raw `deadline`
               field, distinct from the always-populated `dueTime`).
-           6. Merge across dates: the SAME logical action (folder +
-              topic_id + actionIndex — exactly today-adapter.js's `id`
-              when idPrefix=folder, which this always passes) can be
-              re-extracted on a later report date. Dedupe keyed by
-              item.id, keeping the OLDEST occurrence (largest ageDays)
-              so the card reads as "carried over N days", not reset.
+           6. Merge across dates: each report's action items are
+              independent (topic_id restarts at 0 per report), so there is
+              NO cross-date "same logical action" to dedupe — every
+              (date, topic_id, actionIndex) is a distinct item. Because
+              today-adapter.js's id (folder + topic_id + index) is
+              date-independent and thus collides across dates, keep() makes
+              the id date-unique (date + '__' + id) so distinct leftover
+              actions are never false-merged.
 
          Returns { myTasks, teamTasks } — the FULL merged lists (no
          Recent/Leftover split here; that split is computed at RENDER
@@ -612,13 +614,23 @@
                     if (resolved) return; /* checked off — drop */
 
                     item.date       = item.date || date;
+                    /* topic_id restarts at 0 in every report, so
+                       buildTodayFromReport's date-independent id
+                       (folder + '_action_' + topic_id + '_' + index) is NOT
+                       unique across dates: two DIFFERENT actions on
+                       different dates that happen to share topic_id+index
+                       collide. The old bucket-by-id "keep oldest" then
+                       false-merged them, hiding ~1/3 of real leftover
+                       items. Make the id date-unique. There is no
+                       cross-date "same logical action" in this data model
+                       (each report's actions are independent), so no dedupe
+                       is warranted — every (date, topic, index) is its own
+                       item. */
+                    item.id         = item.date + '__' + item.id;
                     item.ageDays    = diffDaysISO(item.date, today);
                     item.noDeadline = !item.deadline;
 
-                    var existing = bucket[item.id];
-                    if (!existing || item.ageDays > existing.ageDays) {
-                      bucket[item.id] = item;
-                    }
+                    bucket[item.id] = item;
                   });
                 }
 
