@@ -95,10 +95,14 @@
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
     if (opts.site && !opts.user && caller.role !== 'worker') user = null;
 
-    /* 1) Discover days that actually have reports. /api/dates is the
-       cheapest call — single round-trip, gives us a hasReport flag
-       per date. We only fan out timeline + actions for those days. */
-    var datesRes = await window.FS.api.dates.getDates({ months: 3 });
+    /* 1) Discover days that actually have reports. Use getSpan() — the
+       cached wide-discovery over the FULL report history (same underlying
+       GET /api/dates as Evidence/Today use) — NOT a trailing getDates({
+       months:3 }). The old 3-month cap silently hid every report older
+       than ~3 months even when the range said "all": with data in Feb/Mar
+       and "today" months later, the 'all' preset returned zero rows. The
+       [from,to] filter below still bounds the fan-out for narrow presets. */
+    var datesRes = await window.FS.api.window.getSpan();
     if (datesRes && datesRes._accessDenied) {
       return { _accessDenied: true, error: datesRes.error };
     }

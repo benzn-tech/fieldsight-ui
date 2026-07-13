@@ -28,15 +28,16 @@ const NAV_ICONS = {
 const NAV_SECTIONS = [
   {
     key: 'DAILY',
-    /* fix/today-timeline-and-focus — `timeline` (NAV_ITEMS.timeline,
-       fs-globals.js) was registered with a permission + path but never
-       added to any NAV_SECTIONS list, so it never rendered in the
-       sidebar for ANY caller regardless of permission — the only way
-       to reach /timeline was Today's "View daily report" CTA, which
-       itself disappears in the multi-project fallback (the bug this
-       fix addresses). Added here, between Today and Activity. */
+    /* Timeline is intentionally NOT a top-level nav item (user decision
+       2026-07-13): it's the per-day RECORD you drill INTO, reached via
+       Today's "Open timeline" / "View daily report" CTAs, Tasks rows, and
+       search/Ask citations — a contextual deep-link (?date=&user=&topic…),
+       not a parallel destination. The /timeline route still exists; it's
+       just not surfaced as a sidebar entry. (It was briefly added here in
+       fix/today-timeline-and-focus after being found unregistered, then
+       removed once we settled that button/deep-link access is the model.) */
     label: 'Daily',
-    items: ['today', 'timeline', 'activity'],
+    items: ['today', 'activity'],
   },
   {
     key: 'WORKSPACE',
