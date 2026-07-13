@@ -1,5 +1,6 @@
 /* ==========================================================================
-   FieldSight Today Page — feat/today-rolling-open-items
+   FieldSight Today Page — feat/today-rolling-open-items,
+                            feat/today-leftover-grouping
    --------------------------------------------------------------------------
    Today is a ROLLING open-items list, not a single-day snapshot. Three
    parts, assembled independently and merged into one render-shaped
@@ -8,11 +9,18 @@
      1. Today-scoped extras (morning brief, urgent, on-site) — from
         TODAY's own report, when one exists. Absent otherwise.
      2. Rolling unresolved tasks (the core) — every action item from
-        reports in the trailing ROLLING_LOOKBACK_DAYS window that is
-        NOT yet checked off, mine + team, tagged with age + a
-        no-deadline flag. An item keeps showing every day until it's
-        resolved, instead of vanishing when the calendar day changes.
-        Checking one off drops it (existing optimistic removeMyTask).
+        every report in the FULL report span (feat/today-leftover-
+        grouping widened this from a fixed trailing 30d window — verified
+        against live data, ALL unresolved items were 90-180d old, so a
+        30d floor showed nothing) that is NOT yet checked off, mine +
+        team, tagged with age + a no-deadline flag. An item keeps
+        showing until it's resolved, instead of vanishing when the
+        calendar day changes. At render time the merged list is split
+        into a Recent group (ageDays <= LEFTOVER_THRESHOLD_DAYS, front-
+        and-center, existing My/Team/Programme treatment) and a
+        collapsible Leftover group (ageDays > LEFTOVER_THRESHOLD_DAYS,
+        default collapsed, grouped by project). Checking one off drops
+        it (existing optimistic removeMyTask, now scans both buckets).
      3. Near-deadline programme — programme tasks whose deadline (end)
         falls within the next PROGRAMME_DEADLINE_DAYS days.
 
@@ -43,12 +51,18 @@
 (function () {
   'use strict';
 
-  /* feat/today-rolling-open-items — how far back the rolling open-items
-     scan looks for unresolved action items, and how far forward the
-     near-deadline programme lookahead reaches. Both windows anchor on
-     FS.api.todayNZDT() (BUG-19 — never new Date('YYYY-MM-DD')). */
-  var ROLLING_LOOKBACK_DAYS   = 30;
+  /* feat/today-rolling-open-items — how far forward the near-deadline
+     programme lookahead reaches, anchored on FS.api.todayNZDT() (BUG-19
+     — never new Date('YYYY-MM-DD')). The rolling open-items scan itself
+     no longer has a fixed lookback const — it scans the FULL report span
+     (see loadRollingOpenItems' use of FS.api.window.getSpan()). */
   var PROGRAMME_DEADLINE_DAYS = 7;
+
+  /* feat/today-leftover-grouping — an open item is "Recent" (front-and-
+     center, existing My/Team treatment) when its ageDays is at most
+     this; older items are "Leftover" (collapsible, grouped by project,
+     collapsed by default). Tunable. */
+  var LEFTOVER_THRESHOLD_DAYS = 90;
 
   /* UTC-safe day diff — mirrors today-programme-adapter.js:diffDays.
      fromISO/toISO are 'YYYY-MM-DD'; parsing via 'T00:00:00Z' avoids the
@@ -474,9 +488,12 @@
         });
       }
 
-      /* feat/today-rolling-open-items (§A) — the core replacement for
-         loadRecentPerProject/loadPerProjectLatest. Scans the trailing
-         ROLLING_LOOKBACK_DAYS window across every accessible folder for
+      /* feat/today-rolling-open-items (§A), widened by
+         feat/today-leftover-grouping — the core replacement for
+         loadRecentPerProject/loadPerProjectLatest. Scans the FULL report
+         span (every hasReport date up to today, not a fixed trailing
+         window — live data showed ALL unresolved items are 90-180d old,
+         so a 30d floor found nothing) across every accessible folder for
          UNRESOLVED action items (mine + team) — an item keeps showing
          every day until it's checked off, regardless of which calendar
          day it was extracted on. Folder set mirrors the rest of this
@@ -485,14 +502,20 @@
          else is scoped to their own folder only.
 
          Steps:
+           0. Resolve the scan floor via FS.api.window.getSpan() —
+              span.earliest is the smallest hasReport date across its
+              24-month lookback. Falls back to a generous 400d floor if
+              the span is empty (fresh install, no reports yet at all).
            1. Resolve report-dates per folder in [from, today] via
               FS.api.dates.getDates (pooled) — the (date, folder) pairs
               with hasReport true.
            2. ONE FS.api.actions.getActionsRange({from, to}) call for
-              the whole window (not cached, but a single request).
+              the whole span (not cached, but a single request).
            3. Pooled FS.api.timeline.getTimeline per (date, folder) pair
               — cached (PR #53), so repeat visits are cheap; first load
-              can issue up to pairs.length requests (pooled at 8).
+              can issue up to pairs.length requests (pooled at 8) — now
+              larger than before since the span covers every report
+              date, not just a trailing 30d slice.
            4. buildTodayFromReport (SAME adapter call as loadFor above)
               per report, using that report's OWN date's audit slice —
               so status/checked state is correct for THAT date, not
@@ -512,18 +535,29 @@
               item.id, keeping the OLDEST occurrence (largest ageDays)
               so the card reads as "carried over N days", not reset.
 
-         Returns { myTasks, teamTasks } — no effectiveDate (mixed
-         dates); check-off is per-item (§C) via each item's own .date. */
+         Returns { myTasks, teamTasks } — the FULL merged lists (no
+         Recent/Leftover split here; that split is computed at RENDER
+         TIME in TodayMiddleColumn from these same lists, so the
+         existing removeMyTask-by-id optimistic-removal path and
+         findItemById lookups keep working unchanged regardless of which
+         group an item renders in). No effectiveDate (mixed dates);
+         check-off is per-item (§C) via each item's own .date. */
       function loadRollingOpenItems() {
-        var from = window.FS.api.addDaysISO(today, -ROLLING_LOOKBACK_DAYS);
         var EMPTY = { myTasks: [], teamTasks: [] };
 
         var foldersPromise = multiProject ? adminFoldersPromise : Promise.resolve([folder]);
 
-        return Promise.all([foldersPromise, siteSlugMapPromise]).then(function (results) {
+        return Promise.all([foldersPromise, siteSlugMapPromise, window.FS.api.window.getSpan()])
+          .then(function (results) {
           if (cancelled) return EMPTY;
           var folders     = (results[0] || []).filter(Boolean);
           var siteSlugMap = results[1];
+          var span        = results[2] || {};
+          /* feat/today-leftover-grouping — span.earliest (smallest
+             hasReport date) replaces the old fixed -30d floor. Empty
+             span (no reports at all yet) falls back to a generous 400d
+             floor rather than scanning nothing. */
+          var from = span.earliest || window.FS.api.addDaysISO(today, -400);
           if (folders.length === 0) return EMPTY;
 
           /* 1) (date, folder) pairs with a real report in the window. */
@@ -547,7 +581,7 @@
             (perFolder || []).forEach(function (list) { if (list) pairs = pairs.concat(list); });
             if (pairs.length === 0) return EMPTY;
 
-            /* 2) One audit fan-out for the whole window. */
+            /* 2) One audit fan-out for the whole span. */
             return window.FS.api.actions.getActionsRange({ from: from, to: today }).then(function (auditRange) {
               if (cancelled) return EMPTY;
               /* Partial data beats a dead page — the today-scoped
@@ -669,13 +703,21 @@
     /* Local optimistic removal — used after the check-off animation
        finishes to drop a task out of the rendered list without a
        network round-trip. The next mount re-fetches the persisted
-       audit state. */
+       audit state.
+
+       feat/today-leftover-grouping — the collapsible Leftover section
+       (render-time split, see TodayMiddleColumn) merges myTasks +
+       teamTasks into one checkable list, so a checked-off id may live
+       in either bucket. Filtering both by id keeps this a single call
+       site for every checkable card on the page (My, Team-in-Leftover)
+       — filtering a bucket that doesn't contain the id is a no-op. */
     function removeMyTask(taskId) {
       setState(function (s) {
         if (s.status !== 'ok' || !s.data) return s;
-        var nextMy = (s.data.myTasks || []).filter(function (t) { return t.id !== taskId; });
+        var nextMy   = (s.data.myTasks   || []).filter(function (t) { return t.id !== taskId; });
+        var nextTeam = (s.data.teamTasks || []).filter(function (t) { return t.id !== taskId; });
         return Object.assign({}, s, {
-          data: Object.assign({}, s.data, { myTasks: nextMy }),
+          data: Object.assign({}, s.data, { myTasks: nextMy, teamTasks: nextTeam }),
         });
       });
     }
@@ -877,6 +919,14 @@
        and passes it through; we only read the id for matching. */
     var selectedId = props.selectedItem && props.selectedItem.id;
 
+    /* feat/today-leftover-grouping — collapsible Leftover section expand
+       state, declared unconditionally (before any early return below)
+       per rules-of-hooks. Default collapsed — the substance triage
+       happens on demand, not shoved in the user's face every visit. */
+    var leftoverRef          = React.useState(false);
+    var leftoverExpanded     = leftoverRef[0];
+    var setLeftoverExpanded  = leftoverRef[1];
+
     var ctx = React.useContext(TodayContext);
     if (!ctx) {
       console.warn('[TodayMiddleColumn] TodayContext missing — was the page Provider mounted?');
@@ -942,7 +992,7 @@
           }, "No open items — you're all caught up"),
           React.createElement('div', {
             style: { fontSize: '13px', color: 'var(--text-tertiary)' },
-          }, 'Nothing unresolved in the last ' + ROLLING_LOOKBACK_DAYS + ' days, and nothing due in the next ' + PROGRAMME_DEADLINE_DAYS + ' days.'),
+          }, 'Nothing unresolved in any report, and nothing due in the next ' + PROGRAMME_DEADLINE_DAYS + ' days.'),
         ),
       );
     }
@@ -958,6 +1008,37 @@
        TaskCard instead (see renderMaybeGrouped / TaskCard `site` prop). */
     var projects       = distinctProjects(data);
     var isMultiProject = projects.length > 1;
+
+    /* feat/today-leftover-grouping — Recent vs Leftover split, computed
+       HERE at render time from the full data.myTasks/data.teamTasks
+       (the loader/state never splits — see loadRollingOpenItems), so
+       removeMyTask (id-based, both buckets) and findItemById keep
+       working unchanged no matter which group an item is currently
+       rendered in. Recent = ageDays <= LEFTOVER_THRESHOLD_DAYS (existing
+       My/Team treatment); Leftover = older, combined across My + Team
+       into one collapsible, project-grouped list (ownership matters
+       less for old-item triage). myIds is used only to paint the
+       existing `isMine` accent border on leftover cards that originated
+       from myTasks. */
+    var myRecent = [], myLeftover = [];
+    (data.myTasks || []).forEach(function (t) {
+      (t.ageDays > LEFTOVER_THRESHOLD_DAYS ? myLeftover : myRecent).push(t);
+    });
+    var teamRecent = [], teamLeftover = [];
+    (data.teamTasks || []).forEach(function (t) {
+      (t.ageDays > LEFTOVER_THRESHOLD_DAYS ? teamLeftover : teamRecent).push(t);
+    });
+    var leftoverItems = myLeftover.concat(teamLeftover);
+    var myIds = {};
+    (data.myTasks || []).forEach(function (t) { myIds[t.id] = true; });
+
+    /* Leftover section computes its OWN multi-project flag off just the
+       leftover items (reusing distinctProjects' pool-scanning shape) —
+       it can legitimately differ from the page-level isMultiProject
+       above (e.g. recent items are all one project but leftovers span
+       three). */
+    var leftoverProjects      = distinctProjects({ myTasks: leftoverItems, teamTasks: [], urgent: [], programmeTasks: [] });
+    var leftoverIsMultiProject = leftoverProjects.length > 1;
 
     /* When the check-off anim finishes, drop the task locally. The
        optimistic toggle inside TaskCard already persisted via
@@ -1032,8 +1113,10 @@
          (1) near-deadline programme tasks (deadline within
              PROGRAMME_DEADLINE_DAYS — FS.api.todayProgramme.
              getUpcomingProgrammeTasks),
-         (2) rolling unresolved action items from the trailing
-             ROLLING_LOOKBACK_DAYS days (loadRollingOpenItems above).
+         (2) rolling unresolved action items from the FULL report span
+             (loadRollingOpenItems above), split at render time into
+             Recent (<= LEFTOVER_THRESHOLD_DAYS old, shown here) and
+             Leftover (older, collapsible section further down).
          Same parent SectionLabel, two visually distinct sub-groups so
          the user reads them as ONE list with provenance, not two lists. */
       React.createElement(SectionLabel, null, 'Tasks'),
@@ -1066,16 +1149,18 @@
           )
         : null,
 
-      /* Sub-group 2 — rolling unresolved action items (§C — per-item
-         check-off). Each task carries its OWN origin date (stamped by
+      /* Sub-group 2 — rolling unresolved action items, RECENT only
+         (ageDays <= LEFTOVER_THRESHOLD_DAYS; older items live in the
+         collapsible Leftover section below). §C — per-item check-off:
+         each task carries its OWN origin date (stamped by
          today-adapter.js / loadRollingOpenItems) since the list mixes
          dates — there is no single page-level effectiveDate to check
          off against any more. */
-      data.myTasks && data.myTasks.length > 0
+      myRecent.length > 0
         ? React.createElement(React.Fragment, null,
             React.createElement(SubsectionLabel, null,
-              'Open items · ' + data.myTasks.length),
-            renderMaybeGrouped(data.myTasks, isMultiProject, function (task) {
+              'Open items · ' + myRecent.length),
+            renderMaybeGrouped(myRecent, isMultiProject, function (task) {
               return React.createElement(fs.TaskCard, {
                 key:           task.id,
                 task:          task,
@@ -1098,10 +1183,10 @@
           )
         : null,
 
-      data.teamTasks && data.teamTasks.length > 0 ? React.createElement(React.Fragment, null,
+      teamRecent.length > 0 ? React.createElement(React.Fragment, null,
         React.createElement(SubsectionLabel, null,
-          'Team · ' + data.teamTasks.length),
-        renderMaybeGrouped(data.teamTasks, isMultiProject, function (task) {
+          'Team · ' + teamRecent.length),
+        renderMaybeGrouped(teamRecent, isMultiProject, function (task) {
           return React.createElement(fs.TaskCard, {
             key:        task.id,
             task:       task,
@@ -1114,6 +1199,58 @@
           });
         }),
       ) : null,
+
+      /* LEFTOVER — feat/today-leftover-grouping. Combined My + Team
+         open items older than LEFTOVER_THRESHOLD_DAYS, collapsed by
+         default behind a real <button> toggle (aria-expanded + rotating
+         chevron, tokens-only, transition-based so the global
+         prefers-reduced-motion transition-duration:0.01ms belt in
+         tokens.css already neutralises it — same pattern as
+         .fs-gantt-tree__chev / .fs-prog-kanban__group-chev). Grouped by
+         project when expanded (groupByProject / renderMaybeGrouped,
+         >1 leftover project → grouped, else flat). Neutral/warning tone
+         — never safety-red / blocked-magenta (CLAUDE.md status-color
+         rule) — leftover age is informational, not a blocked/overdue
+         signal. */
+      leftoverItems.length > 0
+        ? React.createElement('div', { className: 'fs-today__leftover' },
+            React.createElement('button', {
+              type:            'button',
+              className:       'fs-today__leftover-toggle',
+              onClick:         function () { setLeftoverExpanded(function (v) { return !v; }); },
+              'aria-expanded': leftoverExpanded,
+            },
+              React.createElement('span', {
+                className: 'fs-today__leftover-chev'
+                  + (leftoverExpanded ? ' fs-today__leftover-chev--open' : ''),
+                'aria-hidden': true,
+              }, '▸'),
+              React.createElement('span', { className: 'fs-today__leftover-label' },
+                'Leftover · ' + leftoverItems.length),
+              React.createElement('span', { className: 'fs-today__leftover-hint' },
+                '(' + LEFTOVER_THRESHOLD_DAYS + '+ days, unresolved)'),
+            ),
+            leftoverExpanded
+              ? React.createElement('div', { className: 'fs-today__leftover-body' },
+                  renderMaybeGrouped(leftoverItems, leftoverIsMultiProject, function (task) {
+                    return React.createElement(fs.TaskCard, {
+                      key:           task.id,
+                      task:          task,
+                      onSelect:      onSelect,
+                      isMine:        !!myIds[task.id],
+                      selected:      selectedId === task.id,
+                      checkable:     task.topic_id != null && task.actionIndex != null && !!task.date,
+                      date:          task.date,
+                      onCheckedOff:  onCheckedOff,
+                      site:          !leftoverIsMultiProject ? task.site_name : null,
+                      ageLabel:      formatAgeLabel(task.ageDays),
+                      noDeadline:    !!task.noDeadline,
+                    });
+                  }),
+                )
+              : null,
+          )
+        : null,
 
       /* (Sprint 3, P-02) Recent activity removed — the same topics are
          now reachable on /timeline as the canonical surface. Today
