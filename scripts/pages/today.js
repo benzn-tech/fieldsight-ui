@@ -723,16 +723,58 @@
        in either bucket. Filtering both by id keeps this a single call
        site for every checkable card on the page (My, Team-in-Leftover)
        — filtering a bucket that doesn't contain the id is a no-op. */
-    function removeMyTask(taskId) {
+    /* fix/action-checkoff-sync (Bug 2) — generalized so both the
+       existing id-based removal (removeMyTask below) and the new
+       bus-driven (date, topic_id, actionIndex)-based removal share one
+       setState call site, scanning both buckets exactly once. */
+    function removeTasksMatching(predicate) {
       setState(function (s) {
         if (s.status !== 'ok' || !s.data) return s;
-        var nextMy   = (s.data.myTasks   || []).filter(function (t) { return t.id !== taskId; });
-        var nextTeam = (s.data.teamTasks || []).filter(function (t) { return t.id !== taskId; });
+        var nextMy   = (s.data.myTasks   || []).filter(function (t) { return !predicate(t); });
+        var nextTeam = (s.data.teamTasks || []).filter(function (t) { return !predicate(t); });
         return Object.assign({}, s, {
           data: Object.assign({}, s.data, { myTasks: nextMy, teamTasks: nextTeam }),
         });
       });
     }
+
+    function removeMyTask(taskId) {
+      removeTasksMatching(function (t) { return t.id === taskId; });
+    }
+
+    /* fix/action-checkoff-sync (Bug 2) — Today previously had ZERO
+       actionsBus subscriptions, so a check-off made on /timeline (either
+       panel) was invisible here until a full remount. Match on
+       (date, topic_id, actionIndex) — the fields the bus payload
+       actually carries (today-adapter.js stamps these onto every
+       rolling item; see loadRollingOpenItems' keep() above) — rather
+       than the composed `.id`, which the bus event doesn't carry.
+
+       Ambiguity note: the bus payload/audit key carry no folder/user
+       dimension. topic_id restarts at 0 per report, so on a date where
+       TWO different folders both have an unresolved topic 0 / action 0,
+       this predicate can't tell them apart and could drop the wrong
+       folder's item. This is the SAME pre-existing audit-key ambiguity
+       flagged in loadRollingOpenItems above (date + '__' + id dedup
+       comment) and in AggregatedDayView (timeline.js) — a separate,
+       already-known follow-up task, not introduced here.
+
+       Un-checking (checked === false) is intentionally left alone —
+       re-adding a Leftover item needs its full adapter-shaped row data
+       (title, assignee, deadline, …), which the bus event doesn't
+       carry; a full remount restores it. */
+    React.useEffect(function () {
+      var bus = window.FS && window.FS.actionsBus;
+      if (!bus) return undefined;
+      return bus.subscribe(function (payload) {
+        if (!payload || !payload.checked) return;
+        removeTasksMatching(function (t) {
+          return t.date === payload.date
+              && t.topic_id === payload.topic_id
+              && t.actionIndex === payload.action_index;
+        });
+      });
+    }, []);
 
     return { state: state, removeMyTask: removeMyTask };
   }

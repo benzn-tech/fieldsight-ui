@@ -319,6 +319,55 @@
     var retryCount = retryRef[0];
     var setRetry   = retryRef[1];
 
+    /* fix/action-checkoff-sync (Bug 1) — this view renders ONE date
+       (props.date) fanned out across every user on the site, so a
+       single getActions(date) call covers every section's TopicCards
+       (the audit key has no user dimension yet — see the follow-up
+       task note below). Mirrors TimelineMiddleColumn's own actions
+       fetch (~line 743) so checked state actually shows here instead
+       of the hardcoded {} this view used to pass down. */
+    var refActionsState = React.useState({});
+    var actionsMap    = refActionsState[0];
+    var setActionsMap = refActionsState[1];
+
+    React.useEffect(function () {
+      var cancelled = false;
+      window.FS.api.actions.getActions(props.date).then(function (res) {
+        if (cancelled) return;
+        setActionsMap((res && res.actions) || {});
+      });
+      return function () { cancelled = true; };
+    }, [props.date]);
+
+    /* fix/action-checkoff-sync (Bug 1) — mirrors TimelineMiddleColumn's
+       bus subscription (~line 800) so a toggle made anywhere (this
+       view's own TopicCards, the right-detail OverviewTab, or a tick
+       made from the single-user timeline for the same date) updates
+       every section's TopicCard live, including ones currently
+       collapsed/unmounted. NOTE: the bus payload + audit key carry no
+       user dimension, so two different sections' topic 0 / action 0
+       on the same date collide on one record — same pre-existing
+       ambiguity as the getActions fetch above; a separate follow-up
+       task owns adding a user dimension to the audit key. */
+    React.useEffect(function () {
+      var bus = window.FS && window.FS.actionsBus;
+      if (!bus) return undefined;
+      var myDate = props.date;
+      return bus.subscribe(function (payload) {
+        if (!payload || payload.date !== myDate) return;
+        setActionsMap(function (cur) {
+          var key = payload.topic_id + '_' + payload.action_index;
+          var next = Object.assign({}, cur || {});
+          next[key] = {
+            checked:    !!payload.checked,
+            checked_by: payload.checked_by,
+            checked_at: payload.checked_at,
+          };
+          return next;
+        });
+      });
+    }, [props.date]);
+
     React.useEffect(function () {
       var cancelled = false;
       setState({ status: 'loading' });
@@ -441,7 +490,7 @@
                 key:           topic.topic_id,
                 topic:         topic,
                 date:          props.date,
-                actionState:   {},
+                actionState:   actionsMap,
                 selected:      selectedAggId === ('topic_' + sectionUser + '_' + topic.topic_id),
                 defaultOpen:   false,
                 highlight:     false,
@@ -1248,6 +1297,12 @@
                 action:         a,
                 initialChecked: !!st.checked,
                 checkedBy:      st.checked_by,
+                /* fix/action-checkoff-sync (Bug 3) — was omitted, so the
+                   right panel never showed the "· <time>" half of
+                   "Checked by X · <time>" that the middle TopicCard
+                   already renders (topic-card.js ~228). ActionItemRow
+                   already handles both props; this just feeds it. */
+                checkedAt:      st.checked_at,
               });
             }),
           )
