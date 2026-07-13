@@ -24,8 +24,11 @@
     return byDate[folder] || byDate[user] || null;
   }
 
-  async function getTimeline(opts) {
-    opts = opts || {};
+  /* Session-stable read: reports are generated server-side and not edited
+     in-app, so a few minutes of staleness is safe — see api/_cache.js.
+     Cache key intentionally includes only (date, user); it's the exact
+     request shape callers pass. */
+  async function fetchTimeline(opts) {
     if (!window.FS.api.useMocks) {
       return window.FS.api.request('/timeline', {
         params: { date: opts.date, user: opts.user },
@@ -62,6 +65,14 @@
       message:   'No report for ' + (user || '(unknown)') + ' on ' + date,
       date:      date,
     };
+  }
+
+  function getTimeline(opts) {
+    opts = opts || {};
+    var key = 'tl:' + opts.date + ':' + (opts.user || '');
+    return window.FS.api.cache.cached(key, undefined, function () {
+      return fetchTimeline(opts);
+    });
   }
 
   window.FS.api.timeline = { getTimeline: getTimeline };
