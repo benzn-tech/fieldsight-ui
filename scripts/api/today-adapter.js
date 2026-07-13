@@ -73,11 +73,142 @@
 
   /* Pull a HH:MM from the deadline string when present. The backend
      surfaces deadlines as free-text ("Tomorrow 08:00", "By Friday"); we
-     fall back to em-dash if no clock time is present. */
+     fall back to em-dash if no clock time is present.
+     Superseded by resolveDeadline() below as the source of `dueTime`
+     (fix/timeline-buttons-and-deadline) — kept defined/working since
+     it's a small correct helper other code may still reach for. */
   function dueTimeFromDeadline(deadline) {
     if (!deadline) return '—';
     var m = String(deadline).match(/(\d{2}):(\d{2})/);
     return m ? m[0] : deadline;
+  }
+
+  /* ---------- resolveDeadline — free-text deadline -> absolute date ----
+     fix/timeline-buttons-and-deadline. Action-item deadlines are free
+     text ("Wednesday", "Tomorrow", "By Friday", "Next week", "Today
+     08:30", …) captured relative to the REPORT'S OWN date, not "now" —
+     every call site has that origin date available (Today items carry
+     .date = report_date; Timeline's ActionItemRow/TopicCard receive a
+     `date` prop). Resolves to an absolute yyyy-MM-dd wherever the
+     pattern is confidently recognised; falls back to the raw text
+     (never a WRONG date) when it isn't. All date math goes through
+     FS.api.addDaysISO + a Date.UTC(...) parse of the report date —
+     BUG-19: never `new Date('YYYY-MM-DD')`.
+
+     Signature: resolveDeadline(freeText, reportDateISO)
+       -> { absolute: 'YYYY-MM-DD'|null, display: string }
+
+     Rule order (first match wins):
+       1. empty                       -> { null, '—' }
+       2. contains "today"            -> reportDate
+       3. contains "tomorrow"         -> reportDate + 1d
+       4. contains a weekday name     -> the FIRST occurrence of that
+          (mon..sun, full or 3-letter)   weekday STRICTLY AFTER
+                                          reportDate
+       5. contains "next week"        -> reportDate + 7d
+       6. "within|in N day(s)/week(s)" -> reportDate + N (or N*7)
+       7. otherwise: try to normalise a bare date already present in
+          the text ("2026-02-12", "12 Feb", "Feb 12 2026") -> that
+          date; unparsable -> { null, <raw freeText> }
+
+     A trailing clock time in the original text ("Today 08:30") is kept
+     on `display` after the resolved date ("2026-02-09 08:30"). */
+  var WEEKDAY_INDEX = {
+    sunday: 0, sun: 0,
+    monday: 1, mon: 1,
+    tuesday: 2, tues: 2, tue: 2,
+    wednesday: 3, weds: 3, wed: 3,
+    thursday: 4, thurs: 4, thur: 4, thu: 4,
+    friday: 5, fri: 5,
+    saturday: 6, sat: 6,
+  };
+  var MONTH_INDEX = ['jan', 'feb', 'mar', 'apr', 'may', 'jun',
+                      'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
+  function pad2(n) { return n < 10 ? '0' + n : String(n); }
+
+  /* UTC day-of-week for a 'YYYY-MM-DD' string — BUG-19 safe (mirrors
+     timeline.js:formatDateLabel / today.js:mondayOf — Date.UTC parse,
+     never new Date(str)). */
+  function weekdayOfISO(iso) {
+    var p = iso.split('-').map(Number);
+    return new Date(Date.UTC(p[0], p[1] - 1, p[2])).getUTCDay();
+  }
+
+  /* Best-effort "there's already a bare date in the text" fallback —
+     tried only after today/tomorrow/weekday/next-week/within-N all
+     miss. Handles an ISO date anywhere in the string, or "12 Feb[ruary]
+     [2026]" / "Feb[ruary] 12[, 2026]" (year optional, defaults to the
+     report's own year). Returns 'YYYY-MM-DD' or null (never guesses). */
+  function tryParseBareDate(text, reportDateISO) {
+    var iso = text.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+    if (iso) {
+      var mo = parseInt(iso[2], 10), d = parseInt(iso[3], 10);
+      if (mo >= 1 && mo <= 12 && d >= 1 && d <= 31) return iso[1] + '-' + iso[2] + '-' + iso[3];
+    }
+
+    var dayMonth = text.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\b/);
+    var monthDay = text.match(/\b([A-Za-z]{3,9})\s+(\d{1,2})(?:st|nd|rd|th)?\b/);
+    var day = null, monthToken = null;
+    if (dayMonth && MONTH_INDEX.indexOf(dayMonth[2].slice(0, 3).toLowerCase()) !== -1) {
+      day = parseInt(dayMonth[1], 10);
+      monthToken = dayMonth[2];
+    } else if (monthDay && MONTH_INDEX.indexOf(monthDay[1].slice(0, 3).toLowerCase()) !== -1) {
+      day = parseInt(monthDay[2], 10);
+      monthToken = monthDay[1];
+    } else {
+      return null;
+    }
+    var monIdx = MONTH_INDEX.indexOf(monthToken.slice(0, 3).toLowerCase());
+    if (monIdx === -1 || day < 1 || day > 31) return null;
+    var yearMatch = text.match(/\b(20\d{2})\b/);
+    var year = yearMatch ? yearMatch[1] : reportDateISO.split('-')[0];
+    return year + '-' + pad2(monIdx + 1) + '-' + pad2(day);
+  }
+
+  function resolveDeadline(freeText, reportDateISO) {
+    var text = (freeText == null ? '' : String(freeText)).trim();
+    if (!text) return { absolute: null, display: '—' };
+
+    var api = window.FS && window.FS.api;
+    if (!reportDateISO || !api || !api.addDaysISO) return { absolute: null, display: text };
+
+    var lower = text.toLowerCase();
+    var absolute = null;
+
+    if (/\btoday\b/.test(lower)) {
+      absolute = reportDateISO;
+    } else if (/\btomorrow\b/.test(lower)) {
+      absolute = api.addDaysISO(reportDateISO, 1);
+    } else {
+      var weekdayMatch = lower.match(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday|sun|mon|tues|tue|weds|wed|thurs|thur|thu|fri|sat)\b/);
+      if (weekdayMatch) {
+        var targetDow  = WEEKDAY_INDEX[weekdayMatch[1]];
+        var currentDow = weekdayOfISO(reportDateISO);
+        var delta = (targetDow - currentDow + 7) % 7;
+        if (delta === 0) delta = 7; /* strictly AFTER reportDate, never same-day */
+        absolute = api.addDaysISO(reportDateISO, delta);
+      } else if (/\bnext\s+week\b/.test(lower)) {
+        absolute = api.addDaysISO(reportDateISO, 7);
+      } else {
+        var withinMatch = lower.match(/\b(?:within|in)\s+(\d+)\s*(day|week)s?\b/);
+        if (withinMatch) {
+          var n = parseInt(withinMatch[1], 10);
+          var days = withinMatch[2] === 'week' ? n * 7 : n;
+          absolute = api.addDaysISO(reportDateISO, days);
+        } else {
+          absolute = tryParseBareDate(text, reportDateISO);
+        }
+      }
+    }
+
+    if (!absolute) return { absolute: null, display: text };
+
+    var display = absolute;
+    var timeMatch = text.match(/\b(\d{1,2}):(\d{2})\b/);
+    if (timeMatch) display = absolute + ' ' + pad2(parseInt(timeMatch[1], 10)) + ':' + timeMatch[2];
+
+    return { absolute: absolute, display: display };
   }
 
   /* Topic time_range uses an en-dash; the start half is the source of
@@ -231,7 +362,15 @@
              dueTime alone can't tell '—' (no deadline) apart from a
              deadline with no clock time in it. */
           deadline:    a.deadline || null,
-          dueTime:     dueTimeFromDeadline(a.deadline),
+          /* fix/timeline-buttons-and-deadline — dueTime now shows the
+             free-text deadline RESOLVED to an absolute date (relative to
+             this action's own report date), not the raw verbatim text.
+             Both TaskCard's due display and the Today right-detail
+             ['Due', …] row read task.dueTime directly, so this one
+             change wires both. Falls back to the raw text unchanged
+             when the pattern isn't recognised (resolveDeadline never
+             guesses a wrong date). */
+          dueTime:     resolveDeadline(a.deadline, report.report_date || ctx.date).display,
           kind:        'task',
           /* feat/today-rolling-open-items — the report date this item
              was extracted from. today.js's rolling loader fans out
@@ -300,5 +439,12 @@
   if (!window.FS) window.FS = {};
   if (!window.FS.api) window.FS.api = {};
   window.FS.api.todayAdapter = { adapt: adapt };
+  /* fix/timeline-buttons-and-deadline — flat on FS.api (mirrors
+     FS.api.addDaysISO / FS.api.folderName) so scripts/composites/
+     action-item-row.js (Timeline's action-item deadline render) can
+     reuse the exact same resolver without importing the whole adapter
+     namespace. Load order doesn't matter — only called at render time,
+     well after all scripts have loaded. */
+  window.FS.api.resolveDeadline = resolveDeadline;
 
 })();

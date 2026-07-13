@@ -143,6 +143,18 @@
     var priority = (action.priority || '').toLowerCase();
     var priorityTone = PRIORITY_TONE[priority] || 'neutral';
 
+    /* fix/timeline-buttons-and-deadline — resolve the free-text deadline
+       to an absolute date relative to THIS topic's own report date (the
+       `date` prop, same value TopicCard/OverviewTab pass to
+       FS.api.actions.toggleAction above). Falls back to the raw text
+       when resolveDeadline can't confidently parse it, or when the
+       resolver isn't loaded yet — never shows a wrong date. */
+    var deadlineDisplay = action.deadline
+      ? (window.FS && window.FS.api && window.FS.api.resolveDeadline
+          ? window.FS.api.resolveDeadline(action.deadline, date).display
+          : action.deadline)
+      : null;
+
     var className = 'fs-action-item-row' + (checked ? ' fs-action-item-row--checked' : '');
 
     return React.createElement('label', { className: className },
@@ -161,9 +173,9 @@
             ? React.createElement('span', { className: 'fs-action-item-row__meta-item' },
                 action.responsible)
             : null,
-          action.deadline
+          deadlineDisplay
             ? React.createElement('span', { className: 'fs-action-item-row__meta-item' },
-                'Due ' + action.deadline)
+                'Due ' + deadlineDisplay)
             : null,
           checked && checkedBy
             ? React.createElement('span', {

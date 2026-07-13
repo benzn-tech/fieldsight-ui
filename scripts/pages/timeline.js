@@ -724,6 +724,14 @@
       var cancelled = false;
       var qsUser = user ? '&user=' + encodeURIComponent(user) : '';
       var qsSite = site ? '&site=' + encodeURIComponent(site) : '';
+      /* fix/timeline-buttons-and-deadline — the redirects below were
+         dropping ?from=today, so Today's "Open timeline" link (bare
+         /timeline?from=today, no date — the rolling-list case) lost the
+         flag on this self-resolve redirect, and the "Back to Today"
+         button (gated on readRouteParams().from === 'today') never
+         appeared. Preserve it through both redirects below like
+         qsUser/qsSite. */
+      var qsFrom = params.from ? '&from=' + encodeURIComponent(params.from) : '';
       var today = window.FS.api.todayNZDT();
 
       /* Batch A — site-aware bootstrap. Once a project is anchored,
@@ -747,7 +755,7 @@
           var resolved = (res && !res._accessDenied)
             ? (findLatestReportDate(res.dates || {}) || today)
             : today;
-          window.FS.Router.navigate('/timeline?date=' + resolved + qsUser + qsSite);
+          window.FS.Router.navigate('/timeline?date=' + resolved + qsUser + qsSite + qsFrom);
         }).catch(function () { /* fall through; fetch effect won't run */ });
         return function () { cancelled = true; };
       }
@@ -763,7 +771,7 @@
         })
         .then(function (resolved) {
           if (cancelled || !resolved) return;
-          window.FS.Router.navigate('/timeline?date=' + resolved + qsUser + qsSite);
+          window.FS.Router.navigate('/timeline?date=' + resolved + qsUser + qsSite + qsFrom);
         })
         .catch(function () { /* fall through; fetch effect won't run */ });
 
