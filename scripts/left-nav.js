@@ -7,6 +7,7 @@
 
 const NAV_ICONS = {
   today:      'calendar-check',
+  timeline:   'history',
   activity:   'activity',
   portfolio:  'layout-dashboard',
   regional:   'map',
@@ -27,8 +28,15 @@ const NAV_ICONS = {
 const NAV_SECTIONS = [
   {
     key: 'DAILY',
+    /* fix/today-timeline-and-focus — `timeline` (NAV_ITEMS.timeline,
+       fs-globals.js) was registered with a permission + path but never
+       added to any NAV_SECTIONS list, so it never rendered in the
+       sidebar for ANY caller regardless of permission — the only way
+       to reach /timeline was Today's "View daily report" CTA, which
+       itself disappears in the multi-project fallback (the bug this
+       fix addresses). Added here, between Today and Activity. */
     label: 'Daily',
-    items: ['today', 'activity'],
+    items: ['today', 'timeline', 'activity'],
   },
   {
     key: 'WORKSPACE',

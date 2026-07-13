@@ -31,6 +31,13 @@
 (function () {
   'use strict';
 
+  /* feat/today-focus-recent — recency cutoff for the multi-project
+     fallback (loadRecentPerProject below). A project whose newest
+     report is older than this many days is treated as stale for
+     Today's purposes — it belongs on /timeline or /tasks, not in the
+     "what's happening right now" feed. */
+  var RECENT_DAYS = 14;
+
   /* Today's date in NZDT — see BUG-19. We compute "today" via
      FS.api.todayNZDT() (Pacific/Auckland clock). If no report exists
      for that date, fall back to the latest available date from
@@ -64,6 +71,46 @@
         letterSpacing: '0.02em',
       },
     }, props.children);
+  }
+
+  /* ---------- TimelineLink — persistent "Open timeline" affordance ------
+     fix/today-timeline-and-focus. Rendered at the top of BOTH the
+     'empty' and 'ok' branches of TodayMiddleColumn's render, unlike the
+     primary "View daily report" CTA (.fs-today__view-report-cta) below
+     it, which only shows when a single `effectiveDate` is known — the
+     per-project-recent fallback (perProjectLatest) has none, and used
+     to leave NO way back to /timeline from Today at all.
+
+     Navigates to /timeline?date=<date>[&user=<user>]&from=today when a
+     date is known (empty-state's state.latest), or bare
+     /timeline?from=today otherwise. timeline.js's own M-2 bootstrap
+     effect self-resolves a dateless visit to the latest available date
+     (or an admin project/user picker when ambiguous) — see that file's
+     "no date in the URL" effect — so the bare link always lands
+     somewhere useful, never a dead page. */
+  function TimelineLink(props) {
+    var dateOpt = props.date || null;
+    var userOpt = props.user || null;
+    var label   = props.label || 'Open timeline';
+
+    function onClick() {
+      var parts = [];
+      if (dateOpt) parts.push('date=' + encodeURIComponent(dateOpt));
+      if (dateOpt && userOpt) parts.push('user=' + encodeURIComponent(userOpt));
+      parts.push('from=today');
+      window.FS.Router.navigate('/timeline?' + parts.join('&'));
+    }
+
+    return React.createElement('div', { className: 'fs-today__timeline-link-row' },
+      React.createElement('button', {
+        type:      'button',
+        className: 'fs-today__timeline-link',
+        onClick:   onClick,
+      },
+        React.createElement('span', null, label),
+        React.createElement('span', { className: 'fs-today__timeline-link-arrow' }, '→'),
+      ),
+    );
   }
 
   /* ---------- Helper: derive Today from a backend report --------------- */
@@ -412,46 +459,45 @@
          belongs to only ONE project — loadFor(latest, true) would
          silently show just that project's todos with no grouping ever
          visible. Instead: resolve EACH accessible folder's OWN latest
-         hasReport date (pooled FS.api.dates.getDates per folder), fetch
-         that folder's own-latest report (pooled getTimeline), and merge
-         via the SAME mergeTodayData the primary fan-out path uses — so
-         the result is per-project-tagged and renderMaybeGrouped groups
-         it exactly like the "today has data" multi-project case.
+         hasReport date (pooled FS.api.dates.getDates per folder) and
+         merge via the SAME mergeTodayData the primary fan-out path
+         uses — so the result is per-project-tagged and
+         renderMaybeGrouped groups it exactly like the "today has data"
+         multi-project case.
 
-         feat/today-fallback-with-todos — "latest report" alone was too
-         naive: a project's most-recent report is often a content-less
-         radio-check (no action items), so the banner said "showing the
-         latest from each project" over an empty task list while an
-         OLDER report for that same project had real todos. Per folder,
-         we now walk that folder's hasReport dates NEWEST → OLDEST,
-         fetching getTimeline sequentially (one at a time — never fan
-         out within a folder) and stop at the first report that actually
-         has todos (non-empty urgent/myTasks/teamTasks — activity/onSite
-         don't count as todos). A folder that never turns up a report
-         with todos within MAX_LOOKBACK real reports examined is OMITTED
-         entirely — an "everything's quiet here" project isn't worth a
-         zero-item section.
+         feat/today-focus-recent — replaces the old "walk each folder's
+         dates newest → oldest, fetching up to MAX_LOOKBACK reports
+         sequentially, stop at the first with todos" behaviour. That dug
+         up months-old rich reports (long todo lists, meeting
+         brainstorms) whenever a project's newest report happened to be
+         a thin radio-check — Today read as a full backlog dump instead
+         of "what's happening right now". Now, per folder:
+           1. Take ONLY that folder's newest hasReport date.
+           2. If it's older than RECENT_DAYS (module-level const, 14),
+              OMIT the folder entirely — no getTimeline call at all.
+              That project is stale for Today; /timeline and /tasks
+              still cover it.
+           3. Otherwise fetch that ONE report (a single getTimeline
+              call — never more than one per folder) and keep the
+              folder only if it has todos (non-empty urgent/myTasks/
+              teamTasks — activity/onSite don't count). No todos →
+              omit ("everything's quiet here" isn't worth a zero-item
+              section).
 
-         Worst case API calls (expected case — every hasReport-flagged
-         date resolves to a real report, which is what hasReport means):
-         N folders × getDates (pooled, limit 8) + up to
-         N folders × MAX_LOOKBACK getTimeline (pooled across folders,
-         limit 8; sequential WITHIN a folder). _notFound/available_users/
-         _accessDenied responses don't consume a MAX_LOOKBACK slot (they
-         aren't reports to judge for todos) — defensively unbounded if a
-         folder's hasReport dates are wrong, but that's a data-integrity
-         bug elsewhere, not an expected path here.
+         Worst case API calls: N folders × getDates (pooled, limit 8) +
+         up to N folders × ONE getTimeline (pooled, limit 8) — down from
+         up to MAX_LOOKBACK(5) getTimeline calls per folder before.
 
          Actions/check-off overlay: SKIPPED here (empty actions map).
-         Each folder resolves a DIFFERENT date, so overlaying check-off
-         state correctly would need one getActions() call per distinct
-         resolved date on top of the two fan-outs above; this is a
-         read-only "latest activity per project" view, not today's live
-         checklist, so the simpler-and-correct choice is no overlay
+         Each surviving folder resolves a DIFFERENT date, so overlaying
+         check-off state correctly would need one getActions() call per
+         distinct resolved date on top of the two fan-outs above; this
+         is a read-only "recent activity per project" view, not today's
+         live checklist, so the simpler-and-correct choice is no overlay
          (chose "pass an empty actions map" per spec, not the merged-
          per-date getActions fan-out). */
-      function loadPerProjectLatest() {
-        var MAX_LOOKBACK = 5;
+      function loadRecentPerProject() {
+        var cutoff = window.FS.api.addDaysISO(today, -RECENT_DAYS);
 
         return Promise.all([adminFoldersPromise, siteSlugMapPromise]).then(function (results) {
           if (cancelled) return null;
@@ -475,52 +521,37 @@
 
           return window.FS.api.pooledAll(dateThunks, 8).then(function (resolved) {
             if (cancelled) return null;
-            /* Folders with zero hasReport dates make zero getTimeline
-               calls — filtered out before the folderThunks fan-out. */
-            var withDates = (resolved || []).filter(function (x) { return x && x.dates && x.dates.length; });
+            /* Folders with zero hasReport dates, or whose newest date
+               falls outside the RECENT_DAYS window, make zero
+               getTimeline calls — filtered out before the folderThunks
+               fan-out below (dates[0] is newest-first, per the sort
+               above). */
+            var withDates = (resolved || []).filter(function (x) {
+              return x && x.dates && x.dates.length && x.dates[0] >= cutoff;
+            });
             if (withDates.length === 0) {
               return { ok: false, report: {} };
             }
 
-            /* One thunk per folder; each thunk walks its own dates
-               newest → oldest SEQUENTIALLY (chained .then, never fired
-               in parallel) and resolves to either the first
-               {folder, date, data} with todos, or null if none is found
-               within MAX_LOOKBACK real reports (or the folder runs out
-               of dates first). The per-folder thunks themselves still
-               run pooled (limit 8) across folders — only the walk
-               inside a single folder is sequential. */
+            /* One thunk per folder — exactly ONE getTimeline call for
+               that folder's single newest (already recency-filtered)
+               report. Pooled across folders (limit 8); no per-folder
+               sequential walk anymore. */
             var folderThunks = withDates.map(function (x) {
               return function () {
-                var dates    = x.dates;
-                var idx      = 0;
-                var attempts = 0;
-
-                function tryNext() {
-                  if (idx >= dates.length || attempts >= MAX_LOOKBACK) {
-                    return Promise.resolve(null);
-                  }
-                  var date = dates[idx++];
-                  return window.FS.api.timeline.getTimeline({ date: date, user: x.folder })
-                    .then(function (report) {
-                      if (!report || report._notFound || report.available_users || report._accessDenied) {
-                        /* Not a real report — doesn't consume a
-                           MAX_LOOKBACK slot, try the next date. */
-                        return tryNext();
-                      }
-                      attempts++;
-                      var data = buildTodayFromReport(report, {}, caller, date, siteSlugMap, x.folder);
-                      var hasTodos = (data.urgent && data.urgent.length)
-                        || (data.myTasks && data.myTasks.length)
-                        || (data.teamTasks && data.teamTasks.length);
-                      if (hasTodos) {
-                        return { folder: x.folder, date: date, data: data };
-                      }
-                      return tryNext();
-                    });
-                }
-
-                return tryNext();
+                var date = x.dates[0];
+                return window.FS.api.timeline.getTimeline({ date: date, user: x.folder })
+                  .then(function (report) {
+                    if (!report || report._notFound || report.available_users || report._accessDenied) {
+                      return null;
+                    }
+                    var data = buildTodayFromReport(report, {}, caller, date, siteSlugMap, x.folder);
+                    var hasTodos = (data.urgent && data.urgent.length)
+                      || (data.myTasks && data.myTasks.length)
+                      || (data.teamTasks && data.teamTasks.length);
+                    if (!hasTodos) return null;
+                    return { folder: x.folder, date: date, data: data };
+                  });
               };
             });
 
@@ -579,13 +610,14 @@
             var latest = span && span.latest;
 
             if (multiProject) {
-              /* Multi-project fallback = per-folder latest (see
-                 loadPerProjectLatest above), NOT loadFor(latest, true)
-                 — the single global `latest` almost always belongs to
-                 only one project. `latest` (possibly null) still
-                 threads through to the empty-state CTA below when NO
-                 folder resolves a report of its own. */
-              return loadPerProjectLatest().then(function (result) {
+              /* Multi-project fallback = per-folder recent-within-
+                 RECENT_DAYS (see loadRecentPerProject above), NOT
+                 loadFor(latest, true) — the single global `latest`
+                 almost always belongs to only one project. `latest`
+                 (possibly null) still threads through to the
+                 empty-state CTA below when NO folder resolves a
+                 recent report of its own. */
+              return loadRecentPerProject().then(function (result) {
                 if (cancelled || !result) return;
                 if (result.accessDenied) {
                   setState({ status: 'access_denied', message: result.message, today: today });
@@ -912,6 +944,13 @@
               || 'No report yet for today.';
       var emptyLatest = state.latest;
       return React.createElement('div', { className: 'fs-page fs-page--today' },
+
+        /* fix/today-timeline-and-focus — always-present, NOT gated on
+           emptyLatest (unlike the "View latest report" CTA just below,
+           which only shows once a fallback date is known). Falls back
+           to a bare /timeline link that self-resolves. */
+        React.createElement(TimelineLink, { date: emptyLatest, user: state.folder }),
+
         React.createElement('div', { style: { padding: '24px', color: 'var(--text-tertiary)', fontSize: '13px' } },
           msg),
 
@@ -944,12 +983,12 @@
     var data              = state.data;
     var effectiveDate     = state.effectiveDate;
     var isFallback        = !!state.isFallback;
-    /* feat/today-fallback-per-project — set by loadPerProjectLatest()
+    /* feat/today-fallback-per-project — set by loadRecentPerProject()
        when today has no report AND the caller is multi-project: each
-       accessible project fanned out to ITS OWN latest report date
-       (mixed dates, so effectiveDate above is null). Swaps the fallback
-       banner copy below; renderMaybeGrouped groups the merged list by
-       project unchanged. */
+       accessible project (within RECENT_DAYS) fanned out to ITS OWN
+       newest report date (mixed dates, so effectiveDate above is
+       null). Swaps the fallback banner copy below; renderMaybeGrouped
+       groups the merged list by project unchanged. */
     var perProjectLatest  = !!state.perProjectLatest;
 
     /* Part B — group-by-project vs. per-card chip. Computed straight off
@@ -982,6 +1021,13 @@
       className: 'fs-page fs-page--today',
     },
 
+      /* fix/today-timeline-and-focus — always-present header action,
+         NOT gated on effectiveDate/perProjectLatest (unlike the "View
+         daily report" CTA below). perProjectLatest has no single date
+         to deep-link to, so this passes none — bare /timeline
+         self-resolves via timeline.js's own bootstrap effect. */
+      React.createElement(TimelineLink, null),
+
       /* Fallback banner — shown when today has no report yet and we're
          displaying the latest available one instead. perProjectLatest
          swaps the single-date copy for the "each project" copy, since
@@ -993,7 +1039,7 @@
               React.createElement('span', { className: 'fs-today__fallback-label' },
                 'No reports today'),
               React.createElement('span', { className: 'fs-today__fallback-note' },
-                '— showing recent activity from each project'),
+                '— recent activity · last ' + RECENT_DAYS + ' days'),
             )
           : React.createElement(React.Fragment, null,
               React.createElement('span', { className: 'fs-today__fallback-label' },
@@ -1012,8 +1058,13 @@
          &from=today flag tells TimelineMiddleColumn to render a
          "← Back to today" link in its header (Sprint 4.5). Hidden in
          perProjectLatest mode — effectiveDate is null there (mixed
-         folder-dates), so there's no single report to deep-link to;
-         each project's own group is reached via its own cards instead. */
+         folder-dates), so there's no single report to deep-link to.
+         fix/today-timeline-and-focus — that used to leave NO way to
+         reach /timeline from Today in this mode (cards only call
+         onSelect, they don't navigate); the always-present
+         TimelineLink rendered at the top of this page (see
+         `React.createElement(TimelineLink, ...)` above) now covers it
+         regardless of effectiveDate/perProjectLatest. */
       effectiveDate ? React.createElement('button', {
         type:      'button',
         className: 'fs-today__view-report-cta',
