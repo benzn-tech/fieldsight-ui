@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="styles/tokens.css" />
   <link rel="stylesheet" href="styles/app-shell.css?v=3" />
   <link rel="stylesheet" href="styles/components.css?v=5" />
-  <link rel="stylesheet" href="styles/composites.css?v=9" />
+  <link rel="stylesheet" href="styles/composites.css?v=10" />
 
   <style>
     html, body { overflow: auto; height: auto; }
@@ -86,7 +86,7 @@
   <script type="text/babel" src="scripts/components/avatar.js?v=2"></script>
 
   <!-- Layer 5 composites (depend on L4 atoms above) -->
-  <script type="text/babel" src="scripts/composites/task-card.js?v=4"></script>
+  <script type="text/babel" src="scripts/composites/task-card.js?v=5"></script>
   <script type="text/babel" src="scripts/composites/urgent-card.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/activity-card.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/morning-brief-card.js?v=1"></script>
@@ -1080,6 +1080,11 @@
                    onSelect={t => console.log('select', t.id)} />
               </div>
             </Row>
+            <Row label="selectable (feat/leftover-bulk-select) — square select + round check-off together">
+              <div style={{ flex: 1 }}>
+                <TaskCardSelectDemo />
+              </div>
+            </Row>
           </Section>
 
           <Section title="Today · project groups (feat/today-by-project)">
@@ -1579,6 +1584,35 @@
           </Section>
 
         </React.Fragment>
+      );
+    }
+
+    /* feat/leftover-bulk-select — smoke render for TaskCard's new
+       selectable/bulkSelected/onSelectToggle prop trio (CLAUDE.md
+       "components-preview.html lag" guardrail). checkable + selectable
+       together so the square bulk-select checkbox and the round
+       check-off circle render side by side, proving the shape/position
+       contrast the Today Leftover section relies on. */
+    function TaskCardSelectDemo() {
+      const [checked, setChecked] = React.useState(false);
+      return (
+        <TaskCard
+          task={{
+            id: 'demo-bulk-1',
+            title: 'Confirm delivery dockets filed',
+            assignee: 'Priya Sharma',
+            status: 'Open', statusTone: 'info',
+            dueTime: '—',
+            topic_id: 0, actionIndex: 0, folder: 'priya_sharma',
+          }}
+          date="2026-03-01"
+          checkable
+          selectable
+          bulkSelected={checked}
+          onSelectToggle={() => setChecked(v => !v)}
+          onSelect={t => console.log('select', t.id)}
+          ageLabel="132d ago"
+        />
       );
     }
 
