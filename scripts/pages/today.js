@@ -995,6 +995,24 @@
     var leftoverExpanded     = leftoverRef[0];
     var setLeftoverExpanded  = leftoverRef[1];
 
+    /* feat/leftover-bulk-select — selection state for the Leftover
+       bulk-resolve feature. Map of id -> true (not an array — O(1)
+       toggle/lookup, matches the myIds/onSiteById idiom already used
+       elsewhere in this file). Declared unconditionally (before any
+       early return below) per rules-of-hooks, same as leftoverRef
+       above. Intentionally NOT cleared when the section collapses
+       (simplest option per spec — "your call") — a user can select,
+       collapse, and still Resolve N from the still-visible bulk bar. */
+    var selectedRef          = React.useState({});
+    var selectedIds          = selectedRef[0];
+    var setSelectedIds       = selectedRef[1];
+
+    /* Guards the "Resolve N" button against double-submit while the
+       pooled toggleAction batch is in flight. */
+    var resolvingRef         = React.useState(false);
+    var bulkResolving        = resolvingRef[0];
+    var setBulkResolving     = resolvingRef[1];
+
     var ctx = React.useContext(TodayContext);
     if (!ctx) {
       console.warn('[TodayMiddleColumn] TodayContext missing — was the page Provider mounted?');
@@ -1107,6 +1125,113 @@
        three). */
     var leftoverProjects      = distinctProjects({ myTasks: leftoverItems, teamTasks: [], urgent: [], programmeTasks: [] });
     var leftoverIsMultiProject = leftoverProjects.length > 1;
+
+    /* feat/leftover-bulk-select — derive the actually-selected leftover
+       items by intersecting selectedIds with leftoverItems (rather than
+       trusting selectedIds' own key count) so a stale id — e.g. an item
+       someone else resolved via the actionsBus subscription above, or
+       one that aged back under the threshold on a refresh — silently
+       drops out of the count instead of over-counting or crashing a
+       lookup. Only LEFTOVER items are ever selectable, so this is also
+       the single source of truth "N selected" reads from. */
+    var selectedLeftoverItems = leftoverItems.filter(function (t) { return !!selectedIds[t.id]; });
+    var selectedCount         = selectedLeftoverItems.length;
+
+    function toggleLeftoverSelect(task) {
+      setSelectedIds(function (prev) {
+        var next = Object.assign({}, prev);
+        if (next[task.id]) { delete next[task.id]; } else { next[task.id] = true; }
+        return next;
+      });
+    }
+
+    function selectAllLeftover() {
+      setSelectedIds(function () {
+        var next = {};
+        leftoverItems.forEach(function (t) { next[t.id] = true; });
+        return next;
+      });
+    }
+
+    function clearLeftoverSelection() {
+      setSelectedIds({});
+    }
+
+    /* Bulk resolve — pooled-toggle every selected item, EACH carrying
+       ITS OWN date/folder/topic_id/actionIndex (leftover items span
+       many dates and owners; there is no single "today" to check off
+       against — same reasoning as the per-item checkable path above).
+       user_folder: it.folder is the report OWNER's folder
+       (feat/user-dim-audit-key, Task 6) — never the caller/currentUser,
+       or the audit write lands on the legacy bare key and silently
+       de-syncs from this owner's other entries. Partial failure is
+       handled per-item: a failed toggle keeps that item selected (so
+       the user can just hit Resolve again) and is reported via toast;
+       successes are dropped from both the rendered list (removeMy,
+       reusing the SAME optimistic-removal path the single check-off
+       circle uses) and the selection. */
+    function bulkResolveLeftover() {
+      if (bulkResolving || selectedCount === 0) return;
+      var items = selectedLeftoverItems;
+      var api   = window.FS && window.FS.api;
+      if (!api || !api.actions || !api.pooledAll) return;
+
+      setBulkResolving(true);
+
+      var thunks = items.map(function (it) {
+        return function () {
+          return api.actions.toggleAction({
+            date:         it.date,
+            topic_id:     it.topic_id,
+            action_index: it.actionIndex,
+            checked:      true,
+            action_text:  it.title,
+            user_folder:  it.folder,
+          }).then(function () { return { ok: true, item: it }; })
+            .catch(function (err) {
+              console.error('[Today leftover] bulk resolve failed for', it.id, err);
+              return { ok: false, item: it };
+            });
+        };
+      });
+
+      window.FS.api.pooledAll(thunks, 6).then(function (results) {
+        var okIds = {};
+        var okCount = 0, failCount = 0;
+        (results || []).forEach(function (r) {
+          if (r && r.ok) { okIds[r.item.id] = true; okCount++; }
+          else { failCount++; }
+        });
+
+        Object.keys(okIds).forEach(function (id) { removeMy(id); });
+
+        setSelectedIds(function (prev) {
+          var next = {};
+          Object.keys(prev).forEach(function (id) { if (!okIds[id]) next[id] = prev[id]; });
+          return next;
+        });
+        setBulkResolving(false);
+
+        var toast = window.FS && window.FS.toast;
+        if (!toast) return;
+        if (failCount === 0) {
+          toast.show({
+            message: 'Resolved ' + okCount + ' item' + (okCount === 1 ? '' : 's'),
+            tone:    'success',
+          });
+        } else if (okCount === 0) {
+          toast.show({
+            message: 'Could not resolve ' + failCount + ' item' + (failCount === 1 ? '' : 's') + ' — try again',
+            tone:    'error',
+          });
+        } else {
+          toast.show({
+            message: 'Resolved ' + okCount + ', ' + failCount + ' failed — still selected, try again',
+            tone:    'warning',
+          });
+        }
+      });
+    }
 
     /* When the check-off anim finishes, drop the task locally. The
        optimistic toggle inside TaskCard already persisted via
@@ -1298,21 +1423,63 @@
               React.createElement('span', { className: 'fs-today__leftover-hint' },
                 '(' + LEFTOVER_THRESHOLD_DAYS + '+ days, unresolved)'),
             ),
+
+            /* feat/leftover-bulk-select — bulk action bar, shown once
+               >=1 leftover item is selected. Lives in the section
+               "header area" (between the toggle and the collapsible
+               body) so it's visible whether or not the body itself is
+               expanded — selection intentionally survives a collapse
+               (see selectedRef declaration above), so Resolve N stays
+               reachable without re-expanding. */
+            selectedCount > 0
+              ? React.createElement('div', { className: 'fs-today__bulk-bar' },
+                  React.createElement('span', { className: 'fs-today__bulk-bar-count' },
+                    selectedCount + ' selected'),
+                  React.createElement('div', { className: 'fs-today__bulk-bar-actions' },
+                    React.createElement('button', {
+                      type:      'button',
+                      className: 'fs-today__bulk-bar-btn',
+                      onClick:   selectAllLeftover,
+                      disabled:  bulkResolving,
+                    }, 'Select all'),
+                    React.createElement('button', {
+                      type:      'button',
+                      className: 'fs-today__bulk-bar-btn fs-today__bulk-bar-btn--primary',
+                      onClick:   bulkResolveLeftover,
+                      disabled:  bulkResolving,
+                    }, bulkResolving ? 'Resolving…' : 'Resolve ' + selectedCount),
+                    React.createElement('button', {
+                      type:      'button',
+                      className: 'fs-today__bulk-bar-btn',
+                      onClick:   clearLeftoverSelection,
+                      disabled:  bulkResolving,
+                    }, 'Clear'),
+                  ),
+                )
+              : null,
+
             leftoverExpanded
               ? React.createElement('div', { className: 'fs-today__leftover-body' },
                   renderMaybeGrouped(leftoverItems, leftoverIsMultiProject, function (task) {
                     return React.createElement(fs.TaskCard, {
-                      key:           task.id,
-                      task:          task,
-                      onSelect:      onSelect,
-                      isMine:        !!myIds[task.id],
-                      selected:      selectedId === task.id,
-                      checkable:     task.topic_id != null && task.actionIndex != null && !!task.date,
-                      date:          task.date,
-                      onCheckedOff:  onCheckedOff,
-                      site:          !leftoverIsMultiProject ? task.site_name : null,
-                      ageLabel:      formatAgeLabel(task.ageDays),
-                      noDeadline:    !!task.noDeadline,
+                      key:            task.id,
+                      task:           task,
+                      onSelect:       onSelect,
+                      isMine:         !!myIds[task.id],
+                      selected:       selectedId === task.id,
+                      checkable:      task.topic_id != null && task.actionIndex != null && !!task.date,
+                      date:           task.date,
+                      onCheckedOff:   onCheckedOff,
+                      site:           !leftoverIsMultiProject ? task.site_name : null,
+                      ageLabel:       formatAgeLabel(task.ageDays),
+                      noDeadline:     !!task.noDeadline,
+                      /* feat/leftover-bulk-select — only Leftover cards
+                         are selectable; Recent/programme/timeline
+                         TaskCard call sites omit these three props and
+                         render byte-identical to before. */
+                      selectable:     true,
+                      bulkSelected:   !!selectedIds[task.id],
+                      onSelectToggle: toggleLeftoverSelect,
                     });
                   }),
                 )
