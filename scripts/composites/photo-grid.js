@@ -110,6 +110,7 @@
               src:       url,
               alt:       props.filename,
               loading:   'lazy',
+              decoding:  'async',
               className: 'fs-photo-grid__img',
               onError:   function () { setErrored(true); },
             })
