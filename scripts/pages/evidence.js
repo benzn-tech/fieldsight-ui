@@ -182,13 +182,17 @@
       window.FS.api.window.getSpan().then(function (span) {
         if (cancelled) return;
         var datesMap = (span && span.dates) || {};
-        var dates = Object.keys(datesMap)
+        var allDates = Object.keys(datesMap)
           .filter(function (d) {
             return datesMap[d] && datesMap[d].hasReport && d >= view.from && d <= view.to;
           })
           .sort()
-          .reverse()
-          .slice(0, daysToLoad);
+          .reverse();
+        /* Sprint 8.8.2 pagination only applies to the bounded presets —
+           the 'all' preset already widened from/to to the full report
+           span, so capping by daysToLoad on top of that silently hid
+           every in-range day past the first DEFAULT_DAYS. */
+        var dates = (view.preset === 'all') ? allDates : allDates.slice(0, daysToLoad);
 
         setState({ status: 'ok', dates: dates, user: user });
       }).catch(function (err) {
@@ -197,7 +201,7 @@
       });
 
       return function () { cancelled = true; };
-    }, [depKey, view.from, view.to, daysToLoad, retryCount]);
+    }, [depKey, view.preset, view.from, view.to, daysToLoad, retryCount]);
 
     /* Lazy-load photos when the Photos tab is the active one and we
        don't yet have data for it. Other tabs are populated by their
@@ -484,7 +488,8 @@
         React.createElement('h2', { className: 'fs-evidence__title' }, 'Evidence'),
         React.createElement('div', { className: 'fs-evidence__subtitle' },
           dates.length + ' ' + (dates.length === 1 ? 'day' : 'days')
-            + ' with reports in this range · showing up to ' + ctx.daysToLoad + ' at a time'),
+            + ' with reports in this range'
+            + (ctx.view.preset === 'all' ? '' : ' · showing up to ' + ctx.daysToLoad + ' at a time')),
       ),
       toolbar,
 
@@ -501,8 +506,9 @@
             'No reports in the selected range.')
         : body,
 
-      /* Load more */
-      dates.length >= ctx.daysToLoad
+      /* Load more — hidden for the 'all' preset since every in-range day
+         is already rendered; there's nothing left to page in. */
+      (ctx.view.preset !== 'all' && dates.length >= ctx.daysToLoad)
         ? React.createElement('div', { className: 'fs-evidence__load-more' },
             React.createElement(Button, {
               variant: 'secondary', size: 'sm',
