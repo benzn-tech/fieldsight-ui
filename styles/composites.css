@@ -236,6 +236,79 @@
 }
 
 
+/* feat/today-leftover-grouping — collapsible section for rolling open
+   items aged past LEFTOVER_THRESHOLD_DAYS (90d). Default collapsed; a
+   real <button> toggle with aria-expanded + a rotating chevron. The
+   chevron uses a plain `transform` transition (no @keyframes), so the
+   global prefers-reduced-motion transition-duration:0.01ms belt in
+   tokens.css (~line 757) already neutralises it — same pattern as
+   .fs-gantt-tree__chev / .fs-prog-kanban__group-chev above, no separate
+   override needed here (see file-header animation registry note: that
+   registry only tracks @keyframes, whose forwards-fill end-states need
+   an explicit static override; transitions don't have that problem).
+   Label uses --text-warning (theme-flipped semantic token, NOT the raw
+   --color-warning-700 palette value) — neutral/warning tone per
+   CLAUDE.md status-color rule, never safety-red / blocked-magenta. */
+.fs-today__leftover {
+  margin-top: 14px;
+}
+.fs-today__leftover-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 4px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  cursor: pointer;
+  text-align: left;
+}
+.fs-today__leftover-toggle:hover {
+  color: var(--text-primary);
+}
+.fs-today__leftover-toggle:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.fs-today__leftover-chev {
+  flex-shrink: 0;
+  width: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  /* NOTE: --ease-out is the real token (tokens.css ~line 280); several
+     existing call sites in this file (.fs-today__view-report-cta,
+     .fs-today__timeline-link-arrow, .fs-gantt-tree__chev,
+     .fs-prog-kanban__group-chev) reference a nonexistent --easing-out
+     instead — an existing typo, out of scope to fix here, but new code
+     shouldn't propagate it. */
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.fs-today__leftover-chev--open {
+  transform: rotate(90deg);
+}
+.fs-today__leftover-label {
+  color: var(--text-warning);
+}
+.fs-today__leftover-hint {
+  font-weight: var(--font-weight-regular);
+  color: var(--text-tertiary);
+  text-transform: none;
+  letter-spacing: normal;
+}
+.fs-today__leftover-body {
+  padding-top: 8px;
+}
+
+
 /* "Mine" accent — left edge in safety orange so a user's own tasks
    stand out among the team's. */
 .fs-task-card--mine {
