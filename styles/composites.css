@@ -872,14 +872,30 @@
 
 .fs-topic-card--selected {
   border-color: var(--color-accent-400) !important;
+  /* T3 — readable neutral tint + accent left-border, not a yellow fill.
+     Yellow (--surface-selected) is reserved for hover only (below). */
+  background: var(--surface-topic-selected);
+  border-left: 3px solid var(--color-accent-500);
+}
+
+/* T3 — yellow highlight only on hover, on any (non-selected) card. */
+.fs-topic-card:hover {
   background: var(--surface-selected);
+}
+[data-theme="dark"] .fs-topic-card:hover,
+[data-theme="dark"] .fs-topic-card:hover .fs-topic-card__title {
+  /* Pin foreground so title stays readable on the yellow hover tint —
+     status/highlight-style tokens aren't theme-flipped (see CLAUDE.md). */
+  color: var(--text-primary);
 }
 
 /* Sprint 6.6.4 — deep-link spotlight. Three soft pulses then settle.
    Total ~1.8s. The flash class lands on the inner Card (which carries
    .fs-topic-card); the wrapper just exists for the ref / scrollIntoView
-   target. Uses accent-100 for the pulse — same token the --selected
-   state uses, so no new palette work.
+   target. Uses accent-100 for the animated pulse. T3 — the
+   prefers-reduced-motion static fallback below now uses
+   --surface-topic-selected instead (accent-100 was a pale-yellow-under-
+   white legibility trap with no border cue once the animation is gone).
    Sprint 6.7.2 — same animation reused by .fs-safety-flag-row--flash
    for precision spotlight on a single flag inside an open topic.
    A2-2 — same animation reused again by .fs-transcript-list__row--flash
@@ -902,7 +918,10 @@
   .fs-safety-flag-row--flash,
   .fs-transcript-list__row--flash {
     animation: none;
-    background: var(--color-accent-100);
+    /* T3 — was --color-accent-100 (pale-yellow-under-white legibility trap
+       in dark mode). Use the same readable neutral tint as the selected
+       state so a reduced-motion deep-link spotlight is still legible. */
+    background: var(--surface-topic-selected);
   }
 }
 

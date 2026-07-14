@@ -66,6 +66,10 @@
       sidebarActive: '#374151', input: '#FFFFFF', inputHover: '#F9FAFB',
       inputFocus: '#FFFFFF', overlay: 'rgba(17, 24, 39, 0.5)',
       tooltip: '#111827', highlight: '#FFD966',
+      /* T3 — neutral selected tint for Timeline topic cards (readable
+         pairing with --text-primary; --surface-selected stays yellow,
+         reserved for hover). */
+      topicSelected: '#F3F4F6',
     },
     border: {
       subtle: '#E5E7EB', default: '#D1D5DB', strong: '#9CA3AF',
@@ -175,6 +179,7 @@
       sidebarActive: '#374151', input: '#111827', inputHover: '#1F2937',
       inputFocus: '#111827', overlay: 'rgba(0,0,0,0.75)',
       tooltip: '#1F2937', highlight: 'rgba(255,217,102,0.12)',
+      topicSelected: 'rgba(255,255,255,0.06)',
     },
     border: { subtle: '#1F2937', default: '#374151', strong: '#4B5563' },
     text: {
