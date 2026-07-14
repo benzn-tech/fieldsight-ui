@@ -302,13 +302,15 @@
        (same ones /today's Leftover "Batch Select" toggle uses). Reachable
        whenever the list has at least one batch-eligible row, independent
        of canCreate. */
-    var multiToggleBtn = React.createElement('button', {
-      type:            'button',
-      className:       'fs-multi-select__toggle'
-        + (multiSelect.batchMode ? ' fs-multi-select__toggle--active' : ''),
-      onClick:         function () { multiSelect.setBatchMode(function (prev) { return !prev; }); },
-      'aria-pressed':  multiSelect.batchMode,
-    }, multiSelect.batchMode ? 'Multi-Select: On' : 'Multi-Select');
+    var multiToggleBtn = batchEligibleRows.length > 0
+      ? React.createElement('button', {
+          type:            'button',
+          className:       'fs-multi-select__toggle'
+            + (multiSelect.batchMode ? ' fs-multi-select__toggle--active' : ''),
+          onClick:         function () { multiSelect.setBatchMode(function (prev) { return !prev; }); },
+          'aria-pressed':  multiSelect.batchMode,
+        }, multiSelect.batchMode ? 'Multi-Select: On' : 'Multi-Select')
+      : null;
 
     var header = React.createElement('div', { className: 'fs-safety__header' },
       React.createElement('div', { className: 'fs-safety__header-top' },

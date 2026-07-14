@@ -126,7 +126,7 @@
     var inputId = 'tpl-file-input-' + scope;
 
     if (phase === 'uploading' || phase === 'extracting') {
-      return React.createElement(ModalOverlay, { onClose: onCancel },
+      return React.createElement(ModalOverlay, { open: true, onClose: onCancel },
         React.createElement('div', { className: 'fs-tpl-upload' },
           React.createElement('h2', { className: 'fs-tpl-upload__title' }, 'Upload template'),
           React.createElement('div', { className: 'fs-tpl-upload__progress' },
@@ -146,7 +146,7 @@
     }
 
     if (phase === 'done') {
-      return React.createElement(ModalOverlay, { onClose: onCancel },
+      return React.createElement(ModalOverlay, { open: true, onClose: onCancel },
         React.createElement('div', { className: 'fs-tpl-upload' },
           React.createElement('h2', { className: 'fs-tpl-upload__title' }, 'Upload template'),
           React.createElement('div', { className: 'fs-tpl-upload__progress' },
@@ -164,7 +164,7 @@
     }
 
     if (phase === 'error') {
-      return React.createElement(ModalOverlay, { onClose: onCancel },
+      return React.createElement(ModalOverlay, { open: true, onClose: onCancel },
         React.createElement('div', { className: 'fs-tpl-upload' },
           React.createElement('h2', { className: 'fs-tpl-upload__title' }, 'Upload template'),
           React.createElement('p', { className: 'fs-tpl-upload__error' }, errMsg || 'Something went wrong.'),
@@ -177,7 +177,7 @@
     }
 
     /* idle / dragging */
-    return React.createElement(ModalOverlay, { onClose: onCancel },
+    return React.createElement(ModalOverlay, { open: true, onClose: onCancel },
       React.createElement('div', { className: 'fs-tpl-upload' },
         React.createElement('h2', { className: 'fs-tpl-upload__title' }, 'Upload template'),
         React.createElement('p', { className: 'fs-tpl-upload__subtitle' },
