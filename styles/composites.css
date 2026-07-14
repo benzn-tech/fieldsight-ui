@@ -25,6 +25,44 @@
 
 
 /* =========================================================================
+   Shared row state — resolved sink (T7 + G2)
+   -------------------------------------------------------------------------
+   .fs-row--resolved marks a resolved/closed/checked list row in /safety,
+   /quality, and /timeline topic action items. The stable sink-to-bottom
+   sort lives in each page/composite's JS (safety.js, quality.js,
+   topic-card.js) — this class only supplies the shared visual treatment
+   (muted gray bg + strikethrough primary text) so the three lists read
+   consistently. Applied at each row's WRAPPER element (safety.js's
+   .fs-safety__row-btn, quality.js's .fs-quality__row-btn, topic-card.js's
+   action-item wrapper div) rather than inside SafetyFlagRow/ActionItemRow
+   themselves, so this stays a pure CSS add-on with no composite API
+   change.
+
+   --surface-resolved is a neutral gray, NOT a status-tone token (it isn't
+   theme-flipped the way --color-{success,danger,...} are), so the
+   foreground is pinned to --text-tertiary directly rather than relying
+   on an ancestor color flip — stays readable in both themes.
+   ========================================================================= */
+
+.fs-row--resolved {
+  background:    var(--surface-resolved);
+  border-radius: var(--radius-md);
+}
+
+/* SafetyFlagRow paints its own opaque --surface-panel background, so the
+   ancestor's --surface-resolved needs to be re-applied on the inner row
+   for it to actually show through. */
+.fs-row--resolved .fs-safety-flag-row { background: var(--surface-resolved); }
+
+.fs-row--resolved .fs-safety-flag-row__obs,
+.fs-row--resolved .fs-quality__row-title,
+.fs-row--resolved .fs-action-item-row__text {
+  text-decoration: line-through;
+  color:           var(--text-tertiary);
+}
+
+
+/* =========================================================================
    TaskCard — avatar + title (2-line) + status badge + due time
    ========================================================================= */
 

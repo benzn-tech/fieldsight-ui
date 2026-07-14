@@ -242,20 +242,48 @@
               React.createElement('div', { className: 'fs-topic-card__section-label' },
                 'Action items'),
               React.createElement('div', { className: 'fs-topic-card__actions' },
+                /* T7/G2 — checked action items sink to the bottom of the
+                   list while unfinished items keep their existing
+                   relative order. The raw `a` from topic.action_items
+                   carries no `checked` field of its own — checked state
+                   is derived per-index via FS.api.actions.lookupAction
+                   (actionState is the real source of truth, keyed by
+                   topic_id_action_index / userFolder|topic_id_action_index
+                   — see action-item-row.js header). Pair each item with
+                   its original `idx` + derived checked state BEFORE
+                   sorting so actionIndex/lookupAction keys stay tied to
+                   the item's real backend position, not its sorted
+                   render position. .map() already returns a fresh array,
+                   so .sort() here never mutates topic.action_items; the
+                   comparator only distinguishes checked-vs-not (no
+                   secondary tiebreaker), so it never reorders two items
+                   on the same side of the checked/unchecked split
+                   (Array.sort is stable in evergreen browsers). */
                 actions.map(function (a, idx) {
-                  var key = topic.topic_id + '_' + idx;
                   var state = window.FS.api.actions.lookupAction(actionState, userFolder, topic.topic_id, idx) || {};
-                  return React.createElement(ActionItemRow, {
-                    key:            key,
+                  return { a: a, idx: idx, state: state, checked: !!state.checked };
+                }).sort(function (x, y) {
+                  if (x.checked === y.checked) return 0;
+                  return x.checked ? 1 : -1;
+                }).map(function (pair) {
+                  var a     = pair.a;
+                  var idx   = pair.idx;
+                  var state = pair.state;
+                  var key   = topic.topic_id + '_' + idx;
+                  return React.createElement('div', {
+                    key:       key,
+                    className: 'fs-topic-card__action-item'
+                      + (pair.checked ? ' fs-row--resolved' : ''),
+                  }, React.createElement(ActionItemRow, {
                     date:           date,
                     topicId:        topic.topic_id,
                     actionIndex:    idx,
                     userFolder:     userFolder,
                     action:         a,
-                    initialChecked: !!state.checked,
+                    initialChecked: pair.checked,
                     checkedBy:      state.checked_by,
                     checkedAt:      state.checked_at,
-                  });
+                  }));
                 }),
               ),
             )

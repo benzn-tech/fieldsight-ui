@@ -70,6 +70,9 @@
          pairing with --text-primary; --surface-selected stays yellow,
          reserved for hover). */
       topicSelected: '#F3F4F6',
+      /* T7/G2 — shared resolved/closed/checked row sink (safety, quality,
+         timeline action items). See styles/tokens.css comment. */
+      resolved: '#F1F3F5',
     },
     border: {
       subtle: '#E5E7EB', default: '#D1D5DB', strong: '#9CA3AF',
@@ -180,6 +183,7 @@
       inputFocus: '#111827', overlay: 'rgba(0,0,0,0.75)',
       tooltip: '#1F2937', highlight: 'rgba(255,217,102,0.12)',
       topicSelected: 'rgba(255,255,255,0.06)',
+      resolved: 'rgba(255,255,255,0.04)',
     },
     border: { subtle: '#1F2937', default: '#374151', strong: '#4B5563' },
     text: {

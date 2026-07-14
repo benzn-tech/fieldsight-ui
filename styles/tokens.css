@@ -357,6 +357,12 @@
      bg); topic cards need a readable neutral instead, paired with an accent
      left-border. Do not repurpose --surface-selected. */
   --surface-topic-selected: var(--color-neutral-100);
+  /* T7/G2 — shared "resolved/closed/checked row" sink treatment across
+     /safety, /quality, /timeline action items. Neutral gray, NOT a
+     status-tone token (see .fs-row--resolved in composites.css — its
+     foreground is pinned to --text-tertiary rather than relying on a
+     theme-flip). */
+  --surface-resolved:       #F1F3F5;
 
   /* Borders */
   --border-subtle:  var(--color-neutral-200);
@@ -678,6 +684,8 @@
   --surface-selected:       rgba(255, 217, 102, 0.15);
   /* T3 — neutral selected tint (see light-mode comment above). */
   --surface-topic-selected: rgba(255, 255, 255, 0.06);
+  /* T7/G2 — see light-mode comment above. */
+  --surface-resolved:       rgba(255, 255, 255, 0.04);
 
   /* Borders */
   --border-subtle:  #1F2937;

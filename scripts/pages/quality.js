@@ -42,6 +42,22 @@
     return days[d.getUTCDay()] + ', ' + p[2] + ' ' + months[p[1] - 1] + ' ' + p[0];
   }
 
+  /* T7/G2 — resolved/closed rows sink to the bottom of their date group;
+     unfinished rows keep their existing relative order. Array.sort is
+     stable in evergreen browsers, and this comparator only ever
+     distinguishes resolved-vs-not (no secondary tiebreaker), so it never
+     reorders two rows on the same side of the resolved/unresolved split. */
+  function isResolved(r) {
+    return r.status === 'resolved' || r.status === 'closed';
+  }
+
+  function sinkResolved(rows) {
+    return rows.slice().sort(function (a, b) {
+      if (isResolved(a) === isResolved(b)) return 0;
+      return isResolved(a) ? 1 : -1;
+    });
+  }
+
   function groupByDate(rows) {
     var byDate = {};
     rows.forEach(function (r) {
@@ -49,7 +65,7 @@
       byDate[r.date].push(r);
     });
     return Object.keys(byDate).sort().reverse().map(function (date) {
-      return { date: date, rows: byDate[date] };
+      return { date: date, rows: sinkResolved(byDate[date]) };
     });
   }
 
@@ -352,7 +368,8 @@
                       key:       row.id,
                       type:      'button',
                       className: 'fs-quality__row-btn'
-                        + (isSel ? ' fs-quality__row-btn--active' : ''),
+                        + (isSel ? ' fs-quality__row-btn--active' : '')
+                        + (isResolved(row) ? ' fs-row--resolved' : ''),
                       onClick:   function () {
                         ctx.setSelected(row);
                         onSelect({ kind: 'quality_item', id: row.id, row: row });
