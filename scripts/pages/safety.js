@@ -53,6 +53,27 @@
     return days[d.getUTCDay()] + ', ' + p[2] + ' ' + months[p[1] - 1] + ' ' + p[0];
   }
 
+  /* T6 — mirrors action-item-row.js's fmtCheckedAt (kept local rather than
+     exported cross-layer: action-item-row.js is L5, this page-local copy
+     avoids adding a new shared-helper surface for one page). Format ISO
+     timestamp → "3 May, 2:14 pm" in NZ time. Returns '' on missing/
+     unparseable input. */
+  function fmtCheckedAt(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    try {
+      return d.toLocaleString('en-NZ', {
+        day: 'numeric', month: 'short',
+        hour: 'numeric', minute: '2-digit',
+        hour12: true,
+        timeZone: 'Pacific/Auckland',
+      });
+    } catch (_) {
+      return '';
+    }
+  }
+
   /* T7/G2 — resolved/closed rows sink to the bottom of their date group;
      unfinished rows keep their existing relative order. Array.sort is
      stable in evergreen browsers, and this comparator only ever
@@ -453,6 +474,16 @@
       var prevSel   = sel;
       var nextStatus = prevSel.status === 'resolved' ? 'open' : 'resolved';
       var nextSel   = Object.assign({}, prevSel, { status: nextStatus });
+      /* T6 — reopen clears the resolver line immediately (spec: show only
+         the latest Resolved). A fresh resolve does NOT set resolvedBy/
+         resolvedAt optimistically — owner-vs-caller guardrail means the
+         operator name may ONLY come from the API response (never a local
+         AuthMock/session read), so it's filled in once toggleAction
+         resolves below. */
+      if (nextStatus === 'open') {
+        nextSel.resolvedBy = null;
+        nextSel.resolvedAt = null;
+      }
 
       function applyStatus(rowId, status) {
         if (!ctx.setState) return;
@@ -480,8 +511,24 @@
         checked:      nextStatus === 'resolved',
         action_text:  sel.observation,
         user_folder:  sel.user_folder,
-      }).then(function () {
+      }).then(function (res) {
         setTogglePending(false);
+        /* T6 — capture the resolver from the API response ONLY (never
+           AuthMock/session — owner ≠ caller). Functional update + id
+           guard so a stale response can't clobber a since-changed
+           selection. Reopen already cleared these above; skip the
+           write there so we don't resurrect them from a slow response. */
+        if (nextStatus === 'resolved' && ctx.setSelected) {
+          var resolvedBy = (res && res.checked_by) || null;
+          var resolvedAt = (res && res.checked_at) || null;
+          ctx.setSelected(function (cur) {
+            if (!cur || cur.id !== prevSel.id) return cur;
+            return Object.assign({}, cur, {
+              resolvedBy: resolvedBy,
+              resolvedAt: resolvedAt,
+            });
+          });
+        }
       }).catch(function (err) {
         console.error('[SafetyRightDetail] resolve toggle failed, reverting', err);
         setTogglePending(false);
@@ -699,6 +746,20 @@
     rows.push(React.createElement(DetailRow, {
       key: 'source', label: 'Source', value: sourceLabel,
     }));
+    /* T6 — report-derived rows only (topic_flag/observation/live all flow
+       through toggleResolve above). Manual observations (source==='manual')
+       go through toggleManualStatus → org.updateObservation, which carries
+       no operator identity — sel.resolvedBy stays unset for them, so this
+       row correctly stays hidden (Phase 2 territory; don't fabricate one
+       from AuthMock.currentUser). Shows only the latest resolve — cleared
+       on Reopen in toggleResolve. */
+    if (sel.status === 'resolved' && sel.resolvedBy) {
+      rows.push(React.createElement(DetailRow, {
+        key: 'resolved-by', label: 'Resolved by',
+        value: sel.resolvedBy
+          + (fmtCheckedAt(sel.resolvedAt) ? ' · ' + fmtCheckedAt(sel.resolvedAt) : ''),
+      }));
+    }
 
     /* Sprint 6.6.3 — photos block, rendered between field rows and
        linked actions. Topic-flag rows carry related_photos from the
