@@ -42,6 +42,22 @@
     return days[d.getUTCDay()] + ', ' + p[2] + ' ' + months[p[1] - 1] + ' ' + p[0];
   }
 
+  /* T7/G2 — resolved/closed rows sink to the bottom of their date group;
+     unfinished rows keep their existing relative order. Array.sort is
+     stable in evergreen browsers, and this comparator only ever
+     distinguishes resolved-vs-not (no secondary tiebreaker), so it never
+     reorders two rows on the same side of the resolved/unresolved split. */
+  function isResolved(r) {
+    return r.status === 'resolved' || r.status === 'closed';
+  }
+
+  function sinkResolved(rows) {
+    return rows.slice().sort(function (a, b) {
+      if (isResolved(a) === isResolved(b)) return 0;
+      return isResolved(a) ? 1 : -1;
+    });
+  }
+
   function groupByDate(rows) {
     var byDate = {};
     rows.forEach(function (r) {
@@ -49,7 +65,7 @@
       byDate[r.date].push(r);
     });
     return Object.keys(byDate).sort().reverse().map(function (date) {
-      return { date: date, rows: byDate[date] };
+      return { date: date, rows: sinkResolved(byDate[date]) };
     });
   }
 
@@ -196,13 +212,51 @@
     var Button              = fs.Button;
     var RangeToolbar        = fs.RangeToolbar;
 
-    var ctx = React.useContext(QualityContext);
+    var ctx      = React.useContext(QualityContext);
+    var state    = ctx && ctx.state;
+    var onSelect = props.onSelect || function () {};
+
+    /* T4 — Multi-Select toggle + bulk "Mark Resolved", reusing the SAME
+       useMultiSelect hook /today's Leftover section and /safety use
+       (scripts/composites/multi-select-list.js). `items` has to be
+       known before the useMultiSelect() call, and hook calls must stay
+       unconditional per rules-of-hooks — so the flattened, currently-
+       rendered row order is computed defensively here (state may not
+       be 'ok' yet) rather than after the status early-returns below.
+
+       Batch-eligible = ONLY source === 'topic_quality' — narrower than
+       /safety's "report-derived" gate. toggleResolve() below (the
+       single-row "Mark resolved" button in QualityRightDetail) already
+       explicitly skips 'qc_item' rows: they carry a REAL backend status
+       field (not a synthetic open/resolved binary), so toggling them
+       via the actions-toggle join would overwrite honest data — same
+       reasoning applies to the batch path, so 'qc_item' rows (plus
+       'manual'/'live', which have no batch backend either) are excluded
+       from the selectable set entirely.
+
+       F4 — also excludes already-resolved rows, so "Select all" and N
+       in "Mark Resolved (N)" only ever reflect actionable rows (mirrors
+       safety.js's batchEligibleRows fix). */
+    var groupsEarly = (state && state.status === 'ok') ? (state.groups || []) : [];
+    var flatRows = [];
+    groupsEarly.forEach(function (g) { flatRows = flatRows.concat(g.rows); });
+    var batchEligibleRows = flatRows.filter(function (r) { return r.source === 'topic_quality' && !isResolved(r); });
+
+    var multiSelect = window.FieldSight.useMultiSelect({
+      items: batchEligibleRows,
+      getId: function (r) { return r.id; },
+    });
+
+    /* Guards the bulk "Mark Resolved" button against double-submit
+       while the pooled toggleAction batch is in flight. */
+    var refBulkResolving = React.useState(false);
+    var bulkResolving    = refBulkResolving[0];
+    var setBulkResolving = refBulkResolving[1];
+
     if (!ctx) {
       console.warn('[QualityMiddleColumn] QualityContext missing');
       return null;
     }
-    var state    = ctx.state;
-    var onSelect = props.onSelect || function () {};
 
     var caller    = ctx.caller || {};
     var canCreate = !!(window.FS && window.FS.can &&
@@ -218,6 +272,17 @@
         }, '+ Log Item')
       : null;
 
+    /* T4 — "Multi-Select" toggle, shared .fs-multi-select__toggle
+       classes (same ones /today's Leftover "Batch Select" toggle and
+       /safety's "Multi-Select" toggle use). */
+    var multiToggleBtn = React.createElement('button', {
+      type:            'button',
+      className:       'fs-multi-select__toggle'
+        + (multiSelect.batchMode ? ' fs-multi-select__toggle--active' : ''),
+      onClick:         function () { multiSelect.setBatchMode(function (prev) { return !prev; }); },
+      'aria-pressed':  multiSelect.batchMode,
+    }, multiSelect.batchMode ? 'Multi-Select: On' : 'Multi-Select');
+
     var header = React.createElement('div', { className: 'fs-quality__header' },
       React.createElement('div', { className: 'fs-quality__header-top' },
         React.createElement('div', null,
@@ -225,7 +290,9 @@
           React.createElement('div', { className: 'fs-quality__subtitle' },
             'Quality & compliance items across your accessible reports'),
         ),
-        logBtn,
+        React.createElement('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
+          multiToggleBtn, logBtn,
+        ),
       ),
     );
     var toolbar = RangeToolbar
@@ -291,6 +358,113 @@
       }
     }
 
+    /* T4 — bulk "Mark Resolved", piggybacking the SAME actions-toggle
+       endpoint QualityRightDetail's single-row toggleResolve() uses,
+       applied per selected topic_quality row instead of one at a time.
+       qc_item/manual/live rows never reach here (excluded from
+       batchEligibleRows above). Already-resolved rows in the selection
+       are silently skipped rather than re-submitted. Partial failure
+       mirrors today.js's bulkResolveLeftover / safety.js's
+       bulkMarkResolved: a failed toggle keeps that row selected for
+       retry; successes are dropped from the selection AND patched to
+       'resolved' in the row list (so they sink via sinkResolved on the
+       next render — Task 4/T7). */
+    function bulkMarkResolved() {
+      var candidates = multiSelect.selectedItems.filter(function (r) { return !isResolved(r); });
+      if (bulkResolving || candidates.length === 0) return;
+      var api = window.FS && window.FS.api;
+      if (!api || !api.actions || !api.pooledAll) return;
+
+      setBulkResolving(true);
+
+      var thunks = candidates.map(function (row) {
+        return function () {
+          return api.actions.toggleAction({
+            date:         row.date,
+            topic_id:     row.topic_id,
+            action_index: 'quality',
+            checked:      true,
+            action_text:  row.item,
+            user_folder:  row.user_folder,
+          }).then(function (res) {
+              return {
+                ok: true, row: row,
+                checkedBy: (res && res.checked_by) || null,
+                checkedAt: (res && res.checked_at) || null,
+              };
+            })
+            .catch(function (err) {
+              console.error('[Quality] bulk resolve failed for', row.id, err);
+              return { ok: false, row: row };
+            });
+        };
+      });
+
+      window.FS.api.pooledAll(thunks, 6).then(function (results) {
+        var okIds = {};
+        /* F3 — capture the resolver per-thunk (API response only) so a
+           bulk-resolved row shows a resolver immediately instead of only
+           after a reload. */
+        var resolverById = {};
+        var okCount = 0, failCount = 0;
+        (results || []).forEach(function (r) {
+          if (r && r.ok) {
+            okIds[r.row.id] = true;
+            resolverById[r.row.id] = { checkedBy: r.checkedBy, checkedAt: r.checkedAt };
+            okCount++;
+          } else {
+            failCount++;
+          }
+        });
+
+        if (ctx.setState && okCount > 0) {
+          ctx.setState(function (s) {
+            if (s.status !== 'ok') return s;
+            var updatedRows = (s.rows || []).map(function (r) {
+              if (!okIds[r.id]) return r;
+              var resolver = resolverById[r.id] || {};
+              return Object.assign({}, r, {
+                status:      'resolved',
+                resolved_by: resolver.checkedBy || null,
+                resolved_at: resolver.checkedAt || null,
+              });
+            });
+            return Object.assign({}, s, {
+              rows:   updatedRows,
+              totals: totalsFromRows(updatedRows),
+              groups: groupByDate(updatedRows),
+            });
+          });
+        }
+
+        multiSelect.setSelectedIds(function (prev) {
+          var next = {};
+          Object.keys(prev).forEach(function (id) { if (!okIds[id]) next[id] = prev[id]; });
+          return next;
+        });
+        setBulkResolving(false);
+
+        var toast = window.FS && window.FS.toast;
+        if (!toast) return;
+        if (failCount === 0) {
+          toast.show({
+            message: 'Resolved ' + okCount + ' item' + (okCount === 1 ? '' : 's'),
+            tone:    'success',
+          });
+        } else if (okCount === 0) {
+          toast.show({
+            message: 'Could not resolve ' + failCount + ' item' + (failCount === 1 ? '' : 's') + ' — try again',
+            tone:    'error',
+          });
+        } else {
+          toast.show({
+            message: 'Resolved ' + okCount + ', ' + failCount + ' failed — still selected, try again',
+            tone:    'warning',
+          });
+        }
+      });
+    }
+
     return React.createElement('div', { className: 'fs-quality' },
       header,
       toolbar,
@@ -320,6 +494,23 @@
       React.createElement('div', { className: 'fs-quality__meta' },
         totals.total + (totals.total === 1 ? ' item · ' : ' items · ') + rangeLabel),
 
+      /* T4 — bulk action bar, shown whenever Multi-Select mode is on
+         (shared MultiSelectBulkBar composite). "Select all" only ever
+         selects batch-eligible (topic_quality) rows, since that's the
+         `items` useMultiSelect was constructed with above. */
+      multiSelect.batchMode
+        ? React.createElement(fs.MultiSelectBulkBar, {
+            count:   multiSelect.selectedItems.length,
+            actions: [
+              { key: 'select-all', label: 'Select all', onClick: multiSelect.selectAll, disabled: bulkResolving },
+              { key: 'resolve', primary: true, onClick: bulkMarkResolved,
+                disabled: bulkResolving || multiSelect.selectedItems.length === 0,
+                label: bulkResolving ? 'Resolving…' : 'Mark Resolved (' + multiSelect.selectedItems.length + ')' },
+              { key: 'clear', label: 'Clear', onClick: multiSelect.clear, disabled: bulkResolving },
+            ],
+          })
+        : null,
+
       React.createElement(KpiStrip, null,
         React.createElement(StatCard, { value: totals.total,    label: 'Total items' }),
         React.createElement(StatCard, {
@@ -348,12 +539,26 @@
                 React.createElement('div', { className: 'fs-quality__group-rows' },
                   g.rows.map(function (row) {
                     var isSel = ctx.selectedItem && ctx.selectedItem.id === row.id;
+                    /* T4 — batch-eligible = source === 'topic_quality'
+                       only (see the comment above batchEligibleRows).
+                       Ineligible rows keep opening the detail panel
+                       regardless of batchMode. F4 — also excludes
+                       already-resolved rows (see batchEligibleRows
+                       above). */
+                    var batchEligible = row.source === 'topic_quality' && !isResolved(row);
+                    var batchSelected = multiSelect.batchMode && batchEligible && !!multiSelect.selectedIds[row.id];
                     return React.createElement('button', {
                       key:       row.id,
                       type:      'button',
                       className: 'fs-quality__row-btn'
-                        + (isSel ? ' fs-quality__row-btn--active' : ''),
-                      onClick:   function () {
+                        + (isSel ? ' fs-quality__row-btn--active' : '')
+                        + (isResolved(row) ? ' fs-row--resolved' : '')
+                        + (batchSelected ? ' fs-row--batch-selected' : ''),
+                      onClick:   function (e) {
+                        if (multiSelect.batchMode && batchEligible) {
+                          multiSelect.onItemClick(row, e);
+                          return;
+                        }
                         ctx.setSelected(row);
                         onSelect({ kind: 'quality_item', id: row.id, row: row });
                       },

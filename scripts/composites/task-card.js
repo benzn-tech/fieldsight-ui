@@ -42,23 +42,28 @@
      noDeadline     boolean, optional (feat/today-rolling-open-items) —
                     renders a subtle "No deadline" chip (warning tone,
                     never safety-red/blocked-magenta per CLAUDE.md).
-     selectable     boolean, optional (feat/leftover-bulk-select) — shows
-                    a SQUARE bulk-selection checkbox to the left of the
-                    existing leading slot (avatar or round check-off
-                    circle). Distinct shape + position from the round
-                    check button on purpose — square = "select for bulk
-                    action", circle = "resolve this one now". Omitted/
-                    falsy → no checkbox rendered, row is byte-identical
-                    to before (Recent cards + timeline usages unaffected).
-     bulkSelected   boolean, optional — checkbox checked state. Only
-                    meaningful when `selectable` is true. NOT the same
-                    prop as `selected` above (that one drives the
-                    right-panel "currently open" highlight) — deliberately
-                    a different name to avoid colliding with it.
-     onSelectToggle (task) => void, optional — fired on checkbox toggle.
-                    Click on the checkbox stops propagation so it never
-                    triggers the row's onSelect (open detail) or the
-                    round check-off button.
+     batchMode      boolean, optional (feat/leftover-batch-select, T1) —
+                    when true AND `checkable` is true, the SAME round
+                    check-off button doubles as a multi-select toggle
+                    instead of resolving immediately: its onClick calls
+                    `onBatchToggle(task, evt)` rather than the single-
+                    resolve `startCheckOff`. Omitted/falsy → the round
+                    button keeps its original single-resolve behavior,
+                    byte-identical to before this prop existed (Recent
+                    cards + timeline usages never pass it).
+     batchSelected  boolean, optional — paints the round button with a
+                    `--selected` modifier when true. Only meaningful
+                    when `batchMode` is true. NOT the same prop as
+                    `selected` above (that one drives the right-panel
+                    "currently open" highlight) — deliberately a
+                    different name to avoid colliding with it.
+     onBatchToggle  (task, evt) => void, optional — fired on round-button
+                    click when `batchMode` is true, INSTEAD of
+                    `startCheckOff`. `evt` is passed through so the
+                    caller can branch on evt.shiftKey (range-select) /
+                    evt.ctrlKey / evt.metaKey (toggle-only). Click on the
+                    button stops propagation so it never also triggers
+                    the row's onSelect (open detail).
 
    Exported to:
      window.FieldSight.TaskCard
@@ -79,9 +84,9 @@
     var isMine   = !!props.isMine;
     var onSelect = props.onSelect;
     var checkable = !!props.checkable && task && task.topic_id != null && task.actionIndex != null;
-    /* feat/leftover-bulk-select — additive, no-op when `selectable` is
-       omitted/falsy (see prop-trio doc in the file header above). */
-    var selectable = !!props.selectable;
+    /* feat/leftover-batch-select (T1) — additive, no-op when `batchMode`
+       is omitted/falsy (see prop-trio doc in the file header above). */
+    var batchMode = !!props.batchMode;
 
     /* checkingOff: true → row enters animation. Stays true until
        onAnimationEnd; the parent's onCheckedOff then unmounts us. */
@@ -123,6 +128,23 @@
       if (checkingOff && props.onCheckedOff) props.onCheckedOff(task);
     }
 
+    /* feat/leftover-batch-select (T1) — the round button's single onClick
+       dispatcher. batchMode off (default): unchanged single-resolve path
+       (startCheckOff). batchMode on: hands the raw click event up to
+       the caller's onBatchToggle so it can branch on shiftKey (range-
+       select) / ctrlKey / metaKey (toggle-only) / plain (toggle + new
+       anchor) — see today.js onBatchToggle. Selecting never resolves,
+       so stopPropagation/preventDefault still apply (keeps the row's
+       onSelect from also firing) but toggleAction is never called here. */
+    function handleCheckClick(e) {
+      if (batchMode) {
+        if (e) { e.stopPropagation(); e.preventDefault(); }
+        if (props.onBatchToggle) props.onBatchToggle(task, e);
+        return;
+      }
+      startCheckOff(e);
+    }
+
     var className = 'fs-task-card'
       + (isMine ? ' fs-task-card--mine' : '')
       + (props.selected ? ' fs-card--selected' : '')
@@ -131,42 +153,28 @@
     /* Leading slot: avatar by default, circular check button when
        checkable. The button sits on top of the row click handler
        — internal stopPropagation prevents the row's onSelect from
-       firing on check. */
+       firing on check. feat/leftover-batch-select (T1) — when
+       `batchMode` is on, the SAME button doubles as a multi-select
+       toggle (handleCheckClick branches instead of a second element);
+       `--selected` paints a filled ring when `batchSelected` is true. */
+    var checkSelected = batchMode && !!props.batchSelected;
     var leading = checkable
       ? React.createElement('button', {
           type:        'button',
-          className:   'fs-task-card__check',
-          onClick:     startCheckOff,
-          'aria-label': 'Mark task complete',
-          'aria-pressed': checkingOff,
-          disabled:    checkingOff,
+          className:   'fs-task-card__check'
+            + (checkSelected ? ' fs-task-card__check--selected' : ''),
+          onClick:     handleCheckClick,
+          'aria-label': batchMode
+            ? ((checkSelected ? 'Deselect "' : 'Select "') + (task.title || 'task') + '" for batch resolve')
+            : 'Mark task complete',
+          'aria-pressed': batchMode ? checkSelected : checkingOff,
+          disabled:    !batchMode && checkingOff,
         },
           NavIcon ? React.createElement(NavIcon, {
             name: 'check', size: 14,
           }) : '✓',
         )
       : React.createElement(Avatar, { name: task.assignee, size: 'sm' });
-
-    /* feat/leftover-bulk-select — square bulk-select checkbox, rendered
-       BEFORE `leading` (so it never occupies the same slot/shape as the
-       round check-off button or the avatar). Native <input
-       type="checkbox"> renders square by default in every supported
-       browser — the shape contrast with the round .fs-task-card__check
-       button is intentional and load-bearing (spec: "must not visually
-       collide"). onClick stopPropagation keeps a checkbox click from
-       also firing the row's onSelect (open detail). */
-    var selectCheckbox = selectable
-      ? React.createElement('input', {
-          type:      'checkbox',
-          className: 'fs-task-card__select',
-          checked:   !!props.bulkSelected,
-          onClick:   function (e) { e.stopPropagation(); },
-          onChange:  function () {
-            if (props.onSelectToggle) props.onSelectToggle(task);
-          },
-          'aria-label': 'Select "' + (task.title || 'task') + '" for bulk resolve',
-        })
-      : null;
 
     return React.createElement(Card, {
       padding:   'sm',
@@ -177,7 +185,6 @@
         onAnimationEnd: onAnimationEnd,
       },
         React.createElement('div', { className: 'fs-task-card__row' },
-          selectCheckbox,
           leading,
           React.createElement('div', { className: 'fs-task-card__main' },
             React.createElement('div', { className: 'fs-task-card__title' },

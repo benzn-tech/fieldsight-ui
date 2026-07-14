@@ -49,6 +49,7 @@
     var ModalOverlay = fs.ModalOverlay;
     var Button      = fs.Button;
     var Input       = fs.Input;
+    var ErrorBanner = fs.ErrorBanner;
 
     var siteId    = props.siteId    || '';
     var onSuccess = props.onSuccess || function () {};
@@ -91,6 +92,18 @@
     var sitesList    = refSitesList[0];
     var setSitesList = refSitesList[1];
 
+    /* T5 defensive fix — getSites() used to swallow a failure straight
+       into an empty list with zero signal, so a live caller with no
+       siteId anchored got a permanently-empty required Project select
+       and no explanation why the form was stuck. Surface it instead. */
+    var refSitesError = React.useState(false);
+    var sitesError     = refSitesError[0];
+    var setSitesError  = refSitesError[1];
+
+    var refSitesRetry = React.useState(0);
+    var sitesRetry     = refSitesRetry[0];
+    var setSitesRetry  = refSitesRetry[1];
+
     /* One-shot fetch, mirrors the cancelled-guard pattern used by the
        header project selector (app-shell.js MiddleColumn). Only needed
        live: it feeds the required Project select's options (when siteId
@@ -99,15 +112,18 @@
     React.useEffect(function () {
       if (!isLive) return undefined;
       var cancelled = false;
+      setSitesError(false);
       window.FS.api.sites.getSites().then(function (res) {
         if (cancelled) return;
         setSitesList((res && res.sites) || []);
-      }).catch(function () {
+      }).catch(function (err) {
         if (cancelled) return;
+        console.error('[SafetyCreateModal] getSites failed', err);
         setSitesList([]);
+        setSitesError(true);
       });
       return function () { cancelled = true; };
-    }, []);
+    }, [sitesRetry]);
 
     var needsSiteSelect  = isLive && !siteId;
     var siteValue        = siteId || selectedSite;
@@ -234,12 +250,32 @@
     var isSubmitting  = status === 'submitting';
     var submitDisabled = isSubmitting || (needsSiteSelect && !selectedSite);
 
-    var content = React.createElement('form', {
+    /* T5 defensive fix — wrap the form body so an unexpected in-render
+       throw surfaces an ErrorBanner instead of silently aborting the
+       mount (the whole modal would otherwise just never appear, same
+       symptom as the click-no-op bug this task fixes). */
+    var content = (function () {
+    try {
+    return React.createElement('form', {
       className: 'fs-safety-create-modal',
       onSubmit:  handleSubmit,
     },
       React.createElement('h2', { className: 'fs-safety-create-modal__title' },
         'Raise Safety Observation'),
+
+      /* T5 defensive fix — surface a failed sites fetch instead of
+         leaving the required Project select silently empty with no
+         explanation (previously: getSites() failure swallowed to []). */
+      (needsSiteSelect && sitesError)
+        ? (ErrorBanner
+            ? React.createElement(ErrorBanner, {
+                message:   'Could not load projects — a project is required to continue.',
+                retryable: true,
+                onRetry:   function () { setSitesRetry(function (n) { return n + 1; }); },
+              })
+            : React.createElement('div', { className: 'fs-safety-create-modal__error', role: 'alert' },
+                'Could not load projects — a project is required to continue.'))
+        : null,
 
       /* Project (batch B Task 5) — required select when live and no
          project is anchored via FS.siteContext; read-only display when
@@ -381,9 +417,30 @@
               isSubmitting ? 'Raising…' : 'Raise Observation'),
       ),
     );
+    } catch (renderErr) {
+      console.error('[SafetyCreateModal] render failed', renderErr);
+      return ErrorBanner
+        ? React.createElement(ErrorBanner, {
+            message:   'Something went wrong opening this form. Please close and try again.',
+            retryable: true,
+            onRetry:   onCancel,
+          })
+        : React.createElement('div', { className: 'fs-safety-create-modal__error', role: 'alert' },
+            'Something went wrong opening this form. Please close and try again.');
+    }
+    })();
 
     if (ModalOverlay) {
-      return React.createElement(ModalOverlay, { onClose: onCancel }, content);
+      /* T5 fix — ModalOverlay only paints + becomes interactive when
+         open=true (toggles the fs-modal--open / fs-modal__backdrop--open
+         CSS classes — see styles/composites.css ~4631-4667, both default
+         to opacity:0 + pointer-events:none). This component is only ever
+         mounted while the page's showCreate state is true (safety.js),
+         so it should always render open. Omitting this prop was the root
+         cause of the click-does-nothing bug: the modal mounted into the
+         DOM via the portal but stayed permanently invisible and
+         non-interactive, with no console error to signal why. */
+      return React.createElement(ModalOverlay, { open: true, onClose: onCancel }, content);
     }
     /* Fallback when ModalOverlay isn't loaded yet. */
     return React.createElement('div', { className: 'fs-modal-overlay__backdrop' }, content);
