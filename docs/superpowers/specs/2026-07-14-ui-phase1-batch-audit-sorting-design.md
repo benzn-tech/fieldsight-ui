@@ -38,9 +38,10 @@ Exploration (2026-07-14) found the spec was written against the running UI, but 
 
 ### T5 — Safety/Quality create buttons diagnose + fix (P0)
 **Files:** `scripts/pages/safety.js:206-219` (`canCreate`, `+ Raise Observation`), `scripts/pages/quality.js:208-218` (`+ Log Item`), `scripts/composites/safety-create-modal.js:100-109,129-134` (sites load + validate).
-**Current:** The literal strings "Risk Observation"/"Mock Item" don't exist; the real buttons are "+ Raise Observation" / "+ Log Item". onClick IS wired (`setShowCreate(true)`). Two likely no-op causes: (1) `canCreate` false → button renders `null` (invisible, looks broken); (2) admin/no-site path → modal `siteId=''` → `needsSiteSelect` forces a Project pick, and if `getSites()` swallows an error into `[]` (`safety-create-modal.js:100-109`) submit silently fails `validate()` "Project is required."
-**Change:** diagnose which case applies for the reporting user's role/context, then: if gating — verify the intended roles see the button (and, if intended-but-hidden, render it disabled with a tooltip instead of null so it's never "silently missing"); if siteId — ensure the site list populates (surface the load error via ErrorBanner instead of swallowing) and default siteId sensibly. Deliverable: both buttons visibly open a working create modal that can submit for the intended role.
-**Test:** as an admin and as a manager, both buttons appear and open a modal whose Project select is populated; submit succeeds.
+**Confirmed symptom (user, 2026-07-14):** the button IS visible, but **clicking does nothing** — so this is NOT the role-gating/hidden-button case. The failure is on the `setShowCreate(true)` → modal-mount/render path: the modal never appears on click.
+**Current:** real buttons are "+ Raise Observation" (safety.js:213) / "+ Log Item" (quality.js:213); onClick is `ctx.setShowCreate(true)`; the modal is conditionally mounted (`showCreate ? SafetyCreateModal/QualityCreateModal : null`) at safety.js:308-320 / quality.js:306-318.
+**Change:** debug the click→modal path in the browser (console + React state): candidates — (a) `setShowCreate` state update not firing / `ctx` stale-closure so state never flips; (b) modal mounts but is invisible (z-index / portal / `display` / offscreen — check `ModalOverlay` styling); (c) a JS error inside `SafetyCreateModal`/`QualityCreateModal` render (e.g. `getSites()` throwing, siteId='') aborts the mount silently. Instrument with a console log at the onClick + at the modal's top render to localize, fix the root cause, and ensure a JS error inside the modal surfaces (ErrorBanner) instead of silently no-rendering.
+**Test:** clicking "+ Raise Observation" / "+ Log Item" opens a visible, interactable create modal; a forced modal-internal error shows an ErrorBanner rather than a silent no-op.
 
 ### T1 — Leftover batch-select refactor (P1)
 **Files:** `scripts/pages/today.js:1073-1075,1204-1226,1240-1301,1501-1549` (selection state, handlers, bulk bar, TaskCard props), `scripts/composites/task-card.js:92-120,131-148,158-181` (startCheckOff, circular check, square checkbox), `styles/composites.css:418-465` (`.fs-task-card__check` round / `.fs-task-card__select` square).
@@ -92,8 +93,8 @@ Exploration (2026-07-14) found the spec was written against the running UI, but 
 
 - BEM `.fs-{block}__{element}--{modifier}`; tokens only (no hardcoded color/spacing); `tokens.css` ↔ `fs-globals.js` mirrored; bump `?v=N` cache-busters in preview HTMLs for touched files; `node --check` every touched JS; register any new L5 composite in `components-preview.html`; every `@keyframes` needs a `prefers-reduced-motion` override; status color tokens are NOT theme-flipped (pin foregrounds).
 
-## Open questions (resolve at spec review)
+## Resolved decisions (user-confirmed 2026-07-14)
 
-1. **Today/Leftover resolved (G2):** Today currently DROPS resolved items (rolling "open items" design, approved earlier this session). G2 lists Today/Leftover among "sink to bottom". Two readings: (a) keep dropping resolved in Today/Leftover (rolling list stays lean) and apply sink only to safety/quality/timeline; (b) change Today/Leftover to KEEP resolved (sunk + greyed) — reverses the rolling-window behavior. **Default in this spec: (a)** — keep Today's drop behavior, sink applies to the persistent lists. Confirm or switch to (b).
-2. **T1 selection logging:** spec says "log every select/deselect". Interpreted as auditing the resulting batch RESOLVE (already logged), not transient UI selection. Confirm.
-3. **T5 symptom:** exact user-observed behavior (button missing vs opens-but-submit-fails) will pin the fix during implementation.
+1. **Today/Leftover resolved (G2):** DECISION (a) — Today/Leftover keep their current DROP behavior (resolved items leave the rolling list). The G2 sink-to-bottom applies only to the persistent lists: **safety, quality, timeline** (and tasks, already done). Today/Leftover are out of scope for the sink change.
+2. **T1 selection logging:** confirmed — audit the resulting batch RESOLVE (each item's `toggleAction` already logs `checked_by`/`checked_at` server-side). Transient select/deselect UI state is NOT logged.
+3. **T5 symptom:** confirmed — button visible, click does nothing → debug the `setShowCreate → modal mount/render` path (see T5).
