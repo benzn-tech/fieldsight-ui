@@ -230,13 +230,48 @@
     var Button             = fs.Button;
     var RangeToolbar       = fs.RangeToolbar;
 
-    var ctx = React.useContext(SafetyContext);
+    var ctx      = React.useContext(SafetyContext);
+    var state    = ctx && ctx.state;
+    var onSelect = props.onSelect || function () {};
+
+    /* T4 — Multi-Select toggle + bulk "Mark Resolved" for the middle-
+       column list, reusing the SAME useMultiSelect hook /today's
+       Leftover section uses (scripts/composites/multi-select-list.js).
+       `items` has to be known before the useMultiSelect() call, and
+       hook calls must stay unconditional per rules-of-hooks — so the
+       flattened, currently-rendered row order is computed defensively
+       here (state may not be 'ok' yet) rather than after the status
+       early-returns below.
+
+       Batch-eligible = "report-derived" rows only (source !== 'manual'
+       && source !== 'live') — mirrors the exact same gate the single-
+       row "Mark resolved" button already uses in SafetyRightDetail
+       below (manual/live rows have no actions-toggle join to piggyback;
+       "SKIP manual observations — they have no batch backend" per the
+       task brief). Manual/live rows simply don't enter the selectable
+       set — clicking them in batch mode keeps opening the detail panel,
+       same as before this feature existed. */
+    var groupsEarly = (state && state.status === 'ok') ? (state.groups || []) : [];
+    var flatRows = [];
+    groupsEarly.forEach(function (g) { flatRows = flatRows.concat(g.rows); });
+    var batchEligibleRows = flatRows.filter(function (r) { return r.source !== 'manual' && r.source !== 'live'; });
+
+    var multiSelect = window.FieldSight.useMultiSelect({
+      items: batchEligibleRows,
+      getId: function (r) { return r.id; },
+    });
+
+    /* Guards the bulk "Mark Resolved" button against double-submit
+       while the pooled toggleAction batch is in flight. Mirrors
+       today.js's resolvingRef. */
+    var refBulkResolving = React.useState(false);
+    var bulkResolving    = refBulkResolving[0];
+    var setBulkResolving = refBulkResolving[1];
+
     if (!ctx) {
       console.warn('[SafetyMiddleColumn] SafetyContext missing');
       return null;
     }
-    var state    = ctx.state;
-    var onSelect = props.onSelect || function () {};
 
     /* Gate: only hse_manager or site_manager (or admin) can raise new observations. */
     var caller  = ctx.caller || {};
@@ -255,6 +290,18 @@
         }, '+ Raise Observation')
       : null;
 
+    /* T4 — "Multi-Select" toggle, shared .fs-multi-select__toggle classes
+       (same ones /today's Leftover "Batch Select" toggle uses). Reachable
+       whenever the list has at least one batch-eligible row, independent
+       of canCreate. */
+    var multiToggleBtn = React.createElement('button', {
+      type:            'button',
+      className:       'fs-multi-select__toggle'
+        + (multiSelect.batchMode ? ' fs-multi-select__toggle--active' : ''),
+      onClick:         function () { multiSelect.setBatchMode(function (prev) { return !prev; }); },
+      'aria-pressed':  multiSelect.batchMode,
+    }, multiSelect.batchMode ? 'Multi-Select: On' : 'Multi-Select');
+
     var header = React.createElement('div', { className: 'fs-safety__header' },
       React.createElement('div', { className: 'fs-safety__header-top' },
         React.createElement('div', null,
@@ -262,7 +309,9 @@
           React.createElement('div', { className: 'fs-safety__subtitle' },
             'Flags and observations across your accessible reports'),
         ),
-        raiseBtn,
+        React.createElement('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
+          multiToggleBtn, raiseBtn,
+        ),
       ),
     );
     var toolbar = RangeToolbar
@@ -330,6 +379,98 @@
       }
     }
 
+    /* T4 — bulk "Mark Resolved", piggybacking the SAME actions-toggle
+       endpoint SafetyRightDetail's single-row toggleResolve() uses
+       (compliance-aggregator.js _AUDIT-2), applied per selected
+       report-derived row instead of one at a time. Manual/live rows
+       never reach here (excluded from batchEligibleRows above, so they
+       can't be selected). Already-resolved rows in the selection are
+       silently skipped (nothing to do) rather than re-submitted.
+       Partial failure mirrors today.js's bulkResolveLeftover: a failed
+       toggle keeps that row selected (multiSelect.setSelectedIds retains
+       it) for a retry; successes are dropped from the selection AND
+       patched to 'resolved' in the row list (so they sink via
+       sinkResolved on the next render — Task 4/T7). */
+    function bulkMarkResolved() {
+      var candidates = multiSelect.selectedItems.filter(function (r) { return !isResolved(r); });
+      if (bulkResolving || candidates.length === 0) return;
+      var api = window.FS && window.FS.api;
+      if (!api || !api.actions || !api.pooledAll) return;
+
+      setBulkResolving(true);
+
+      var thunks = candidates.map(function (row) {
+        return function () {
+          var idxMatch = String(row.id || '').match(
+            row.source === 'topic_flag' ? /_flag_(\d+)$/ : /_obs_(\d+)$/
+          );
+          if (!idxMatch) return Promise.resolve({ ok: false, row: row });
+          var actionIndex = (row.source === 'topic_flag' ? 'flag_' : 'obs_') + idxMatch[1];
+          return api.actions.toggleAction({
+            date:         row.date,
+            topic_id:     row.topic_id,
+            action_index: actionIndex,
+            checked:      true,
+            action_text:  row.observation,
+            user_folder:  row.user_folder,
+          }).then(function () { return { ok: true, row: row }; })
+            .catch(function (err) {
+              console.error('[Safety] bulk resolve failed for', row.id, err);
+              return { ok: false, row: row };
+            });
+        };
+      });
+
+      window.FS.api.pooledAll(thunks, 6).then(function (results) {
+        var okIds = {};
+        var okCount = 0, failCount = 0;
+        (results || []).forEach(function (r) {
+          if (r && r.ok) { okIds[r.row.id] = true; okCount++; }
+          else { failCount++; }
+        });
+
+        if (ctx.setState && okCount > 0) {
+          ctx.setState(function (s) {
+            if (s.status !== 'ok') return s;
+            var updatedRows = (s.rows || []).map(function (r) {
+              return okIds[r.id] ? Object.assign({}, r, { status: 'resolved' }) : r;
+            });
+            return Object.assign({}, s, {
+              rows:   updatedRows,
+              totals: totalsFromRows(updatedRows),
+              groups: groupByDate(updatedRows),
+            });
+          });
+        }
+
+        multiSelect.setSelectedIds(function (prev) {
+          var next = {};
+          Object.keys(prev).forEach(function (id) { if (!okIds[id]) next[id] = prev[id]; });
+          return next;
+        });
+        setBulkResolving(false);
+
+        var toast = window.FS && window.FS.toast;
+        if (!toast) return;
+        if (failCount === 0) {
+          toast.show({
+            message: 'Resolved ' + okCount + ' flag' + (okCount === 1 ? '' : 's'),
+            tone:    'success',
+          });
+        } else if (okCount === 0) {
+          toast.show({
+            message: 'Could not resolve ' + failCount + ' flag' + (failCount === 1 ? '' : 's') + ' — try again',
+            tone:    'error',
+          });
+        } else {
+          toast.show({
+            message: 'Resolved ' + okCount + ', ' + failCount + ' failed — still selected, try again',
+            tone:    'warning',
+          });
+        }
+      });
+    }
+
     return React.createElement('div', { className: 'fs-safety' },
       header,
       toolbar,
@@ -359,6 +500,24 @@
       /* Meta line */
       React.createElement('div', { className: 'fs-safety__meta' },
         totals.total + (totals.total === 1 ? ' flag · ' : ' flags · ') + rangeLabel),
+
+      /* T4 — bulk action bar, shown whenever Multi-Select mode is on
+         (shared MultiSelectBulkBar composite — same one /today's
+         Leftover section uses). "Select all" only ever selects
+         batch-eligible (report-derived) rows, since that's the `items`
+         useMultiSelect was constructed with above. */
+      multiSelect.batchMode
+        ? React.createElement(fs.MultiSelectBulkBar, {
+            count:   multiSelect.selectedItems.length,
+            actions: [
+              { key: 'select-all', label: 'Select all', onClick: multiSelect.selectAll, disabled: bulkResolving },
+              { key: 'resolve', primary: true, onClick: bulkMarkResolved,
+                disabled: bulkResolving || multiSelect.selectedItems.length === 0,
+                label: bulkResolving ? 'Resolving…' : 'Mark Resolved (' + multiSelect.selectedItems.length + ')' },
+              { key: 'clear', label: 'Clear', onClick: multiSelect.clear, disabled: bulkResolving },
+            ],
+          })
+        : null,
 
       /* KPI strip */
       React.createElement(KpiStrip, null,
@@ -394,13 +553,27 @@
                 React.createElement('div', { className: 'fs-safety__group-rows' },
                   g.rows.map(function (row) {
                     var isSel = ctx.selectedFlag && ctx.selectedFlag.id === row.id;
+                    /* T4 — batch-eligible = report-derived (source !==
+                       'manual' && source !== 'live'); only these rows
+                       toggle into the selection while Multi-Select mode
+                       is on. Ineligible rows keep opening the detail
+                       panel regardless of batchMode — no fake selection
+                       affordance offered for a row with no batch
+                       backend. */
+                    var batchEligible = row.source !== 'manual' && row.source !== 'live';
+                    var batchSelected = multiSelect.batchMode && batchEligible && !!multiSelect.selectedIds[row.id];
                     return React.createElement('button', {
                       key:       row.id,
                       type:      'button',
                       className: 'fs-safety__row-btn'
                         + (isSel ? ' fs-safety__row-btn--active' : '')
-                        + (isResolved(row) ? ' fs-row--resolved' : ''),
-                      onClick:   function () {
+                        + (isResolved(row) ? ' fs-row--resolved' : '')
+                        + (batchSelected ? ' fs-row--batch-selected' : ''),
+                      onClick:   function (e) {
+                        if (multiSelect.batchMode && batchEligible) {
+                          multiSelect.onItemClick(row, e);
+                          return;
+                        }
                         ctx.setSelected(row);
                         onSelect({ kind: 'safety_flag', id: row.id, row: row });
                       },

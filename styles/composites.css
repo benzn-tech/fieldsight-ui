@@ -385,7 +385,15 @@
   flex: 1;
   min-width: 0;
 }
-.fs-today__leftover-batch-toggle {
+/* feat/leftover-batch-select (T1), generalized T4 — was
+   .fs-today__leftover-batch-toggle / .fs-today__bulk-bar*, Today-only.
+   T4 extracted the underlying interaction into useMultiSelect
+   (scripts/composites/multi-select-list.js) and /safety + /quality now
+   reuse the SAME "Multi-Select" toggle + bulk bar, so these rules moved
+   under a page-agnostic .fs-multi-select block instead of staying
+   Today-prefixed. Visuals are byte-identical to the T1 originals —
+   selectors renamed only, no property changes. */
+.fs-multi-select__toggle {
   flex-shrink: 0;
   font: inherit;
   font-size: 12px;
@@ -402,35 +410,37 @@
               border-color var(--duration-fast) var(--ease-out),
               color var(--duration-fast) var(--ease-out);
 }
-.fs-today__leftover-batch-toggle:hover {
+.fs-multi-select__toggle:hover {
   background: var(--surface-panel-elevated);
   border-color: var(--border-strong);
 }
-.fs-today__leftover-batch-toggle:focus-visible {
+.fs-multi-select__toggle:focus-visible {
   outline: 2px solid var(--border-focus);
   outline-offset: 2px;
 }
-.fs-today__leftover-batch-toggle--active {
+.fs-multi-select__toggle--active {
   /* fixed white on --color-primary-700 — same not-theme-flipped pairing
-     as .fs-today__bulk-bar-btn--primary below; see that rule's comment
-     for the CLAUDE.md trap this avoids. */
+     as .fs-multi-select__bulk-bar-btn--primary below; see that rule's
+     comment for the CLAUDE.md trap this avoids. */
   color: #fff;
   background: var(--color-primary-700);
   border-color: var(--color-primary-700);
 }
-.fs-today__leftover-batch-toggle--active:hover {
+.fs-multi-select__toggle--active:hover {
   background: var(--color-primary-800);
 }
 
-/* feat/leftover-batch-select (T1) — bulk action bar, shown in the
-   Leftover section header area whenever Batch Select mode is on (the
-   round .fs-task-card__check selectors below double as multi-select
-   toggles while it's on). Neutral surface tone — never safety-red /
-   blocked-magenta (CLAUDE.md status-color rule); leftover age/
-   selection is informational, not a blocked/overdue signal. Stays
-   visible even if the section is collapsed afterwards, since selection
-   state is intentionally NOT reset on collapse. */
-.fs-today__bulk-bar {
+/* feat/leftover-batch-select (T1), generalized T4 — bulk action bar,
+   shown whenever Multi-Select/Batch Select mode is on (the selectable
+   rows/round-selectors it pairs with double as multi-select toggles
+   while it's on — task-card.js's .fs-task-card__check--selected for
+   Today, .fs-row--batch-selected for /safety + /quality). Neutral
+   surface tone — never safety-red / blocked-magenta (CLAUDE.md
+   status-color rule); selection is informational, not a blocked/
+   overdue signal. On /today, stays visible even if the Leftover section
+   is collapsed afterwards, since selection state is intentionally NOT
+   reset on collapse. */
+.fs-multi-select__bulk-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -441,19 +451,19 @@
   border-radius: var(--radius-md);
   background: var(--surface-panel-muted);
 }
-.fs-today__bulk-bar-count {
+.fs-multi-select__bulk-bar-count {
   font-size: 12px;
   font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.fs-today__bulk-bar-actions {
+.fs-multi-select__bulk-bar-actions {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.fs-today__bulk-bar-btn {
+.fs-multi-select__bulk-bar-btn {
   font: inherit;
   font-size: 12px;
   font-weight: var(--font-weight-medium);
@@ -466,19 +476,19 @@
   transition: background var(--duration-fast) var(--ease-out),
               border-color var(--duration-fast) var(--ease-out);
 }
-.fs-today__bulk-bar-btn:hover:not([disabled]) {
+.fs-multi-select__bulk-bar-btn:hover:not([disabled]) {
   background: var(--surface-panel-elevated);
   border-color: var(--border-strong);
 }
-.fs-today__bulk-bar-btn:focus-visible {
+.fs-multi-select__bulk-bar-btn:focus-visible {
   outline: 2px solid var(--border-focus);
   outline-offset: 2px;
 }
-.fs-today__bulk-bar-btn[disabled] {
+.fs-multi-select__bulk-bar-btn[disabled] {
   cursor: default;
   opacity: 0.6;
 }
-.fs-today__bulk-bar-btn--primary {
+.fs-multi-select__bulk-bar-btn--primary {
   /* fixed white, NOT var(--text-inverse) — --color-primary-700/800 are
      NOT theme-flipped (tokens.css defines them once, no [data-theme=
      "dark"] override — same fixed-navy pattern as
@@ -490,8 +500,22 @@
   background: var(--color-primary-700);
   border-color: var(--color-primary-700);
 }
-.fs-today__bulk-bar-btn--primary:hover:not([disabled]) {
+.fs-multi-select__bulk-bar-btn--primary:hover:not([disabled]) {
   background: var(--color-primary-800);
+}
+
+/* T4 — /safety + /quality row-select affordance. In Multi-Select/batch
+   mode, clicking anywhere on an eligible (report-derived) row toggles it
+   into the selection instead of opening the right-detail panel (there's
+   no separate leading avatar/checkbox slot to repurpose the way
+   TaskCard's round button does for Today's Leftover). Reuses
+   --surface-selected / --border-focus — the same selection tokens the
+   rest of the app already uses — so "selected for batch" reads
+   distinctly from --surface-resolved (.fs-row--resolved) above. */
+.fs-row--batch-selected {
+  background: var(--surface-selected);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 0 0 1.5px var(--border-focus);
 }
 
 

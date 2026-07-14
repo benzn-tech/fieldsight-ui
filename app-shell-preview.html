@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="styles/tokens.css?v=5" />
   <link rel="stylesheet" href="styles/app-shell.css?v=11" />
   <link rel="stylesheet" href="styles/components.css?v=9" />
-  <link rel="stylesheet" href="styles/composites.css?v=81" />
+  <link rel="stylesheet" href="styles/composites.css?v=82" />
 
   <style>
     /* Ensure full-bleed with no scroll */
@@ -63,6 +63,9 @@
 
   <!-- Layer 5 composites (depend on L4 atoms above) -->
   <script type="text/babel" src="scripts/composites/task-card.js?v=9"></script>
+  <!-- T4 — useMultiSelect hook + MultiSelectBulkBar, shared by /today
+       Leftover, /safety, /quality. Loaded before those pages below. -->
+  <script type="text/babel" src="scripts/composites/multi-select-list.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/urgent-card.js?v=3"></script>
   <!-- activity-card.js intentionally not loaded — Sprint 3 P-02 dropped
        Today's Recent activity section. Composite kept on disk in case
@@ -226,7 +229,7 @@
   <!-- Mock data shim (weather only) + page registry + pages -->
   <script type="text/babel" src="scripts/mock-data.js?v=4"></script>
   <script type="text/babel" src="scripts/pages/_page-registry.js?v=1"></script>
-  <script type="text/babel" src="scripts/pages/today.js?v=30"></script>
+  <script type="text/babel" src="scripts/pages/today.js?v=31"></script>
   <script type="text/babel" src="scripts/pages/timeline.js?v=34"></script>
   <script type="text/babel" src="scripts/pages/reports.js?v=5"></script>
   <script type="text/babel" src="scripts/pages/sites.js?v=11"></script>
@@ -234,8 +237,8 @@
   <script type="text/babel" src="scripts/pages/tasks.js?v=10"></script>
   <script type="text/babel" src="scripts/pages/evidence.js?v=12"></script>
   <script type="text/babel" src="scripts/pages/programme.js?v=18"></script>
-  <script type="text/babel" src="scripts/pages/safety.js?v=21"></script>
-  <script type="text/babel" src="scripts/pages/quality.js?v=18"></script>
+  <script type="text/babel" src="scripts/pages/safety.js?v=22"></script>
+  <script type="text/babel" src="scripts/pages/quality.js?v=19"></script>
   <!-- Sprint 7.1+7.2 — /team page -->
   <script type="text/babel" src="scripts/pages/team.js?v=11"></script>
   <!-- Sprint 7.3 + 7.6 — /settings page (density toggle added in 7.6) -->
