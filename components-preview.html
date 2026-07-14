@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="styles/tokens.css" />
   <link rel="stylesheet" href="styles/app-shell.css?v=3" />
   <link rel="stylesheet" href="styles/components.css?v=5" />
-  <link rel="stylesheet" href="styles/composites.css?v=13" />
+  <link rel="stylesheet" href="styles/composites.css?v=14" />
 
   <style>
     html, body { overflow: auto; height: auto; }
@@ -86,7 +86,7 @@
   <script type="text/babel" src="scripts/components/avatar.js?v=2"></script>
 
   <!-- Layer 5 composites (depend on L4 atoms above) -->
-  <script type="text/babel" src="scripts/composites/task-card.js?v=5"></script>
+  <script type="text/babel" src="scripts/composites/task-card.js?v=6"></script>
   <script type="text/babel" src="scripts/composites/urgent-card.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/activity-card.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/morning-brief-card.js?v=1"></script>
@@ -1080,7 +1080,7 @@
                    onSelect={t => console.log('select', t.id)} />
               </div>
             </Row>
-            <Row label="selectable (feat/leftover-bulk-select) — square select + round check-off together">
+            <Row label="batchMode (feat/leftover-batch-select, T1) — round selector doubles as multi-select toggle">
               <div style={{ flex: 1 }}>
                 <TaskCardSelectDemo />
               </div>
@@ -1587,32 +1587,46 @@
       );
     }
 
-    /* feat/leftover-bulk-select — smoke render for TaskCard's new
-       selectable/bulkSelected/onSelectToggle prop trio (CLAUDE.md
-       "components-preview.html lag" guardrail). checkable + selectable
-       together so the square bulk-select checkbox and the round
-       check-off circle render side by side, proving the shape/position
-       contrast the Today Leftover section relies on. */
+    /* feat/leftover-batch-select (T1) — smoke render for TaskCard's
+       batchMode/batchSelected/onBatchToggle prop trio (CLAUDE.md
+       "components-preview.html lag" guardrail). The local toggle button
+       flips batchMode so both states are reachable here: off → round
+       button is the original single-resolve check-off; on → the SAME
+       round button becomes a multi-select toggle and paints
+       fs-task-card__check--selected when batchSelected is true —
+       proving the one-button, no-square-checkbox behavior the Today
+       Leftover section relies on. */
     function TaskCardSelectDemo() {
-      const [checked, setChecked] = React.useState(false);
+      const [batchMode, setBatchMode] = React.useState(true);
+      const [selected, setSelected] = React.useState(false);
       return (
-        <TaskCard
-          task={{
-            id: 'demo-bulk-1',
-            title: 'Confirm delivery dockets filed',
-            assignee: 'Priya Sharma',
-            status: 'Open', statusTone: 'info',
-            dueTime: '—',
-            topic_id: 0, actionIndex: 0, folder: 'priya_sharma',
-          }}
-          date="2026-03-01"
-          checkable
-          selectable
-          bulkSelected={checked}
-          onSelectToggle={() => setChecked(v => !v)}
-          onSelect={t => console.log('select', t.id)}
-          ageLabel="132d ago"
-        />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <button
+            type="button"
+            className={'fs-today__leftover-batch-toggle' + (batchMode ? ' fs-today__leftover-batch-toggle--active' : '')}
+            onClick={() => setBatchMode(v => !v)}
+            style={{ alignSelf: 'flex-start' }}
+          >
+            {batchMode ? 'Batch Select: On' : 'Batch Select'}
+          </button>
+          <TaskCard
+            task={{
+              id: 'demo-bulk-1',
+              title: 'Confirm delivery dockets filed',
+              assignee: 'Priya Sharma',
+              status: 'Open', statusTone: 'info',
+              dueTime: '—',
+              topic_id: 0, actionIndex: 0, folder: 'priya_sharma',
+            }}
+            date="2026-03-01"
+            checkable
+            batchMode={batchMode}
+            batchSelected={selected}
+            onBatchToggle={() => setSelected(v => !v)}
+            onSelect={t => console.log('select', t.id)}
+            ageLabel="132d ago"
+          />
+        </div>
       );
     }
 

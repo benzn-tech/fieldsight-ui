@@ -1080,6 +1080,37 @@
     var bulkResolving        = resolvingRef[0];
     var setBulkResolving     = resolvingRef[1];
 
+    /* feat/leftover-batch-select (T1) — batchMode OFF (default): the
+       round selector on each Leftover TaskCard resolves that single
+       item immediately (existing startCheckOff path in task-card.js,
+       unchanged). ON: the SAME round selectors become multi-select
+       toggles (see onBatchToggle below) — nothing resolves until
+       "Resolve N" is pressed, which reuses bulkResolveLeftover()
+       unchanged, so the audit write is unaffected by this task.
+       anchorId is the last plain/ctrl-clicked leftover id, used as the
+       range-select origin for Shift+Click. Both reset when batch mode
+       is turned off — a stale selection/anchor has no meaning once the
+       round selector goes back to single-resolve. Declared
+       unconditionally per rules-of-hooks, same as selectedRef above. */
+    var batchModeRef         = React.useState(false);
+    var batchMode            = batchModeRef[0];
+    var setBatchMode         = batchModeRef[1];
+
+    var anchorRef            = React.useState(null);
+    var anchorId             = anchorRef[0];
+    var setAnchorId          = anchorRef[1];
+
+    function toggleBatchMode() {
+      setBatchMode(function (prev) {
+        var next = !prev;
+        if (!next) {
+          setSelectedIds({});
+          setAnchorId(null);
+        }
+        return next;
+      });
+    }
+
     var ctx = React.useContext(TodayContext);
     if (!ctx) {
       console.warn('[TodayMiddleColumn] TodayContext missing — was the page Provider mounted?');
@@ -1222,6 +1253,54 @@
 
     function clearLeftoverSelection() {
       setSelectedIds({});
+    }
+
+    /* feat/leftover-batch-select (T1) — the round selector's onClick when
+       batchMode is on (task-card.js handleCheckClick hands the raw click
+       event through unchanged). Reuses toggleLeftoverSelect for the
+       actual add/remove so a single selection map stays the source of
+       truth for both single-toggle and range-select paths.
+         evt.shiftKey       → range-select from anchorId to task.id,
+                               contiguous in the CURRENT rendered
+                               leftoverItems order (SELECTS the slice,
+                               doesn't toggle it — repeat Shift+Click
+                               from the same anchor re-ranges cleanly,
+                               file-explorer idiom). Anchor is left
+                               unmoved so a second Shift+Click re-ranges
+                               from the same origin.
+         evt.ctrlKey/metaKey → toggle only task.id, anchor untouched.
+         plain click         → toggle task.id AND set it as the new
+                               anchor for the next Shift+Click. */
+    function onBatchToggle(task, evt) {
+      var shift      = !!(evt && evt.shiftKey);
+      var ctrlOrMeta = !!(evt && (evt.ctrlKey || evt.metaKey));
+
+      if (shift && anchorId != null) {
+        var ids     = leftoverItems.map(function (t) { return t.id; });
+        var fromIdx = ids.indexOf(anchorId);
+        var toIdx   = ids.indexOf(task.id);
+        if (fromIdx !== -1 && toIdx !== -1) {
+          var lo = Math.min(fromIdx, toIdx);
+          var hi = Math.max(fromIdx, toIdx);
+          var rangeIds = ids.slice(lo, hi + 1);
+          setSelectedIds(function (prev) {
+            var next = Object.assign({}, prev);
+            rangeIds.forEach(function (id) { next[id] = true; });
+            return next;
+          });
+          return;
+        }
+        /* Anchor no longer in the rendered list (e.g. it resolved and
+           dropped out) — fall through to plain toggle+re-anchor below. */
+      }
+
+      if (ctrlOrMeta) {
+        toggleLeftoverSelect(task);
+        return;
+      }
+
+      toggleLeftoverSelect(task);
+      setAnchorId(task.id);
     }
 
     /* Bulk resolve — pooled-toggle every selected item, EACH carrying
@@ -1474,31 +1553,48 @@
          signal. */
       leftoverItems.length > 0
         ? React.createElement('div', { className: 'fs-today__leftover' },
-            React.createElement('button', {
-              type:            'button',
-              className:       'fs-today__leftover-toggle',
-              onClick:         function () { setLeftoverExpanded(function (v) { return !v; }); },
-              'aria-expanded': leftoverExpanded,
-            },
-              React.createElement('span', {
-                className: 'fs-today__leftover-chev'
-                  + (leftoverExpanded ? ' fs-today__leftover-chev--open' : ''),
-                'aria-hidden': true,
-              }, '▸'),
-              React.createElement('span', { className: 'fs-today__leftover-label' },
-                'Leftover · ' + leftoverItems.length),
-              React.createElement('span', { className: 'fs-today__leftover-hint' },
-                '(' + LEFTOVER_THRESHOLD_DAYS + '+ days, unresolved)'),
+            React.createElement('div', { className: 'fs-today__leftover-header' },
+              React.createElement('button', {
+                type:            'button',
+                className:       'fs-today__leftover-toggle',
+                onClick:         function () { setLeftoverExpanded(function (v) { return !v; }); },
+                'aria-expanded': leftoverExpanded,
+              },
+                React.createElement('span', {
+                  className: 'fs-today__leftover-chev'
+                    + (leftoverExpanded ? ' fs-today__leftover-chev--open' : ''),
+                  'aria-hidden': true,
+                }, '▸'),
+                React.createElement('span', { className: 'fs-today__leftover-label' },
+                  'Leftover · ' + leftoverItems.length),
+                React.createElement('span', { className: 'fs-today__leftover-hint' },
+                  '(' + LEFTOVER_THRESHOLD_DAYS + '+ days, unresolved)'),
+              ),
+              /* feat/leftover-batch-select (T1) — OFF (default): round
+                 selectors resolve single items. ON: round selectors
+                 become multi-select toggles and the bulk bar below is
+                 reachable (including "Select all" from a clean, nothing-
+                 selected state). Sibling <button>, not nested, since
+                 the expand toggle above is already a <button>. */
+              React.createElement('button', {
+                type:            'button',
+                className:       'fs-today__leftover-batch-toggle'
+                  + (batchMode ? ' fs-today__leftover-batch-toggle--active' : ''),
+                onClick:         toggleBatchMode,
+                'aria-pressed':  batchMode,
+              }, batchMode ? 'Batch Select: On' : 'Batch Select'),
             ),
 
-            /* feat/leftover-bulk-select — bulk action bar, shown once
-               >=1 leftover item is selected. Lives in the section
-               "header area" (between the toggle and the collapsible
-               body) so it's visible whether or not the body itself is
-               expanded — selection intentionally survives a collapse
-               (see selectedRef declaration above), so Resolve N stays
+            /* feat/leftover-batch-select (T1) — bulk action bar, shown
+               whenever batchMode is on (not gated on selectedCount > 0
+               any more, so "Select all" is reachable immediately after
+               turning batch mode on). Lives in the section "header
+               area" (between the toggle and the collapsible body) so
+               it's visible whether or not the body itself is expanded
+               — selection intentionally survives a collapse (see
+               selectedRef declaration above), so Resolve N stays
                reachable without re-expanding. */
-            selectedCount > 0
+            batchMode
               ? React.createElement('div', { className: 'fs-today__bulk-bar' },
                   React.createElement('span', { className: 'fs-today__bulk-bar-count' },
                     selectedCount + ' selected'),
@@ -1513,7 +1609,7 @@
                       type:      'button',
                       className: 'fs-today__bulk-bar-btn fs-today__bulk-bar-btn--primary',
                       onClick:   bulkResolveLeftover,
-                      disabled:  bulkResolving,
+                      disabled:  bulkResolving || selectedCount === 0,
                     }, bulkResolving ? 'Resolving…' : 'Resolve ' + selectedCount),
                     React.createElement('button', {
                       type:      'button',
@@ -1540,13 +1636,15 @@
                       site:           !leftoverIsMultiProject ? task.site_name : null,
                       ageLabel:       formatAgeLabel(task.ageDays),
                       noDeadline:     !!task.noDeadline,
-                      /* feat/leftover-bulk-select — only Leftover cards
-                         are selectable; Recent/programme/timeline
-                         TaskCard call sites omit these three props and
-                         render byte-identical to before. */
-                      selectable:     true,
-                      bulkSelected:   !!selectedIds[task.id],
-                      onSelectToggle: toggleLeftoverSelect,
+                      /* feat/leftover-batch-select (T1) — only Leftover
+                         cards pass these; Recent/programme/timeline
+                         TaskCard call sites omit them, so their round
+                         check button keeps the original single-resolve
+                         behavior (checkable without batchMode/
+                         onBatchToggle => startCheckOff, unchanged). */
+                      batchMode:      batchMode,
+                      batchSelected:  !!selectedIds[task.id],
+                      onBatchToggle:  onBatchToggle,
                     });
                   }),
                 )
