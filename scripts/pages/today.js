@@ -1093,6 +1093,30 @@
     }
     var leftoverItems = myLeftover.concat(teamLeftover);
 
+    /* F2 — leftoverIsMultiProject (and the flattened render order it
+       drives) has to be known BEFORE useMultiSelect() below, same
+       rules-of-hooks constraint as leftoverItems above. Moved up from
+       further down the component (see the old comment near the
+       state.status early-returns) since it only depends on leftoverItems,
+       already computed just above. Leftover section computes its OWN
+       multi-project flag off just the leftover items (reusing
+       distinctProjects' pool-scanning shape) — it can legitimately
+       differ from the page-level isMultiProject computed later (e.g.
+       recent items are all one project but leftovers span three). */
+    var leftoverProjects       = distinctProjects({ myTasks: leftoverItems, teamTasks: [], urgent: [], programmeTasks: [] });
+    var leftoverIsMultiProject = leftoverProjects.length > 1;
+
+    /* F2 — when multi-project, the middle column renders leftovers
+       grouped by project (renderMaybeGrouped → groupByProject below),
+       NOT in leftoverItems' raw myLeftover-then-teamLeftover concat
+       order. Shift-range selection has to walk the SAME order the user
+       sees, so flatten groupByProject's own output here and pass THAT
+       to useMultiSelect — not leftoverItems — so a Shift+Click between
+       two visually-adjacent cards can't reach into a different group. */
+    var leftoverRenderItems = leftoverIsMultiProject
+      ? groupByProject(leftoverItems).reduce(function (acc, g) { return acc.concat(g.rows); }, [])
+      : leftoverItems;
+
     /* T4 — batchMode/anchor/Shift-Ctrl selection state + dispatch, now
        the ONE shared implementation (scripts/composites/multi-select-
        list.js) also consumed by /safety and /quality. Behavior is
@@ -1104,7 +1128,7 @@
        "Resolve N" is pressed (bulkResolveLeftover(), unchanged, still
        the sole audited write). */
     var multiSelect = window.FieldSight.useMultiSelect({
-      items: leftoverItems,
+      items: leftoverRenderItems,
       getId: function (t) { return t.id; },
     });
 
@@ -1208,24 +1232,21 @@
     var myIds = {};
     (data.myTasks || []).forEach(function (t) { myIds[t.id] = true; });
 
-    /* Leftover section computes its OWN multi-project flag off just the
-       leftover items (reusing distinctProjects' pool-scanning shape) —
-       it can legitimately differ from the page-level isMultiProject
-       above (e.g. recent items are all one project but leftovers span
-       three). */
-    var leftoverProjects      = distinctProjects({ myTasks: leftoverItems, teamTasks: [], urgent: [], programmeTasks: [] });
-    var leftoverIsMultiProject = leftoverProjects.length > 1;
+    /* F2 — leftoverProjects/leftoverIsMultiProject moved up (see the T4
+       useMultiSelect comment near the top of this component); reused
+       verbatim here, not recomputed. */
 
     /* T4 — selectedLeftoverItems/selectedCount now come straight off
        multiSelect.selectedItems, which does the exact same
-       selectedIds-intersect-leftoverItems derivation the old inline
-       code did here: a stale id — e.g. an item someone else resolved
-       via the actionsBus subscription above, or one that aged back
-       under the threshold on a refresh — silently drops out instead of
-       over-counting or crashing a lookup. Only LEFTOVER items are ever
-       selectable (leftoverItems is what was passed as `items` to
-       useMultiSelect above), so this is still the single source of
-       truth "N selected" reads from. */
+       selectedIds-intersect-items derivation the old inline code did
+       here: a stale id — e.g. an item someone else resolved via the
+       actionsBus subscription above, or one that aged back under the
+       threshold on a refresh — silently drops out instead of over-
+       counting or crashing a lookup. Only LEFTOVER items are ever
+       selectable (leftoverRenderItems — leftoverItems, or its flattened
+       project-grouped order when multi-project — is what was passed as
+       `items` to useMultiSelect above), so this is still the single
+       source of truth "N selected" reads from. */
     var selectedLeftoverItems = multiSelect.selectedItems;
     var selectedCount         = selectedLeftoverItems.length;
 

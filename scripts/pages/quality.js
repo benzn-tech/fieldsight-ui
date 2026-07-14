@@ -232,11 +232,15 @@
        via the actions-toggle join would overwrite honest data — same
        reasoning applies to the batch path, so 'qc_item' rows (plus
        'manual'/'live', which have no batch backend either) are excluded
-       from the selectable set entirely. */
+       from the selectable set entirely.
+
+       F4 — also excludes already-resolved rows, so "Select all" and N
+       in "Mark Resolved (N)" only ever reflect actionable rows (mirrors
+       safety.js's batchEligibleRows fix). */
     var groupsEarly = (state && state.status === 'ok') ? (state.groups || []) : [];
     var flatRows = [];
     groupsEarly.forEach(function (g) { flatRows = flatRows.concat(g.rows); });
-    var batchEligibleRows = flatRows.filter(function (r) { return r.source === 'topic_quality'; });
+    var batchEligibleRows = flatRows.filter(function (r) { return r.source === 'topic_quality' && !isResolved(r); });
 
     var multiSelect = window.FieldSight.useMultiSelect({
       items: batchEligibleRows,
@@ -382,7 +386,13 @@
             checked:      true,
             action_text:  row.item,
             user_folder:  row.user_folder,
-          }).then(function () { return { ok: true, row: row }; })
+          }).then(function (res) {
+              return {
+                ok: true, row: row,
+                checkedBy: (res && res.checked_by) || null,
+                checkedAt: (res && res.checked_at) || null,
+              };
+            })
             .catch(function (err) {
               console.error('[Quality] bulk resolve failed for', row.id, err);
               return { ok: false, row: row };
@@ -392,17 +402,32 @@
 
       window.FS.api.pooledAll(thunks, 6).then(function (results) {
         var okIds = {};
+        /* F3 — capture the resolver per-thunk (API response only) so a
+           bulk-resolved row shows a resolver immediately instead of only
+           after a reload. */
+        var resolverById = {};
         var okCount = 0, failCount = 0;
         (results || []).forEach(function (r) {
-          if (r && r.ok) { okIds[r.row.id] = true; okCount++; }
-          else { failCount++; }
+          if (r && r.ok) {
+            okIds[r.row.id] = true;
+            resolverById[r.row.id] = { checkedBy: r.checkedBy, checkedAt: r.checkedAt };
+            okCount++;
+          } else {
+            failCount++;
+          }
         });
 
         if (ctx.setState && okCount > 0) {
           ctx.setState(function (s) {
             if (s.status !== 'ok') return s;
             var updatedRows = (s.rows || []).map(function (r) {
-              return okIds[r.id] ? Object.assign({}, r, { status: 'resolved' }) : r;
+              if (!okIds[r.id]) return r;
+              var resolver = resolverById[r.id] || {};
+              return Object.assign({}, r, {
+                status:      'resolved',
+                resolved_by: resolver.checkedBy || null,
+                resolved_at: resolver.checkedAt || null,
+              });
             });
             return Object.assign({}, s, {
               rows:   updatedRows,
@@ -517,8 +542,10 @@
                     /* T4 — batch-eligible = source === 'topic_quality'
                        only (see the comment above batchEligibleRows).
                        Ineligible rows keep opening the detail panel
-                       regardless of batchMode. */
-                    var batchEligible = row.source === 'topic_quality';
+                       regardless of batchMode. F4 — also excludes
+                       already-resolved rows (see batchEligibleRows
+                       above). */
+                    var batchEligible = row.source === 'topic_quality' && !isResolved(row);
                     var batchSelected = multiSelect.batchMode && batchEligible && !!multiSelect.selectedIds[row.id];
                     return React.createElement('button', {
                       key:       row.id,

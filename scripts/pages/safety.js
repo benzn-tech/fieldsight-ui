@@ -250,11 +250,19 @@
        "SKIP manual observations — they have no batch backend" per the
        task brief). Manual/live rows simply don't enter the selectable
        set — clicking them in batch mode keeps opening the detail panel,
-       same as before this feature existed. */
+       same as before this feature existed.
+
+       F4 — also excludes already-resolved rows, so "Select all" and N
+       in "Mark Resolved (N)" only ever reflect actionable rows. Before
+       this, selecting an all-resolved subset left the button enabled
+       with N > 0 but bulkMarkResolved's own already-resolved filter
+       made it a silent no-op. */
     var groupsEarly = (state && state.status === 'ok') ? (state.groups || []) : [];
     var flatRows = [];
     groupsEarly.forEach(function (g) { flatRows = flatRows.concat(g.rows); });
-    var batchEligibleRows = flatRows.filter(function (r) { return r.source !== 'manual' && r.source !== 'live'; });
+    var batchEligibleRows = flatRows.filter(function (r) {
+      return r.source !== 'manual' && r.source !== 'live' && !isResolved(r);
+    });
 
     var multiSelect = window.FieldSight.useMultiSelect({
       items: batchEligibleRows,
@@ -413,7 +421,13 @@
             checked:      true,
             action_text:  row.observation,
             user_folder:  row.user_folder,
-          }).then(function () { return { ok: true, row: row }; })
+          }).then(function (res) {
+              return {
+                ok: true, row: row,
+                checkedBy: (res && res.checked_by) || null,
+                checkedAt: (res && res.checked_at) || null,
+              };
+            })
             .catch(function (err) {
               console.error('[Safety] bulk resolve failed for', row.id, err);
               return { ok: false, row: row };
@@ -423,17 +437,32 @@
 
       window.FS.api.pooledAll(thunks, 6).then(function (results) {
         var okIds = {};
+        /* F3 — capture the resolver per-thunk (API response only) so a
+           bulk-resolved row shows a resolver immediately instead of only
+           after a reload. */
+        var resolverById = {};
         var okCount = 0, failCount = 0;
         (results || []).forEach(function (r) {
-          if (r && r.ok) { okIds[r.row.id] = true; okCount++; }
-          else { failCount++; }
+          if (r && r.ok) {
+            okIds[r.row.id] = true;
+            resolverById[r.row.id] = { checkedBy: r.checkedBy, checkedAt: r.checkedAt };
+            okCount++;
+          } else {
+            failCount++;
+          }
         });
 
         if (ctx.setState && okCount > 0) {
           ctx.setState(function (s) {
             if (s.status !== 'ok') return s;
             var updatedRows = (s.rows || []).map(function (r) {
-              return okIds[r.id] ? Object.assign({}, r, { status: 'resolved' }) : r;
+              if (!okIds[r.id]) return r;
+              var resolver = resolverById[r.id] || {};
+              return Object.assign({}, r, {
+                status:      'resolved',
+                resolved_by: resolver.checkedBy || null,
+                resolved_at: resolver.checkedAt || null,
+              });
             });
             return Object.assign({}, s, {
               rows:   updatedRows,
@@ -559,8 +588,11 @@
                        is on. Ineligible rows keep opening the detail
                        panel regardless of batchMode — no fake selection
                        affordance offered for a row with no batch
-                       backend. */
-                    var batchEligible = row.source !== 'manual' && row.source !== 'live';
+                       backend. F4 — also excludes already-resolved rows
+                       (see batchEligibleRows above), so clicking one in
+                       batch mode opens its detail instead of toggling a
+                       dead selection. */
+                    var batchEligible = row.source !== 'manual' && row.source !== 'live' && !isResolved(row);
                     var batchSelected = multiSelect.batchMode && batchEligible && !!multiSelect.selectedIds[row.id];
                     return React.createElement('button', {
                       key:       row.id,
@@ -652,10 +684,16 @@
          resolvedAt optimistically — owner-vs-caller guardrail means the
          operator name may ONLY come from the API response (never a local
          AuthMock/session read), so it's filled in once toggleAction
-         resolves below. */
+         resolves below.
+         F1(b) — clear BOTH camelCase (the transient success-handler
+         shape) AND snake_case (compliance-aggregator.js's loaded-row
+         shape, which the DetailRow gate below now falls back to), so a
+         reopen can't leave a stale resolver behind under either key. */
       if (nextStatus === 'open') {
         nextSel.resolvedBy = null;
         nextSel.resolvedAt = null;
+        nextSel.resolved_by = null;
+        nextSel.resolved_at = null;
       }
 
       function applyStatus(rowId, status) {
@@ -664,6 +702,30 @@
           if (s.status !== 'ok') return s;
           var updatedRows = (s.rows || []).map(function (r) {
             return r.id === rowId ? Object.assign({}, r, { status: status }) : r;
+          });
+          return Object.assign({}, s, {
+            rows:   updatedRows,
+            totals: totalsFromRows(updatedRows),
+            groups: groupByDate(updatedRows),
+          });
+        });
+      }
+
+      /* F1(c) — patch resolved_by/resolved_at (snake_case, matching the
+         aggregator's loaded-row shape) into the row in state.rows, not
+         just the transient sel object toggleResolve's success handler
+         already updates below. Without this, the resolver line vanishes
+         the moment the user reselects/changes range/reloads, since the
+         next render reads state.rows again. API-sourced only — callers
+         pass in res.checked_by/res.checked_at, never a local read. */
+      function applyResolver(rowId, resolvedBy, resolvedAt) {
+        if (!ctx.setState) return;
+        ctx.setState(function (s) {
+          if (s.status !== 'ok') return s;
+          var updatedRows = (s.rows || []).map(function (r) {
+            return r.id === rowId
+              ? Object.assign({}, r, { resolved_by: resolvedBy, resolved_at: resolvedAt })
+              : r;
           });
           return Object.assign({}, s, {
             rows:   updatedRows,
@@ -691,16 +753,21 @@
            guard so a stale response can't clobber a since-changed
            selection. Reopen already cleared these above; skip the
            write there so we don't resurrect them from a slow response. */
-        if (nextStatus === 'resolved' && ctx.setSelected) {
+        if (nextStatus === 'resolved') {
           var resolvedBy = (res && res.checked_by) || null;
           var resolvedAt = (res && res.checked_at) || null;
-          ctx.setSelected(function (cur) {
-            if (!cur || cur.id !== prevSel.id) return cur;
-            return Object.assign({}, cur, {
-              resolvedBy: resolvedBy,
-              resolvedAt: resolvedAt,
+          if (ctx.setSelected) {
+            ctx.setSelected(function (cur) {
+              if (!cur || cur.id !== prevSel.id) return cur;
+              return Object.assign({}, cur, {
+                resolvedBy: resolvedBy,
+                resolvedAt: resolvedAt,
+              });
             });
-          });
+          }
+          /* F1(c) — also patch state.rows so the resolver survives a
+             reselect/range-change/reload, not just this transient sel. */
+          applyResolver(prevSel.id, resolvedBy, resolvedAt);
         }
       }).catch(function (err) {
         console.error('[SafetyRightDetail] resolve toggle failed, reverting', err);
@@ -922,15 +989,24 @@
     /* T6 — report-derived rows only (topic_flag/observation/live all flow
        through toggleResolve above). Manual observations (source==='manual')
        go through toggleManualStatus → org.updateObservation, which carries
-       no operator identity — sel.resolvedBy stays unset for them, so this
-       row correctly stays hidden (Phase 2 territory; don't fabricate one
-       from AuthMock.currentUser). Shows only the latest resolve — cleared
-       on Reopen in toggleResolve. */
-    if (sel.status === 'resolved' && sel.resolvedBy) {
+       no operator identity — resolvedBy/resolved_by stay unset for them,
+       so this row correctly stays hidden (Phase 2 territory; don't
+       fabricate one from AuthMock.currentUser). Shows only the latest
+       resolve — cleared on Reopen in toggleResolve.
+       F1(a) — sel.resolvedBy (camelCase) is only ever set by the
+       transient toggleResolve success handler; rows loaded via the
+       aggregator (initial load, reselect, range-change, reload) carry
+       resolved_by/resolved_at (compliance-aggregator.js, snake_case).
+       Fall back to the snake_case field so the line persists instead of
+       only flashing right after clicking Resolve. Still API-sourced
+       either way — never a local AuthMock/session read. */
+    var resolvedByValue = sel.resolvedBy || sel.resolved_by;
+    var resolvedAtValue = sel.resolvedAt || sel.resolved_at;
+    if (sel.status === 'resolved' && resolvedByValue) {
       rows.push(React.createElement(DetailRow, {
         key: 'resolved-by', label: 'Resolved by',
-        value: sel.resolvedBy
-          + (fmtCheckedAt(sel.resolvedAt) ? ' · ' + fmtCheckedAt(sel.resolvedAt) : ''),
+        value: resolvedByValue
+          + (fmtCheckedAt(resolvedAtValue) ? ' · ' + fmtCheckedAt(resolvedAtValue) : ''),
       }));
     }
 
