@@ -10,9 +10,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
   <link rel="stylesheet" href="styles/tokens.css" />
-  <link rel="stylesheet" href="styles/app-shell.css?v=2" />
+  <link rel="stylesheet" href="styles/app-shell.css?v=3" />
   <link rel="stylesheet" href="styles/components.css?v=5" />
-  <link rel="stylesheet" href="styles/composites.css?v=1" />
+  <link rel="stylesheet" href="styles/composites.css?v=10" />
 
   <style>
     html, body { overflow: auto; height: auto; }
@@ -86,7 +86,7 @@
   <script type="text/babel" src="scripts/components/avatar.js?v=2"></script>
 
   <!-- Layer 5 composites (depend on L4 atoms above) -->
-  <script type="text/babel" src="scripts/composites/task-card.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/task-card.js?v=5"></script>
   <script type="text/babel" src="scripts/composites/urgent-card.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/activity-card.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/morning-brief-card.js?v=1"></script>
@@ -101,9 +101,9 @@
   <script type="text/babel" src="scripts/composites/tooltip.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/toast.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/modal-overlay.js?v=1"></script>
-  <script type="text/babel" src="scripts/composites/safety-create-modal.js?v=1"></script>
-  <script type="text/babel" src="scripts/composites/quality-create-modal.js?v=1"></script>
-  <script type="text/babel" src="scripts/composites/search-palette.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/safety-create-modal.js?v=2"></script>
+  <script type="text/babel" src="scripts/composites/quality-create-modal.js?v=2"></script>
+  <script type="text/babel" src="scripts/composites/search-palette.js?v=8"></script>
   <script type="text/babel" src="scripts/composites/onboarding-overlay.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/demo-tour.js?v=1"></script>
 
@@ -124,6 +124,14 @@
   <!-- Sprint 10 B.4/B.5 — SchemaEditor + VersionHistoryPanel (exported from library.js) -->
   <script type="text/babel" src="scripts/pages/library.js?v=2"></script>
 
+  <!-- Sprint 11 (Task 6) — programme suggestion review queue. Fixture-only
+       smoke render (no api/programme.js / _fetch.js chain loaded here — this
+       preview is a component showcase, not a live integration test; matches
+       the existing SafetyCreateModal/QualityCreateModal triggers above,
+       which are equally unwired to a live api layer in this file). -->
+  <script src="scripts/mock/programme-suggestions.fixture.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/suggestion-review.js?v=1"></script>
+
   <script type="text/babel">
     const { Button, IconButton, Input, Textarea, Select, Card,
             Badge, NotificationDot, Avatar, AvatarGroup,
@@ -139,7 +147,9 @@
             /* Sprint 9.5 — new L5 composites */
             WordCloud, ColumnChart, HeatmapGrid,
             /* Sprint 10 B.4/B.5 — library editor composites */
-            SchemaEditor, VersionHistoryPanel } = window.FieldSight;
+            SchemaEditor, VersionHistoryPanel,
+            /* Sprint 11 (Task 6) — programme suggestion review queue */
+            SuggestionReview } = window.FieldSight;
 
     function Section({ title, children }) {
       return (
@@ -1058,6 +1068,50 @@
                 }} onSelect={t => console.log('select', t.id)} />
               </div>
             </Row>
+            <Row label="site chip (feat/today-by-project)">
+              <div style={{ flex: 1 }}>
+                <TaskCard task={{
+                  id: 'demo-3',
+                  title: 'Confirm scaffold tag-out before handover',
+                  assignee: 'Priya Sharma',
+                  status: 'Open', statusTone: 'info',
+                  dueTime: '11:00',
+                }} site="SB1131 - Northbrook Wanaka"
+                   onSelect={t => console.log('select', t.id)} />
+              </div>
+            </Row>
+            <Row label="selectable (feat/leftover-bulk-select) — square select + round check-off together">
+              <div style={{ flex: 1 }}>
+                <TaskCardSelectDemo />
+              </div>
+            </Row>
+          </Section>
+
+          <Section title="Today · project groups (feat/today-by-project)">
+            <Row label="multi-project header (fs-today__project-group)">
+              <div className="fs-today__project-groups" style={{ flex: 1 }}>
+                {[
+                  { slug: 'sb1108-ellesmere', name: 'SB1108 Ellesmere College', rows: [
+                    { id: 'pg-1', title: 'Pour concrete — Block 4 footing', assignee: 'Jarley Trainor', status: 'In progress', statusTone: 'warning', dueTime: '08:30' },
+                  ] },
+                  { slug: 'mpi', name: 'MPI', rows: [
+                    { id: 'pg-2', title: 'Electrical rough-in sign-off', assignee: 'James Lamb', status: 'Open', statusTone: 'info', dueTime: '13:00' },
+                  ] },
+                ].map(g => (
+                  <div key={g.slug} className="fs-today__project-group">
+                    <div className="fs-today__project-group-header">
+                      <span className="fs-today__project-group-label">{g.name}</span>
+                      <span className="fs-today__project-group-count">{g.rows.length}</span>
+                    </div>
+                    <div className="fs-today__project-group-rows">
+                      {g.rows.map(task => (
+                        <TaskCard key={task.id} task={task} onSelect={t => console.log('select', t.id)} />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Row>
           </Section>
 
           <Section title="UrgentCard">
@@ -1504,7 +1558,61 @@
             </Row>
           </Section>
 
+          {/* Sprint 11 (Task 6) — programme<->item feedback: suggestion review queue.
+              Fixture-only smoke render — window.FieldSight.fixtures.programmeSuggestions
+              is the same fixture the mock branch of getSuggestions() reads from
+              (scripts/mock/programme-suggestions.fixture.js). Confirm/Adjust/Reject
+              are wired to window.FS.api.programme.* but that api chain isn't loaded
+              in this preview file (see the script-tag comment above), same posture
+              as the SafetyCreateModal/QualityCreateModal triggers elsewhere on
+              this page. */}
+          <Section title="Sprint 11 (T6) · SuggestionReview">
+            <Row label="3 pending suggestions">
+              <div style={{ flex: 1, minWidth: 0, maxWidth: '520px' }}>
+                {SuggestionReview && <SuggestionReview
+                  suggestions={(window.FieldSight.fixtures && window.FieldSight.fixtures.programmeSuggestions) || []}
+                  siteSlug="sb1108-ellesmere"
+                  onResolved={(id) => alert('resolved: ' + id)}
+                />}
+              </div>
+            </Row>
+            <Row label="empty">
+              <div style={{ flex: 1, minWidth: 0, maxWidth: '520px' }}>
+                {SuggestionReview && <SuggestionReview suggestions={[]} />}
+              </div>
+            </Row>
+          </Section>
+
         </React.Fragment>
+      );
+    }
+
+    /* feat/leftover-bulk-select — smoke render for TaskCard's new
+       selectable/bulkSelected/onSelectToggle prop trio (CLAUDE.md
+       "components-preview.html lag" guardrail). checkable + selectable
+       together so the square bulk-select checkbox and the round
+       check-off circle render side by side, proving the shape/position
+       contrast the Today Leftover section relies on. */
+    function TaskCardSelectDemo() {
+      const [checked, setChecked] = React.useState(false);
+      return (
+        <TaskCard
+          task={{
+            id: 'demo-bulk-1',
+            title: 'Confirm delivery dockets filed',
+            assignee: 'Priya Sharma',
+            status: 'Open', statusTone: 'info',
+            dueTime: '—',
+            topic_id: 0, actionIndex: 0, folder: 'priya_sharma',
+          }}
+          date="2026-03-01"
+          checkable
+          selectable
+          bulkSelected={checked}
+          onSelectToggle={() => setChecked(v => !v)}
+          onSelect={t => console.log('select', t.id)}
+          ageLabel="132d ago"
+        />
       );
     }
 

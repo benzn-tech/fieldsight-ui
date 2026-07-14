@@ -79,9 +79,10 @@
   /* ---------- shared header rendering ---------------------------------- */
 
   function PageHeader(props) {
-    var report = props.report;
-    var date   = props.date;
-    var user   = props.user;
+    var report    = props.report;
+    var date      = props.date;
+    var user      = props.user;
+    var site      = props.site;
     var DatePicker = window.FieldSight.DatePicker;
 
     var subtitleParts = [];
@@ -95,11 +96,12 @@
     var fromToday = (readRouteParams().from === 'today');
 
     /* Navigate the timeline route to a new date while preserving the
-       active user query param (Sprint 2.5 / Phase E). */
+       active user + site query params (Sprint 2.5 / Phase E; batch A). */
     function onChangeDate(newDate) {
       var params = readRouteParams();
       var u = params.user || (user || '');
-      var qs = '?date=' + newDate + (u ? '&user=' + u : '');
+      var s = params.site || (site || '');
+      var qs = '?date=' + newDate + (s ? '&site=' + encodeURIComponent(s) : '') + (u ? '&user=' + u : '');
       window.FS.Router.navigate('/timeline' + qs);
     }
 
@@ -122,8 +124,47 @@
       DatePicker && date ? React.createElement(DatePicker, {
         date:        date,
         onChange:    onChangeDate,
-        monthsRange: 3,
+        /* monthsRange deliberately omitted → DatePicker's own 24-month
+           default. The old `monthsRange: 3` cut /api/dates to a 90-day
+           lookback, so a user whose reports are older (e.g. Feb–Mar viewed
+           in July) got ZERO calendar dots. */
+        /* Dots follow the ACTIVE user so they match the per-user report
+           fetch (admin dots were a union across all users — dotted dates
+           with no content for the selected user). No user → union stays,
+           which pairs with the admin "pick a user" state. */
+        user:        user || null,
+        /* Batch A — when no user is selected, dots follow the active
+           project instead of the (now-dropped) admin union. User wins
+           when both are present. */
+        site:        (user ? null : site),
       }) : null,
+      /* Admin/GM viewing a specific user: offer a way back to the
+         user-picker (available_users state) — previously the only way to
+         switch users was hand-editing the ?user= query param. Batch A —
+         when a project is active, "back" means the aggregated per-site
+         day view (drop user, keep site) rather than the raw cross-site
+         user list.
+
+         F2 — this back control is URL-based (never window.history.back(),
+         which is fragile on deep links: refresh, bookmark, or a link
+         shared from elsewhere leaves no browser history entry to pop) and
+         ALWAYS renders whenever an admin/gm is viewing a specific user —
+         previously it was folded into the same conditional as the
+         "View another user" toggle further below, giving the two
+         directions of the same bidirectional control different visibility
+         rules. Both directions now share one URL contract: drop ?user=,
+         keep date + site. */
+      (user && isAdminLike((window.AuthMock && window.AuthMock.currentUser) || {}))
+        ? React.createElement('button', {
+            type:      'button',
+            className: 'fs-btn fs-btn--tertiary fs-btn--sm',
+            style:     { marginTop: '6px' },
+            onClick:   function () {
+              window.FS.Router.navigate('/timeline?date=' + (date || '')
+                + (site ? '&site=' + encodeURIComponent(site) : ''));
+            },
+          }, site ? '← All people on this site' : '← Back to overview')
+        : null,
     );
   }
 
@@ -189,13 +230,301 @@
                 type: 'button',
                 className: 'fs-timeline-page__user',
                 onClick: function () {
-                  window.FS.Router.navigate('/timeline?date=' + props.date + '&user=' + u);
+                  var qs = '/timeline?date=' + props.date + '&user=' + u
+                    + (props.site ? '&site=' + encodeURIComponent(props.site) : '');
+                  window.FS.Router.navigate(qs);
                 },
               }, unfolder(u)),
             );
           }),
         ),
+        /* Escape hatch — arriving here via the "← Back to overview" /
+           "View another user ↺" toggle left no way back to the report
+           being viewed (user feedback 2026-07-06).
+           F2 — URL-based, not window.history.back(): a deep link straight
+           into this picker state has no browser history entry to pop, so
+           history.back() silently did nothing. Drop ?user= (there wasn't
+           one set here anyway) and keep date/site — if no user was ever
+           set, this is just '/timeline?date=...'. */
+        React.createElement('button', {
+          type:      'button',
+          className: 'fs-btn fs-btn--tertiary fs-btn--sm',
+          style:     { marginTop: '10px' },
+          onClick:   function () {
+            window.FS.Router.navigate('/timeline?date=' + (props.date || '')
+              + (props.site ? '&site=' + encodeURIComponent(props.site) : ''));
+          },
+        }, '← Back'),
       ),
+    );
+  }
+
+  /* Batch A — multi-project admin/gm caller with no project chosen yet:
+     pick which site's day to view (mirrors AvailableUsersState's card
+     shape). Only rendered once sitesList has resolved to more than one
+     option — see TimelineMiddleColumn's render-branch ordering. */
+  function SitePickerState(props) {
+    var Card = window.FieldSight.Card;
+    return React.createElement(Card, {
+      padding: 'lg', className: 'fs-timeline-page__picker',
+    },
+      React.createElement(Card.Body, null,
+        React.createElement('div', { className: 'fs-timeline-page__empty-title' },
+          'Pick a project'),
+        React.createElement('ul', { className: 'fs-timeline-page__users' },
+          (props.sitesList || []).map(function (s) {
+            return React.createElement('li', { key: s.site_id },
+              React.createElement('button', {
+                type:      'button',
+                className: 'fs-timeline-page__user',
+                onClick:   function () {
+                  if (props.onChangeSite) props.onChangeSite(s.site_id);
+                },
+              },
+                s.name,
+                s.location ? React.createElement('span', {
+                  style: { display: 'block', fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px' },
+                }, s.location) : null,
+              ),
+            );
+          }),
+        ),
+      ),
+    );
+  }
+
+  /* =====================================================================
+     AggregatedDayView — site-wide fan-out (Batch A core)
+     ---------------------------------------------------------------------
+     Rendered by TimelineMiddleColumn when a project is chosen but no
+     specific person is (site && !user). Fans out getSiteUsers ×
+     getTimeline across every user on the site (bounded concurrency via
+     pooledAll) and renders one section per person who has a report for
+     the date, reusing ReportKpis / ExecutiveSummaryCard / TopicCard
+     exactly as the single-user daily view does below. AskChat is
+     intentionally omitted — it's scoped to a single report; cross-report
+     Q&A is Phase 4.
+     ===================================================================== */
+  function AggregatedDayView(props) {
+    var fs                   = window.FieldSight;
+    var ErrorBanner          = fs.ErrorBanner;
+    var ExecutiveSummaryCard = fs.ExecutiveSummaryCard;
+    var TopicCard            = fs.TopicCard;
+
+    var refState = React.useState({ status: 'loading' });
+    var state    = refState[0];
+    var setState = refState[1];
+
+    var retryRef   = React.useState(0);
+    var retryCount = retryRef[0];
+    var setRetry   = retryRef[1];
+
+    /* fix/action-checkoff-sync (Bug 1) — this view renders ONE date
+       (props.date) fanned out across every user on the site, so a
+       single getActions(date) call covers every section's TopicCards.
+       user-dimension audit key plan (docs/superpowers/plans/2026-07-13-
+       user-dimension-audit-key.md, Task 5) — the audit key NOW carries
+       the section owner's folder (see the TopicCard mount + bus
+       subscription below), so two sections' topic 0 / action 0 on the
+       same date no longer collide. Mirrors TimelineMiddleColumn's own
+       actions fetch (~line 743) so checked state actually shows here
+       instead of the hardcoded {} this view used to pass down. */
+    var refActionsState = React.useState({});
+    var actionsMap    = refActionsState[0];
+    var setActionsMap = refActionsState[1];
+
+    React.useEffect(function () {
+      var cancelled = false;
+      window.FS.api.actions.getActions(props.date).then(function (res) {
+        if (cancelled) return;
+        setActionsMap((res && res.actions) || {});
+      });
+      return function () { cancelled = true; };
+    }, [props.date]);
+
+    /* fix/action-checkoff-sync (Bug 1) — mirrors TimelineMiddleColumn's
+       bus subscription (~line 800) so a toggle made anywhere (this
+       view's own TopicCards, the right-detail OverviewTab, or a tick
+       made from the single-user timeline for the same date) updates
+       every section's TopicCard live, including ones currently
+       collapsed/unmounted. user-dimension audit key plan (Task 5) — the
+       bus payload now carries user_folder, and the map key is derived
+       via FS.api.actions.actionKey(payload.user_folder, …) so two
+       different sections' topic 0 / action 0 on the same date land on
+       distinct composite keys instead of colliding. */
+    React.useEffect(function () {
+      var bus = window.FS && window.FS.actionsBus;
+      if (!bus) return undefined;
+      var myDate = props.date;
+      return bus.subscribe(function (payload) {
+        if (!payload || payload.date !== myDate) return;
+        setActionsMap(function (cur) {
+          var key = window.FS.api.actions.actionKey(payload.user_folder, payload.topic_id, payload.action_index);
+          var next = Object.assign({}, cur || {});
+          next[key] = {
+            checked:    !!payload.checked,
+            checked_by: payload.checked_by,
+            checked_at: payload.checked_at,
+          };
+          return next;
+        });
+      });
+    }, [props.date]);
+
+    React.useEffect(function () {
+      var cancelled = false;
+      setState({ status: 'loading' });
+
+      window.FS.api.sites.getSiteUsers(props.site).then(function (res) {
+        if (cancelled) return;
+        var users  = (res && res.users) || [];
+        var thunks = users.map(function (u) {
+          return function () {
+            return window.FS.api.timeline.getTimeline({ date: props.date, user: u.folder_name })
+              .then(function (r) { return { user: u, report: r }; });
+          };
+        });
+        return window.FS.api.pooledAll(thunks, 8).then(function (raw) {
+          if (cancelled) return;
+          var results = raw.filter(Boolean);
+          if (thunks.length > 0 && results.length === 0) {
+            setState({
+              status:  'error',
+              message: 'Could not load reports — all requests failed. Please retry.',
+              retry:   function () { setRetry(function (n) { return n + 1; }); },
+            });
+            return;
+          }
+          var sections = results.filter(function (x) {
+            return x.report && !x.report._notFound && !x.report.available_users && !x.report._accessDenied;
+          }).sort(function (a, b) {
+            var an = (a.report.user_name || a.user.name || '').toLowerCase();
+            var bn = (b.report.user_name || b.user.name || '').toLowerCase();
+            return an < bn ? -1 : (an > bn ? 1 : 0);
+          });
+          setState({ status: 'ok', sections: sections });
+        });
+      }).catch(function () {
+        if (cancelled) return;
+        setState({
+          status:  'error',
+          message: 'Could not load reports — all requests failed. Please retry.',
+          retry:   function () { setRetry(function (n) { return n + 1; }); },
+        });
+      });
+
+      return function () { cancelled = true; };
+    }, [props.site, props.date, retryCount]);
+
+    if (state.status === 'loading') {
+      return React.createElement('div', { className: 'fs-timeline-page__loading' },
+        'Loading reports…');
+    }
+
+    if (state.status === 'error') {
+      return ErrorBanner
+        ? React.createElement(ErrorBanner, {
+            message:   state.message,
+            retryable: true,
+            onRetry:   state.retry,
+          })
+        : React.createElement(NoReportState, { message: state.message });
+    }
+
+    var sections = state.sections || [];
+    if (sections.length === 0) {
+      return React.createElement(NoReportState, {
+        message: 'No reports for this project on ' + formatDateLabel(props.date),
+      });
+    }
+
+    /* topic_id is per-report sequential (0,1,2…) — every section has a
+       topic 0. Selection identity in the aggregated view must therefore
+       be the NAMESPACED sel.id ('topic_<folder>_<n>'), never the bare
+       topic_id, or clicking A's topic 0 highlights B's and C's too
+       (Fable review A-1/A-2). */
+    var selectedAggId = props.selectedItem && props.selectedItem.kind === 'topic'
+      ? props.selectedItem.id
+      : null;
+
+    return React.createElement(React.Fragment, null,
+      sections.map(function (section) {
+        var report         = section.report;
+        var sectionUser     = section.user.folder_name;
+        var sectionUserName = report.user_name;
+        var roleLabel = section.user.role
+          ? section.user.role.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); })
+          : null;
+
+        return React.createElement('div', {
+          key:       sectionUser,
+          className: 'fs-timeline-page__person-section',
+          style:     { marginBottom: '28px' },
+        },
+          React.createElement('div', {
+            style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' },
+          },
+            React.createElement('div', null,
+              React.createElement('div', {
+                style: { fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' },
+              }, unfolder(section.report.user_name || (section.user && section.user.name) || '')),
+              roleLabel ? React.createElement('div', {
+                style: { fontSize: '12px', color: 'var(--text-tertiary)' },
+              }, roleLabel) : null,
+            ),
+            React.createElement('button', {
+              type:      'button',
+              className: 'fs-btn fs-btn--tertiary fs-btn--sm',
+              onClick:   function () {
+                window.FS.Router.navigate('/timeline?site=' + encodeURIComponent(props.site)
+                  + '&date=' + props.date + '&user=' + encodeURIComponent(sectionUser));
+              },
+            }, 'View only'),
+          ),
+          React.createElement(ReportKpis, { report: report }),
+          (report.executive_summary || []).length > 0
+            ? React.createElement(ExecutiveSummaryCard, { bullets: report.executive_summary })
+            : null,
+          React.createElement('div', { className: 'fs-timeline-page__section-label' },
+            'Topics'),
+          React.createElement('div', { className: 'fs-timeline-page__topics' },
+            (report.topics || []).map(function (topic) {
+              return React.createElement(TopicCard, {
+                key:           topic.topic_id,
+                topic:         topic,
+                date:          props.date,
+                actionState:   actionsMap,
+                userFolder:    sectionUser,
+                selected:      selectedAggId === ('topic_' + sectionUser + '_' + topic.topic_id),
+                defaultOpen:   false,
+                highlight:     false,
+                flagHighlight: null,
+                onSelect:      function () {
+                  if (props.onSelect) {
+                    props.onSelect({
+                      kind:       'topic',
+                      /* Namespaced by section owner — bare topic_id collides
+                         across sections AND leaves the right pane's
+                         reset-to-Overview effect (deps [sel.id]) stuck when
+                         switching between two people's same-numbered topic. */
+                      id:         'topic_' + sectionUser + '_' + topic.topic_id,
+                      topic_id:   topic.topic_id,
+                      topic:      topic,
+                      date:       props.date,
+                      /* RED LINE — this SECTION's own user, never the
+                         page-level `user` (undefined in this branch).
+                         Wrong value here shows person A's topics next to
+                         person B's transcript/audio/photos. */
+                      user:       sectionUser,
+                      user_name:  sectionUserName,
+                    });
+                  }
+                },
+              });
+            }),
+          ),
+        );
+      }),
     );
   }
 
@@ -217,14 +546,54 @@
       });
     }, []);
 
+    /* Batch A2 Task 2 — the header's /timeline special case rewrites the
+       URL on change (app-shell.js onHeaderSiteChange), which the Router
+       subscription above already catches. This subscription covers
+       context changes made elsewhere (another page, or a future caller
+       of FS.siteContext.set) that don't touch /timeline's own URL —
+       re-resolve params so the site-resolution block below picks up the
+       new value. */
+    React.useEffect(function () {
+      if (!(window.FS && window.FS.siteContext)) return undefined;
+      return window.FS.siteContext.onChange(function () {
+        setParams(Object.assign({}, (window.FS.Router.getCurrentRoute() || {}).params || {}));
+      });
+    }, []);
+
     /* Sprint 6.6.4 — deep-link target topic. When /safety or /quality
        launches into /timeline?topic=N, we auto-open + flash that
        topic; all other topics auto-collapse (focus mode). Parsed
        once per params change so navigating again resets the focus. */
     var targetTopicId = params.topic != null && params.topic !== ''
-      ? parseInt(params.topic, 10)
+      ? String(params.topic)
       : null;
-    if (targetTopicId !== null && isNaN(targetTopicId)) targetTopicId = null;
+
+    /* Search results / Ask citations deep-link by topic TITLE, because the
+       backend has the Aurora topic UUID, not the report's per-report
+       sequential topic_id. Resolve the SAME spotlight by matching a report
+       topic's title. matchesTopicTarget() folds both keys together. */
+    var targetTopicTitle = params.topicTitle != null && params.topicTitle !== ''
+      ? String(params.topicTitle)
+      : null;
+    var hasTopicTarget = targetTopicId !== null || targetTopicTitle !== null;
+    function matchesTopicTarget(t) {
+      return (targetTopicId !== null && String(t.topic_id) === String(targetTopicId))
+          || (targetTopicTitle !== null && (t.topic_title || '') === targetTopicTitle);
+    }
+
+    /* 联动 — deep-link project sync: a route carrying &site (a cross-project
+       search result or Ask citation) points the top-bar project selector at
+       that project, so the selector always matches the content shown. Ref-
+       guarded to fire once per site change, not on every render. */
+    var syncedSiteRef = React.useRef(null);
+    React.useEffect(function () {
+      var s = params.site;
+      if (!s || syncedSiteRef.current === s) return;
+      syncedSiteRef.current = s;
+      if (window.FS.siteContext && window.FS.siteContext.get() !== s) {
+        window.FS.siteContext.set(s);
+      }
+    }, [params.site]);
 
     /* Sprint 6.7.2 — deeper precision: when /safety includes
        &flag=<idx>, highlight that specific safety_flag inside the
@@ -235,12 +604,105 @@
       : null;
     if (targetFlagIdx !== null && isNaN(targetFlagIdx)) targetFlagIdx = null;
 
-    /* Resolve effective (date, user) honouring worker-forced-self rule. */
+    /* A2-2 — Ask citation transcript-line deep link. An absolute
+       "HH:MM:SS" time-of-day string (same space as transcript segment
+       .start/.time_label — transcript-list.js), or null. Threaded through
+       the auto-select effect below into selectedItem.turnTime so it only
+       ever reaches the ONE topic being spotlighted (TimelineRightDetail
+       reads sel.turnTime, never the raw route param) — a topic opened by
+       hand never gets a stray flash. */
+    var targetTurnTime = params.turnTime != null && params.turnTime !== ''
+      ? String(params.turnTime)
+      : null;
+
+    /* Resolve effective (date, user, site) honouring the three-tier role
+       rule (Task 4 — carried over from the Task 3 review):
+         • worker                        → forced to self, always (line
+                                            below, unconditional).
+         • site_manager / project_manager → forced to self ONLY when no
+                                            site is anchored. Once a site
+                                            IS anchored (URL ?site=, the
+                                            persisted last-viewed choice,
+                                            or the single-site auto-anchor
+                                            further below) they fall
+                                            through to AggregatedDayView
+                                            instead — the backend already
+                                            scopes their getSiteUsers /
+                                            getTimeline calls to
+                                            self + own-site workers
+                                            (site_manager) or their
+                                            managed sites (pm), so nothing
+                                            unsafe is exposed.
+         • admin / gm                    → always free; isAdminLike
+                                            short-circuits both checks. */
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
     var date   = params.date;            /* may be undefined → bootstrap resolves */
     var user   = params.user;
+
+    /* One-shot sites list fetch (mirrors AvailableUsersState's lack of
+       gating — mock getSites() always resolves; no useMocks branch here
+       since the api layer itself owns that switch). Declared BEFORE the
+       site resolution so the single-site auto-anchor can participate in
+       it — anchoring after the role-forcing checks left a single-site
+       site_manager/PM forced to self on their very first visit (Task 4
+       review carry-over). */
+    var refSitesList = React.useState([]);
+    var sitesList    = refSitesList[0];
+    var setSitesList = refSitesList[1];
+    React.useEffect(function () {
+      var cancelled = false;
+      window.FS.api.sites.getSites()
+        .then(function (res) {
+          if (cancelled) return;
+          setSitesList((res && res.sites) || []);
+        })
+        .catch(function () {
+          if (!cancelled) setSitesList([]);
+        });
+      return function () { cancelled = true; };
+    }, []);
+
+    /* Batch A2 Task 2 — resolve the active site/project up front: URL wins,
+       then the global FS.siteContext (header-driven, shared across pages),
+       then the single-site auto-anchor (a caller scoped to exactly one
+       project never had to choose; no navigate/persist — persisting would
+       poison localStorage for a caller who later gains more sites).
+       Deliberately computed BEFORE the role-forcing checks below — they
+       need to know whether a site is anchored, including the auto-anchor
+       case once sitesList lands and re-renders. */
+    var site = params.site || (window.FS.siteContext && window.FS.siteContext.get())
+      || (sitesList.length === 1 ? sitesList[0].site_id : null);
+
+    /* Stale-anchor guard (Fable review B-2): a persisted/URL site the
+       caller can no longer access (account switch, revoked) renders a
+       blank selector and a misleading empty aggregated view. Once the
+       sites list has landed, an unknown site resolves to null and the
+       stale context is cleared (idempotent — safe in render). */
+    if (site && sitesList.length > 0
+        && !sitesList.some(function (s) { return s.site_id === site; })) {
+      /* Only clear the CONTEXT when the stale value actually came from it
+         (Fable review #1b): a garbage/revoked ?site= in a deep link must
+         not destroy the user's valid global selection — and set() is now
+         deduped, so this render-phase call can't loop either way. */
+      if (!params.site && window.FS.siteContext) window.FS.siteContext.set(null);
+      site = null;
+    }
+
     if (caller.role === 'worker') user = callerFolder();
-    if (!user && !isAdminLike(caller)) user = callerFolder();
+    if (!user && !site && !isAdminLike(caller)) user = callerFolder();
+
+    /* Switching projects resets the active person — a user picked for
+       one site rarely maps onto another. Persists the choice via the
+       global FS.siteContext so it's shared with the header selector and
+       every other site-scoped page (Batch A2 Task 2). Still needed here
+       for SitePickerState, which calls this directly. */
+    function onChangeSite(siteId) {
+      if (window.FS.siteContext) window.FS.siteContext.set(siteId || null);
+      var qs = siteId
+        ? '?site=' + encodeURIComponent(siteId) + (date ? '&date=' + date : '')
+        : '';
+      window.FS.Router.navigate('/timeline' + qs);
+    }
 
     var refState = React.useState({ status: 'loading' });
     var state    = refState[0];
@@ -265,7 +727,42 @@
       if (date) return undefined;
       var cancelled = false;
       var qsUser = user ? '&user=' + encodeURIComponent(user) : '';
+      var qsSite = site ? '&site=' + encodeURIComponent(site) : '';
+      /* fix/timeline-buttons-and-deadline — the redirects below were
+         dropping ?from=today, so Today's "Open timeline" link (bare
+         /timeline?from=today, no date — the rolling-list case) lost the
+         flag on this self-resolve redirect, and the "Back to Today"
+         button (gated on readRouteParams().from === 'today') never
+         appeared. Preserve it through both redirects below like
+         qsUser/qsSite. */
+      var qsFrom = params.from ? '&from=' + encodeURIComponent(params.from) : '';
       var today = window.FS.api.todayNZDT();
+
+      /* Batch A — site-aware bootstrap. Once a project is anchored,
+         resolve the initial date against THAT site's own report calendar
+         (24-month lookback, matching DatePicker's own default) instead of
+         probing today's single-user report below — `user` is frequently
+         empty here (site_manager/pm landing straight on
+         AggregatedDayView), so getTimeline(today, user) wouldn't reflect
+         the site's actual report activity. Falls back to `today` — same
+         as the no-site path below — when the site has no report dates at
+         all (or the calendar call is denied), so the page still
+         navigates and AggregatedDayView can render its own empty state
+         rather than leaving the page stuck in 'loading' forever.
+         Mock mode: getDates() ignores `site` and returns the full
+         fixture calendar — acceptable; findLatestReportDate then simply
+         resolves to the same latest date the no-site path would have
+         found anyway (BACKEND-CONTEXT §4.3 note in api/dates.js). */
+      if (site) {
+        window.FS.api.dates.getDates({ months: 24, site: site }).then(function (res) {
+          if (cancelled) return;
+          var resolved = (res && !res._accessDenied)
+            ? (findLatestReportDate(res.dates || {}) || today)
+            : today;
+          window.FS.Router.navigate('/timeline?date=' + resolved + qsUser + qsSite + qsFrom);
+        }).catch(function () { /* fall through; fetch effect won't run */ });
+        return function () { cancelled = true; };
+      }
 
       window.FS.api.timeline.getTimeline({ date: today, user: user })
         .then(function (r) {
@@ -278,16 +775,29 @@
         })
         .then(function (resolved) {
           if (cancelled || !resolved) return;
-          window.FS.Router.navigate('/timeline?date=' + resolved + qsUser);
+          window.FS.Router.navigate('/timeline?date=' + resolved + qsUser + qsSite + qsFrom);
         })
         .catch(function () { /* fall through; fetch effect won't run */ });
 
       return function () { cancelled = true; };
-    }, [date, user]);
+    }, [date, user, site]);
 
     React.useEffect(function () {
       if (!date) return undefined;            /* bootstrap above is in flight */
       var cancelled = false;
+
+      /* Batch A — project chosen, no specific person: AggregatedDayView
+         owns its own getSiteUsers × getTimeline fan-out fetch below; skip
+         the single-user fetch entirely and set a minimal ok-state so
+         render reaches the aggregated branch. Worker-forced-self (above)
+         resolves `user` BEFORE this effect runs, so workers never land
+         here — site && !user means admin/gm, OR a site_manager/PM with an
+         anchored site (their forced-self rule is site-conditional). */
+      if (site && !user) {
+        setState({ status: 'ok', aggregated: true });
+        return undefined;
+      }
+
       setState({ status: 'loading' });
       Promise.all([
         window.FS.api.timeline.getTimeline({ date: date, user: user }),
@@ -355,7 +865,7 @@
         if (!payload || payload.date !== date) return;
         setState(function (s) {
           if (s.status !== 'ok') return s;
-          var key = payload.topic_id + '_' + payload.action_index;
+          var key = window.FS.api.actions.actionKey(payload.user_folder, payload.topic_id, payload.action_index);
           var nextActions = Object.assign({}, s.actions || {});
           nextActions[key] = {
             checked:    !!payload.checked,
@@ -375,14 +885,16 @@
        topic id changes (user clicked a different deep-link). */
     var autoSelectKeyRef = React.useRef(null);
     React.useEffect(function () {
-      if (state.status !== 'ok' || targetTopicId === null) return;
+      if (state.status !== 'ok' || !hasTopicTarget) return;
       var report = state.report;
       if (!report || report._notFound || report.available_users) return;
-      var key = date + '|' + targetTopicId;
+      /* turnTime rides in the dedup key too: two Ask citations into the
+         SAME topic but different transcript moments must each re-fire
+         onSelect (and therefore re-flash at the new line), not get
+         swallowed by the ref-guard from the first click. */
+      var key = date + '|' + (targetTopicId || targetTopicTitle) + '|' + (targetTurnTime || '');
       if (autoSelectKeyRef.current === key) return;
-      var topic = (report.topics || []).filter(function (t) {
-        return t.topic_id === targetTopicId;
-      })[0];
+      var topic = (report.topics || []).filter(matchesTopicTarget)[0];
       if (!topic) return;
       autoSelectKeyRef.current = key;
       if (props.onSelect) {
@@ -394,16 +906,37 @@
           date:      date,
           user:      user,
           user_name: report.user_name,
+          turnTime:  targetTurnTime,
         });
       }
-    }, [state.status, targetTopicId, date]);
+    }, [state.status, targetTopicId, targetTopicTitle, targetTurnTime, date]);
+
+    /* Task C — Search's "Ask FieldSight" hand-off (search-palette.js).
+       Read-and-clear the sessionStorage prefill exactly once per mount,
+       via a lazy useState initializer rather than an effect so the value
+       is ready in time for AskChat's own mount-time prefill effect
+       (ask-chat.js) — that effect only runs once on ITS mount too, so it
+       must see the real value on AskChat's first render, not one render
+       later. Threaded into the report-level AskChat mount below. Must
+       sit above the early returns (:401+) — rules of hooks. */
+    var refAskPrefill = React.useState(function () {
+      try {
+        var v = sessionStorage.getItem('fs.ask.prefill');
+        if (v) sessionStorage.removeItem('fs.ask.prefill');
+        return v || '';
+      } catch (_) { return ''; }
+    });
+    var askPrefill = refAskPrefill[0];
 
     /* Loading */
     if (state.status === 'loading') {
       return React.createElement('div', {
         className: 'fs-timeline-page',
       },
-        React.createElement(PageHeader, { date: date, user: user }),
+        React.createElement(PageHeader, {
+          date: date, user: user,
+          site: site,
+        }),
         React.createElement('div', { className: 'fs-timeline-page__loading' },
           'Loading report…'),
       );
@@ -412,7 +945,10 @@
     if (state.status === 'error') {
       var ErrorBanner = window.FieldSight.ErrorBanner;
       return React.createElement('div', { className: 'fs-timeline-page' },
-        React.createElement(PageHeader, { date: date, user: user }),
+        React.createElement(PageHeader, {
+          date: date, user: user,
+          site: site,
+        }),
         ErrorBanner
           ? React.createElement(ErrorBanner, {
               message:   (state.error && state.error.message) || 'Could not load report',
@@ -429,13 +965,52 @@
     if (state.status === 'access_denied') {
       var AccessDenied = window.FieldSight.AccessDenied;
       return React.createElement('div', { className: 'fs-timeline-page' },
-        React.createElement(PageHeader, { date: date, user: user }),
+        React.createElement(PageHeader, {
+          date: date, user: user,
+          site: site,
+        }),
         AccessDenied
           ? React.createElement(AccessDenied, {
               scope:   state.scope,
               message: state.message,
             })
           : React.createElement(NoReportState, { message: state.message || 'Access denied.' }),
+      );
+    }
+
+    /* Batch A — multi-project admin/gm caller with no project chosen:
+       offer the project picker instead of the raw cross-site user list
+       (available_users below) once we know there's more than one option.
+       While sitesList is still resolving, sitesList.length is 0 so this
+       branch simply doesn't match yet — the 'loading' branch above (from
+       the still-in-flight, non-short-circuited fetch below) covers that
+       window without any extra state. */
+    if (!site && !user && sitesList.length > 1) {
+      return React.createElement('div', { className: 'fs-timeline-page' },
+        React.createElement(PageHeader, {
+          date: date, user: null,
+          site: site,
+        }),
+        React.createElement(SitePickerState, {
+          sitesList: sitesList, onChangeSite: onChangeSite,
+        }),
+      );
+    }
+
+    /* Batch A core — project chosen, no specific person: fan out across
+       every user on the site (AggregatedDayView) instead of a single
+       report. The fetch effect above short-circuits to a minimal
+       ok-state for this case; AggregatedDayView does its own fetching. */
+    if (site && !user) {
+      return React.createElement('div', { className: 'fs-timeline-page' },
+        React.createElement(PageHeader, {
+          date: date, user: null,
+          site: site,
+        }),
+        React.createElement(AggregatedDayView, {
+          site: site, date: date,
+          onSelect: props.onSelect, selectedItem: props.selectedItem,
+        }),
       );
     }
 
@@ -447,9 +1022,12 @@
     /* Admin disambiguation shape: { date, available_users:[...] } */
     if (report && report.available_users && !hasMeeting) {
       return React.createElement('div', { className: 'fs-timeline-page' },
-        React.createElement(PageHeader, { date: date, user: null }),
+        React.createElement(PageHeader, {
+          date: date, user: null,
+          site: site,
+        }),
         React.createElement(AvailableUsersState, {
-          date: date, users: report.available_users,
+          date: date, users: report.available_users, site: site,
         }),
       );
     }
@@ -457,7 +1035,10 @@
     /* No-anything shape */
     if (!hasReport && !hasMeeting) {
       return React.createElement('div', { className: 'fs-timeline-page' },
-        React.createElement(PageHeader, { date: date, user: user }),
+        React.createElement(PageHeader, {
+          date: date, user: user,
+          site: site,
+        }),
         React.createElement(NoReportState, {
           message: (report && report.message) || ('No report for ' + unfolder(user || '') + ' on ' + date),
         }),
@@ -499,7 +1080,10 @@
     /* ---- Meeting view ---- */
     if (effectiveView === 'meeting') {
       return React.createElement('div', { className: 'fs-timeline-page' },
-        React.createElement(PageHeader, { date: date, user: user, report: report || meeting }),
+        React.createElement(PageHeader, {
+          date: date, user: user, report: report || meeting,
+          site: site,
+        }),
         React.createElement(ViewToggle),
 
         meeting.meeting_title ? React.createElement('div', {
@@ -566,7 +1150,10 @@
     return React.createElement('div', {
       className: 'fs-timeline-page',
     },
-      React.createElement(PageHeader, { date: date, user: user, report: report }),
+      React.createElement(PageHeader, {
+        date: date, user: user, report: report,
+        site: site,
+      }),
       React.createElement(ViewToggle),
       React.createElement(ReportKpis, { report: report }),
       React.createElement(ExecutiveSummaryCard, {
@@ -582,8 +1169,8 @@
              flash). Other topics force-collapse (defaultOpen=false)
              so the target reads as the focal point. When no target,
              defaultOpen=undefined leaves user-toggled state alone. */
-          var isTarget = targetTopicId !== null && topic.topic_id === targetTopicId;
-          var defaultOpenProp = targetTopicId === null
+          var isTarget = matchesTopicTarget(topic);
+          var defaultOpenProp = !hasTopicTarget
             ? undefined
             : isTarget;
           return React.createElement(TopicCard, {
@@ -591,6 +1178,11 @@
             topic:       topic,
             date:        date,
             actionState: actionState,
+            /* user-dimension audit key plan (Task 5) — MUST derive from
+               report.user_name, never the page `user` param: the
+               self-view route has user=null (documented crux trap), and
+               report.user_name is always the actual report owner. */
+            userFolder:  report.user_name ? window.FS.api.folderName(report.user_name) : null,
             selected:    selectedTopicId === topic.topic_id,
             defaultOpen: defaultOpenProp,
             /* Sprint 7 follow-up — when &flag= is present, suppress
@@ -626,11 +1218,12 @@
         React.createElement('div', { className: 'fs-timeline-page__section-label' },
           'Ask agent'),
         React.createElement(AskChat, {
-          date:        date,
-          user:        user,
-          scope:       'both',
-          placeholder: 'Ask anything about today’s report…',
-          compact:     true,
+          date:            date,
+          user:            user || (report && report.user_name && window.FS.api.folderName(report.user_name)),
+          scope:           'both',
+          placeholder:     'Ask anything about today’s report…',
+          compact:         true,
+          initialQuestion: askPrefill,
           suggestions: [
             'What were today’s safety highlights?',
             'Which actions are still open?',
@@ -712,15 +1305,22 @@
               'Action items'),
             actions.map(function (a, idx) {
               var key = topic.topic_id + '_' + idx;
-              var st  = (props.actionState || {})[key] || {};
+              var st  = window.FS.api.actions.lookupAction(props.actionState, props.userFolder, topic.topic_id, idx) || {};
               return React.createElement(ActionItemRow, {
                 key:            key,
                 date:           props.date,
                 topicId:        topic.topic_id,
                 actionIndex:    idx,
+                userFolder:     props.userFolder,
                 action:         a,
                 initialChecked: !!st.checked,
                 checkedBy:      st.checked_by,
+                /* fix/action-checkoff-sync (Bug 3) — was omitted, so the
+                   right panel never showed the "· <time>" half of
+                   "Checked by X · <time>" that the middle TopicCard
+                   already renders (topic-card.js ~228). ActionItemRow
+                   already handles both props; this just feeds it. */
+                checkedAt:      st.checked_at,
               });
             }),
           )
@@ -870,7 +1470,7 @@
       return bus.subscribe(function (payload) {
         if (!payload || payload.date !== myDate) return;
         setActions(function (cur) {
-          var key = payload.topic_id + '_' + payload.action_index;
+          var key = window.FS.api.actions.actionKey(payload.user_folder, payload.topic_id, payload.action_index);
           var next = Object.assign({}, cur || {});
           next[key] = {
             checked:    !!payload.checked,
@@ -882,10 +1482,14 @@
       });
     }, [isDaily, sel && sel.date]);
 
-    /* Reset to overview tab whenever a new topic is selected. */
+    /* Reset tab whenever a new topic is selected. A2-2 — when the
+       selection carries a turnTime (Ask citation → transcript-window
+       deep link), land straight on the Transcript tab so the flash is
+       actually visible instead of hiding behind Overview; daily topics
+       only (isMeeting has no transcript tab). */
     React.useEffect(function () {
-      setTab('overview');
-    }, [sel && sel.id]);
+      setTab(isDaily && sel && sel.turnTime ? 'transcript' : 'overview');
+    }, [sel && sel.id, isDaily, sel && sel.turnTime]);
 
     if (!isDaily && !isMeeting) {
       return React.createElement('div', {
@@ -901,11 +1505,24 @@
     var topic = sel.topic;
     var range = parseTimeRange(topic.time_range);
 
+    /* A2-2 — only ever set by the auto-select effect in
+       TimelineMiddleColumn above (never read directly off the route),
+       so it's scoped to exactly the topic that deep-link spotlighted —
+       a topic the user opens by hand carries no turnTime. */
+    var highlightTime = sel.turnTime || null;
+
     var TranscriptList = fs.TranscriptList;
     var AudioPlaylist  = fs.AudioPlaylist;
     var VideoPlayer    = fs.VideoPlayer;
     var PhotoGrid      = fs.PhotoGrid;
     var AskChat        = fs.AskChat;
+
+    /* user-dimension audit key plan (Task 5) — report OWNER's folder,
+       never the caller. sel.user is the section/topic owner folder set
+       by the AggregatedDayView + single-user onSelect payloads above;
+       sel.user_name is the display name fallback (folderName-derived)
+       for callers that only set that. */
+    var ownerFolder = sel.user || (sel.user_name && window.FS.api.folderName(sel.user_name)) || null;
 
     var mediaProps = {
       date:  sel.date,
@@ -939,11 +1556,12 @@
     } else {
       bodyByTab = {
         overview:   React.createElement(OverviewTab, {
-          topic: topic, date: sel.date, actionState: refActions[0],
+          topic: topic, date: sel.date, actionState: refActions[0], userFolder: ownerFolder,
         }),
         transcript: TranscriptList ? React.createElement(TranscriptList,
           Object.assign({}, mediaProps, {
-            participants: topic.participants || [],
+            participants:  topic.participants || [],
+            highlightTime: highlightTime,
           })) : null,
         audio:      AudioPlaylist  ? React.createElement(AudioPlaylist,  mediaProps) : null,
         video:      VideoPlayer    ? React.createElement(VideoPlayer,    mediaProps) : null,
@@ -955,7 +1573,7 @@
         ask:        AskChat        ? React.createElement(AskChat, {
           date:        sel.date,
           user:        mediaProps.user,
-          scope:       'transcript',
+          scope:       'both',
           topic_id:    topic.topic_id,
           placeholder: 'Ask about this topic…',
           suggestions: [

@@ -21,8 +21,6 @@
 (function () {
   'use strict';
 
-  var DEFAULT_DAYS = 7;
-
   /* ---------- Helpers --------------------------------------------------- */
 
   function fmtDate(yyyymmdd) {
@@ -66,6 +64,7 @@
       case 'fail':      return 'danger';
       case 'blocked':   return 'danger';
       case 'observed':  return 'info';
+      case 'resolved':  return 'success';
       default:          return 'neutral';
     }
   }
@@ -91,17 +90,19 @@
 
   var QualityContext = React.createContext(null);
 
+  /* fs.settings.qualityView now holds { preset, from, to } — persisted and
+     restored by the shared RangeToolbar composite itself (Task B), which
+     also tolerates the pre-Task-B { mode, day } shape. Default preset
+     'all' widens discovery back to the real report span (Feb–Mar 2026)
+     instead of the last-7-days window, which used to come up empty since
+     "today" runs months ahead of the fixture data. */
   function QualityProvider(props) {
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
     var depKey = (caller.name || '') + '|' + (caller.role || '') + '|' + (caller.isAdmin ? 'admin' : '');
 
-    var refMode = React.useState('week');
-    var mode    = refMode[0];
-    var setMode = refMode[1];
-
-    var refDay = React.useState(window.FS.api.todayNZDT());
-    var day    = refDay[0];
-    var setDay = refDay[1];
+    var refView = React.useState({ preset: 'all', from: null, to: null });
+    var view    = refView[0];
+    var setView = refView[1];
 
     var refState = React.useState({ status: 'loading' });
     var state    = refState[0];
@@ -111,22 +112,26 @@
     var retryCount = retryRef[0];
     var setRetry   = retryRef[1];
 
-    var today = window.FS.api.todayNZDT();
-    var range;
-    if (mode === 'week') {
-      range = { from: window.FS.api.addDaysISO(today, -(DEFAULT_DAYS - 1)), to: today };
-    } else if (mode === 'today') {
-      range = { from: today, to: today };
-    } else {
-      range = { from: day, to: day };
-    }
+    /* batch A2 Task 4 — read the global active-site selection; passed
+       EXPLICITLY into the aggregator call below (never read inside the
+       aggregator itself — see compliance-aggregator.js _AUDIT note). */
+    var refActiveSite = React.useState(function () { return (window.FS && window.FS.siteContext) ? window.FS.siteContext.get() : null; });
+    var activeSite    = refActiveSite[0];
+    var setActiveSite = refActiveSite[1];
+    React.useEffect(function () {
+      if (!(window.FS && window.FS.siteContext)) return undefined;
+      return window.FS.siteContext.onChange(setActiveSite);
+    }, []);
 
     React.useEffect(function () {
+      /* RangeToolbar resolves the range asynchronously (e.g. 'all' needs
+         FS.api.window.getSpan()) — wait for both ends before fetching. */
+      if (!view.from || !view.to) return undefined;
       var cancelled = false;
       setState({ status: 'loading' });
 
       window.FS.api.compliance.getQualityRange({
-        from: range.from, to: range.to,
+        from: view.from, to: view.to, site: activeSite || undefined,
       }).then(function (res) {
         if (cancelled) return;
         if (res && res._accessDenied) {
@@ -137,8 +142,8 @@
         setState({
           status: 'ok',
           rows:   rows,
-          from:   range.from,
-          to:     range.to,
+          from:   view.from,
+          to:     view.to,
           totals: totalsFromRows(rows),
           groups: groupByDate(rows),
           dates:  (res && res.dates) || [],
@@ -150,7 +155,7 @@
       });
 
       return function () { cancelled = true; };
-    }, [depKey, mode, day, retryCount]);
+    }, [depKey, view.from, view.to, retryCount, activeSite]);
 
     var refSel = React.useState(null);
     var sel    = refSel[0];
@@ -163,62 +168,20 @@
     var ctx = {
       state:         state,
       setState:      setState,
-      mode:          mode,
-      day:           day,
-      setMode:       function (m) { setSel(null); setMode(m); },
-      setDay:        function (d) { setSel(null); setDay(d); setMode('day'); },
+      view:          view,
+      setView:       function (next) { setSel(null); setView(next); },
       selectedItem:  sel,
       setSelected:   setSel,
       showCreate:    showCreate,
       setShowCreate: setShowCreate,
       caller:        caller,
+      /* batch B Task 6 — manual Mark closed/Reopen action refetches the
+         range (rather than patching rows locally) so the merged manual
+         row comes back through the same toManualQualityRow() mapping. */
+      refetch:       function () { setRetry(function (n) { return n + 1; }); },
     };
     return React.createElement(QualityContext.Provider, { value: ctx },
       props.children);
-  }
-
-  /* ---------- Range toolbar -------------------------------------------- */
-
-  function RangeToolbar(props) {
-    var DatePicker = window.FieldSight.DatePicker;
-    var ctx = props.ctx;
-    var refOpen = React.useState(false);
-    var open    = refOpen[0];
-    var setOpen = refOpen[1];
-
-    function chip(key, label, isActive) {
-      return React.createElement('button', {
-        key:       key,
-        type:      'button',
-        className: 'fs-quality__chip' + (isActive ? ' fs-quality__chip--active' : ''),
-        onClick:   function () {
-          if (key === 'pick') { setOpen(!open); return; }
-          ctx.setMode(key);
-          setOpen(false);
-        },
-      }, label);
-    }
-
-    return React.createElement('div', { className: 'fs-quality__toolbar' },
-      React.createElement('div', { className: 'fs-quality__chips' },
-        chip('today', 'Today',         ctx.mode === 'today'),
-        chip('week',  'Last 7 days',   ctx.mode === 'week'),
-        chip('pick',  ctx.mode === 'day' ? fmtDate(ctx.day) : 'Pick date…',
-             ctx.mode === 'day'),
-      ),
-      open && DatePicker
-        ? React.createElement('div', { className: 'fs-quality__picker-wrap' },
-            React.createElement(DatePicker, {
-              date:        ctx.day,
-              onChange:    function (d) {
-                ctx.setDay(d);
-                setOpen(false);
-              },
-              monthsRange: 3,
-              inline:      true,
-            }))
-        : null,
-    );
   }
 
   /* ---------- Middle column -------------------------------------------- */
@@ -231,6 +194,7 @@
     var AccessDenied        = fs.AccessDenied;
     var QualityCreateModal  = fs.QualityCreateModal;
     var Button              = fs.Button;
+    var RangeToolbar        = fs.RangeToolbar;
 
     var ctx = React.useContext(QualityContext);
     if (!ctx) {
@@ -264,7 +228,14 @@
         logBtn,
       ),
     );
-    var toolbar = React.createElement(RangeToolbar, { ctx: ctx });
+    var toolbar = RangeToolbar
+      ? React.createElement(RangeToolbar, {
+          value:      ctx.view,
+          onChange:   ctx.setView,
+          presets:    ['today', '7d', '30d', 'all', 'custom'],
+          storageKey: 'fs.settings.qualityView',
+        })
+      : null;
 
     if (state.status === 'loading') {
       return React.createElement('div', { className: 'fs-quality' },
@@ -325,16 +296,22 @@
       toolbar,
 
       /* Create item modal (Sprint 8.1.3)
-         Sprint 8 follow-up — admin has state.user=null; fall back to
-         the first site from fixtures so the modal mounts with a valid
-         siteId. */
+         Batch B Task 5 — live mode sources siteId from the global
+         FS.siteContext (the report-side project slug), NOT state.user
+         (a user-scoping value from the aggregator that happened to be
+         admin-null, which is what made the old fixtures[0] fallback
+         WRONG for admin in live). When siteContext has nothing anchored,
+         the modal itself collects a Project via its required select.
+         Mock mode keeps the pre-existing fixtures[0] fallback verbatim. */
       ctx.showCreate && QualityCreateModal
         ? React.createElement(QualityCreateModal, {
-            siteId:    state.user
-                       || (((window.FieldSight && window.FieldSight.fixtures
-                            && window.FieldSight.fixtures.sites
-                            && window.FieldSight.fixtures.sites.sites) || [])[0] || {}).site_id
-                       || '',
+            siteId:    !window.FS.api.useMocks
+                       ? ((window.FS.siteContext && window.FS.siteContext.get()) || '')
+                       : (state.user
+                          || (((window.FieldSight && window.FieldSight.fixtures
+                               && window.FieldSight.fixtures.sites
+                               && window.FieldSight.fixtures.sites.sites) || [])[0] || {}).site_id
+                          || ''),
             onSuccess: handleNewItem,
             onCancel:  function () { ctx.setShowCreate(false); },
           })
@@ -401,6 +378,21 @@
                                 tone: 'warning', size: 'sm', variant: 'outline',
                               }, 'Follow-up')
                             : null,
+                          /* batch B Task 6 — manually-logged items, merged in
+                             by compliance-aggregator.js from
+                             org.getObservations.
+                             feat 4b — 'live' items merged in the same way
+                             from org.getLiveItems. */
+                          row.source === 'manual'
+                            ? React.createElement(Badge, {
+                                tone: 'neutral', size: 'sm', variant: 'subtle',
+                              }, 'Manual')
+                            : null,
+                          row.source === 'live'
+                            ? React.createElement(Badge, {
+                                tone: 'info', size: 'sm', variant: 'subtle',
+                              }, 'Live')
+                            : null,
                         ),
                       ),
                     );
@@ -432,6 +424,125 @@
 
     var ctx = React.useContext(QualityContext);
     var sel = ctx && ctx.selectedItem;
+    var caller = (ctx && ctx.caller) || {};
+
+    /* Task 2 (live-data fixes) — resolve/reopen toggle, piggybacking the
+       existing actions-toggle endpoint (see compliance-aggregator.js
+       _AUDIT-2). Only 'topic_quality' rows carry the synthetic status
+       gap (fixed 'observed' literal) — 'qc_item' rows already have a
+       real backend status (q.status) and are left alone; toggling them
+       would overwrite honest data with a synthetic binary. Mirrors
+       action-item-row.js's optimistic pattern: flip local state
+       immediately, fire toggleAction, revert on reject. */
+    var refPending = React.useState(false);
+    var togglePending = refPending[0];
+    var setTogglePending = refPending[1];
+
+    function toggleResolve() {
+      if (!sel || togglePending || sel.source !== 'topic_quality') return;
+      var prevSel   = sel;
+      var nextStatus = prevSel.status === 'resolved' ? 'observed' : 'resolved';
+      var nextSel   = Object.assign({}, prevSel, { status: nextStatus });
+
+      function applyStatus(rowId, status) {
+        if (!ctx.setState) return;
+        ctx.setState(function (s) {
+          if (s.status !== 'ok') return s;
+          var updatedRows = (s.rows || []).map(function (r) {
+            return r.id === rowId ? Object.assign({}, r, { status: status }) : r;
+          });
+          return Object.assign({}, s, {
+            rows:   updatedRows,
+            totals: totalsFromRows(updatedRows),
+            groups: groupByDate(updatedRows),
+          });
+        });
+      }
+
+      setTogglePending(true);
+      if (ctx.setSelected) ctx.setSelected(nextSel);
+      applyStatus(prevSel.id, nextStatus);
+
+      window.FS.api.actions.toggleAction({
+        date:         sel.date,
+        topic_id:     sel.topic_id,
+        action_index: 'quality',
+        checked:      nextStatus === 'resolved',
+        action_text:  sel.item,
+        user_folder:  sel.user_folder,
+      }).then(function () {
+        setTogglePending(false);
+      }).catch(function (err) {
+        console.error('[QualityRightDetail] resolve toggle failed, reverting', err);
+        setTogglePending(false);
+        if (ctx.setSelected) ctx.setSelected(prevSel);
+        applyStatus(prevSel.id, prevSel.status);
+      });
+    }
+
+    /* batch B Task 6 — Mark closed/Reopen for manually-logged items
+       (source === 'manual', merged in by compliance-aggregator.js from
+       org.getObservations). Distinct from toggleResolve() above: that
+       one only ever applies to 'topic_quality' rows and piggybacks the
+       actions-toggle join; manual rows use
+       org.updateObservation({status:'open'|'closed'}) instead. Gated to
+       the author or an admin/gm caller (mirrors team.js's
+       user:manage-gated archive pattern). No optimistic row-list flip —
+       just an immediate local `sel` update for a responsive detail
+       panel, plus a full range refetch so the list (Manual badge/status)
+       comes back through the real toManualQualityRow() mapping. */
+    var refManualPending = React.useState(false);
+    var manualPending    = refManualPending[0];
+    var setManualPending = refManualPending[1];
+
+    var sessionSub = ((window.FS && window.FS.session && window.FS.session.user) || {}).sub;
+    var canManageManual = !!(sel && sel.source === 'manual' && window.FS.can && (
+      window.FS.can(caller, 'user:manage') ||
+      (sel.author_sub && sel.author_sub === sessionSub)
+    ));
+
+    function toggleManualStatus() {
+      if (!sel || sel.source !== 'manual' || manualPending) return;
+      var prevSel    = sel;
+      var nextClosed = !prevSel.closed;
+
+      setManualPending(true);
+      window.FS.api.org.updateObservation(prevSel.obs_id, {
+        status: nextClosed ? 'closed' : 'open',
+      }).then(function (res) {
+        /* 403/404 resolve as envelopes (Fable batch-B review F3): a PM whose
+           UI gate is broader than the backend's author-or-admin/gm rule must
+           see the rejection, not a fake success. */
+        if (res && (res._accessDenied || res._notFound)) {
+          throw new Error(res.error || 'You cannot update this observation');
+        }
+        setManualPending(false);
+        if (ctx.setSelected) {
+          ctx.setSelected(Object.assign({}, prevSel, {
+            closed: nextClosed,
+            status: nextClosed ? 'resolved' : 'observed',
+          }));
+        }
+        var toast = window.FS && window.FS.toast;
+        if (toast) {
+          toast.show({
+            message: nextClosed ? 'Item marked closed.' : 'Item reopened.',
+            tone:    'success',
+          });
+        }
+        if (ctx.refetch) ctx.refetch();
+      }).catch(function (err) {
+        console.error('[QualityRightDetail] manual status update failed', err);
+        setManualPending(false);
+        var toast = window.FS && window.FS.toast;
+        if (toast) {
+          toast.show({
+            message: (err && err.message) || 'Could not update item',
+            tone:    'error',
+          });
+        }
+      });
+    }
 
     /* Lazy-fetch related action_items from the source topic — only
        applies when the row was sourced from a quality-tagged topic
@@ -509,9 +620,19 @@
         }, 'Follow-up needed')
       : null;
 
+    /* batch B Task 6 — 'manual' added alongside the two report-derived
+       sources; previously fell through to the 'Quality-tagged topic'
+       label, which is wrong for a manually-logged item.
+       Fable-review F3 — 'live' added alongside; previously also fell
+       through to 'Quality-tagged topic', which is wrong for a session-
+       sourced live extraction. */
     var sourceLabel = sel.source === 'qc_item'
       ? 'Report-level Q&C item'
-      : 'Quality-tagged topic';
+      : sel.source === 'manual'
+        ? 'Manually logged item'
+        : sel.source === 'live'
+          ? 'Live extraction'
+          : 'Quality-tagged topic';
 
     var rows = [];
     if (sel.details) {
@@ -623,11 +744,27 @@
 
       linkedBlock,
 
+      /* batch B Task 6 — manual rows get the author/admin-gated Mark
+         closed/Reopen action instead of the generic resolve button
+         (which is scoped to 'topic_quality' only, above). */
       React.createElement('div', { className: 'fs-quality-detail__actions' },
-        React.createElement(Button, {
+        (Button && sel.source === 'topic_quality') ? React.createElement(Button, {
+          variant: 'primary', size: 'sm', loading: togglePending,
+          onClick: toggleResolve,
+        }, sel.status === 'resolved' ? 'Reopen' : 'Mark resolved') : null,
+        (Button && sel.source === 'manual' && canManageManual) ? React.createElement(Button, {
+          variant: 'primary', size: 'sm', loading: manualPending,
+          onClick: toggleManualStatus,
+        }, sel.closed ? 'Reopen' : 'Mark closed') : null,
+        /* Manual observations have no source report — the link would land on
+           a "_notFound" timeline (batch B review). Same for 'live' rows
+           (Fable-review F3) — the nightly report hasn't landed yet, so
+           Open source report would navigate to a "_notFound" timeline
+           too. */
+        (sel.source !== 'manual' && sel.source !== 'live') ? React.createElement(Button, {
           variant: 'secondary', size: 'sm', rightIcon: 'arrow-right',
           onClick: onOpenInTimeline,
-        }, 'Open source report'),
+        }, 'Open source report') : null,
       ),
     );
   }

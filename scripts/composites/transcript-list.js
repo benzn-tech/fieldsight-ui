@@ -22,6 +22,17 @@
      participants  string[] (optional) — names to overlay onto labels
      onJump        (segment) => void  — caller wires this to audio/video
                    playback if present
+     highlightTime "HH:MM:SS" string or null — A2-2 Ask citation
+                   transcript-line deep link (timeline.js passes
+                   selectedItem.turnTime, itself sourced from the
+                   citation's backend time_start, see ask-chat.js).
+                   Same precision-spotlight shape as SafetyFlagRow's
+                   `highlight` prop (safety-flag-row.js): scrolls the
+                   matched segment into view and runs a 3-pulse flash
+                   (.fs-transcript-list__row--flash). Segment match is
+                   nearest-at-or-before (see findHighlightIndex below) —
+                   the window start doesn't always land exactly on a
+                   segment boundary.
 
    Exported to:
      window.FieldSight.TranscriptList
@@ -44,6 +55,34 @@
     { fg: '#0F766E', bg: '#CCFBF1' }, /* teal */
   ];
 
+  /* A2-2 — "HH:MM:SS" → seconds-since-midnight, same space as segment
+     .start/.end (BACKEND-CONTEXT transcript shape). Returns null when
+     unparseable so callers can no-op cleanly. */
+  function hmsToSeconds(hms) {
+    var m = /^(\d{1,2}):(\d{2}):(\d{2})$/.exec(String(hms || '').trim());
+    if (!m) return null;
+    return (parseInt(m[1], 10) * 3600) + (parseInt(m[2], 10) * 60) + parseInt(m[3], 10);
+  }
+
+  /* A2-2 — matching rule (robust to the window-start not landing exactly
+     on a segment boundary):
+       1. the segment whose [start, end] CONTAINS targetSec, else
+       2. the LAST segment whose start <= targetSec (nearest at-or-before), else
+       3. the FIRST segment (fallback).
+     Assumes segments are chronologically ordered (as returned by the API). */
+  function findHighlightIndex(segments, targetSec) {
+    if (targetSec == null || !segments || !segments.length) return null;
+    var lastAtOrBefore = null;
+    for (var i = 0; i < segments.length; i++) {
+      var s = segments[i];
+      if (typeof s.start !== 'number') continue;
+      var end = typeof s.end === 'number' ? s.end : s.start;
+      if (targetSec >= s.start && targetSec <= end) return i;
+      if (s.start <= targetSec) lastAtOrBefore = i;
+    }
+    return lastAtOrBefore !== null ? lastAtOrBefore : 0;
+  }
+
   function TranscriptList(props) {
     var refState = React.useState({ status: 'loading', segments: [] });
     var state    = refState[0];
@@ -65,6 +104,7 @@
           status:   'ok',
           segments: res.speaker_segments || [],
           speakers: res.speakers || [],
+          message:  res.message,
           counts: {
             files:    res.count,
             segments: res.total_speaker_segments,
@@ -78,6 +118,29 @@
       return function () { cancelled = true; };
     }, [date, user, start, end]);
 
+    /* A2-2 — precision spotlight, same shape as SafetyFlagRow /
+       TopicCard (rootRef + flashing state + useEffect keyed on the
+       highlight prop → scrollIntoView + timed flash class). One row
+       flashes at a time, so a single index (not a per-row boolean) is
+       enough; segRefs maps segment index → DOM node via callback ref. */
+    var segRefs = React.useRef({});
+    var refFlash = React.useState(null);
+    var flashIndex    = refFlash[0];
+    var setFlashIndex = refFlash[1];
+
+    React.useEffect(function () {
+      if (!props.highlightTime || !state.segments.length) return undefined;
+      var idx = findHighlightIndex(state.segments, hmsToSeconds(props.highlightTime));
+      if (idx == null) return undefined;
+      var node = segRefs.current[idx];
+      if (node && typeof node.scrollIntoView === 'function') {
+        node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      setFlashIndex(idx);
+      var t = setTimeout(function () { setFlashIndex(null); }, 1900);
+      return function () { clearTimeout(t); };
+    }, [props.highlightTime, state.segments]);
+
     if (state.status === 'loading') {
       return React.createElement('div', { className: 'fs-transcript-list__loading' },
         'Loading transcript…');
@@ -87,8 +150,11 @@
         'Could not load transcript.');
     }
     if (state.segments.length === 0) {
+      var emptyText = window.FS.api.useMocks
+        ? 'No speaker segments in this window.'
+        : (state.message || 'No transcripts available for this date — recordings may have been archived.');
       return React.createElement('div', { className: 'fs-transcript-list__empty' },
-        'No speaker segments in this window.');
+        emptyText);
     }
 
     /* Build position-within-view label → palette index map. */
@@ -118,7 +184,10 @@
         var nameHint = participantHint[s.speaker];
 
         return React.createElement('div', {
-          key: i, className: 'fs-transcript-list__row',
+          key: i,
+          ref: function (node) { segRefs.current[i] = node; },
+          className: 'fs-transcript-list__row'
+            + (flashIndex === i ? ' fs-transcript-list__row--flash' : ''),
         },
           React.createElement('button', {
             type:    'button',

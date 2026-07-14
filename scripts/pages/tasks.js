@@ -35,7 +35,6 @@
 (function () {
   'use strict';
 
-  var DEFAULT_DAYS = 14;
   var PAGE_SIZE    = 25;
 
   /* ---------- Helpers --------------------------------------------------- */
@@ -129,15 +128,38 @@
     var retryCount = retryRef[0];
     var setRetry   = retryRef[1];
 
+    /* fs.settings.tasksView holds { preset, from, to } — persisted/restored by
+       the shared RangeToolbar. Default 'all' so the range reaches the real
+       report span (Feb–Jun 2026) rather than a trailing-days window that comes
+       up empty when "today" runs ahead of the data (same reason as Evidence). */
+    var refView = React.useState({ preset: 'all', from: null, to: null });
+    var view    = refView[0];
+    var setView = refView[1];
+
+    /* batch A2 Task 4 — read the global active-site selection; passed
+       EXPLICITLY into the aggregator call below (never read inside the
+       aggregator itself — see tasks-aggregator.js _AUDIT note). */
+    var refActiveSite = React.useState(function () { return (window.FS && window.FS.siteContext) ? window.FS.siteContext.get() : null; });
+    var activeSite    = refActiveSite[0];
+    var setActiveSite = refActiveSite[1];
     React.useEffect(function () {
+      if (!(window.FS && window.FS.siteContext)) return undefined;
+      return window.FS.siteContext.onChange(setActiveSite);
+    }, []);
+
+    React.useEffect(function () {
+      /* RangeToolbar resolves the range asynchronously ('all' needs
+         getSpan()) — wait for both ends before fetching. The toolbar is
+         rendered in every non-terminal branch below so it can resolve the
+         initial preset even while this is still loading. */
+      if (!view.from || !view.to) return undefined;
       var cancelled = false;
       setState({ status: 'loading' });
 
       var today = window.FS.api.todayNZDT();
-      var from  = window.FS.api.addDaysISO(today, -(DEFAULT_DAYS - 1));
-
-      var fetchOpts = { from: from, to: today };
+      var fetchOpts = { from: view.from, to: view.to };
       if (targetUser) fetchOpts.user = targetUser;
+      if (activeSite) fetchOpts.site = activeSite;
 
       window.FS.api.tasks.getActionsResolvedRange(fetchOpts).then(function (res) {
         if (cancelled) return;
@@ -149,8 +171,8 @@
         setState({
           status:     'ok',
           rows:       rows,
-          from:       from,
-          to:         today,
+          from:       view.from,
+          to:         view.to,
           today:      today,
           user:       res.user || null,
           filterUser: targetUser || null,
@@ -161,7 +183,7 @@
       });
 
       return function () { cancelled = true; };
-    }, [depKey, retryCount]);
+    }, [depKey, retryCount, view.from, view.to, activeSite]);
 
     function removeRow(rowId) {
       setState(function (s) {
@@ -171,7 +193,7 @@
       });
     }
 
-    var ctx = { state: state, removeRow: removeRow };
+    var ctx = { state: state, removeRow: removeRow, view: view, setView: setView };
     return React.createElement(TasksContext.Provider, { value: ctx },
       props.children);
   }
@@ -182,6 +204,7 @@
     var fs                = window.FieldSight;
     var TasksFilterChips  = fs.TasksFilterChips;
     var TaskCard          = fs.TaskCard;
+    var RangeToolbar      = fs.RangeToolbar;
     var onSelect          = props.onSelect || function () {};
 
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
@@ -210,10 +233,25 @@
     }
     var state = ctx.state;
 
+    /* Built once and rendered in EVERY non-terminal branch (loading/error/ok):
+       RangeToolbar owns resolving the initial preset into {from,to} via its
+       onChange, so it must be mounted even while state is still 'loading' —
+       otherwise the fetch guard (view.from null) and the loading state
+       deadlock each other. */
+    var toolbar = RangeToolbar
+      ? React.createElement(RangeToolbar, {
+          value:      ctx.view,
+          onChange:   ctx.setView,
+          presets:    ['today', '7d', '30d', 'all', 'custom'],
+          storageKey: 'fs.settings.tasksView',
+        })
+      : null;
+
     if (state.status === 'loading') {
       /* Sprint 8.7.3 — skeleton rows while aggregating */
       var skeletonWidths = ['75%', '55%', '90%', '65%', '80%'];
       return React.createElement('div', { className: 'fs-tasks' },
+        toolbar,
         React.createElement('div', { className: 'fs-tasks__skeleton' },
           skeletonWidths.map(function (w, i) {
             return React.createElement('div', {
@@ -243,6 +281,7 @@
     if (state.status === 'error') {
       var ErrorBanner = window.FieldSight.ErrorBanner;
       return React.createElement('div', { className: 'fs-tasks' },
+        toolbar,
         ErrorBanner
           ? React.createElement(ErrorBanner, {
               message:   (state.error && state.error.message) || 'Could not load tasks',
@@ -313,14 +352,16 @@
         React.createElement('div', { className: 'fs-tasks__subtitle' },
           'Action items assigned across reports — yours, your team’s, by status'),
         React.createElement('div', { className: 'fs-tasks__meta' },
-          rows.length + ' actions · last ' + DEFAULT_DAYS + ' days'
-            + ' (' + fmtDate(state.from) + ' → ' + fmtDate(state.to) + ')',
+          rows.length + ' actions · ' + fmtDate(state.from) + ' → ' + fmtDate(state.to),
           React.createElement('span', {
             className: 'fs-tasks__meta-info',
             title:     'Aggregated client-side from /api/timeline + /api/actions per day. A backend /api/actions/all aggregator would speed this up at scale.',
           }, 'ⓘ'),
         ),
       ),
+
+      /* Date-range selector — Today / 7d / 30d / All / Custom */
+      toolbar,
 
       /* Filter chips */
       React.createElement(TasksFilterChips, {
@@ -416,6 +457,7 @@
         action_index: row.action_index,
         checked:      true,
         action_text:  row.action,
+        user_folder:  row.user_folder,
       }).then(function () {
         if (ctx && ctx.removeRow) ctx.removeRow(row.id);
         if (props.onClose) props.onClose();
@@ -525,7 +567,11 @@
 
   function ActionHistoryPanel(props) {
     var row = props.row;
-    var key = row.topic_id + '_' + row.action_index;
+    /* User-dim audit key (plan §1.3) — match either the composite key
+       (row.user_folder present) or the bare legacy key, so records written
+       before the migration still surface in history. */
+    var bareKey = row.topic_id + '_' + row.action_index;
+    var compositeKey = row.user_folder ? (row.user_folder + '|' + bareKey) : bareKey;
 
     var dataRef = React.useState({ status: 'loading' });
     var data    = dataRef[0]; var setData = dataRef[1];
@@ -545,7 +591,7 @@
           return;
         }
         var entries = (res.entries || []).filter(function (e) {
-          return e.topic_action_key === key;
+          return e.topic_action_key === compositeKey || e.topic_action_key === bareKey;
         });
 
         /* Q-S11-3 — admin/gm see all events; regular users see only
@@ -567,7 +613,7 @@
         if (!cancelled) setData({ status: 'hidden' });
       });
       return function () { cancelled = true; };
-    }, [key]);
+    }, [bareKey, compositeKey]);
 
     if (data.status !== 'ok') return null;
 

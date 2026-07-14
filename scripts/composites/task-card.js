@@ -19,12 +19,46 @@
 
    Props:
      task           { id, title, assignee, status, statusTone, dueTime,
-                      topic_id, actionIndex, ... }
+                      topic_id, actionIndex, folder, ... } — `folder` is
+                      the report OWNER's folder (feat/user-dim-audit-key,
+                      Task 6; stamped by today-adapter.js), sent as
+                      `user_folder` on the toggleAction call below so the
+                      audit check-off is keyed per-user, never the
+                      caller/currentUser.
      isMine         boolean — apply --mine accent border
      onSelect       (task) => void — click handler on the row body
      checkable      boolean — show check button instead of avatar
      date           'YYYY-MM-DD' — passed to FS.api.actions.toggleAction
      onCheckedOff   (task) => void — called once the fade-out finishes
+     site           string, optional (feat/today-by-project) — project
+                    display name. Renders as a small chip in the meta
+                    row so a single-project caller can still tell which
+                    project a task belongs to. Omitted/falsy → the meta
+                    row is byte-identical to before this prop existed.
+     ageLabel       string, optional (feat/today-rolling-open-items) —
+                    e.g. 'Today' / '3d ago'. How long this item has been
+                    open, for the Today rolling list where cards mix
+                    origin dates. Omitted/falsy → no age text rendered.
+     noDeadline     boolean, optional (feat/today-rolling-open-items) —
+                    renders a subtle "No deadline" chip (warning tone,
+                    never safety-red/blocked-magenta per CLAUDE.md).
+     selectable     boolean, optional (feat/leftover-bulk-select) — shows
+                    a SQUARE bulk-selection checkbox to the left of the
+                    existing leading slot (avatar or round check-off
+                    circle). Distinct shape + position from the round
+                    check button on purpose — square = "select for bulk
+                    action", circle = "resolve this one now". Omitted/
+                    falsy → no checkbox rendered, row is byte-identical
+                    to before (Recent cards + timeline usages unaffected).
+     bulkSelected   boolean, optional — checkbox checked state. Only
+                    meaningful when `selectable` is true. NOT the same
+                    prop as `selected` above (that one drives the
+                    right-panel "currently open" highlight) — deliberately
+                    a different name to avoid colliding with it.
+     onSelectToggle (task) => void, optional — fired on checkbox toggle.
+                    Click on the checkbox stops propagation so it never
+                    triggers the row's onSelect (open detail) or the
+                    round check-off button.
 
    Exported to:
      window.FieldSight.TaskCard
@@ -45,6 +79,9 @@
     var isMine   = !!props.isMine;
     var onSelect = props.onSelect;
     var checkable = !!props.checkable && task && task.topic_id != null && task.actionIndex != null;
+    /* feat/leftover-bulk-select — additive, no-op when `selectable` is
+       omitted/falsy (see prop-trio doc in the file header above). */
+    var selectable = !!props.selectable;
 
     /* checkingOff: true → row enters animation. Stays true until
        onAnimationEnd; the parent's onCheckedOff then unmounts us. */
@@ -70,6 +107,10 @@
         action_index: task.actionIndex,
         checked:      true,
         action_text:  task.title,
+        /* feat/user-dim-audit-key (Task 6) — report OWNER's folder
+           (task.folder, stamped by today-adapter.js), never the
+           caller/currentUser. */
+        user_folder:  task.folder,
       }).catch(function (err) {
         /* If the persist call fails, abort the animation and let the
            user retry. */
@@ -106,6 +147,27 @@
         )
       : React.createElement(Avatar, { name: task.assignee, size: 'sm' });
 
+    /* feat/leftover-bulk-select — square bulk-select checkbox, rendered
+       BEFORE `leading` (so it never occupies the same slot/shape as the
+       round check-off button or the avatar). Native <input
+       type="checkbox"> renders square by default in every supported
+       browser — the shape contrast with the round .fs-task-card__check
+       button is intentional and load-bearing (spec: "must not visually
+       collide"). onClick stopPropagation keeps a checkbox click from
+       also firing the row's onSelect (open detail). */
+    var selectCheckbox = selectable
+      ? React.createElement('input', {
+          type:      'checkbox',
+          className: 'fs-task-card__select',
+          checked:   !!props.bulkSelected,
+          onClick:   function (e) { e.stopPropagation(); },
+          onChange:  function () {
+            if (props.onSelectToggle) props.onSelectToggle(task);
+          },
+          'aria-label': 'Select "' + (task.title || 'task') + '" for bulk resolve',
+        })
+      : null;
+
     return React.createElement(Card, {
       padding:   'sm',
       onClick:   onSelect && !checkingOff ? function () { onSelect(task); } : undefined,
@@ -115,12 +177,26 @@
         onAnimationEnd: onAnimationEnd,
       },
         React.createElement('div', { className: 'fs-task-card__row' },
+          selectCheckbox,
           leading,
           React.createElement('div', { className: 'fs-task-card__main' },
             React.createElement('div', { className: 'fs-task-card__title' },
               task.title),
           ),
           React.createElement('div', { className: 'fs-task-card__meta' },
+            props.site ? React.createElement('span', {
+              className: 'fs-task-card__site',
+              title:     props.site,
+            }, props.site) : null,
+            /* feat/today-rolling-open-items — age + no-deadline signals.
+               Both optional; omitted/falsy on any caller that doesn't
+               pass them → meta row is byte-identical to before. */
+            props.ageLabel ? React.createElement('span', {
+              className: 'fs-task-card__age',
+            }, props.ageLabel) : null,
+            props.noDeadline ? React.createElement(Badge, {
+              tone: 'warning', variant: 'outline', size: 'sm',
+            }, 'No deadline') : null,
             React.createElement(Badge, { tone: task.statusTone, size: 'sm' },
               task.status),
             React.createElement('span', { className: 'fs-task-card__due' },

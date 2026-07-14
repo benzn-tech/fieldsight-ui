@@ -7,6 +7,7 @@
 
 const NAV_ICONS = {
   today:      'calendar-check',
+  timeline:   'history',
   activity:   'activity',
   portfolio:  'layout-dashboard',
   regional:   'map',
@@ -27,6 +28,14 @@ const NAV_ICONS = {
 const NAV_SECTIONS = [
   {
     key: 'DAILY',
+    /* Timeline is intentionally NOT a top-level nav item (user decision
+       2026-07-13): it's the per-day RECORD you drill INTO, reached via
+       Today's "Open timeline" / "View daily report" CTAs, Tasks rows, and
+       search/Ask citations — a contextual deep-link (?date=&user=&topic…),
+       not a parallel destination. The /timeline route still exists; it's
+       just not surfaced as a sidebar entry. (It was briefly added here in
+       fix/today-timeline-and-focus after being found unregistered, then
+       removed once we settled that button/deep-link access is the model.) */
     label: 'Daily',
     items: ['today', 'activity'],
   },
@@ -99,7 +108,7 @@ function NavItem({ navKey, label, isActive, isCollapsed, onClick, isSubItem }) {
   const t = window.FS.tokens;
 
   const iconColor = isActive
-    ? t.colors.accent[500]
+    ? t.colors.neutral[900]
     : (hovered ? t.colors.neutral[0] : t.colors.neutral[400]);
 
   /* Sprint 3 P-04: in collapsed mode (justifyContent:center, 48 px wide
@@ -108,10 +117,10 @@ function NavItem({ navKey, label, isActive, isCollapsed, onClick, isSubItem }) {
      borderLeft in expanded mode (where it sits beside text and the
      visual offset is fine) and switch to a non-layout box-shadow
      inset stripe when collapsed. */
-  const activeStripe   = isActive ? '3px solid ' + t.colors.accent[500] : '3px solid transparent';
-  const collapsedStripe = isCollapsed && isActive
-    ? 'inset 3px 0 0 ' + t.colors.accent[500]
-    : 'none';
+  /* Selection is now a solid yellow fill (see itemStyle); the old yellow edge
+     stripe is redundant/invisible on yellow — keep the layout slot transparent. */
+  const activeStripe   = '3px solid transparent';
+  const collapsedStripe = 'none';
 
   const itemStyle = {
     display: 'flex',
@@ -129,9 +138,9 @@ function NavItem({ navKey, label, isActive, isCollapsed, onClick, isSubItem }) {
     position: 'relative',
     justifyContent: isCollapsed ? 'center' : 'flex-start',
     background: isActive
-      ? 'var(--surface-sidebar-active)'
+      ? t.colors.accent[500]
       : hovered ? 'var(--surface-sidebar-hover)' : 'transparent',
-    color: isActive || hovered ? t.colors.neutral[0] : t.colors.neutral[300],
+    color: isActive ? t.colors.neutral[900] : (hovered ? t.colors.neutral[0] : t.colors.neutral[300]),
     fontSize: t.typography.fontSize.sm,
     fontWeight: isActive ? t.typography.fontWeight.semibold : t.typography.fontWeight.medium,
     transition: 'background 100ms ease-out, color 100ms ease-out',
@@ -263,9 +272,12 @@ function UserArea({ user, isCollapsed }) {
 
   return React.createElement('div', { style: areaStyle, className: 'user-area' },
     React.createElement('div', {
-      style: avatarStyle,
+      style: Object.assign({}, avatarStyle, { overflow: 'hidden' }),
       onClick: function() { setMenuOpen(function(o) { return !o; }); },
-    }, user.initials || '?'),
+    },
+      user.avatarUrl
+        ? React.createElement('img', { src: user.avatarUrl, alt: '', style: { width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' } })
+        : (user.initials || '?')),
 
     !isCollapsed ? React.createElement('div', {
       style: { flex: 1, minWidth: 0, cursor: 'pointer' },
@@ -289,13 +301,27 @@ function UserArea({ user, isCollapsed }) {
     ) : null,
 
     menuOpen ? React.createElement('div', { style: menuStyle },
-      React.createElement('div', { style: menuItemStyle }, 'Profile'),
       React.createElement('div', {
-        style: Object.assign({}, menuItemStyle, {
-          borderTop: '1px solid var(--border-subtle)',
-          color: 'var(--text-danger)',
-        }),
-      }, 'Log out'),
+        style: menuItemStyle,
+        onClick: function() { setMenuOpen(false); window.location.hash = '#/settings'; },
+      }, 'Settings'),
+      /* Sign out — live mode only (mock mode has no real session to clear).
+         Session API: window.FS.session.isSignedIn() / .clear() (scripts/auth/session.js). */
+      (window.FS && window.FS.api && window.FS.api.useMocks === false &&
+       window.FS.session && window.FS.session.isSignedIn())
+        ? React.createElement('div', {
+            style: Object.assign({}, menuItemStyle, {
+              borderTop: '1px solid var(--border-subtle)',
+              color: 'var(--text-danger)',
+            }),
+            onClick: function() {
+              setMenuOpen(false);
+              window.FS.session.clear();
+              window.location.hash = '';
+              window.location.reload();
+            },
+          }, 'Sign out')
+        : null,
     ) : null,
 
     menuOpen ? React.createElement('div', {
@@ -330,13 +356,6 @@ function LeftNav({ user, currentRoute, isCollapsed, onToggleCollapse, onNavigate
     padding: isCollapsed ? '0' : '0 12px 0 16px',
     borderBottom: '1px solid rgba(255,255,255,0.08)',
     flexShrink: 0,
-  };
-
-  const logoMarkStyle = {
-    width: '28px', height: '28px', borderRadius: '6px',
-    background: t.colors.accent[500], color: '#fff',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontWeight: 800, fontSize: '14px', flexShrink: 0,
   };
 
   const toggleBtnStyle = {
@@ -375,7 +394,10 @@ function LeftNav({ user, currentRoute, isCollapsed, onToggleCollapse, onNavigate
       !isCollapsed ? React.createElement('div', {
         style: { display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 },
       },
-        React.createElement('div', { style: logoMarkStyle }, 'F'),
+        React.createElement('img', {
+          src: 'assets/logo.png?v=1', alt: 'FieldSight',
+          style: { height: '26px', width: 'auto', flexShrink: 0, display: 'block' },
+        }),
         React.createElement('span', {
           style: {
             color: '#fff',
@@ -384,7 +406,11 @@ function LeftNav({ user, currentRoute, isCollapsed, onToggleCollapse, onNavigate
             letterSpacing: '-0.01em',
             overflow: 'hidden', whiteSpace: 'nowrap',
           },
-        }, 'FieldSight'),
+        },
+          'Field',
+          React.createElement('span', { style: { color: t.colors.accent[500] } }, 'Sight'),
+          'AI',
+        ),
       ) : null,
       React.createElement('button', {
         style: toggleBtnStyle,

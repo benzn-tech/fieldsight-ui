@@ -4,14 +4,17 @@
    Full-screen search overlay opened via Cmd/Ctrl+K or the search icon
    button in the middle-column header.
 
-   Search scope (client-side, against cached API data):
-     Tasks    — action_items[].text across last 14 days
-     Safety   — safety_flags + safety_observations
-     Sites    — sites[].name + sites[].location
-     People   — users derived from sites[].users
+   Search scope:
+     Tasks    — action_items[].text across last 14 days (client-side, cached)
+     Safety   — safety_flags + safety_observations (client-side, cached)
+     Sites    — sites[].name + sites[].location (client-side, cached)
+     People   — users derived from sites[].users (client-side, cached)
+     Topics   — server-side semantic search via window.FS.api.search.topics
+                (POST /api/search), debounced 250ms, results grouped by
+                report_date; shown once the request settles
 
-   Data is loaded once on first open and cached in module scope for the
-   rest of the session (survives palette close/reopen).
+   Tasks/safety/sites/people are loaded once on first open and cached in
+   module scope for the rest of the session (survives palette close/reopen).
 
    Keyboard:
      ArrowUp / ArrowDown  — navigate result list
@@ -28,9 +31,9 @@
 (function () {
   'use strict';
 
-  var TYPE_ORDER  = ['task', 'safety', 'site', 'user'];
-  var TYPE_LABELS = { task: 'Tasks', safety: 'Safety', site: 'Sites', user: 'People' };
-  var TYPE_ICONS  = { task: 'check-square', safety: 'shield-alert', site: 'building-2', user: 'user' };
+  var TYPE_ORDER  = ['task', 'safety', 'site', 'user', 'topic'];
+  var TYPE_LABELS = { task: 'Tasks', safety: 'Safety', site: 'Sites', user: 'People', topic: 'Topics' };
+  var TYPE_ICONS  = { task: 'check-square', safety: 'shield-alert', site: 'building-2', user: 'user', topic: 'file-text' };
 
   /* ---------------------------------------------------------------------- */
   /* Module-level data cache — survives palette close/reopen in a session    */
@@ -39,12 +42,26 @@
   var _cache = { loaded: false, loading: false,
                  tasks: [], safety: [], sites: [], users: [] };
 
+  function _isAdminCaller() {
+    var c = (window.AuthMock && window.AuthMock.currentUser) || {};
+    return c.role === 'admin' || c.role === 'gm' || !!c.isAdmin;
+  }
+
   async function _loadCache() {
     if (_cache.loaded || _cache.loading) return;
     _cache.loading = true;
     try {
       var today = window.FS.api.todayNZDT();
-      var from  = window.FS.api.addDaysISO(today, -14);
+      /* Task C — widen the cache window from a trailing 14 days to the
+         full report span (FS.api.window.getSpan(), shared/cached with
+         every other widened call site) so Search can actually find the
+         historic Feb/Mar report data instead of an empty last-14-days
+         slice. Falls back to `today` (i.e. no widening) if the span
+         lookup fails or no report has ever existed. */
+      var span  = await window.FS.api.window.getSpan().catch(function () {
+        return { earliest: null, latest: null, dates: {} };
+      });
+      var from  = span.earliest || today;
 
       var results = await Promise.all([
         window.FS.api.sites.getSites()
@@ -140,8 +157,27 @@
     });
 
     var out = [];
-    TYPE_ORDER.forEach(function (t) { out = out.concat(byType[t]); });
+    /* byType no longer has a 'topic' key (server-side now) — guard so the
+       TYPE_ORDER walk doesn't concat(undefined) into the result list. */
+    TYPE_ORDER.forEach(function (t) { if (byType[t]) out = out.concat(byType[t]); });
     return out;
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* Ask hand-off — which report user's Timeline the "Ask FieldSight" row    */
+  /* routes to. Worker/site_manager: own folder (server would force this     */
+  /* anyway). Admin/gm: no personal report folder, so fall back to the       */
+  /* seeded default site_manager, matching compliance-aggregator.js's        */
+  /* resolveUser() (:107-116) parity convention.                             */
+  /* ---------------------------------------------------------------------- */
+
+  var ADMIN_ASK_FOLDER = 'Jarley_Trainor';
+
+  function _resolveAskFolder() {
+    var caller  = (window.AuthMock && window.AuthMock.currentUser) || {};
+    var isAdmin = caller.role === 'admin' || caller.role === 'gm' || caller.isAdmin;
+    if (!isAdmin && caller.name) return window.FS.api.folderName(caller.name);
+    return ADMIN_ASK_FOLDER;
   }
 
   /* ---------------------------------------------------------------------- */
@@ -167,6 +203,27 @@
     });
     var recent  = refRecent[0]; var setRecent = refRecent[1];
 
+    /* F1 — inline RAG Ask hand-off. null = normal search list; { question }
+       swaps the results body for an inline AskChat (no navigation). Local
+       state only — closing the palette unmounts SearchPalette and this
+       resets for free, no explicit cleanup needed. */
+    var refAsk  = React.useState(null);
+    var askMode = refAsk[0]; var setAskMode = refAsk[1];
+
+    /* Mechanism 1 — server-side semantic topic search (replaces the old
+       client fan-out). Async + debounced; results merged with the client-side
+       task/safety/site/people matches below. */
+    var refTopics = React.useState([]);
+    var topicRows = refTopics[0]; var setTopicRows = refTopics[1];
+    var refTLoad  = React.useState(false);
+    var topicLoading = refTLoad[0]; var setTopicLoading = refTLoad[1];
+    /* Imp3 (Fable UI review) — topicsFor tracks the query the current
+       topicRows correspond to. Gating Ask / "No results" on this (instead of
+       the transient topicLoading) stops the Ask row flashing for one paint on
+       the query-change render, before the debounced effect has run. */
+    var refTFor   = React.useState('');
+    var topicsFor = refTFor[0]; var setTopicsFor = refTFor[1];
+
     var inputRef = React.useRef(null);
     var listRef  = React.useRef(null);
 
@@ -176,12 +233,39 @@
       _loadCache();
     }, []);
 
-    /* Re-run search whenever query changes */
+    /* Re-run client search + kick a debounced server topic search on query
+       change. A stale-guard token drops out-of-order responses. */
+    var reqSeq = React.useRef(0);
     React.useEffect(function () {
       var q = query.trim();
-      if (!q) { setResults([]); setSelIdx(0); return; }
-      setResults(_search(q));
       setSelIdx(0);
+      if (!q) { reqSeq.current++; setResults([]); setTopicRows([]); setTopicsFor(''); setTopicLoading(false); return; }
+      setResults(_search(q));                 /* tasks/safety/sites/people, sync */
+      if (q.length < 2) { reqSeq.current++; setTopicRows([]); setTopicsFor(q); setTopicLoading(false); return; }
+      var mine = ++reqSeq.current;
+      setTopicLoading(true);
+      var t = setTimeout(function () {
+        /* Imp1 (Fable UI review) — degrade gracefully if search.js isn't
+           loaded on this page (e.g. components-preview): resolve empty instead
+           of throwing a TypeError inside the timer (outside the promise chain,
+           so .catch can't see it) which would wedge topicLoading forever. */
+        (window.FS.api.search
+          ? window.FS.api.search.topics({ q: q })
+          : Promise.resolve({ results: [] }))
+          .then(function (r) {
+            if (mine !== reqSeq.current) return;       /* superseded */
+            setTopicRows((r && r.results) || []);
+            setTopicsFor(q);
+            setTopicLoading(false);
+          })
+          .catch(function () {
+            if (mine !== reqSeq.current) return;
+            setTopicRows([]);
+            setTopicsFor(q);
+            setTopicLoading(false);
+          });
+      }, 250);
+      return function () { clearTimeout(t); };
     }, [query]);
 
     /* Scroll the focused result into view */
@@ -191,46 +275,141 @@
       if (el) el.scrollIntoView({ block: 'nearest' });
     }, [selIdx]);
 
+    /* Minor A (Fable review) — global Escape, works even when focus has
+       moved off the search input (e.g. into AskChat's own input).
+       Mirrors the document-level Escape pattern in app-shell.js
+       WeatherIndicator. askMode → back to search; else → close palette. */
+    React.useEffect(function () {
+      function onKey(e) {
+        if (e.key !== 'Escape') return;
+        if (askMode) setAskMode(null);
+        else onClose();
+      }
+      document.addEventListener('keydown', onKey);
+      return function () { document.removeEventListener('keydown', onKey); };
+    }, [askMode, onClose]);
+
+    var trimmedQuery = query.trim();
+
+    /* Client-side groups (task/safety/site/user) */
+    var groups = [];
+    TYPE_ORDER.forEach(function (type) {
+      if (type === 'topic') return;  /* topics come from the server now */
+      var items = results.filter(function (r) { return r.type === type; });
+      if (items.length) groups.push({ type: type, items: items });
+    });
+
+    /* Server topic rows → result items, grouped by report_date */
+    var topicItems = topicRows.map(function (row) {
+      return {
+        type:     'topic',
+        id:       row.route,
+        title:    row.title,
+        subtitle: (row.site_name ? row.site_name + ' · ' : '') + row.report_date,
+        route:    row.route,
+      };
+    });
+
+    var clientFlat = groups.reduce(function (acc, g) { return acc.concat(g.items); }, []);
+
+    /* topicsSettled: the server topic search has landed for THIS exact query
+       (or it's too short to trigger one) — still gates the "No results" line so
+       it can't flash before the debounced effect runs. */
+    var topicsSettled = (topicsFor === trimmedQuery) || trimmedQuery.length < 2;
+
+    /* Mechanism 2 — Ask is now ALWAYS available (user pref 2026-07-10): when the
+       query is non-empty an "Ask:" row sits ABOVE the Topics group so the user
+       can always fall through to the agent, whether or not keyword topics
+       matched. Ordered after the client groups / before topics so arrow-key
+       navigation matches the visual order. */
+    var askItem = trimmedQuery
+      ? { type: 'ask', id: '__ask__', title: trimmedQuery }
+      : null;
+    var flatItems = clientFlat
+      .concat(askItem ? [askItem] : [])
+      .concat(topicItems);
+
+    function saveRecent(q) {
+      if (!q) return;
+      var next = [q].concat(recent.filter(function (r) { return r !== q; })).slice(0, 5);
+      setRecent(next);
+      try { sessionStorage.setItem('fs.search.recent', JSON.stringify(next)); } catch (_) {}
+    }
+
+    /* F1 — inline RAG Ask hand-off. Starts AskChat right inside the palette
+       (global scope: no date/user/topic_id, so backend Phase 5 grounds
+       across the caller's whole ACL rather than one report). Does NOT call
+       onClose — the palette stays open showing the answer.
+       Guard: if AskChat isn't loaded (script missing/load-order issue),
+       fall back to the original Task C behaviour — stash the query for
+       Timeline's report-level AskChat to prefill-and-clear, then route to
+       the latest report date for the resolved user folder. getSpan() is
+       already warm by the time this fires (kicked off by _loadCache on
+       palette open), so the async hop is imperceptible in practice; still
+       tolerate a slow/failed span lookup by falling back to today. */
+    function doAsk(q) {
+      if (!q) return;
+      saveRecent(q);
+
+      if (!(window.FieldSight && window.FieldSight.AskChat)) {
+        try { sessionStorage.setItem('fs.ask.prefill', q); } catch (_) {}
+        var folder = _resolveAskFolder();
+        function go(dateStr) {
+          window.FS.Router.navigate('/timeline?date=' + encodeURIComponent(dateStr)
+            + '&user=' + encodeURIComponent(folder));
+        }
+        window.FS.api.window.getSpan().then(function (span) {
+          go((span && span.latest) || window.FS.api.todayNZDT());
+        }).catch(function () {
+          go(window.FS.api.todayNZDT());
+        });
+        onClose();
+        return;
+      }
+
+      setAskMode({ question: q });
+    }
+
     function doSelect(item) {
       if (!item) return;
-      var q = query.trim();
-      if (q) {
-        var next = [q].concat(recent.filter(function (r) { return r !== q; })).slice(0, 5);
-        setRecent(next);
-        try { sessionStorage.setItem('fs.search.recent', JSON.stringify(next)); } catch (_) {}
+      if (item.type === 'ask') {
+        doAsk(trimmedQuery);
+        return;
       }
+      saveRecent(trimmedQuery);
       window.FS.Router.navigate(item.route);
       onClose();
     }
 
     function onKeyDown(e) {
+      /* F1 (Fable review) — askMode swaps the results body for the inline
+         AskChat panel; short-circuit here so Enter/Arrow keys don't drive
+         the now-hidden results list (Enter could re-select an invisible
+         row, or re-set askMode without re-sending — AskChat's
+         initialQuestion is mount-only). Escape isn't handled here either:
+         it bubbles to the document-level effect below, which backs out of
+         askMode instead of closing the whole palette. */
+      if (askMode) return;
+
       switch (e.key) {
         case 'Escape':
           onClose();
           break;
         case 'ArrowDown':
           e.preventDefault();
-          setSelIdx(function (i) { return Math.min(i + 1, results.length - 1); });
+          setSelIdx(function (i) { return Math.min(i + 1, flatItems.length - 1); });
           break;
         case 'ArrowUp':
           e.preventDefault();
           setSelIdx(function (i) { return Math.max(i - 1, 0); });
           break;
         case 'Enter':
-          doSelect(results[selIdx]);
+          doSelect(flatItems[selIdx]);
           break;
         default:
           break;
       }
     }
-
-    /* Group results by type for sectioned display */
-    var groups = [];
-    TYPE_ORDER.forEach(function (type) {
-      var items = results.filter(function (r) { return r.type === type; });
-      if (items.length) groups.push({ type: type, items: items });
-    });
-    var flatItems = groups.reduce(function (acc, g) { return acc.concat(g.items); }, []);
 
     return React.createElement('div', {
       className:    'fs-search-palette',
@@ -259,7 +438,7 @@
             ref:          inputRef,
             type:         'text',
             className:    'fs-search-palette__input',
-            placeholder:  'Search tasks, sites, people, safety…',
+            placeholder:  'Search tasks, sites, people, safety, topics…',
             value:        query,
             onChange:     function (e) { setQuery(e.target.value); },
             onKeyDown:    onKeyDown,
@@ -281,15 +460,48 @@
           React.createElement('kbd', { className: 'fs-search-palette__esc-hint' }, 'Esc'),
         ),
 
-        /* ---- Results list ---------------------------------------------- */
+        /* ---- Results list ------------------------------------------------
+           F1 — when askMode is set, this whole body is swapped for the
+           inline AskChat panel (below); everything else (no-match/grouped/
+           recent/hint + the "Ask FieldSight" row) only renders when
+           askMode is null. */
         React.createElement('div', {
           ref:          listRef,
           className:    'fs-search-palette__results',
-          role:         'listbox',
-          'aria-label': 'Search results',
+          role:         askMode ? 'region' : 'listbox',
+          'aria-label': askMode ? 'Ask FieldSight' : 'Search results',
         },
+          askMode
+            ? React.createElement('div', { className: 'fs-search-palette__ask' },
+                React.createElement('button', {
+                  type:         'button',
+                  className:    'fs-search-palette__ask-back',
+                  onClick:      function () { setAskMode(null); },
+                },
+                  NavIcon && React.createElement(NavIcon, {
+                    name:  'chevron-left',
+                    size:  14,
+                    color: 'var(--text-tertiary)',
+                  }),
+                  'Back to search',
+                ),
+                React.createElement('div', { className: 'fs-search-palette__ask-question' },
+                  askMode.question),
+                React.createElement(window.FieldSight.AskChat, {
+                  /* F1 (Fable review) — key on the question so a second
+                     Ask from search (different question, same mounted
+                     panel) remounts AskChat instead of reusing the old
+                     instance; initialQuestion is mount-only and wouldn't
+                     otherwise re-send. */
+                  key:             askMode.question,
+                  compact:         true,
+                  initialQuestion: askMode.question,
+                  scope:           'both',
+                }),
+              )
+            :
           /* No match */
-          query.trim() && results.length === 0
+          query.trim() && results.length === 0 && !topicItems.length && !topicLoading && topicsSettled
             ? React.createElement('div', { className: 'fs-search-palette__empty' },
                 'No results for “' + query.trim() + '”')
 
@@ -364,9 +576,91 @@
                 }),
               )
 
-            /* Empty prompt */
-            : React.createElement('div', { className: 'fs-search-palette__hint' },
-                'Type to search across tasks, safety flags, sites, and people'),
+            /* Empty prompt (only when the query itself is empty — a non-empty
+               query with zero client matches but pending/found server topics
+               is covered by the Topics block below, not this hint). */
+            : !query.trim()
+            ? React.createElement('div', { className: 'fs-search-palette__hint' },
+                'Type to search across tasks, safety flags, sites, people, and topics')
+            : null,
+
+          /* "Ask:" row — ALWAYS shown above Topics (user pref 2026-07-10) so
+             the agent is always reachable; distinct accent-bordered pill.
+             Hidden while the AskChat panel (askMode) is open. */
+          !askMode && askItem
+            ? React.createElement('button', {
+                type:            'button',
+                role:            'option',
+                'aria-selected': flatItems.indexOf(askItem) === selIdx,
+                'data-selected': String(flatItems.indexOf(askItem) === selIdx),
+                className:       'fs-search-palette__result'
+                                  + (flatItems.indexOf(askItem) === selIdx ? ' fs-search-palette__result--active' : ''),
+                style: {
+                  border:       '1px solid var(--color-accent-400)',
+                  borderRadius: '8px',
+                  margin:       '4px 0 8px',
+                },
+                onClick:         function () { doSelect(askItem); },
+                onMouseEnter:    function () { setSelIdx(flatItems.indexOf(askItem)); },
+              },
+                NavIcon && React.createElement(NavIcon, {
+                  name:  'message-circle',
+                  size:  15,
+                  color: 'var(--color-accent-700)',
+                }),
+                React.createElement('div', { className: 'fs-search-palette__result-body' },
+                  React.createElement('span', {
+                    className: 'fs-search-palette__result-title',
+                    style:     { fontWeight: 600 },
+                  },
+                    React.createElement('span', {
+                      style: { color: 'var(--color-accent-700)', marginRight: '6px' },
+                    }, 'Ask:'),
+                    React.createElement('span', {
+                      style: { color: 'var(--color-accent-800)' },
+                    }, askItem.title)),
+                ),
+              )
+            : null,
+
+          /* Server topic results, sub-grouped by report date. Gated on
+             !askMode too — the search input stays editable while the Ask
+             panel is showing, so topicItems/topicLoading can otherwise
+             change underneath it. */
+          (!askMode && query.trim() && (topicItems.length || topicLoading))
+            ? React.createElement('div', { className: 'fs-search-palette__group', key: '__topics__' },
+                React.createElement('div', {
+                  className: 'fs-search-palette__group-label', role: 'presentation',
+                }, 'Topics'),
+                topicLoading && !topicItems.length
+                  ? React.createElement('div', { className: 'fs-search-palette__hint' }, 'Searching topics…')
+                  : topicItems.map(function (item) {
+                      /* Relevance order from the backend (hybrid: word-match
+                         first, then cosine distance) — NOT re-grouped by date,
+                         which used to bury a relevant older topic under a
+                         recent-but-irrelevant one. The report date stays
+                         visible in each row's subtitle. */
+                      var idx = flatItems.indexOf(item);
+                      var isSel = idx === selIdx;
+                      return React.createElement('button', {
+                        key: item.id, type: 'button', role: 'option',
+                        'aria-selected': isSel, 'data-selected': String(isSel),
+                        className: 'fs-search-palette__result'
+                          + (isSel ? ' fs-search-palette__result--active' : ''),
+                        onClick: function () { doSelect(item); },
+                        onMouseEnter: function () { setSelIdx(idx); },
+                      },
+                        NavIcon && React.createElement(NavIcon, {
+                          name: 'file-text', size: 15, color: 'var(--text-tertiary)' }),
+                        React.createElement('div', { className: 'fs-search-palette__result-body' },
+                          React.createElement('span', { className: 'fs-search-palette__result-title' }, item.title),
+                          item.subtitle ? React.createElement('span', {
+                            className: 'fs-search-palette__result-sub' }, item.subtitle) : null));
+                    }))
+            : null,
+
+          /* (Ask row is rendered ABOVE the Topics group now — user pref
+             2026-07-10; see the "Ask:" block above.) */
         ),
       ),
     );

@@ -133,13 +133,71 @@ function BottomNav({ user, currentRoute, onNavigate }) {
   );
 }
 
+/* ---------- Weather: WMO weathercode → {icon, label} -------------------
+   Open-Meteo returns a numeric WMO 4677 weather code (both the archive
+   and forecast APIs). Icon names are lucide keys (see NavIcon in
+   left-nav.js — kebab-case, converted to PascalCase at render time). */
+const WMO_WEATHER_CODES = {
+  0:  { icon: 'sun',             label: 'Clear sky' },
+  1:  { icon: 'cloud-sun',       label: 'Mainly clear' },
+  2:  { icon: 'cloud-sun',       label: 'Partly cloudy' },
+  3:  { icon: 'cloud',           label: 'Overcast' },
+  45: { icon: 'cloud-fog',       label: 'Fog' },
+  48: { icon: 'cloud-fog',       label: 'Depositing rime fog' },
+  51: { icon: 'cloud-drizzle',   label: 'Light drizzle' },
+  53: { icon: 'cloud-drizzle',   label: 'Moderate drizzle' },
+  55: { icon: 'cloud-drizzle',   label: 'Dense drizzle' },
+  56: { icon: 'cloud-drizzle',   label: 'Light freezing drizzle' },
+  57: { icon: 'cloud-drizzle',   label: 'Dense freezing drizzle' },
+  61: { icon: 'cloud-rain',      label: 'Slight rain' },
+  63: { icon: 'cloud-rain',      label: 'Moderate rain' },
+  65: { icon: 'cloud-rain',      label: 'Heavy rain' },
+  66: { icon: 'cloud-rain',      label: 'Light freezing rain' },
+  67: { icon: 'cloud-rain',      label: 'Heavy freezing rain' },
+  71: { icon: 'cloud-snow',      label: 'Slight snow' },
+  73: { icon: 'cloud-snow',      label: 'Moderate snow' },
+  75: { icon: 'cloud-snow',      label: 'Heavy snow' },
+  77: { icon: 'cloud-snow',      label: 'Snow grains' },
+  80: { icon: 'cloud-rain',      label: 'Slight showers' },
+  81: { icon: 'cloud-rain',      label: 'Moderate showers' },
+  82: { icon: 'cloud-rain',      label: 'Violent showers' },
+  85: { icon: 'cloud-snow',      label: 'Slight snow showers' },
+  86: { icon: 'cloud-snow',      label: 'Heavy snow showers' },
+  95: { icon: 'cloud-lightning', label: 'Thunderstorm' },
+  96: { icon: 'cloud-lightning', label: 'Thunderstorm, slight hail' },
+  99: { icon: 'cloud-lightning', label: 'Thunderstorm, heavy hail' },
+};
+function wmoLookup(code) {
+  return WMO_WEATHER_CODES[code] || { icon: 'cloud', label: 'Unknown' };
+}
+
+/* sb1108-ellesmere (Christchurch) — sensible NZ fallback when there is no
+   active site (siteContext) or the active site has no `coord` yet. Mirrors
+   the value on that fixture in scripts/mock/sites.fixture.js. */
+const WEATHER_DEFAULT_COORD = { lat: -43.5321, lng: 172.6362 };
+
+/* Module-level cache: `${lat},${lng},${date},${h|r}` → { data, ts }.
+   Cheap insurance against refetch storms (route/site churn while a
+   popover is open, StrictMode double-invoke, etc). Historical ('h')
+   entries are cached indefinitely — the past doesn't change. Realtime
+   ('r') entries get a TTL below (Minor B, Fable review) so an all-day-open
+   tab doesn't keep showing the morning temperature. */
+const weatherFetchCache = {};
+const WEATHER_REALTIME_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
 /* ---------- Weather Indicator + Popover -------------------------------- */
-/* Click reveals a popover with current conditions, next 12h hourly,
-   and a 7-day daily forecast. Mock data only — Sprint 2 wires the
-   real MetService API. */
+/* Click reveals a popover with current/selected-date conditions, next 12h
+   hourly, and a 7-day daily forecast. The headline indicator follows the
+   selected date (route ?date=) and active site (FS.siteContext) via a
+   plain fetch() against Open-Meteo (no key, no Cognito):
+     - selectedDate < today (NZDT)   → archive API (historical daily)
+     - today / future / no date     → forecast API (current_weather)
+   Falls back to the static MockData.WEATHER fixture on fetch failure or
+   when no coordinates are available, so the indicator never disappears
+   or crashes the shell. */
 function WeatherIndicator() {
   const NavIcon = window.FieldSight && window.FieldSight.NavIcon;
-  const weatherData = window.FieldSight.MockData
+  const mockWeather = window.FieldSight.MockData
     ? window.FieldSight.MockData.WEATHER
     : null;
 
@@ -166,9 +224,128 @@ function WeatherIndicator() {
     return function() { document.removeEventListener('keydown', onKey); };
   }, [open]);
 
-  if (!weatherData) return null;
+  /* Selected date — from the route's ?date= param (e.g. /timeline?date=
+     2026-04-10). Router.subscribe() already wraps 'hashchange' and emits
+     synchronously on subscribe, so this doubles as the initial read. */
+  const [routeParams, setRouteParams] = React.useState(function() {
+    return (window.FS && window.FS.Router) ? window.FS.Router.getCurrentRoute().params : {};
+  });
+  React.useEffect(function() {
+    if (!(window.FS && window.FS.Router)) return undefined;
+    return window.FS.Router.subscribe(function(r) { setRouteParams(r.params || {}); });
+  }, []);
 
-  const current = weatherData.current;
+  /* Active site — FS.siteContext, same pub/sub the header project
+     selector uses. */
+  const [activeSiteId, setActiveSiteId] = React.useState(function() {
+    return (window.FS && window.FS.siteContext) ? window.FS.siteContext.get() : null;
+  });
+  React.useEffect(function() {
+    if (!(window.FS && window.FS.siteContext)) return undefined;
+    return window.FS.siteContext.onChange(function(siteId) { setActiveSiteId(siteId); });
+  }, []);
+
+  /* BUG-19: never new Date('YYYY-MM-DD') (UTC drift in NZ) — string
+     compare 'YYYY-MM-DD' dates directly, and use FS.api.todayNZDT(). */
+  const todayISO = (window.FS && window.FS.api) ? window.FS.api.todayNZDT() : null;
+  const selectedDate = routeParams.date || todayISO;
+  const isHistorical = !!(todayISO && selectedDate && selectedDate < todayISO);
+
+  const sitesList = (window.FieldSight.fixtures && window.FieldSight.fixtures.sites
+    && window.FieldSight.fixtures.sites.sites) || [];
+  const activeSite = activeSiteId
+    ? sitesList.find(function(s) { return s.site_id === activeSiteId; })
+    : null;
+  const coord = (activeSite && activeSite.coord) || WEATHER_DEFAULT_COORD;
+
+  /* status: 'loading' | 'success' | 'error' */
+  const [liveState, setLiveState] = React.useState({ status: 'loading', data: null });
+
+  React.useEffect(function() {
+    if (!coord || !selectedDate) { setLiveState({ status: 'error', data: null }); return undefined; }
+
+    const cacheKey = coord.lat + ',' + coord.lng + ',' + selectedDate + ',' + (isHistorical ? 'h' : 'r');
+    const cached = weatherFetchCache[cacheKey];
+    /* Minor B (Fable review) — historical entries are always fresh (the
+       past doesn't change); realtime entries go stale after the TTL so a
+       long-open tab refetches instead of showing the morning temperature
+       all day. */
+    if (cached && (isHistorical || (Date.now() - cached.ts) < WEATHER_REALTIME_TTL_MS)) {
+      setLiveState({ status: 'success', data: cached.data });
+      return undefined;
+    }
+
+    let cancelled = false;
+    setLiveState({ status: 'loading', data: null });
+
+    const url = isHistorical
+      ? 'https://archive-api.open-meteo.com/v1/archive?latitude=' + coord.lat
+        + '&longitude=' + coord.lng + '&start_date=' + selectedDate
+        + '&end_date=' + selectedDate
+        + '&daily=temperature_2m_max,temperature_2m_min,weathercode,windspeed_10m_max'
+        + '&timezone=Pacific/Auckland'
+      : 'https://api.open-meteo.com/v1/forecast?latitude=' + coord.lat
+        + '&longitude=' + coord.lng + '&current_weather=true&timezone=Pacific/Auckland';
+
+    fetch(url)
+      .then(function(res) {
+        if (!res.ok) throw new Error('weather http ' + res.status);
+        return res.json();
+      })
+      .then(function(json) {
+        if (cancelled) return;
+        let result;
+        if (isHistorical) {
+          const daily = json && json.daily;
+          if (!daily || !Array.isArray(daily.weathercode) || daily.weathercode.length === 0
+              || daily.weathercode[0] == null) {
+            throw new Error('no historical data');
+          }
+          const wmo = wmoLookup(daily.weathercode[0]);
+          result = {
+            temp:           Math.round(daily.temperature_2m_max[0]),
+            tempLow:        Math.round(daily.temperature_2m_min[0]),
+            condition:      wmo.icon,
+            conditionLabel: wmo.label,
+            wind:           Math.round(daily.windspeed_10m_max[0]) + ' km/h',
+            humidity:       null,
+            tag:            'Historical · ' + selectedDate,
+          };
+        } else {
+          const cw = json && json.current_weather;
+          if (!cw || cw.temperature == null) throw new Error('no realtime data');
+          const wmo = wmoLookup(cw.weathercode);
+          result = {
+            temp:           Math.round(cw.temperature),
+            condition:      wmo.icon,
+            conditionLabel: wmo.label,
+            wind:           Math.round(cw.windspeed) + ' km/h',
+            humidity:       null,
+            tag:            'Live',
+          };
+        }
+        weatherFetchCache[cacheKey] = { data: result, ts: Date.now() };
+        setLiveState({ status: 'success', data: result });
+      })
+      .catch(function() {
+        if (!cancelled) setLiveState({ status: 'error', data: null });
+      });
+
+    return function() { cancelled = true; };
+  }, [coord.lat, coord.lng, selectedDate, isHistorical]);
+
+  /* Resolve what to actually render: live result, else the mock fixture
+     (tag-less — mock has no historical/realtime distinction), else
+     nothing while a first fetch is in flight. */
+  const display = liveState.status === 'success'
+    ? liveState.data
+    : (liveState.status === 'error' && mockWeather)
+      ? Object.assign({ tag: null }, mockWeather.current)
+      : null;
+
+  const loading = liveState.status === 'loading' && !display;
+
+  if (!display && !loading) return null;
 
   return React.createElement('div', {
     ref: wrapRef,
@@ -176,29 +353,42 @@ function WeatherIndicator() {
   },
     React.createElement('button', {
       type: 'button',
-      onClick: function() { setOpen(function(o) { return !o; }); },
+      onClick: function() { if (display) setOpen(function(o) { return !o; }); },
       className: 'fs-utility-item' + (open ? ' fs-utility-item--active' : ''),
-      title: 'Site weather · ' + current.temp + '°C · ' + current.wind,
-      'aria-label': 'Site weather, ' + current.temp + ' degrees',
+      disabled: !display,
+      title: display
+        ? ('Site weather · ' + display.temp + '°C · ' + display.wind + (display.tag ? ' · ' + display.tag : ''))
+        : 'Loading weather…',
+      'aria-label': display ? ('Site weather, ' + display.temp + ' degrees') : 'Loading weather',
       'aria-expanded': open,
     },
-      NavIcon && React.createElement(NavIcon, { name: current.condition, size: 16 }),
-      React.createElement('span', { className: 'fs-utility-item__text' },
-        current.temp + '°'),
+      loading
+        ? React.createElement('span', { className: 'fs-weather-indicator__spinner', 'aria-hidden': 'true' })
+        : [
+            NavIcon && React.createElement(NavIcon, { key: 'icon', name: display.condition, size: 16 }),
+            React.createElement('span', { key: 'text', className: 'fs-utility-item__text' },
+              display.temp + '°'),
+          ],
     ),
 
-    open ? React.createElement(WeatherPopover, {
-      data: weatherData,
+    (open && display) ? React.createElement(WeatherPopover, {
+      current: display,
+      hourly: (mockWeather && mockWeather.hourly) || [],
+      daily: (mockWeather && mockWeather.daily) || [],
       onClose: function() { setOpen(false); },
     }) : null,
   );
 }
 
 /* ---------- Weather popover content ----------------------------------- */
+/* `current` is date/site-aware (live Open-Meteo result or mock fallback);
+   `hourly`/`daily` stay mock — Open-Meteo forecast data for those strips
+   is a v2 nice-to-have, not required for the headline indicator to be
+   date-aware (see task brief). */
 function WeatherPopover(props) {
   const NavIcon = window.FieldSight && window.FieldSight.NavIcon;
-  const data = props.data;
-  const current = data.current;
+  const Badge = window.FieldSight && window.FieldSight.Badge;
+  const current = props.current;
 
   return React.createElement('div', {
     className: 'fs-weather-popover',
@@ -212,12 +402,17 @@ function WeatherPopover(props) {
         NavIcon && React.createElement(NavIcon, { name: current.condition, size: 36 }),
       ),
       React.createElement('div', null,
-        React.createElement('div', { className: 'fs-weather-popover__current-temp' },
-          current.temp + '°'),
+        React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+          React.createElement('span', { className: 'fs-weather-popover__current-temp' },
+            current.temp + '°'),
+          (current.tag && Badge) ? React.createElement(Badge, {
+            tone: 'neutral', variant: 'subtle', size: 'sm', pill: true,
+          }, current.tag) : null,
+        ),
         React.createElement('div', { className: 'fs-weather-popover__current-label' },
           current.conditionLabel),
         React.createElement('div', { className: 'fs-weather-popover__current-meta' },
-          'Wind ' + current.wind + ' · Humidity ' + current.humidity),
+          'Wind ' + current.wind + (current.humidity ? ' · Humidity ' + current.humidity : '')),
       ),
     ),
 
@@ -225,7 +420,7 @@ function WeatherPopover(props) {
     React.createElement('div', { className: 'fs-weather-popover__section-label' },
       'Next 12 hours'),
     React.createElement('div', { className: 'fs-weather-popover__hourly' },
-      data.hourly.map(function(h, i) {
+      props.hourly.map(function(h, i) {
         return React.createElement('div', {
           key: i, className: 'fs-weather-popover__hour',
         },
@@ -242,7 +437,7 @@ function WeatherPopover(props) {
     React.createElement('div', { className: 'fs-weather-popover__section-label' },
       '7-day forecast'),
     React.createElement('div', { className: 'fs-weather-popover__daily' },
-      data.daily.map(function(d, i) {
+      props.daily.map(function(d, i) {
         return React.createElement('div', {
           key: i, className: 'fs-weather-popover__day',
         },
@@ -297,12 +492,73 @@ async function shareCurrentLink() {
 }
 
 /* ---------- MiddleColumn -------------------------------------------------- */
+
+/* Batch A2 Task 1 — routes scoped by the header project selector (FS.
+   siteContext). Strategic pages (Insights/Portfolio/Regional/Executive),
+   Today, Team/Sites and Ask are exempt BY DESIGN — see scripts/site-context.js. */
+const SITE_SCOPED_ROUTES = ['/timeline', '/safety', '/quality', '/tasks', '/evidence', '/activity'];
+
 function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, fullWidth, onSearchOpen }) {
   const t = window.FS.tokens;
 
   const routeLabel = (route || '/').replace(/^\//, '') || 'today';
   const title = routeLabel
     .split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+
+  /* Batch A2 Task 1 — header project selector (SITE_SCOPED_ROUTES only).
+     sitesList is fetched once per mount (mirrors the cancelled-guard
+     pattern used elsewhere, e.g. composites/audio-playlist.js:59-72);
+     activeSite mirrors FS.siteContext so the header re-renders whenever
+     any page changes the active project. */
+  const [sitesList, setSitesList] = React.useState([]);
+  React.useEffect(function () {
+    var cancelled = false;
+    window.FS.api.sites.getSites().then(function (res) {
+      if (cancelled) return;
+      setSitesList((res && res.sites) || []);
+    }).catch(function () {
+      if (cancelled) return;
+      setSitesList([]);
+    });
+    return function () { cancelled = true; };
+  }, []);
+
+  const [activeSite, setActiveSite] = React.useState(function () {
+    return window.FS.siteContext ? window.FS.siteContext.get() : null;
+  });
+  React.useEffect(function () {
+    if (!window.FS.siteContext) return;
+    return window.FS.siteContext.onChange(setActiveSite);
+  }, []);
+
+  /* Stale-value validation: if the persisted/legacy-adopted activeSite no
+     longer matches a real project (e.g. a fixture/backend change removed
+     it), fall back to '' in the UI and drop the stale key — done in an
+     effect, not during render, since it's a side effect on shared state. */
+  const validatedActiveSite = (sitesList.length > 0 && sitesList.some(function (s) { return s.site_id === activeSite; }))
+    ? activeSite
+    : '';
+  React.useEffect(function () {
+    if (activeSite && sitesList.length > 0 && !sitesList.some(function (s) { return s.site_id === activeSite; })) {
+      window.FS.siteContext.set(null);
+    }
+  }, [activeSite, sitesList]);
+
+  function onHeaderSiteChange(e) {
+    var v = e.target.value || null;
+    window.FS.siteContext.set(v);
+    /* Special case: /timeline's own URL `?site=` outranks the global
+       context for deep-link support (a shared link must keep showing the
+       linked project even if the visitor's last-picked context differs).
+       That means switching projects from the header has to rewrite the
+       URL too, or the page would keep reading the old ?site= value and
+       silently ignore the header change. Date is preserved; user is
+       deliberately dropped — a project switch resets the person filter. */
+    if (route === '/timeline') {
+      var p = window.FS.Router.getCurrentRoute().params || {};
+      window.FS.Router.navigate('/timeline' + (v ? '?site=' + encodeURIComponent(v) + (p.date ? '&date=' + p.date : '') : ''));
+    }
+  }
 
   /* Sprint 4.7 — full-width pages (currently /programme) ignore the
      middle-column width slider and let the column flex to fill the
@@ -313,12 +569,12 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
     ? {
         flex: 1,
         minWidth: 0,
-        background: 'var(--surface-panel)',
+        background: 'var(--surface-app)',
         borderRight: '1px solid var(--border-subtle)',
       }
     : {
         width: width + 'px',
-        background: 'var(--surface-panel)',
+        background: 'var(--surface-app)',
         borderRight: '1px solid var(--border-subtle)',
       };
 
@@ -363,6 +619,27 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
           style: { fontSize: '11px', color: 'var(--text-tertiary)', lineHeight: 1.2 },
         }, formatTodayDate()) : null,
       ),
+
+      /* Batch A2 Task 1 — header project selector, SITE_SCOPED_ROUTES only. */
+      (SITE_SCOPED_ROUTES.indexOf(route) !== -1 && sitesList.length > 0) ? React.createElement('select', {
+        className:    'fs-settings__select',
+        style:        { maxWidth: '220px' },
+        /* On /timeline the URL's ?site= outranks the context (deep links) —
+           the select must show what the PAGE shows, or the two project
+           indicators contradict each other (Fable review #5). Other scoped
+           routes have no site URL param, so context is the truth there. */
+        value:        (route === '/timeline'
+                        ? (((window.FS.Router.getCurrentRoute() || {}).params || {}).site || validatedActiveSite)
+                        : validatedActiveSite) || '',
+        onChange:     onHeaderSiteChange,
+        'aria-label': 'Active project',
+      },
+        [{ v: '', l: '— All projects —' }].concat(
+          sitesList.map(function (s) { return { v: s.site_id, l: s.name }; })
+        ).map(function (o) {
+          return React.createElement('option', { key: o.v, value: o.v }, o.l);
+        }),
+      ) : null,
 
       /* Right-side utility area: search + share + weather */
       React.createElement('div', { className: 'middle-column__utility' },
@@ -488,7 +765,9 @@ function RightDetail({ route, selectedItem, onClose }) {
   if (page && page.Right) {
     return React.createElement('div', {
       className: 'right-detail',
-      style: { background: 'var(--surface-app)', height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' },
+      /* alignItems/justifyContent reset the empty-state centering (.right-detail
+         in app-shell.css) so a populated Right panel fills the full pane width. */
+      style: { background: 'var(--surface-panel)', height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start' },
     },
       /* Sprint 8.4.1 — back button visible only on mobile via CSS */
       React.createElement(MobileBack, { onClose: onClose }),
@@ -504,14 +783,14 @@ function RightDetail({ route, selectedItem, onClose }) {
   /* Default empty state for unregistered routes */
   const iconWrapStyle = {
     width: '60px', height: '60px', borderRadius: '50%',
-    background: 'var(--surface-panel)',
+    background: 'var(--surface-app)',
     border: '1px solid var(--border-subtle)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     boxShadow: t.shadow.sm,
   };
 
   return React.createElement('div', {
-    style: { background: 'var(--surface-app)', color: 'var(--text-tertiary)' },
+    style: { background: 'var(--surface-panel)', color: 'var(--text-tertiary)' },
     className: 'right-detail',
   },
     React.createElement('div', { style: iconWrapStyle },
@@ -633,6 +912,22 @@ function AppShell({ showDevSwitcher = false }) {
 
   React.useEffect(function() {
     return window.AuthMock.onChange(function(u) { setUser(Object.assign({}, u)); });
+  }, []);
+
+  /* Sprint 2b — org status banner. FS.session.user (real backend identity)
+     isn't mirrored onto AuthMock (session-bridge.js only copies role/name/
+     site), so `user` above won't carry orgStatus. Subscribe separately just
+     to force a re-render when the session changes (sign-in, hydrateUser());
+     the actual orgStatus read happens fresh each render, right before the
+     return below. Guarded for mock mode, where window.FS.session is present
+     but .user stays null. */
+  var refOrgStatusTick   = React.useState(0);
+  var setOrgStatusTick   = refOrgStatusTick[1];
+  React.useEffect(function() {
+    if (!(window.FS && window.FS.session && window.FS.session.onChange)) return undefined;
+    return window.FS.session.onChange(function () {
+      setOrgStatusTick(function (n) { return n + 1; });
+    });
   }, []);
 
   React.useEffect(function() {
@@ -763,6 +1058,11 @@ function AppShell({ showDevSwitcher = false }) {
     return function () { delete window.FS.shell; };
   });
 
+  /* Sprint 2b — org account status (unprovisioned / archived). Null-guarded:
+     mock mode has no window.FS.session.user, so orgStatus stays undefined
+     and the banner below renders nothing. */
+  var orgStatus = ((window.FS && window.FS.session && window.FS.session.user) || {}).orgStatus;
+
   return React.createElement('div', { style: shellStyle, className: shellClassName },
 
     /* Sprint 8.5.3 — skip navigation link (visually hidden until focused) */
@@ -837,6 +1137,19 @@ function AppShell({ showDevSwitcher = false }) {
           role:        'status',
           'aria-live': 'polite',
         }, '⚠️ You’re offline — changes won’t sync')
+      : null,
+
+    /* Sprint 2b — org account status banner (fixed; stacks below the
+       offline banner via CSS adjacent-sibling on the rare occasion both
+       show at once). 'active' / mock (null orgStatus) render nothing. */
+    (orgStatus === 'unprovisioned' || orgStatus === 'archived')
+      ? React.createElement('div', {
+          className:   'fs-orgstatus-banner fs-orgstatus-banner--' + orgStatus,
+          role:        'status',
+          'aria-live': 'polite',
+        }, orgStatus === 'unprovisioned'
+          ? 'Your account isn’t activated yet — contact your administrator for access.'
+          : 'Your account is archived — you have read-only access.')
       : null,
 
     /* Sprint 8.6 — global search palette */
@@ -918,6 +1231,26 @@ function SessionGate(opts) {
     return session ? session.isSignedIn() : true;
   });
 
+  /* Silent session restore: the access token lives ~1 h, but the refresh
+     token lives 30 days. Without this, any refresh/idle past the hour
+     dumps the user to LoginScreen even though session.refresh() would
+     succeed instantly. Gate the login screen behind one refresh attempt. */
+  const [restoring, setRestoring] = React.useState(function () {
+    return !!(session && !session.isSignedIn() && session.refreshToken);
+  });
+
+  React.useEffect(function () {
+    if (!restoring || !session) return undefined;
+    var cancelled = false;
+    session.refresh().then(function () {
+      if (!cancelled) {
+        setSignedIn(session.isSignedIn());
+        setRestoring(false);
+      }
+    });
+    return function () { cancelled = true; };
+  }, []);
+
   React.useEffect(function () {
     if (!session) return undefined;
     return session.onChange(function () {
@@ -929,6 +1262,10 @@ function SessionGate(opts) {
   if (useMocks || !session) {
     return React.createElement(AppShell, opts);
   }
+
+  /* Sub-second blank while the silent refresh runs — flashing the login
+     screen and then swapping to the app is worse than a brief blank. */
+  if (restoring) return null;
 
   if (!signedIn) {
     if (!Login) {

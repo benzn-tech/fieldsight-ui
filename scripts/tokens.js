@@ -35,18 +35,18 @@ export const tokens = {
       950: '#0A1A2E',
     },
 
-    /* Accent · Safety Orange */
+    /* Accent · Brand Yellow (FieldSightAI) */
     accent: {
-      50:  '#FFF4ED',
-      100: '#FFE6D5',
-      200: '#FFC8A5',
-      300: '#FFA06B',
-      400: '#FF7A3C',
-      500: '#FF6B35',
-      600: '#E54B1E',
-      700: '#C23616',
-      800: '#9A2A13',
-      900: '#7A2210',
+      50:  '#FFFDE7',
+      100: '#FFF9C4',
+      200: '#FFF59D',
+      300: '#FFF176',
+      400: '#FFEE58',
+      500: '#FFD966',
+      600: '#FFC107',
+      700: '#FF8F00',
+      800: '#FF6F00',
+      900: '#E65100',
     },
 
     /* Semantic · Danger (Red) */
@@ -150,15 +150,15 @@ export const tokens = {
     panel:          '#FFFFFF',  /* neutral-0  */
     panelElevated:  '#FFFFFF',
     panelMuted:     '#F3F4F6',  /* neutral-100 */
-    sidebar:        '#102A43',  /* primary-900 */
-    sidebarHover:   '#243B53',  /* primary-800 */
-    sidebarActive:  '#334E68',  /* primary-700 */
+    sidebar:        '#111827',  /* neutral-900 */
+    sidebarHover:   '#1F2937',  /* neutral-800 */
+    sidebarActive:  '#374151',  /* neutral-700 */
     input:          '#FFFFFF',
     inputHover:     '#F9FAFB',
     inputFocus:     '#FFFFFF',
     overlay:        'rgba(17, 24, 39, 0.5)',
     tooltip:        '#111827',  /* neutral-900 */
-    highlight:      '#FFF4ED',  /* accent-50 */
+    highlight:      '#FFD966',  /* accent-500 */
   },
 
 
@@ -167,7 +167,7 @@ export const tokens = {
     subtle:  '#E5E7EB',  /* neutral-200 */
     default: '#D1D5DB',  /* neutral-300 */
     strong:  '#9CA3AF',  /* neutral-400 */
-    focus:   '#FF6B35',  /* accent-500  */
+    focus:   '#FF8F00',  /* accent-700  */
     danger:  '#EF4444',  /* danger-500  */
     success: '#22C55E',  /* success-500 */
   },
@@ -363,7 +363,7 @@ export const tokens = {
     conversation: '#3B82F6',  /* info-500            */
     report:       '#15803D',  /* category-commercial */
     manual:       '#6B7280',  /* neutral-500         */
-    aiSuggested:  '#FF6B35',  /* accent-500          */
+    aiSuggested:  '#FFD966',  /* accent-500          */
   },
 };
 
@@ -383,13 +383,13 @@ export const darkTokens = {
     panelMuted:     '#0F1623',
     sidebar:        '#000814',
     sidebarHover:   '#0A1018',
-    sidebarActive:  '#334E68',
+    sidebarActive:  '#374151',
     input:          '#111827',
     inputHover:     '#1F2937',
     inputFocus:     '#111827',
     overlay:        'rgba(0, 0, 0, 0.75)',
     tooltip:        '#1F2937',
-    highlight:      'rgba(255, 107, 53, 0.12)',
+    highlight:      'rgba(255, 217, 102, 0.12)',
   },
 
   border: {

@@ -136,12 +136,18 @@
 
   async function rawRequest(path, opts) {
     opts = opts || {};
-    var base = (window.FS && window.FS.api && window.FS.api.baseUrl) || '/api';
+    var base = opts.baseUrl || (window.FS && window.FS.api && window.FS.api.baseUrl) || '/api';
     var url  = base + path + buildQuery(opts.params);
 
     var headers = Object.assign({}, opts.headers || {});
 
-    headers['X-Request-Id'] = uuidV4();
+    /* X-Request-Id only on same-origin requests: the API Gateway preflight
+       allow-list is Content-Type,Authorization — any extra header makes the
+       browser's CORS preflight fail ("Failed to fetch"). Verified live A/B
+       2026-07-03. Cross-origin tracing can return when the gateway allows it. */
+    if (base.charAt(0) === '/') {
+      headers['X-Request-Id'] = uuidV4();
+    }
 
     if (opts.body !== undefined && opts.body !== null && !(opts.body instanceof FormData)) {
       headers['Content-Type'] = 'application/json';
@@ -152,10 +158,12 @@
       if (session) {
         var token = await session.ensureFresh();
         if (token) {
-          /* Prefer accessToken for Bearer if available (API Gateway validates it).
-             ensureFresh returns idToken; use getAccessToken() when present. */
-          var bearer = (session.getAccessToken && session.getAccessToken()) || token;
-          headers['Authorization'] = 'Bearer ' + bearer;
+          /* This API's Cognito REST authorizer validates the ID token passed
+             RAW (no "Bearer " prefix) — mirrors the shipped fieldsight_v5
+             frontend exactly. Access token / Bearer prefix → 401, and the
+             gateway's 401 carries no CORS headers, so the browser surfaces
+             it as "Failed to fetch". */
+          headers['Authorization'] = token;
         }
       }
     }
@@ -220,9 +228,48 @@
     window.FS.api.baseUrl = url;
   }
 
+  /* Org backend channel: same request() machinery (auth, retries, error
+     envelopes) but routed at FS.api.orgBaseUrl (a cross-origin absolute URL,
+     so the X-Request-Id same-origin guard omits that header automatically).
+     Callers in api/org.js only invoke this when orgBaseUrl is non-empty. */
+  function orgRequest(path, opts) {
+    opts = Object.assign({}, opts);
+    opts.baseUrl = (window.FS && window.FS.api && window.FS.api.orgBaseUrl) || '';
+    /* Org endpoints live under /api/org/* on the gateway, but orgBaseUrl ends
+       at /prod/api — so prefix the logical path (/me → /org/me). api/org.js
+       passes Lambda-internal route names (/me, /sites, …) and only calls this
+       when orgBaseUrl is set (its orgLive gate), so no report-gateway leak. */
+    return request('/org' + path, opts);
+  }
+
+  /* Bounded-concurrency Promise.all for the admin fan-out cross-products.
+     (dates × users reaches 150+ requests on the 'All' range; an unbounded
+     burst trips API Gateway throttling, whose 429s carry no CORS headers and
+     so surface as opaque "Failed to fetch" rejections that killed the whole
+     page.) Takes THUNKS (() => Promise), runs at most `limit` at a time, and
+     maps a failed thunk to null instead of rejecting — partial data beats a
+     dead page; callers filter(Boolean). */
+  async function pooledAll(thunks, limit) {
+    var results = new Array(thunks.length);
+    var next = 0;
+    async function worker() {
+      while (next < thunks.length) {
+        var i = next++;
+        try { results[i] = await thunks[i](); }
+        catch (e) { results[i] = null; }
+      }
+    }
+    var workers = [];
+    for (var w = 0; w < Math.min(limit || 8, thunks.length); w++) workers.push(worker());
+    await Promise.all(workers);
+    return results;
+  }
+
   if (!window.FS) window.FS = {};
   if (!window.FS.api) window.FS.api = {};
   window.FS.api.request   = request;
   window.FS.api.setBaseUrl = setBaseUrl;
+  window.FS.api.orgRequest = orgRequest;
+  window.FS.api.pooledAll  = pooledAll;
 
 })();

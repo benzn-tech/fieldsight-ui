@@ -50,6 +50,26 @@
     return user && (user.role === 'admin' || user.role === 'gm' || user.isAdmin);
   }
 
+  /* folder_name if present (fixtures + live /api/users alike), else
+     derived client-side from name. Real /api/users returns only
+     {device_id,name,role,sites} — no folder_name. */
+  function deriveFolder(u) {
+    return u.folder_name || (u.name ? u.name.replace(/ /g, '_') : '');
+  }
+
+  /* batch A2 Task 4 — the existing all-users fan-out source (GET /api/users,
+     falling back to fixtures on error). Extracted so the site-scoped path
+     below can fall back to the same unscoped source if getSiteUsers fails. */
+  function allUsersFoldersPromise() {
+    return window.FS.api.sites.getUsers().then(function (res) {
+      return ((res && res.users) || []).map(deriveFolder).filter(Boolean);
+    }).catch(function () {
+      var fxUsers = (window.FieldSight && window.FieldSight.fixtures
+        && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [];
+      return fxUsers.map(deriveFolder).filter(Boolean);
+    });
+  }
+
   function fmtDate(yyyymmdd) {
     if (!yyyymmdd) return '';
     var p = String(yyyymmdd).split('-').map(Number);
@@ -80,6 +100,15 @@
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
     var depKey = (caller.name || '') + '|' + (caller.role || '') + '|' + (caller.isAdmin ? 'admin' : '');
 
+    /* fs.settings.evidenceView holds { preset, from, to } — persisted and
+       restored by the shared RangeToolbar composite (Task B). Default
+       preset 'all' so Evidence reaches the real report span (Feb–Mar
+       2026) instead of a trailing-days window that comes up empty since
+       "today" runs months ahead of the fixture data. */
+    var refView = React.useState({ preset: 'all', from: null, to: null });
+    var view    = refView[0];
+    var setView = refView[1];
+
     var refDays = React.useState(DEFAULT_DAYS);
     var daysToLoad    = refDays[0];
     var setDaysToLoad = refDays[1];
@@ -96,33 +125,74 @@
     var retryCount = retryRef[0];
     var setRetry   = retryRef[1];
 
+    /* batch A2 Task 4 — read the global active-site selection; passed
+       EXPLICITLY into the photos fan-out folders source below (never read
+       inside an aggregator itself). The dates-span discovery effect below
+       intentionally keeps the global span — see that effect's comment. */
+    var refActiveSite = React.useState(function () { return (window.FS && window.FS.siteContext) ? window.FS.siteContext.get() : null; });
+    var activeSite    = refActiveSite[0];
+    var setActiveSite = refActiveSite[1];
+    React.useEffect(function () {
+      if (!(window.FS && window.FS.siteContext)) return undefined;
+      return window.FS.siteContext.onChange(setActiveSite);
+    }, []);
+
+    /* Fable review #3 — the photos effect guards on status==='ok', and only
+       the discovery effect (which deliberately excludes activeSite) resets
+       it. Without this, switching projects left the previous scope's
+       gallery on screen under the new selection. */
+    React.useEffect(function () {
+      setPhotos({ status: 'idle', perDay: [], totalCount: 0 });
+    }, [activeSite]);
+
     /* Photos cache — populated when the Photos tab activates (first
        open) and shared with the right-pane summary. */
     var refPhotos = React.useState({ status: 'idle', perDay: [], totalCount: 0 });
     var photos    = refPhotos[0];
     var setPhotos = refPhotos[1];
 
-    var user = caller.role === 'worker' || !isAdminLike(caller)
+    /* Fable review #4 — mirror the aggregators' A2 rule: with an anchored
+       site, sm/pm widen from forced-self to the site fan-out (getSiteUsers
+       is server-side permission-scoped to self + own-site workers). Workers
+       stay forced-self always. */
+    var user = caller.role === 'worker' || (!isAdminLike(caller) && !activeSite)
       ? callerFolder()
       : null;
 
     React.useEffect(function () {
+      /* RangeToolbar resolves the range asynchronously (e.g. 'all' needs
+         FS.api.window.getSpan()) — wait for both ends before fetching.
+         batch A2 Task 4 — this discovery step deliberately does NOT take
+         activeSite: the date-span itself is global (which days have any
+         report at all), not site-scoped. Narrowing happens per-day in the
+         photos fan-out effect below, whose folders source IS site-scoped;
+         a date with no site-matching photos just yields zero rows for
+         that day (existing perDay.length === 0 skip), not an error —
+         acceptable here. */
+      if (!view.from || !view.to) return undefined;
       var cancelled = false;
       setState({ status: 'loading' });
       setPhotos({ status: 'idle', perDay: [], totalCount: 0 });
 
-      window.FS.api.dates.getDates({ months: 1 }).then(function (res) {
+      /* Reuses FS.api.window.getSpan()'s cached wide-discovery fetch
+         (same underlying GET /api/dates the toolbar's 'all' preset and
+         DatePicker already share) instead of a separate months-scoped
+         call, then narrows to the selected [from, to] window client-side
+         and paginates within it. */
+      window.FS.api.window.getSpan().then(function (span) {
         if (cancelled) return;
-        if (res && res._accessDenied) {
-          setState({ status: 'access_denied', message: res.error });
-          return;
-        }
-        var datesMap = (res && res.dates) || {};
-        var dates = Object.keys(datesMap)
-          .filter(function (d) { return datesMap[d] && datesMap[d].hasReport; })
+        var datesMap = (span && span.dates) || {};
+        var allDates = Object.keys(datesMap)
+          .filter(function (d) {
+            return datesMap[d] && datesMap[d].hasReport && d >= view.from && d <= view.to;
+          })
           .sort()
-          .reverse()
-          .slice(0, daysToLoad);
+          .reverse();
+        /* Sprint 8.8.2 pagination only applies to the bounded presets —
+           the 'all' preset already widened from/to to the full report
+           span, so capping by daysToLoad on top of that silently hid
+           every in-range day past the first DEFAULT_DAYS. */
+        var dates = (view.preset === 'all') ? allDates : allDates.slice(0, daysToLoad);
 
         setState({ status: 'ok', dates: dates, user: user });
       }).catch(function (err) {
@@ -131,7 +201,7 @@
       });
 
       return function () { cancelled = true; };
-    }, [depKey, daysToLoad, retryCount]);
+    }, [depKey, view.preset, view.from, view.to, daysToLoad, retryCount]);
 
     /* Lazy-load photos when the Photos tab is the active one and we
        don't yet have data for it. Other tabs are populated by their
@@ -144,25 +214,52 @@
       setPhotos({ status: 'loading', perDay: [], totalCount: 0 });
 
       /* Sprint 8 follow-up — admin fan-out across all known users so
-         /evidence Photos tab isn't blank when running as admin. */
-      var fanoutFolders = state.user ? [state.user] : null;
-      if (!fanoutFolders) {
-        var fxUsers = (window.FieldSight && window.FieldSight.fixtures
-          && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [];
-        fanoutFolders = fxUsers.map(function (u) { return u.folder_name; }).filter(Boolean);
-      }
-      Promise.all((state.dates || []).reduce(function (acc, d) {
-        fanoutFolders.forEach(function (f) {
-          acc.push(window.FS.api.timeline.getTimeline({ date: d, user: f })
-            .then(function (r) { return { date: d, report: r }; }));
+         /evidence Photos tab isn't blank when running as admin. Sourced
+         from the real GET /api/users (report identity) — live =
+         pass-through of /api/users, mock = fixtures (unchanged
+         behaviour). Falls back to the fixtures read on any /api/users
+         error.
+
+         batch A2 Task 4 — when there's no forced single user AND an
+         active site is selected, narrow the fan-out to that site's users
+         via GET /site-users; any failure there falls back to the same
+         unscoped all-users source above (partial/unscoped data beats a
+         dead page). */
+      var foldersPromise = state.user
+        ? Promise.resolve([state.user])
+        : (activeSite
+            ? window.FS.api.sites.getSiteUsers(activeSite).then(function (res) {
+                return ((res && res.users) || []).map(deriveFolder).filter(Boolean);
+              }).catch(allUsersFoldersPromise)
+            : allUsersFoldersPromise());
+
+      foldersPromise.then(function (fanoutFolders) {
+        /* Pooled, not Promise.all: the cross-product reaches 150+ requests
+           on the 'All' range — see FS.api.pooledAll. Failed fetches → null
+           → skipped below (partial data beats a dead page). */
+        var evThunks = (state.dates || []).reduce(function (acc, d) {
+          fanoutFolders.forEach(function (f) {
+            acc.push(function () {
+              return window.FS.api.timeline.getTimeline({ date: d, user: f })
+                .then(function (r) { return { date: d, report: r }; });
+            });
+          });
+          return acc;
+        }, []);
+        return window.FS.api.pooledAll(evThunks, 8).then(function (rs) {
+          /* batch 2c Task 6 — all-failed → error (lands in the .catch below
+             → photos error state), not a silently-empty gallery. */
+          if (evThunks.length > 0 && rs.filter(Boolean).length === 0) {
+            throw new Error('Could not load photos — all requests failed. Please retry.');
+          }
+          return rs;
         });
-        return acc;
-      }, [])).then(function (perDay) {
+      }).then(function (perDay) {
         if (cancelled) return;
         var rows = [];
         var total = 0;
         perDay.forEach(function (x) {
-          if (!x.report || x.report._notFound || x.report.available_users) return;
+          if (!x || !x.report || x.report._notFound || x.report.available_users) return;
           var photosForDate = [];
           (x.report.topics || []).forEach(function (t) {
             (t.related_photos || []).forEach(function (filename) {
@@ -191,9 +288,17 @@
       });
 
       return function () { cancelled = true; };
-    }, [activeTab, state.status, state.dates && state.dates.join(',')]);
+    }, [activeTab, state.status, state.dates && state.dates.join(','), activeSite]);
 
     function loadMore() { setDaysToLoad(function (n) { return n + LOAD_STEP; }); }
+
+    /* A newly picked range restarts pagination from the top — the old
+       daysToLoad count belonged to the previous window and has no
+       meaning in the new one. */
+    function handleViewChange(next) {
+      setDaysToLoad(DEFAULT_DAYS);
+      setView(next);
+    }
 
     var ctx = {
       state:        state,
@@ -202,6 +307,8 @@
       daysToLoad:   daysToLoad,
       loadMore:     loadMore,
       photos:       photos,
+      view:         view,
+      setView:      handleViewChange,
     };
     return React.createElement(EvidenceContext.Provider, { value: ctx },
       props.children);
@@ -224,7 +331,7 @@
     }
     if (!photos.perDay.length) {
       return React.createElement('div', { className: 'fs-evidence__empty' },
-        'No photos in the last ' + ctx.daysToLoad + ' days.');
+        'No photos in the selected range.');
     }
 
     return React.createElement('div', { className: 'fs-evidence__sections' },
@@ -261,7 +368,7 @@
 
     if (dates.length === 0) {
       return React.createElement('div', { className: 'fs-evidence__empty' },
-        'No reports in the last ' + ctx.daysToLoad + ' days.');
+        'No reports in the selected range.');
     }
 
     var Component = props.component;
@@ -287,6 +394,7 @@
     var fs              = window.FieldSight;
     var EvidenceTabs    = fs.EvidenceTabs;
     var Button          = fs.Button;
+    var RangeToolbar    = fs.RangeToolbar;
 
     var ctx = React.useContext(EvidenceContext);
     if (!ctx) {
@@ -295,8 +403,20 @@
     }
     var state = ctx.state;
 
+    var header = React.createElement('div', { className: 'fs-evidence__header' },
+      React.createElement('h2', { className: 'fs-evidence__title' }, 'Evidence'));
+    var toolbar = RangeToolbar
+      ? React.createElement(RangeToolbar, {
+          value:      ctx.view,
+          onChange:   ctx.setView,
+          presets:    ['today', '7d', '30d', 'all', 'custom'],
+          storageKey: 'fs.settings.evidenceView',
+        })
+      : null;
+
     if (state.status === 'loading') {
       return React.createElement('div', { className: 'fs-evidence' },
+        header, toolbar,
         React.createElement('div', { className: 'fs-evidence__loading' },
           'Loading evidence…'),
       );
@@ -304,6 +424,7 @@
     if (state.status === 'error') {
       var ErrorBanner = window.FieldSight.ErrorBanner;
       return React.createElement('div', { className: 'fs-evidence' },
+        header, toolbar,
         ErrorBanner
           ? React.createElement(ErrorBanner, {
               message:   (state.error && state.error.message) || 'Could not load evidence',
@@ -317,6 +438,7 @@
     if (state.status === 'access_denied') {
       var AccessDenied = fs.AccessDenied;
       return React.createElement('div', { className: 'fs-evidence' },
+        header,
         AccessDenied
           ? React.createElement(AccessDenied, {
               scope:   'this evidence library',
@@ -366,8 +488,10 @@
         React.createElement('h2', { className: 'fs-evidence__title' }, 'Evidence'),
         React.createElement('div', { className: 'fs-evidence__subtitle' },
           dates.length + ' ' + (dates.length === 1 ? 'day' : 'days')
-            + ' with reports · last ' + ctx.daysToLoad + ' days searched'),
+            + ' with reports in this range'
+            + (ctx.view.preset === 'all' ? '' : ' · showing up to ' + ctx.daysToLoad + ' at a time')),
       ),
+      toolbar,
 
       /* Tabs */
       React.createElement(EvidenceTabs, {
@@ -379,11 +503,12 @@
       /* Body */
       dates.length === 0
         ? React.createElement('div', { className: 'fs-evidence__empty' },
-            'No reports in the last ' + ctx.daysToLoad + ' days.')
+            'No reports in the selected range.')
         : body,
 
-      /* Load more */
-      dates.length >= ctx.daysToLoad
+      /* Load more — hidden for the 'all' preset since every in-range day
+         is already rendered; there's nothing left to page in. */
+      (ctx.view.preset !== 'all' && dates.length >= ctx.daysToLoad)
         ? React.createElement('div', { className: 'fs-evidence__load-more' },
             React.createElement(Button, {
               variant: 'secondary', size: 'sm',

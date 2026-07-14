@@ -14,8 +14,17 @@
   async function ask(opts) {
     opts = opts || {};
     if (!window.FS.api.useMocks) {
+      /* Route /ask to the org gateway's report base (the TEST fieldsight-api),
+         not the prod report baseUrl. The Phase 5 RAG ask — date-optional
+         global Ask + caller_sub forwarding + rag-search over report_chunks —
+         is deployed on the TEST report API; the prod report API that baseUrl
+         points to is pre-Phase-5 and 400s "Missing date" on the date-less
+         global Ask fired from the search palette. Falls back to the default
+         baseUrl when orgBaseUrl is unset (pure-prod deploy). */
+      var askBaseUrl = (window.FS.api.orgBaseUrl) || undefined;
       return window.FS.api.request('/ask', {
         method: 'POST',
+        baseUrl: askBaseUrl,
         body: {
           date:     opts.date,
           user:     opts.user,

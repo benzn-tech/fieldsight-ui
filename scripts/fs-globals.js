@@ -22,9 +22,9 @@
         800: '#243B53', 900: '#102A43', 950: '#0A1A2E',
       },
       accent: {
-        50: '#FFF4ED', 100: '#FFE6D5', 200: '#FFC8A5', 300: '#FFA06B',
-        400: '#FF7A3C', 500: '#FF6B35', 600: '#E54B1E', 700: '#C23616',
-        800: '#9A2A13', 900: '#7A2210',
+        50: '#FFFDE7', 100: '#FFF9C4', 200: '#FFF59D', 300: '#FFF176',
+        400: '#FFEE58', 500: '#FFD966', 600: '#FFC107', 700: '#FF8F00',
+        800: '#FF6F00', 900: '#E65100',
       },
       danger: {
         50: '#FEF2F2', 100: '#FEE2E2', 200: '#FECACA', 300: '#FCA5A5',
@@ -62,14 +62,14 @@
     },
     surface: {
       app: '#F9FAFB', panel: '#FFFFFF', panelElevated: '#FFFFFF',
-      panelMuted: '#F3F4F6', sidebar: '#102A43', sidebarHover: '#243B53',
-      sidebarActive: '#334E68', input: '#FFFFFF', inputHover: '#F9FAFB',
+      panelMuted: '#F3F4F6', sidebar: '#111827', sidebarHover: '#1F2937',
+      sidebarActive: '#374151', input: '#FFFFFF', inputHover: '#F9FAFB',
       inputFocus: '#FFFFFF', overlay: 'rgba(17, 24, 39, 0.5)',
-      tooltip: '#111827', highlight: '#FFF4ED',
+      tooltip: '#111827', highlight: '#FFD966',
     },
     border: {
       subtle: '#E5E7EB', default: '#D1D5DB', strong: '#9CA3AF',
-      focus: '#FF6B35', danger: '#EF4444', success: '#22C55E',
+      focus: '#FF8F00', danger: '#EF4444', success: '#22C55E',
     },
     text: {
       primary: '#111827', secondary: '#4B5563', tertiary: '#6B7280',
@@ -163,7 +163,7 @@
       conversation: '#3B82F6',
       report:       '#15803D',
       manual:       '#6B7280',
-      aiSuggested:  '#FF6B35',
+      aiSuggested:  '#FFD966',
     },
   };
 
@@ -172,9 +172,9 @@
     surface: {
       app: '#0A1018', panel: '#111827', panelElevated: '#1F2937',
       panelMuted: '#0F1623', sidebar: '#000814', sidebarHover: '#0A1018',
-      sidebarActive: '#334E68', input: '#111827', inputHover: '#1F2937',
+      sidebarActive: '#374151', input: '#111827', inputHover: '#1F2937',
       inputFocus: '#111827', overlay: 'rgba(0,0,0,0.75)',
-      tooltip: '#1F2937', highlight: 'rgba(255,107,53,0.12)',
+      tooltip: '#1F2937', highlight: 'rgba(255,217,102,0.12)',
     },
     border: { subtle: '#1F2937', default: '#374151', strong: '#4B5563' },
     text: {
