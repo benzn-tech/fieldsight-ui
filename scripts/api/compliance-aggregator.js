@@ -153,6 +153,14 @@
 (function () {
   'use strict';
 
+  /* authority flip (pipeline plan 2026-07-14) — true when the aurora
+     timeline shim is live (kill switch: only when orgBaseUrl is ALSO
+     set). Shared by both live-merge legs below (getSafetyRange /
+     getQualityRange) so the gate condition lives in exactly one place. */
+  function timelineIsAurora() {
+    return window.FS.api.timelineSource === 'aurora' && !!window.FS.api.orgBaseUrl;
+  }
+
   /* Resolve user respecting worker-forced-self — copy of
      tasks-aggregator.js:46-55 (intentional parity). */
   function resolveUser(explicitUser) {
@@ -683,35 +691,41 @@
        failure must never take the range down — report + manual rows
        still render. */
     try {
-      /* authority flip (pipeline plan 2026-07-14): when timelineSource is
-         'aurora' (kill switch: only live when orgBaseUrl is set too), the
-         shim already serves these same extraction topics through
-         getTimeline — merging live-items again here would double-display
-         every safety finding (investigation §0.11). Skip the fetch; this
-         leg contributes nothing. */
-      if (window.FS.api.timelineSource === 'aurora' && window.FS.api.orgBaseUrl) {
-        // no-op — live items already reflected via the aurora timeline path
-      } else {
-        var liveDatesSafety = computeLiveDates(from, to, fanout.dates);
-        var liveThunksSafety = liveDatesSafety.map(function (d) {
-          return function () {
-            return window.FS.api.org.getLiveItems({ date: d });
-          };
-        });
-        var liveResultsSafety = (await window.FS.api.pooledAll(liveThunksSafety, 8)).filter(Boolean);
-        var siteNameFilterSafety = opts.site ? await resolveSiteNameForFilter(opts.site) : null;
-        var liveRowsSafety = [];
-        liveResultsSafety.forEach(function (res) {
-          ((res && res.topics) || []).forEach(function (topic) {
-            if (!topic.is_live) return;
-            if (siteNameFilterSafety && topic.site_name !== siteNameFilterSafety) return;  /* F2 — slug→name bridge, see resolveSiteNameForFilter() */
-            (topic.safety_observations || []).forEach(function (o) {
-              liveRowsSafety.push(toLiveSafetyRow(topic, o));
-            });
+      /* authority flip (pipeline plan 2026-07-14) — under timelineIsAurora(),
+         the shim already serves live extraction topics for dates the report
+         fanout covers via getTimeline, so re-merging live-items for THOSE
+         dates would double-display every safety finding (investigation
+         §0.11). But fanout.dates is report-having dates only (hasReport:
+         true) — TODAY never qualifies (daily_report.json lands the
+         following morning, see fanoutDates()/_AUDIT-1), so it has no
+         shimmed data either. Rather than skip this leg entirely (which
+         silently zeroes out today), drop only the fanout-covered dates
+         from the live date set — each date is then served exactly once,
+         in both flag states. Non-aurora: no filtering, unchanged. */
+      var liveDatesSafety = computeLiveDates(from, to, fanout.dates);
+      if (timelineIsAurora()) {
+        var fanoutDateSetSafety = {};
+        fanout.dates.forEach(function (d) { fanoutDateSetSafety[d] = true; });
+        liveDatesSafety = liveDatesSafety.filter(function (d) { return !fanoutDateSetSafety[d]; });
+      }
+      var liveThunksSafety = liveDatesSafety.map(function (d) {
+        return function () {
+          return window.FS.api.org.getLiveItems({ date: d });
+        };
+      });
+      var liveResultsSafety = (await window.FS.api.pooledAll(liveThunksSafety, 8)).filter(Boolean);
+      var siteNameFilterSafety = opts.site ? await resolveSiteNameForFilter(opts.site) : null;
+      var liveRowsSafety = [];
+      liveResultsSafety.forEach(function (res) {
+        ((res && res.topics) || []).forEach(function (topic) {
+          if (!topic.is_live) return;
+          if (siteNameFilterSafety && topic.site_name !== siteNameFilterSafety) return;  /* F2 — slug→name bridge, see resolveSiteNameForFilter() */
+          (topic.safety_observations || []).forEach(function (o) {
+            liveRowsSafety.push(toLiveSafetyRow(topic, o));
           });
         });
-        rows = rows.concat(liveRowsSafety);
-      }
+      });
+      rows = rows.concat(liveRowsSafety);
     } catch (e) {
       console.warn('[compliance] live items unavailable — report/manual rows only', e);
     }
@@ -829,28 +843,34 @@
        above, which filters the same way. */
     try {
       /* authority flip (pipeline plan 2026-07-14): see the matching guard in
-         getSafetyRange above — same rationale, same kill switch. */
-      if (window.FS.api.timelineSource === 'aurora' && window.FS.api.orgBaseUrl) {
-        // no-op — live items already reflected via the aurora timeline path
-      } else {
-        var liveDatesQuality = computeLiveDates(from, to, fanout.dates);
-        var liveThunksQuality = liveDatesQuality.map(function (d) {
-          return function () {
-            return window.FS.api.org.getLiveItems({ date: d });
-          };
-        });
-        var liveResultsQuality = (await window.FS.api.pooledAll(liveThunksQuality, 8)).filter(Boolean);
-        var siteNameFilterQuality = opts.site ? await resolveSiteNameForFilter(opts.site) : null;
-        var liveRowsQuality = [];
-        liveResultsQuality.forEach(function (res) {
-          ((res && res.topics) || []).forEach(function (topic) {
-            if (!topic.is_live || topic.category !== 'quality') return;
-            if (siteNameFilterQuality && topic.site_name !== siteNameFilterQuality) return;  /* F2 — slug→name bridge, see resolveSiteNameForFilter() */
-            liveRowsQuality.push(toLiveQualityRow(topic));
-          });
-        });
-        rows = rows.concat(liveRowsQuality);
+         getSafetyRange above — same rationale, same shared timelineIsAurora()
+         gate. Drop only the fanout-covered dates from the live date set
+         (report-dated days already come through the aurora-shimmed
+         getTimeline); TODAY (never report-dated — see fanoutDates()/
+         _AUDIT-1) stays in the live set so it isn't silently zeroed out.
+         Non-aurora: no filtering, unchanged. */
+      var liveDatesQuality = computeLiveDates(from, to, fanout.dates);
+      if (timelineIsAurora()) {
+        var fanoutDateSetQuality = {};
+        fanout.dates.forEach(function (d) { fanoutDateSetQuality[d] = true; });
+        liveDatesQuality = liveDatesQuality.filter(function (d) { return !fanoutDateSetQuality[d]; });
       }
+      var liveThunksQuality = liveDatesQuality.map(function (d) {
+        return function () {
+          return window.FS.api.org.getLiveItems({ date: d });
+        };
+      });
+      var liveResultsQuality = (await window.FS.api.pooledAll(liveThunksQuality, 8)).filter(Boolean);
+      var siteNameFilterQuality = opts.site ? await resolveSiteNameForFilter(opts.site) : null;
+      var liveRowsQuality = [];
+      liveResultsQuality.forEach(function (res) {
+        ((res && res.topics) || []).forEach(function (topic) {
+          if (!topic.is_live || topic.category !== 'quality') return;
+          if (siteNameFilterQuality && topic.site_name !== siteNameFilterQuality) return;  /* F2 — slug→name bridge, see resolveSiteNameForFilter() */
+          liveRowsQuality.push(toLiveQualityRow(topic));
+        });
+      });
+      rows = rows.concat(liveRowsQuality);
     } catch (e) {
       console.warn('[compliance] live items unavailable — report/manual rows only', e);
     }
