@@ -9,10 +9,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
-  <link rel="stylesheet" href="styles/tokens.css" />
+  <link rel="stylesheet" href="styles/tokens.css?v=1" />
   <link rel="stylesheet" href="styles/app-shell.css?v=3" />
   <link rel="stylesheet" href="styles/components.css?v=5" />
-  <link rel="stylesheet" href="styles/composites.css?v=10" />
+  <link rel="stylesheet" href="styles/composites.css?v=15" />
 
   <style>
     html, body { overflow: auto; height: auto; }
@@ -77,7 +77,7 @@
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 
-  <script src="scripts/fs-globals.js"></script>
+  <script src="scripts/fs-globals.js?v=1"></script>
   <script type="text/babel" src="scripts/left-nav.js?v=2"></script>
   <script type="text/babel" src="scripts/components/button.js?v=1"></script>
   <script type="text/babel" src="scripts/components/input.js?v=1"></script>
@@ -86,7 +86,10 @@
   <script type="text/babel" src="scripts/components/avatar.js?v=2"></script>
 
   <!-- Layer 5 composites (depend on L4 atoms above) -->
-  <script type="text/babel" src="scripts/composites/task-card.js?v=5"></script>
+  <script type="text/babel" src="scripts/composites/task-card.js?v=6"></script>
+  <!-- T4 — useMultiSelect hook + MultiSelectBulkBar, shared by /today
+       Leftover, /safety, /quality. -->
+  <script type="text/babel" src="scripts/composites/multi-select-list.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/urgent-card.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/activity-card.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/morning-brief-card.js?v=1"></script>
@@ -101,8 +104,8 @@
   <script type="text/babel" src="scripts/composites/tooltip.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/toast.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/modal-overlay.js?v=1"></script>
-  <script type="text/babel" src="scripts/composites/safety-create-modal.js?v=2"></script>
-  <script type="text/babel" src="scripts/composites/quality-create-modal.js?v=2"></script>
+  <script type="text/babel" src="scripts/composites/safety-create-modal.js?v=3"></script>
+  <script type="text/babel" src="scripts/composites/quality-create-modal.js?v=3"></script>
   <script type="text/babel" src="scripts/composites/search-palette.js?v=8"></script>
   <script type="text/babel" src="scripts/composites/onboarding-overlay.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/demo-tour.js?v=1"></script>
@@ -149,7 +152,10 @@
             /* Sprint 10 B.4/B.5 — library editor composites */
             SchemaEditor, VersionHistoryPanel,
             /* Sprint 11 (Task 6) — programme suggestion review queue */
-            SuggestionReview } = window.FieldSight;
+            SuggestionReview,
+            /* T4 — shared multi-select hook + bulk-bar (Today Leftover /
+               Safety / Quality) */
+            useMultiSelect, MultiSelectBulkBar } = window.FieldSight;
 
     function Section({ title, children }) {
       return (
@@ -1080,9 +1086,24 @@
                    onSelect={t => console.log('select', t.id)} />
               </div>
             </Row>
-            <Row label="selectable (feat/leftover-bulk-select) — square select + round check-off together">
+            <Row label="batchMode (feat/leftover-batch-select, T1) — round selector doubles as multi-select toggle">
               <div style={{ flex: 1 }}>
                 <TaskCardSelectDemo />
+              </div>
+            </Row>
+          </Section>
+
+          {/* T4 — useMultiSelect hook + MultiSelectBulkBar composite
+              (scripts/composites/multi-select-list.js). Extracted from
+              the TaskCardSelectDemo/T1 batch logic above so /today
+              Leftover, /safety, /quality all share ONE implementation.
+              This demo drives it against a plain row list (no TaskCard)
+              to prove the hook + bulk bar work standalone, independent
+              of any one page's row markup. */}
+          <Section title="T4 · useMultiSelect + MultiSelectBulkBar">
+            <Row label="Multi-Select toggle + Shift/Ctrl row selection + bulk bar">
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {useMultiSelect && <MultiSelectListDemo />}
               </div>
             </Row>
           </Section>
@@ -1587,32 +1608,111 @@
       );
     }
 
-    /* feat/leftover-bulk-select — smoke render for TaskCard's new
-       selectable/bulkSelected/onSelectToggle prop trio (CLAUDE.md
-       "components-preview.html lag" guardrail). checkable + selectable
-       together so the square bulk-select checkbox and the round
-       check-off circle render side by side, proving the shape/position
-       contrast the Today Leftover section relies on. */
+    /* feat/leftover-batch-select (T1) — smoke render for TaskCard's
+       batchMode/batchSelected/onBatchToggle prop trio (CLAUDE.md
+       "components-preview.html lag" guardrail). The local toggle button
+       flips batchMode so both states are reachable here: off → round
+       button is the original single-resolve check-off; on → the SAME
+       round button becomes a multi-select toggle and paints
+       fs-task-card__check--selected when batchSelected is true —
+       proving the one-button, no-square-checkbox behavior the Today
+       Leftover section relies on. */
     function TaskCardSelectDemo() {
-      const [checked, setChecked] = React.useState(false);
+      const [batchMode, setBatchMode] = React.useState(true);
+      const [selected, setSelected] = React.useState(false);
       return (
-        <TaskCard
-          task={{
-            id: 'demo-bulk-1',
-            title: 'Confirm delivery dockets filed',
-            assignee: 'Priya Sharma',
-            status: 'Open', statusTone: 'info',
-            dueTime: '—',
-            topic_id: 0, actionIndex: 0, folder: 'priya_sharma',
-          }}
-          date="2026-03-01"
-          checkable
-          selectable
-          bulkSelected={checked}
-          onSelectToggle={() => setChecked(v => !v)}
-          onSelect={t => console.log('select', t.id)}
-          ageLabel="132d ago"
-        />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <button
+            type="button"
+            className={'fs-multi-select__toggle' + (batchMode ? ' fs-multi-select__toggle--active' : '')}
+            onClick={() => setBatchMode(v => !v)}
+            style={{ alignSelf: 'flex-start' }}
+          >
+            {batchMode ? 'Batch Select: On' : 'Batch Select'}
+          </button>
+          <TaskCard
+            task={{
+              id: 'demo-bulk-1',
+              title: 'Confirm delivery dockets filed',
+              assignee: 'Priya Sharma',
+              status: 'Open', statusTone: 'info',
+              dueTime: '—',
+              topic_id: 0, actionIndex: 0, folder: 'priya_sharma',
+            }}
+            date="2026-03-01"
+            checkable
+            batchMode={batchMode}
+            batchSelected={selected}
+            onBatchToggle={() => setSelected(v => !v)}
+            onSelect={t => console.log('select', t.id)}
+            ageLabel="132d ago"
+          />
+        </div>
+      );
+    }
+
+    /* T4 — smoke render for useMultiSelect + MultiSelectBulkBar
+       (scripts/composites/multi-select-list.js), the extraction of the
+       TaskCardSelectDemo/T1 batch logic above into a page-agnostic
+       hook. Drives it against a plain 5-row list (not TaskCard) to
+       prove the hook + bulk bar work standalone — this is exactly the
+       shape /safety and /quality's middle-column lists consume it in
+       (a row `<button>` per item, batch-toggle on click while
+       multiSelect.batchMode is on). Click a row to select (plain);
+       Shift+Click range-selects from the last-clicked row; Ctrl/Cmd+
+       Click toggles one without moving the anchor — same semantics as
+       Today's Leftover section. */
+    function MultiSelectListDemo() {
+      const items = [
+        { id: 'row-1', label: 'Guard rail missing — west stair' },
+        { id: 'row-2', label: 'Scaffold tag not signed off' },
+        { id: 'row-3', label: 'Fire extinguisher inspection overdue' },
+        { id: 'row-4', label: 'Trip hazard — laydown area' },
+        { id: 'row-5', label: 'PPE non-compliance, level 3' },
+      ];
+      const multiSelect = useMultiSelect({ items, getId: (it) => it.id });
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <button
+            type="button"
+            className={'fs-multi-select__toggle' + (multiSelect.batchMode ? ' fs-multi-select__toggle--active' : '')}
+            onClick={() => multiSelect.setBatchMode(v => !v)}
+            style={{ alignSelf: 'flex-start' }}
+          >
+            {multiSelect.batchMode ? 'Multi-Select: On' : 'Multi-Select'}
+          </button>
+          {multiSelect.batchMode && (
+            <MultiSelectBulkBar
+              count={multiSelect.selectedItems.length}
+              actions={[
+                { key: 'select-all', label: 'Select all', onClick: multiSelect.selectAll },
+                { key: 'act', primary: true, label: 'Do thing (' + multiSelect.selectedItems.length + ')',
+                  disabled: multiSelect.selectedItems.length === 0,
+                  onClick: () => console.log('selected', multiSelect.selectedItems.map(it => it.id)) },
+                { key: 'clear', label: 'Clear', onClick: multiSelect.clear },
+              ]}
+            />
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {items.map(it => {
+              const isSelected = multiSelect.batchMode && !!multiSelect.selectedIds[it.id];
+              return (
+                <button
+                  key={it.id}
+                  type="button"
+                  className={'fs-safety__row-btn' + (isSelected ? ' fs-row--batch-selected' : '')}
+                  onClick={(e) => {
+                    if (multiSelect.batchMode) { multiSelect.onItemClick(it, e); return; }
+                    console.log('open detail', it.id);
+                  }}
+                  style={{ textAlign: 'left', width: '100%' }}
+                >
+                  {it.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       );
     }
 

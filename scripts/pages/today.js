@@ -1062,31 +1062,80 @@
     var leftoverExpanded     = leftoverRef[0];
     var setLeftoverExpanded  = leftoverRef[1];
 
-    /* feat/leftover-bulk-select — selection state for the Leftover
-       bulk-resolve feature. Map of id -> true (not an array — O(1)
-       toggle/lookup, matches the myIds/onSiteById idiom already used
-       elsewhere in this file). Declared unconditionally (before any
-       early return below) per rules-of-hooks, same as leftoverRef
-       above. Intentionally NOT cleared when the section collapses
-       (simplest option per spec — "your call") — a user can select,
-       collapse, and still Resolve N from the still-visible bulk bar. */
-    var selectedRef          = React.useState({});
-    var selectedIds          = selectedRef[0];
-    var setSelectedIds       = selectedRef[1];
-
     /* Guards the "Resolve N" button against double-submit while the
        pooled toggleAction batch is in flight. */
     var resolvingRef         = React.useState(false);
     var bulkResolving        = resolvingRef[0];
     var setBulkResolving     = resolvingRef[1];
 
-    var ctx = React.useContext(TodayContext);
+    var ctx      = React.useContext(TodayContext);
+    var state    = ctx && ctx.state;
+    var removeMy = ctx && ctx.removeMyTask;
+
+    /* feat/leftover-batch-select (T1) / T4 DRY extraction — leftoverItems
+       has to be known BEFORE the useMultiSelect() hook call just below
+       (its `items` param drives Shift-range selection), and hook calls
+       must stay unconditional per rules-of-hooks — so this is computed
+       defensively here (state may not be 'ok' yet, e.g. still loading)
+       rather than after the status early-returns further down, which is
+       where the equivalent myRecent/teamRecent split used to live.
+       Reused verbatim below once state.status === 'ok' is confirmed —
+       not recomputed. */
+    var earlyData = (state && state.status === 'ok') ? state.data : null;
+    var myRecent = [], myLeftover = [], teamRecent = [], teamLeftover = [];
+    if (earlyData) {
+      (earlyData.myTasks || []).forEach(function (t) {
+        (t.ageDays > LEFTOVER_THRESHOLD_DAYS ? myLeftover : myRecent).push(t);
+      });
+      (earlyData.teamTasks || []).forEach(function (t) {
+        (t.ageDays > LEFTOVER_THRESHOLD_DAYS ? teamLeftover : teamRecent).push(t);
+      });
+    }
+    var leftoverItems = myLeftover.concat(teamLeftover);
+
+    /* F2 — leftoverIsMultiProject (and the flattened render order it
+       drives) has to be known BEFORE useMultiSelect() below, same
+       rules-of-hooks constraint as leftoverItems above. Moved up from
+       further down the component (see the old comment near the
+       state.status early-returns) since it only depends on leftoverItems,
+       already computed just above. Leftover section computes its OWN
+       multi-project flag off just the leftover items (reusing
+       distinctProjects' pool-scanning shape) — it can legitimately
+       differ from the page-level isMultiProject computed later (e.g.
+       recent items are all one project but leftovers span three). */
+    var leftoverProjects       = distinctProjects({ myTasks: leftoverItems, teamTasks: [], urgent: [], programmeTasks: [] });
+    var leftoverIsMultiProject = leftoverProjects.length > 1;
+
+    /* F2 — when multi-project, the middle column renders leftovers
+       grouped by project (renderMaybeGrouped → groupByProject below),
+       NOT in leftoverItems' raw myLeftover-then-teamLeftover concat
+       order. Shift-range selection has to walk the SAME order the user
+       sees, so flatten groupByProject's own output here and pass THAT
+       to useMultiSelect — not leftoverItems — so a Shift+Click between
+       two visually-adjacent cards can't reach into a different group. */
+    var leftoverRenderItems = leftoverIsMultiProject
+      ? groupByProject(leftoverItems).reduce(function (acc, g) { return acc.concat(g.rows); }, [])
+      : leftoverItems;
+
+    /* T4 — batchMode/anchor/Shift-Ctrl selection state + dispatch, now
+       the ONE shared implementation (scripts/composites/multi-select-
+       list.js) also consumed by /safety and /quality. Behavior is
+       byte-identical to the T1 inline version it replaces: batchMode
+       OFF (default) leaves each Leftover TaskCard's round selector on
+       the single-resolve path (task-card.js startCheckOff, unchanged);
+       ON, the SAME round selectors become multi-select toggles
+       (multiSelect.onItemClick, wired below) and nothing resolves until
+       "Resolve N" is pressed (bulkResolveLeftover(), unchanged, still
+       the sole audited write). */
+    var multiSelect = window.FieldSight.useMultiSelect({
+      items: leftoverRenderItems,
+      getId: function (t) { return t.id; },
+    });
+
     if (!ctx) {
       console.warn('[TodayMiddleColumn] TodayContext missing — was the page Provider mounted?');
       return null;
     }
-    var state    = ctx.state;
-    var removeMy = ctx.removeMyTask;
 
     if (state.status === 'loading') {
       return React.createElement('div', { className: 'fs-page fs-page--today' },
@@ -1163,8 +1212,8 @@
     var isMultiProject = projects.length > 1;
 
     /* feat/today-leftover-grouping — Recent vs Leftover split, computed
-       HERE at render time from the full data.myTasks/data.teamTasks
-       (the loader/state never splits — see loadRollingOpenItems), so
+       at render time from the full data.myTasks/data.teamTasks (the
+       loader/state never splits — see loadRollingOpenItems), so
        removeMyTask (id-based, both buckets) and findItemById keep
        working unchanged no matter which group an item is currently
        rendered in. Recent = ageDays <= LEFTOVER_THRESHOLD_DAYS (existing
@@ -1172,57 +1221,34 @@
        into one collapsible, project-grouped list (ownership matters
        less for old-item triage). myIds is used only to paint the
        existing `isMine` accent border on leftover cards that originated
-       from myTasks. */
-    var myRecent = [], myLeftover = [];
-    (data.myTasks || []).forEach(function (t) {
-      (t.ageDays > LEFTOVER_THRESHOLD_DAYS ? myLeftover : myRecent).push(t);
-    });
-    var teamRecent = [], teamLeftover = [];
-    (data.teamTasks || []).forEach(function (t) {
-      (t.ageDays > LEFTOVER_THRESHOLD_DAYS ? teamLeftover : teamRecent).push(t);
-    });
-    var leftoverItems = myLeftover.concat(teamLeftover);
+       from myTasks.
+
+       T4 DRY extraction — myRecent/myLeftover/teamRecent/teamLeftover/
+       leftoverItems themselves were already computed EARLIER in this
+       component (before the useMultiSelect() hook call near the top —
+       see that T4 comment), since useMultiSelect's `items` param must be
+       known before any early return per rules-of-hooks. Reused verbatim
+       here, not recomputed. */
     var myIds = {};
     (data.myTasks || []).forEach(function (t) { myIds[t.id] = true; });
 
-    /* Leftover section computes its OWN multi-project flag off just the
-       leftover items (reusing distinctProjects' pool-scanning shape) —
-       it can legitimately differ from the page-level isMultiProject
-       above (e.g. recent items are all one project but leftovers span
-       three). */
-    var leftoverProjects      = distinctProjects({ myTasks: leftoverItems, teamTasks: [], urgent: [], programmeTasks: [] });
-    var leftoverIsMultiProject = leftoverProjects.length > 1;
+    /* F2 — leftoverProjects/leftoverIsMultiProject moved up (see the T4
+       useMultiSelect comment near the top of this component); reused
+       verbatim here, not recomputed. */
 
-    /* feat/leftover-bulk-select — derive the actually-selected leftover
-       items by intersecting selectedIds with leftoverItems (rather than
-       trusting selectedIds' own key count) so a stale id — e.g. an item
-       someone else resolved via the actionsBus subscription above, or
-       one that aged back under the threshold on a refresh — silently
-       drops out of the count instead of over-counting or crashing a
-       lookup. Only LEFTOVER items are ever selectable, so this is also
-       the single source of truth "N selected" reads from. */
-    var selectedLeftoverItems = leftoverItems.filter(function (t) { return !!selectedIds[t.id]; });
+    /* T4 — selectedLeftoverItems/selectedCount now come straight off
+       multiSelect.selectedItems, which does the exact same
+       selectedIds-intersect-items derivation the old inline code did
+       here: a stale id — e.g. an item someone else resolved via the
+       actionsBus subscription above, or one that aged back under the
+       threshold on a refresh — silently drops out instead of over-
+       counting or crashing a lookup. Only LEFTOVER items are ever
+       selectable (leftoverRenderItems — leftoverItems, or its flattened
+       project-grouped order when multi-project — is what was passed as
+       `items` to useMultiSelect above), so this is still the single
+       source of truth "N selected" reads from. */
+    var selectedLeftoverItems = multiSelect.selectedItems;
     var selectedCount         = selectedLeftoverItems.length;
-
-    function toggleLeftoverSelect(task) {
-      setSelectedIds(function (prev) {
-        var next = Object.assign({}, prev);
-        if (next[task.id]) { delete next[task.id]; } else { next[task.id] = true; }
-        return next;
-      });
-    }
-
-    function selectAllLeftover() {
-      setSelectedIds(function () {
-        var next = {};
-        leftoverItems.forEach(function (t) { next[t.id] = true; });
-        return next;
-      });
-    }
-
-    function clearLeftoverSelection() {
-      setSelectedIds({});
-    }
 
     /* Bulk resolve — pooled-toggle every selected item, EACH carrying
        ITS OWN date/folder/topic_id/actionIndex (leftover items span
@@ -1272,7 +1298,12 @@
 
         Object.keys(okIds).forEach(function (id) { removeMy(id); });
 
-        setSelectedIds(function (prev) {
+        /* T4 — multiSelect.setSelectedIds is the hook's raw escape-hatch
+           setter (beyond the 6-field spec), kept for exactly this case:
+           a failed toggle must stay selected for retry, so this can't be
+           a blanket multiSelect.clear() — same partial-survivor logic as
+           the pre-extraction inline version. */
+        multiSelect.setSelectedIds(function (prev) {
           var next = {};
           Object.keys(prev).forEach(function (id) { if (!okIds[id]) next[id] = prev[id]; });
           return next;
@@ -1474,55 +1505,63 @@
          signal. */
       leftoverItems.length > 0
         ? React.createElement('div', { className: 'fs-today__leftover' },
-            React.createElement('button', {
-              type:            'button',
-              className:       'fs-today__leftover-toggle',
-              onClick:         function () { setLeftoverExpanded(function (v) { return !v; }); },
-              'aria-expanded': leftoverExpanded,
-            },
-              React.createElement('span', {
-                className: 'fs-today__leftover-chev'
-                  + (leftoverExpanded ? ' fs-today__leftover-chev--open' : ''),
-                'aria-hidden': true,
-              }, '▸'),
-              React.createElement('span', { className: 'fs-today__leftover-label' },
-                'Leftover · ' + leftoverItems.length),
-              React.createElement('span', { className: 'fs-today__leftover-hint' },
-                '(' + LEFTOVER_THRESHOLD_DAYS + '+ days, unresolved)'),
+            React.createElement('div', { className: 'fs-today__leftover-header' },
+              React.createElement('button', {
+                type:            'button',
+                className:       'fs-today__leftover-toggle',
+                onClick:         function () { setLeftoverExpanded(function (v) { return !v; }); },
+                'aria-expanded': leftoverExpanded,
+              },
+                React.createElement('span', {
+                  className: 'fs-today__leftover-chev'
+                    + (leftoverExpanded ? ' fs-today__leftover-chev--open' : ''),
+                  'aria-hidden': true,
+                }, '▸'),
+                React.createElement('span', { className: 'fs-today__leftover-label' },
+                  'Leftover · ' + leftoverItems.length),
+                React.createElement('span', { className: 'fs-today__leftover-hint' },
+                  '(' + LEFTOVER_THRESHOLD_DAYS + '+ days, unresolved)'),
+              ),
+              /* feat/leftover-batch-select (T1), extracted T4 — OFF
+                 (default): round selectors resolve single items. ON:
+                 round selectors become multi-select toggles and the
+                 bulk bar below is reachable (including "Select all"
+                 from a clean, nothing-selected state). Sibling
+                 <button>, not nested, since the expand toggle above is
+                 already a <button>. Shared .fs-multi-select__toggle
+                 classes (composites.css), same ones /safety + /quality
+                 (T4) use for their own Multi-Select toggle. */
+              React.createElement('button', {
+                type:            'button',
+                className:       'fs-multi-select__toggle'
+                  + (multiSelect.batchMode ? ' fs-multi-select__toggle--active' : ''),
+                onClick:         function () { multiSelect.setBatchMode(function (prev) { return !prev; }); },
+                'aria-pressed':  multiSelect.batchMode,
+              }, multiSelect.batchMode ? 'Batch Select: On' : 'Batch Select'),
             ),
 
-            /* feat/leftover-bulk-select — bulk action bar, shown once
-               >=1 leftover item is selected. Lives in the section
-               "header area" (between the toggle and the collapsible
-               body) so it's visible whether or not the body itself is
-               expanded — selection intentionally survives a collapse
-               (see selectedRef declaration above), so Resolve N stays
-               reachable without re-expanding. */
-            selectedCount > 0
-              ? React.createElement('div', { className: 'fs-today__bulk-bar' },
-                  React.createElement('span', { className: 'fs-today__bulk-bar-count' },
-                    selectedCount + ' selected'),
-                  React.createElement('div', { className: 'fs-today__bulk-bar-actions' },
-                    React.createElement('button', {
-                      type:      'button',
-                      className: 'fs-today__bulk-bar-btn',
-                      onClick:   selectAllLeftover,
-                      disabled:  bulkResolving,
-                    }, 'Select all'),
-                    React.createElement('button', {
-                      type:      'button',
-                      className: 'fs-today__bulk-bar-btn fs-today__bulk-bar-btn--primary',
-                      onClick:   bulkResolveLeftover,
-                      disabled:  bulkResolving,
-                    }, bulkResolving ? 'Resolving…' : 'Resolve ' + selectedCount),
-                    React.createElement('button', {
-                      type:      'button',
-                      className: 'fs-today__bulk-bar-btn',
-                      onClick:   clearLeftoverSelection,
-                      disabled:  bulkResolving,
-                    }, 'Clear'),
-                  ),
-                )
+            /* feat/leftover-batch-select (T1), extracted T4 — bulk
+               action bar (shared MultiSelectBulkBar composite), shown
+               whenever batchMode is on (not gated on selectedCount > 0
+               any more, so "Select all" is reachable immediately after
+               turning batch mode on). Lives in the section "header
+               area" (between the toggle and the collapsible body) so
+               it's visible whether or not the body itself is expanded
+               — selection intentionally survives a collapse (the
+               underlying selection state lives in the useMultiSelect
+               hook now, still not tied to leftoverExpanded), so
+               Resolve N stays reachable without re-expanding. */
+            multiSelect.batchMode
+              ? React.createElement(fs.MultiSelectBulkBar, {
+                  count:   selectedCount,
+                  actions: [
+                    { key: 'select-all', label: 'Select all', onClick: multiSelect.selectAll, disabled: bulkResolving },
+                    { key: 'resolve', primary: true, onClick: bulkResolveLeftover,
+                      disabled: bulkResolving || selectedCount === 0,
+                      label: bulkResolving ? 'Resolving…' : 'Resolve ' + selectedCount },
+                    { key: 'clear', label: 'Clear', onClick: multiSelect.clear, disabled: bulkResolving },
+                  ],
+                })
               : null,
 
             leftoverExpanded
@@ -1540,13 +1579,19 @@
                       site:           !leftoverIsMultiProject ? task.site_name : null,
                       ageLabel:       formatAgeLabel(task.ageDays),
                       noDeadline:     !!task.noDeadline,
-                      /* feat/leftover-bulk-select — only Leftover cards
-                         are selectable; Recent/programme/timeline
-                         TaskCard call sites omit these three props and
-                         render byte-identical to before. */
-                      selectable:     true,
-                      bulkSelected:   !!selectedIds[task.id],
-                      onSelectToggle: toggleLeftoverSelect,
+                      /* feat/leftover-batch-select (T1), extracted T4 —
+                         only Leftover cards pass these; Recent/
+                         programme/timeline TaskCard call sites omit
+                         them, so their round check button keeps the
+                         original single-resolve behavior (checkable
+                         without batchMode/onBatchToggle =>
+                         startCheckOff, unchanged). multiSelect.onItemClick
+                         is the shared hook's dispatcher — same
+                         Shift/Ctrl/plain semantics the old inline
+                         onBatchToggle had. */
+                      batchMode:      multiSelect.batchMode,
+                      batchSelected:  !!multiSelect.selectedIds[task.id],
+                      onBatchToggle:  multiSelect.onItemClick,
                     });
                   }),
                 )

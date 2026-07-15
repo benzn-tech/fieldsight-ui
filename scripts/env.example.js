@@ -12,4 +12,5 @@ window.FS_ENV = {
   writeMocks: true,  // non-org backend-less writes stay mocked
   orgBaseUrl: 'https://wdsgobb7b0.execute-api.ap-southeast-2.amazonaws.com/prod/api',  // org backend (empty '' = kill switch → org回mock)
   orgWrites: true,   // org-domain writes go live (batch 2)
+  timelineSource: 'report',  // 'aurora' routes getTimeline to org /timeline shim (only when orgBaseUrl is set — kill switch); default 'report' = zero behavior change
 };

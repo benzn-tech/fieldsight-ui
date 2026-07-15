@@ -25,6 +25,44 @@
 
 
 /* =========================================================================
+   Shared row state — resolved sink (T7 + G2)
+   -------------------------------------------------------------------------
+   .fs-row--resolved marks a resolved/closed/checked list row in /safety,
+   /quality, and /timeline topic action items. The stable sink-to-bottom
+   sort lives in each page/composite's JS (safety.js, quality.js,
+   topic-card.js) — this class only supplies the shared visual treatment
+   (muted gray bg + strikethrough primary text) so the three lists read
+   consistently. Applied at each row's WRAPPER element (safety.js's
+   .fs-safety__row-btn, quality.js's .fs-quality__row-btn, topic-card.js's
+   action-item wrapper div) rather than inside SafetyFlagRow/ActionItemRow
+   themselves, so this stays a pure CSS add-on with no composite API
+   change.
+
+   --surface-resolved is a neutral gray, NOT a status-tone token (it isn't
+   theme-flipped the way --color-{success,danger,...} are), so the
+   foreground is pinned to --text-tertiary directly rather than relying
+   on an ancestor color flip — stays readable in both themes.
+   ========================================================================= */
+
+.fs-row--resolved {
+  background:    var(--surface-resolved);
+  border-radius: var(--radius-md);
+}
+
+/* SafetyFlagRow paints its own opaque --surface-panel background, so the
+   ancestor's --surface-resolved needs to be re-applied on the inner row
+   for it to actually show through. */
+.fs-row--resolved .fs-safety-flag-row { background: var(--surface-resolved); }
+
+.fs-row--resolved .fs-safety-flag-row__obs,
+.fs-row--resolved .fs-quality__row-title,
+.fs-row--resolved .fs-action-item-row__text {
+  text-decoration: line-through;
+  color:           var(--text-tertiary);
+}
+
+
+/* =========================================================================
    TaskCard — avatar + title (2-line) + status badge + due time
    ========================================================================= */
 
@@ -331,14 +369,78 @@
   padding-top: 8px;
 }
 
-/* feat/leftover-bulk-select — bulk action bar, shown in the Leftover
-   section header area once >=1 leftover item is selected (square
-   checkboxes on .fs-task-card__select above). Neutral surface tone —
-   never safety-red / blocked-magenta (CLAUDE.md status-color rule);
-   leftover age/selection is informational, not a blocked/overdue
-   signal. Stays visible even if the section is collapsed afterwards,
-   since selection state is intentionally NOT reset on collapse. */
-.fs-today__bulk-bar {
+/* feat/leftover-batch-select (T1) — header row wrapping the existing
+   expand toggle + the new "Batch Select" mode toggle as siblings (NOT
+   nested — the expand toggle is already a <button>, and buttons can't
+   nest). border-top lives here now instead of on .fs-today__leftover-
+   toggle so the rule reads once per row. */
+.fs-today__leftover-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+.fs-today__leftover-header .fs-today__leftover-toggle {
+  border-top: none;
+  flex: 1;
+  min-width: 0;
+}
+/* feat/leftover-batch-select (T1), generalized T4 — was
+   .fs-today__leftover-batch-toggle / .fs-today__bulk-bar*, Today-only.
+   T4 extracted the underlying interaction into useMultiSelect
+   (scripts/composites/multi-select-list.js) and /safety + /quality now
+   reuse the SAME "Multi-Select" toggle + bulk bar, so these rules moved
+   under a page-agnostic .fs-multi-select block instead of staying
+   Today-prefixed. Visuals are byte-identical to the T1 originals —
+   selectors renamed only, no property changes. */
+.fs-multi-select__toggle {
+  flex-shrink: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  margin: 4px 4px 4px 0;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out);
+}
+.fs-multi-select__toggle:hover {
+  background: var(--surface-panel-elevated);
+  border-color: var(--border-strong);
+}
+.fs-multi-select__toggle:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+.fs-multi-select__toggle--active {
+  /* fixed white on --color-primary-700 — same not-theme-flipped pairing
+     as .fs-multi-select__bulk-bar-btn--primary below; see that rule's
+     comment for the CLAUDE.md trap this avoids. */
+  color: #fff;
+  background: var(--color-primary-700);
+  border-color: var(--color-primary-700);
+}
+.fs-multi-select__toggle--active:hover {
+  background: var(--color-primary-800);
+}
+
+/* feat/leftover-batch-select (T1), generalized T4 — bulk action bar,
+   shown whenever Multi-Select/Batch Select mode is on (the selectable
+   rows/round-selectors it pairs with double as multi-select toggles
+   while it's on — task-card.js's .fs-task-card__check--selected for
+   Today, .fs-row--batch-selected for /safety + /quality). Neutral
+   surface tone — never safety-red / blocked-magenta (CLAUDE.md
+   status-color rule); selection is informational, not a blocked/
+   overdue signal. On /today, stays visible even if the Leftover section
+   is collapsed afterwards, since selection state is intentionally NOT
+   reset on collapse. */
+.fs-multi-select__bulk-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -349,19 +451,19 @@
   border-radius: var(--radius-md);
   background: var(--surface-panel-muted);
 }
-.fs-today__bulk-bar-count {
+.fs-multi-select__bulk-bar-count {
   font-size: 12px;
   font-weight: var(--font-weight-semibold);
   color: var(--text-primary);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.fs-today__bulk-bar-actions {
+.fs-multi-select__bulk-bar-actions {
   display: flex;
   align-items: center;
   gap: 6px;
 }
-.fs-today__bulk-bar-btn {
+.fs-multi-select__bulk-bar-btn {
   font: inherit;
   font-size: 12px;
   font-weight: var(--font-weight-medium);
@@ -374,19 +476,19 @@
   transition: background var(--duration-fast) var(--ease-out),
               border-color var(--duration-fast) var(--ease-out);
 }
-.fs-today__bulk-bar-btn:hover:not([disabled]) {
+.fs-multi-select__bulk-bar-btn:hover:not([disabled]) {
   background: var(--surface-panel-elevated);
   border-color: var(--border-strong);
 }
-.fs-today__bulk-bar-btn:focus-visible {
+.fs-multi-select__bulk-bar-btn:focus-visible {
   outline: 2px solid var(--border-focus);
   outline-offset: 2px;
 }
-.fs-today__bulk-bar-btn[disabled] {
+.fs-multi-select__bulk-bar-btn[disabled] {
   cursor: default;
   opacity: 0.6;
 }
-.fs-today__bulk-bar-btn--primary {
+.fs-multi-select__bulk-bar-btn--primary {
   /* fixed white, NOT var(--text-inverse) — --color-primary-700/800 are
      NOT theme-flipped (tokens.css defines them once, no [data-theme=
      "dark"] override — same fixed-navy pattern as
@@ -398,8 +500,22 @@
   background: var(--color-primary-700);
   border-color: var(--color-primary-700);
 }
-.fs-today__bulk-bar-btn--primary:hover:not([disabled]) {
+.fs-multi-select__bulk-bar-btn--primary:hover:not([disabled]) {
   background: var(--color-primary-800);
+}
+
+/* T4 — /safety + /quality row-select affordance. In Multi-Select/batch
+   mode, clicking anywhere on an eligible (report-derived) row toggles it
+   into the selection instead of opening the right-detail panel (there's
+   no separate leading avatar/checkbox slot to repurpose the way
+   TaskCard's round button does for Today's Leftover). Reuses
+   --surface-selected / --border-focus — the same selection tokens the
+   rest of the app already uses — so "selected for batch" reads
+   distinctly from --surface-resolved (.fs-row--resolved) above. */
+.fs-row--batch-selected {
+  background: var(--surface-selected);
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 0 0 1.5px var(--border-focus);
 }
 
 
@@ -445,23 +561,24 @@
   color: #fff;
 }
 
-/* feat/leftover-bulk-select — square selection checkbox, rendered left
-   of .fs-task-card__check / the avatar (never in the same slot). Native
-   <input type="checkbox"> is square by default in every supported
-   browser, so the shape alone (no color/position trick needed)
-   distinguishes "select for bulk action" from the round "resolve this
-   one now" button next to it. */
-.fs-task-card__select {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-  margin: 0;
-  accent-color: var(--color-accent-500);
-  cursor: pointer;
+/* feat/leftover-batch-select (T1) — the SAME round button doubles as a
+   multi-select toggle when the Leftover section's Batch Select mode is
+   on (task-card.js `batchMode` + `batchSelected` props); no separate
+   square checkbox any more. Reuses --border-focus / --surface-selected
+   — the tokens the rest of the app already uses for focus/select
+   states — rather than the green --color-success-* pair above, so
+   "selected for batch" never reads as "already resolved". Declared
+   after the base :hover rule (equal specificity, two classes each) so
+   it wins the cascade tie when a selected button is also hovered. */
+.fs-task-card__check--selected {
+  border-color: var(--border-focus);
+  background: var(--surface-selected);
+  color: var(--border-focus);
 }
-.fs-task-card__select:focus-visible {
-  outline: 2px solid var(--border-focus);
-  outline-offset: 2px;
+.fs-task-card__check--selected:hover {
+  border-color: var(--border-focus);
+  background: var(--surface-selected);
+  color: var(--border-focus);
 }
 
 /* Check-off animation — one keyframe drives border pulse + fade-out.
@@ -872,14 +989,30 @@
 
 .fs-topic-card--selected {
   border-color: var(--color-accent-400) !important;
+  /* T3 — readable neutral tint + accent left-border, not a yellow fill.
+     Yellow (--surface-selected) is reserved for hover only (below). */
+  background: var(--surface-topic-selected);
+  border-left: 3px solid var(--color-accent-500);
+}
+
+/* T3 — yellow highlight only on hover, on any (non-selected) card. */
+.fs-topic-card:hover {
   background: var(--surface-selected);
+}
+[data-theme="dark"] .fs-topic-card:hover,
+[data-theme="dark"] .fs-topic-card:hover .fs-topic-card__title {
+  /* Pin foreground so title stays readable on the yellow hover tint —
+     status/highlight-style tokens aren't theme-flipped (see CLAUDE.md). */
+  color: var(--text-primary);
 }
 
 /* Sprint 6.6.4 — deep-link spotlight. Three soft pulses then settle.
    Total ~1.8s. The flash class lands on the inner Card (which carries
    .fs-topic-card); the wrapper just exists for the ref / scrollIntoView
-   target. Uses accent-100 for the pulse — same token the --selected
-   state uses, so no new palette work.
+   target. Uses accent-100 for the animated pulse. T3 — the
+   prefers-reduced-motion static fallback below now uses
+   --surface-topic-selected instead (accent-100 was a pale-yellow-under-
+   white legibility trap with no border cue once the animation is gone).
    Sprint 6.7.2 — same animation reused by .fs-safety-flag-row--flash
    for precision spotlight on a single flag inside an open topic.
    A2-2 — same animation reused again by .fs-transcript-list__row--flash
@@ -902,7 +1035,10 @@
   .fs-safety-flag-row--flash,
   .fs-transcript-list__row--flash {
     animation: none;
-    background: var(--color-accent-100);
+    /* T3 — was --color-accent-100 (pale-yellow-under-white legibility trap
+       in dark mode). Use the same readable neutral tint as the selected
+       state so a reduced-motion deep-link spotlight is still legible. */
+    background: var(--surface-topic-selected);
   }
 }
 
@@ -1035,21 +1171,25 @@
 
 /* Sprint 4.5 — back link surfaced when arriving from /today.
    Sprint 4.10 — restyled to match the "View daily report" CTA on
-   /today: full-width, dark navy primary button, with the arrow
-   on the left and text following. Visually parallel to the
-   CTA so users perceive the round-trip as one symmetrical action.
+   /today: dark navy primary button, with the arrow on the left and
+   text following. Visually parallel to the CTA so users perceive the
+   round-trip as one symmetrical action.
    fix/timeline-buttons-and-deadline — padding tightened from
    12px/16px to 10px/14px to exactly match
    .fs-today__view-report-cta / .fs-today__timeline-link's box, so all
-   three "timeline nav" buttons render at the same height. Stays
-   full-width (unlike the other two, which are the 50%/min-220px
-   compact block) since this is a full-width page-header element. */
+   three "timeline nav" buttons render at the same height.
+   fix/today-timeline-equal-width (T2) — now also matches their
+   width:50%/min-width:220px compact block instead of full-width;
+   sits inside .fs-timeline-page__header (plain block, no flex
+   constraint) so this renders identically to the other two and the
+   three read as one button family, not two different sizes. */
 .fs-timeline-page__back {
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 12px;
-  width: 100%;
+  width: 50%;
+  min-width: 220px;
   margin: 0 0 12px;
   padding: 10px 14px;
   font: inherit;

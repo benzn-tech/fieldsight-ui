@@ -1303,25 +1303,48 @@
         ? React.createElement('div', { className: 'fs-topic-detail__section' },
             React.createElement('div', { className: 'fs-topic-detail__section-label' },
               'Action items'),
+            /* follow-up (T7 parity) — mirrors topic-card.js's sink+style
+               treatment (~242-290): checked action items sink to the
+               bottom while unfinished items keep their existing relative
+               order. Pair each item with its ORIGINAL idx + derived
+               checked state BEFORE sorting so actionIndex/lookupAction/key
+               stay tied to the item's real backend position, not its
+               sorted render position. .map() returns a fresh array, so
+               .sort() here never mutates topic.action_items; the
+               comparator only distinguishes checked-vs-not (no secondary
+               tiebreaker), so it never reorders two items on the same
+               side of the checked/unchecked split (Array.sort is stable
+               in evergreen browsers). */
             actions.map(function (a, idx) {
-              var key = topic.topic_id + '_' + idx;
-              var st  = window.FS.api.actions.lookupAction(props.actionState, props.userFolder, topic.topic_id, idx) || {};
-              return React.createElement(ActionItemRow, {
-                key:            key,
+              var state = window.FS.api.actions.lookupAction(props.actionState, props.userFolder, topic.topic_id, idx) || {};
+              return { a: a, idx: idx, state: state, checked: !!state.checked };
+            }).sort(function (x, y) {
+              if (x.checked === y.checked) return 0;
+              return x.checked ? 1 : -1;
+            }).map(function (pair) {
+              var a     = pair.a;
+              var idx   = pair.idx;
+              var state = pair.state;
+              var key   = topic.topic_id + '_' + idx;
+              return React.createElement('div', {
+                key:       key,
+                className: 'fs-topic-detail__action-item'
+                  + (pair.checked ? ' fs-row--resolved' : ''),
+              }, React.createElement(ActionItemRow, {
                 date:           props.date,
                 topicId:        topic.topic_id,
                 actionIndex:    idx,
                 userFolder:     props.userFolder,
                 action:         a,
-                initialChecked: !!st.checked,
-                checkedBy:      st.checked_by,
+                initialChecked: pair.checked,
+                checkedBy:      state.checked_by,
                 /* fix/action-checkoff-sync (Bug 3) — was omitted, so the
                    right panel never showed the "· <time>" half of
                    "Checked by X · <time>" that the middle TopicCard
                    already renders (topic-card.js ~228). ActionItemRow
                    already handles both props; this just feeds it. */
-                checkedAt:      st.checked_at,
-              });
+                checkedAt:      state.checked_at,
+              }));
             }),
           )
         : null,

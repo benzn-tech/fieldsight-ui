@@ -84,6 +84,10 @@
     /* Second base URL for the org backend (test gateway). Empty '' = kill
        switch: org reads/writes fall back to mocks. See api/org.js. */
     orgBaseUrl: env.orgBaseUrl || '',
+    /* authority flip (pipeline plan 2026-07-14): 'report' = prod /api/timeline
+       (S3 daily_report.json), 'aurora' = org /api/org/timeline (item store).
+       'aurora' only takes effect when orgBaseUrl is non-empty (kill switch). */
+    timelineSource: env.timelineSource || 'report',
     orgWrites: env.orgWrites !== undefined ? !!env.orgWrites : false,
     delay: delay,
     folderName: folderName,

@@ -160,7 +160,17 @@
       checked_at: new Date().toISOString(),
     };
 
-    return { message: 'Updated', checked: checked };
+    /* T6 pre-check fix — the return value previously omitted checked_by/
+       checked_at even though they're written into `state` above; callers
+       that read the toggleAction response directly (e.g. safety.js's
+       resolver display) got undefined in mock mode. Mirror the same
+       fields the live path returns from the server. */
+    return {
+      message:    'Updated',
+      checked:    checked,
+      checked_by: state[date][key].checked_by,
+      checked_at: state[date][key].checked_at,
+    };
   }
 
   /* Sprint 8.1.1 — create a new action item. Used by future write flows. */

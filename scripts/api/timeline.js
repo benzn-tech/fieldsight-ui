@@ -24,15 +24,31 @@
     return byDate[folder] || byDate[user] || null;
   }
 
+  /* authority flip (pipeline plan 2026-07-14): 'aurora' only takes effect
+     when orgBaseUrl is non-empty (kill switch) — see api/index.js. */
+  function timelineSource() {
+    var api = window.FS.api;
+    return (api.timelineSource === 'aurora' && api.orgBaseUrl) ? 'aurora' : 'report';
+  }
+
   /* Session-stable read: reports are generated server-side and not edited
      in-app, so a few minutes of staleness is safe — see api/_cache.js.
      Cache key intentionally includes only (date, user); it's the exact
      request shape callers pass. */
   async function fetchTimeline(opts) {
     if (!window.FS.api.useMocks) {
-      return window.FS.api.request('/timeline', {
-        params: { date: opts.date, user: opts.user },
-      });
+      var params = { date: opts.date, user: opts.user };
+      if (timelineSource() === 'aurora') {
+        try {
+          var r = await window.FS.api.orgRequest('/timeline', { params: params });
+          /* _accessDenied → ACL divergence (shim v1 is stricter than prod for
+             site_manager/pm, plan D10): fall through to the report path rather
+             than blanking the page. _notFound is authoritative (the shim
+             already fell back to S3 server-side) — return it. */
+          if (r && !r._accessDenied) return r;
+        } catch (e) { /* org gateway/transport failure → report fallback */ }
+      }
+      return window.FS.api.request('/timeline', { params: params });
     }
     await window.FS.api.delay(120);
 
@@ -69,7 +85,7 @@
 
   function getTimeline(opts) {
     opts = opts || {};
-    var key = 'tl:' + opts.date + ':' + (opts.user || '');
+    var key = 'tl:' + timelineSource() + ':' + opts.date + ':' + (opts.user || '');
     return window.FS.api.cache.cached(key, undefined, function () {
       return fetchTimeline(opts);
     });
