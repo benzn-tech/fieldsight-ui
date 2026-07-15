@@ -166,7 +166,7 @@
 
   <!-- Backend-shaped data layer (Sprint 2.1, Phase A): fixtures → api modules → adapter -->
   <!--   1. FS.api namespace + helpers (must precede every api/* and adapter) -->
-  <script src="scripts/api/index.js?v=4"></script>
+  <script src="scripts/api/index.js?v=5"></script>
   <script src="scripts/api/_fetch.js?v=6"></script>
   <!-- TTL read-cache for session-stable reads (getTimeline/getDates/getSpan) -->
   <script src="scripts/api/_cache.js?v=1"></script>
@@ -191,7 +191,7 @@
   <script src="scripts/api/dates.js?v=4"></script>
   <!-- Sprint date-range-batch — Data window (range calculations) -->
   <script src="scripts/api/data-window.js?v=2"></script>
-  <script src="scripts/api/timeline.js?v=2"></script>
+  <script src="scripts/api/timeline.js?v=3"></script>
   <script src="scripts/api/transcripts.js?v=1"></script>
   <script src="scripts/api/audio.js?v=1"></script>
   <script src="scripts/api/video.js?v=1"></script>
@@ -208,7 +208,7 @@
   <!-- Sprint 4.2 — Tasks aggregator (cross-day join: timeline + actions) -->
   <script src="scripts/api/tasks-aggregator.js?v=9"></script>
   <!-- Sprint 6.0 — Compliance aggregator (cross-day fan-out for /safety + /quality) -->
-  <script src="scripts/api/compliance-aggregator.js?v=15"></script>
+  <script src="scripts/api/compliance-aggregator.js?v=16"></script>
   <!-- Sprint 9 Track A.1 — Insights aggregator (subcontractor + tag rollups over compliance rows) -->
   <script src="scripts/api/insights-aggregator.js?v=1"></script>
   <!-- Sprint 9 Track C.1 — Strategic aggregator (per-site / per-region / org rollups) -->
@@ -262,6 +262,9 @@
        ?mocks=0        → sets FS.api.useMocks = false (requires a real API)
        ?baseUrl=https… → sets FS.api.baseUrl to point at staging or local backend
        ?dev=1          → shows the role switcher (always on in preview; kept for parity)
+       ?timelinesrc=   → authority flip (pipeline plan 2026-07-14) per-session
+                         override of FS.api.timelineSource ('aurora'|'report');
+                         'aurora' only takes effect when orgBaseUrl is set too.
        ?axe=1          → Sprint 11 A.1: load axe-core via CDN + run on each
                          route change, log WCAG 2.1 AA violations to console.
                          One-off audit tool — never on by default (Q-S11-4).
@@ -291,6 +294,9 @@
       if (ob !== null && window.FS && window.FS.api) { window.FS.api.orgBaseUrl = ob; }
       var ow = params.get('orgwrites');
       if (ow !== null && window.FS && window.FS.api) { window.FS.api.orgWrites = ow !== '0'; }
+
+      var ts = params.get('timelinesrc');
+      if (ts && window.FS && window.FS.api) window.FS.api.timelineSource = ts;
 
       /* Sprint 11 A.1 — ?axe=1 loads axe-core dynamically + runs the
          WCAG 2.1 AA audit on every route change. Findings logged to

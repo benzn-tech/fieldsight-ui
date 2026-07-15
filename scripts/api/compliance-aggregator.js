@@ -683,25 +683,35 @@
        failure must never take the range down — report + manual rows
        still render. */
     try {
-      var liveDatesSafety = computeLiveDates(from, to, fanout.dates);
-      var liveThunksSafety = liveDatesSafety.map(function (d) {
-        return function () {
-          return window.FS.api.org.getLiveItems({ date: d });
-        };
-      });
-      var liveResultsSafety = (await window.FS.api.pooledAll(liveThunksSafety, 8)).filter(Boolean);
-      var siteNameFilterSafety = opts.site ? await resolveSiteNameForFilter(opts.site) : null;
-      var liveRowsSafety = [];
-      liveResultsSafety.forEach(function (res) {
-        ((res && res.topics) || []).forEach(function (topic) {
-          if (!topic.is_live) return;
-          if (siteNameFilterSafety && topic.site_name !== siteNameFilterSafety) return;  /* F2 — slug→name bridge, see resolveSiteNameForFilter() */
-          (topic.safety_observations || []).forEach(function (o) {
-            liveRowsSafety.push(toLiveSafetyRow(topic, o));
+      /* authority flip (pipeline plan 2026-07-14): when timelineSource is
+         'aurora' (kill switch: only live when orgBaseUrl is set too), the
+         shim already serves these same extraction topics through
+         getTimeline — merging live-items again here would double-display
+         every safety finding (investigation §0.11). Skip the fetch; this
+         leg contributes nothing. */
+      if (window.FS.api.timelineSource === 'aurora' && window.FS.api.orgBaseUrl) {
+        // no-op — live items already reflected via the aurora timeline path
+      } else {
+        var liveDatesSafety = computeLiveDates(from, to, fanout.dates);
+        var liveThunksSafety = liveDatesSafety.map(function (d) {
+          return function () {
+            return window.FS.api.org.getLiveItems({ date: d });
+          };
+        });
+        var liveResultsSafety = (await window.FS.api.pooledAll(liveThunksSafety, 8)).filter(Boolean);
+        var siteNameFilterSafety = opts.site ? await resolveSiteNameForFilter(opts.site) : null;
+        var liveRowsSafety = [];
+        liveResultsSafety.forEach(function (res) {
+          ((res && res.topics) || []).forEach(function (topic) {
+            if (!topic.is_live) return;
+            if (siteNameFilterSafety && topic.site_name !== siteNameFilterSafety) return;  /* F2 — slug→name bridge, see resolveSiteNameForFilter() */
+            (topic.safety_observations || []).forEach(function (o) {
+              liveRowsSafety.push(toLiveSafetyRow(topic, o));
+            });
           });
         });
-      });
-      rows = rows.concat(liveRowsSafety);
+        rows = rows.concat(liveRowsSafety);
+      }
     } catch (e) {
       console.warn('[compliance] live items unavailable — report/manual rows only', e);
     }
@@ -818,23 +828,29 @@
        category === 'quality' qualify — mirrors the topic_quality loop
        above, which filters the same way. */
     try {
-      var liveDatesQuality = computeLiveDates(from, to, fanout.dates);
-      var liveThunksQuality = liveDatesQuality.map(function (d) {
-        return function () {
-          return window.FS.api.org.getLiveItems({ date: d });
-        };
-      });
-      var liveResultsQuality = (await window.FS.api.pooledAll(liveThunksQuality, 8)).filter(Boolean);
-      var siteNameFilterQuality = opts.site ? await resolveSiteNameForFilter(opts.site) : null;
-      var liveRowsQuality = [];
-      liveResultsQuality.forEach(function (res) {
-        ((res && res.topics) || []).forEach(function (topic) {
-          if (!topic.is_live || topic.category !== 'quality') return;
-          if (siteNameFilterQuality && topic.site_name !== siteNameFilterQuality) return;  /* F2 — slug→name bridge, see resolveSiteNameForFilter() */
-          liveRowsQuality.push(toLiveQualityRow(topic));
+      /* authority flip (pipeline plan 2026-07-14): see the matching guard in
+         getSafetyRange above — same rationale, same kill switch. */
+      if (window.FS.api.timelineSource === 'aurora' && window.FS.api.orgBaseUrl) {
+        // no-op — live items already reflected via the aurora timeline path
+      } else {
+        var liveDatesQuality = computeLiveDates(from, to, fanout.dates);
+        var liveThunksQuality = liveDatesQuality.map(function (d) {
+          return function () {
+            return window.FS.api.org.getLiveItems({ date: d });
+          };
         });
-      });
-      rows = rows.concat(liveRowsQuality);
+        var liveResultsQuality = (await window.FS.api.pooledAll(liveThunksQuality, 8)).filter(Boolean);
+        var siteNameFilterQuality = opts.site ? await resolveSiteNameForFilter(opts.site) : null;
+        var liveRowsQuality = [];
+        liveResultsQuality.forEach(function (res) {
+          ((res && res.topics) || []).forEach(function (topic) {
+            if (!topic.is_live || topic.category !== 'quality') return;
+            if (siteNameFilterQuality && topic.site_name !== siteNameFilterQuality) return;  /* F2 — slug→name bridge, see resolveSiteNameForFilter() */
+            liveRowsQuality.push(toLiveQualityRow(topic));
+          });
+        });
+        rows = rows.concat(liveRowsQuality);
+      }
     } catch (e) {
       console.warn('[compliance] live items unavailable — report/manual rows only', e);
     }
