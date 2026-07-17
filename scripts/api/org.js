@@ -152,6 +152,12 @@
     return { cognito_sub: sub, global_role: role };
   }
 
+  async function setMemberFolder(sub, folder) {
+    if (orgWrite()) return api.orgRequest('/members/' + encodeURIComponent(sub) + '/folder', { method: 'PATCH', body: { folder_name: folder } });
+    await api.delay();
+    return { cognito_sub: sub, folder_name: folder };
+  }
+
   async function archiveMember(sub)   { return _memberArchive(sub, 'archive'); }
   async function unarchiveMember(sub) { return _memberArchive(sub, 'unarchive'); }
   async function _memberArchive(sub, action) {
@@ -298,6 +304,7 @@
     getOrgSites: getOrgSites, createOrgSite: createOrgSite, updateOrgSite: updateOrgSite,
     archiveSite: archiveSite, unarchiveSite: unarchiveSite,
     getMembers: getMembers, createMember: createMember, updateMemberRole: updateMemberRole,
+    setMemberFolder: setMemberFolder,
     archiveMember: archiveMember, unarchiveMember: unarchiveMember,
     uploadUrl: uploadUrl, assetUrl: assetUrl,
     uploadImage: uploadImage, resolveAssetUrl: resolveAssetUrl,
