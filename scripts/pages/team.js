@@ -786,6 +786,28 @@
     var archiving    = refArchiving[0];
     var setArchiving = refArchiving[1];
 
+    /* Recording-folder inline edit (Phase 1 Task 3) — local buffer state,
+       mirrors the reassign modal's "own local state, reset on open" shape
+       rather than the role select's fire-on-change (folder_name is free
+       text, so needs an explicit Save, not a per-keystroke write). */
+    var refFolderEdit = React.useState(false);
+    var editingFolder = refFolderEdit[0];
+    var setEditingFolder = refFolderEdit[1];
+    var refFolderValue = React.useState('');
+    var folderValue    = refFolderValue[0];
+    var setFolderValue = refFolderValue[1];
+    var refFolderSaving = React.useState(false);
+    var savingFolder    = refFolderSaving[0];
+    var setSavingFolder = refFolderSaving[1];
+
+    /* Selection can change without this component unmounting — drop any
+       in-flight edit state for the previous user so it never leaks onto
+       the newly-selected one. */
+    React.useEffect(function () {
+      setEditingFolder(false);
+      setSavingFolder(false);
+    }, [sel && sel.device_id]);
+
     if (!sel || sel.kind !== 'user') {
       return React.createElement('div', { className: 'fs-team-detail__placeholder' },
         React.createElement('div', { className: 'fs-team-detail__placeholder-title' },
@@ -846,6 +868,39 @@
     var callerSub  = ((window.FS && window.FS.session && window.FS.session.user) || {}).sub || caller.device_id;
     var canArchive = orgLive() && !!(window.FS && window.FS.can && window.FS.can(caller, 'user:manage'))
       && u.device_id !== callerSub;
+
+    /* Recording-folder inline edit — same permission the role editor relies
+       on (page-level user:manage, checked once in TeamProvider); named here
+       so it reads as an explicit admin gate at the point of use. Not
+       orgLive()-gated like archive: setMemberFolder has a mock branch too
+       (api/org.js), so the control also works in demo/mock mode. */
+    var canEditFolder = !!(window.FS && window.FS.can && window.FS.can(caller, 'user:manage'));
+
+    function startEditFolder() {
+      setFolderValue(u.folder_name || '');
+      setEditingFolder(true);
+    }
+    function cancelEditFolder() {
+      setEditingFolder(false);
+    }
+    function saveFolder() {
+      if (savingFolder) return;
+      var next = folderValue.trim();
+      if (!next) return;
+      setSavingFolder(true);
+      window.FS.api.org.setMemberFolder(u.device_id, next).then(function () {
+        setSavingFolder(false);
+        setEditingFolder(false);
+        if (window.FS.toast) window.FS.toast.show({ message: 'Recording folder updated', tone: 'success' });
+        if (ctx && ctx.refetch) ctx.refetch();
+      }).catch(function (err) {
+        setSavingFolder(false);
+        var msg = (err && err.status === 409)
+          ? 'That folder name is already taken — pick another'
+          : 'Could not update recording folder';
+        if (window.FS.toast) window.FS.toast.show({ message: msg, tone: 'error' });
+      });
+    }
 
     function onArchiveMember() {
       if (archiving) return;
@@ -925,6 +980,34 @@
           React.createElement('div', { className: 'fs-team-detail__field-label' }, 'Device ID'),
           React.createElement('div', { className: 'fs-team-detail__field-value fs-team-detail__field-value--mono' },
             u.device_id || '—'),
+        ),
+        React.createElement('div', { className: 'fs-team-detail__field' },
+          React.createElement('div', { className: 'fs-team-detail__field-label' }, 'Recording folder'),
+          editingFolder
+            ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+                React.createElement('input', {
+                  type: 'text', className: 'fs-settings__input', style: { maxWidth: '220px' },
+                  value: folderValue, disabled: savingFolder,
+                  onChange: function (e) { setFolderValue(e.target.value); },
+                }),
+                React.createElement('button', {
+                  type: 'button', className: 'fs-btn fs-btn--primary fs-btn--sm',
+                  disabled: savingFolder || !folderValue.trim(), onClick: saveFolder,
+                }, savingFolder ? 'Saving…' : 'Save'),
+                React.createElement('button', {
+                  type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm',
+                  disabled: savingFolder, onClick: cancelEditFolder,
+                }, 'Cancel'),
+              )
+            : React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+                React.createElement('span', {
+                  className: 'fs-team-detail__field-value fs-team-detail__field-value--mono',
+                  style: u.folder_name ? undefined : { color: 'var(--text-tertiary)', fontStyle: 'italic' },
+                }, u.folder_name || '— not set —'),
+                canEditFolder ? React.createElement('button', {
+                  type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm', onClick: startEditFolder,
+                }, 'Edit') : null,
+              ),
         ),
       ),
 
