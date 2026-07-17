@@ -266,6 +266,36 @@
     return { topics: [] };
   }
 
+  // -------- site members (Phase 2 — Aurora replaces legacy /site-users) --------
+  /* GET /api/org/sites/{id}/members → { members:[...] } (from Aurora
+     memberships, company+site ACL). Mapped to the page member shape via
+     _toPageMember so getSiteUsers consumers get folder_name/name/role.
+     Mock returns no members (matches getLiveItems' seed-first posture).
+
+     Deviation from _toPageMember's default role mapping: members_for_site
+     rows carry BOTH the member's company-wide global_role AND this site's
+     membership role as site_role (repo: "u.global_role, m.role AS
+     site_role"). _toPageMember's shared `role: m.global_role || m.role`
+     picks global_role first, which is right for getMembers() (a multi-site
+     roster) but wrong here — the USERS ON SITE panel and its consumers
+     (sites.js line ~738 renders `[u.role, u.device_id]`) want the role the
+     member holds ON THIS SITE, not their company-wide role. Override role
+     with site_role post-map when present. */
+  async function getSiteMembers(siteId) {
+    if (orgLive()) {
+      var res = await api.orgRequest('/sites/' + encodeURIComponent(siteId) + '/members');
+      if (res && (res._accessDenied || res._notFound)) return res;
+      var users = (res.members || []).map(function (m) {
+        var page = _toPageMember(m);
+        if (m.site_role) page.role = m.site_role;
+        return page;
+      });
+      return { users: users, site: siteId };
+    }
+    await api.delay();
+    return { users: [], site: siteId };
+  }
+
   // -------- strategic rollup (feat 4c) --------
   /* GET /api/org/rollup/portfolio → { sites: [{ site_id (ORG UUID),
      open_safety, open_high_safety, open_actions, total_actions,
@@ -311,6 +341,7 @@
     createObservation: createObservation, getObservations: getObservations,
     updateObservation: updateObservation, archiveObservation: archiveObservation,
     getLiveItems: getLiveItems,
+    getSiteMembers: getSiteMembers,
     getPortfolioRollup: getPortfolioRollup,
     _folderName: folderName,   /* exported for batch-2b fan-out reuse */
     _toPageMember: _toPageMember, _toPageSite: _toPageSite,   /* page-shape adapters, batch-2b */

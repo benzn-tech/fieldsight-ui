@@ -651,7 +651,13 @@
     var setSitesList = refSitesList[1];
     React.useEffect(function () {
       var cancelled = false;
-      window.FS.api.sites.getSites()
+      /* Phase 2 (Aurora read consolidation): source the sites list from
+         org.getOrgSites() (Aurora-accessible sites, {sites:[{site_id,...}]}
+         via _toPageSite — same shape this page already reads below), not
+         the legacy report-gateway /sites list — so the single-site
+         auto-anchor and default site come from the caller's ACTUAL Aurora
+         memberships, never the legacy global mapping. */
+      window.FS.api.org.getOrgSites()
         .then(function (res) {
           if (cancelled) return;
           setSitesList((res && res.sites) || []);
