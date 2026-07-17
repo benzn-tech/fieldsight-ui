@@ -305,6 +305,49 @@
     );
   }
 
+  /* ---------- EditProjectModal (admin edit an existing project) -------- */
+  function EditProjectModal(props) {
+    var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
+    var site  = props.site || {};
+    var refForm = React.useState({
+      name:     site.name || '',
+      location: site.location || '',
+      client:   site.client || '',
+      address:  site.address || '',
+    });
+    var form = refForm[0], setForm = refForm[1];
+    var refBusy = React.useState(false); var busy = refBusy[0], setBusy = refBusy[1];
+    function set(k, v) { setForm(function (f) { var n = Object.assign({}, f); n[k] = v; return n; }); }
+    function submit() {
+      if (!form.name.trim() || busy) return;
+      setBusy(true);
+      window.FS.api.org.updateOrgSite(props.site.site_id, {
+        name: form.name, location: form.location, client: form.client, address: form.address,
+      }).then(function (updated) {
+        setBusy(false);
+        if (window.FS.toast) window.FS.toast.show({ message: 'Project "' + ((updated && updated.name) || form.name) + '" updated', tone: 'success' });
+        if (props.onSaved) props.onSaved();
+        if (props.onClose) props.onClose();
+      }).catch(function () {
+        setBusy(false);
+        if (window.FS.toast) window.FS.toast.show({ message: 'Could not update project', tone: 'error' });
+      });
+    }
+    if (!Modal) return null;
+    return React.createElement(Modal, { open: true, size: 'md', title: 'Edit project', onClose: props.onClose },
+      React.createElement('div', { className: 'fs-settings__pw-form' },
+        fFieldRow('Project name *', fText(form.name, function (v) { set('name', v); })),
+        fFieldRow('Location', fText(form.location, function (v) { set('location', v); })),
+        fFieldRow('Client', fText(form.client, function (v) { set('client', v); })),
+        fFieldRow('Address', fText(form.address, function (v) { set('address', v); })),
+        React.createElement('div', { className: 'fs-settings__actions' },
+          React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: props.onClose }, 'Cancel'),
+          React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--md', disabled: busy, onClick: submit }, busy ? 'Saving…' : 'Save changes')
+        )
+      )
+    );
+  }
+
   /* ---------- SitesMiddleColumn ---------------------------------------- */
 
   function SitesMiddleColumn(props) {
@@ -452,6 +495,10 @@
     var refArchiving = React.useState(false);
     var archiving    = refArchiving[0];
     var setArchiving = refArchiving[1];
+
+    var refEditOpen = React.useState(false);
+    var editOpen    = refEditOpen[0];
+    var setEditOpen = refEditOpen[1];
 
     /* batch 2c: local-only instant preview while the live upload/swap is
        in flight. Deliberately NOT pushed through ctx.setSiteIcon until the
@@ -607,6 +654,7 @@
                backend backlog: explicit-null icon clear), so hide Remove entirely
                rather than offer a button that silently no-ops. Mock keeps it. */
             (!orgLive() && site.icon) ? React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--tertiary fs-btn--sm', onClick: function () { if (ctx && ctx.setSiteIcon) ctx.setSiteIcon(sel.site_id, null); } }, 'Remove') : null,
+            canArchive ? React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm', onClick: function () { setEditOpen(true); } }, 'Edit') : null,
             (canArchive && site.archived) ? React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--tertiary fs-btn--sm', disabled: archiving, onClick: onUnarchive }, archiving ? 'Restoring…' : 'Restore project') : null,
             (canArchive && !site.archived) ? React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--tertiary fs-btn--sm', disabled: archiving, onClick: onArchive }, archiving ? 'Archiving…' : 'Archive project') : null,
           ),
@@ -695,6 +743,12 @@
               }),
             ),
       ),
+
+      editOpen ? React.createElement(EditProjectModal, {
+        site:     site,
+        onClose:  function () { setEditOpen(false); },
+        onSaved:  function () { if (ctx && ctx.refetch) ctx.refetch(); },
+      }) : null,
     );
   }
 
