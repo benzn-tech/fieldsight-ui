@@ -403,7 +403,7 @@
       function loadFor(date) {
         if (!multiProject) {
           return Promise.all([
-            window.FS.api.timeline.getTimeline({ date: date, user: folder }),
+            window.FS.api.timeline.getTimeline({ date: date }),
             window.FS.api.actions.getActions(date),
             siteSlugMapPromise,
           ]).then(function (results) {
@@ -411,13 +411,17 @@
             var report     = results[0];
             var actions    = results[1].actions || {};
             var siteSlugMap = results[2];
-            /* P-12: 403 from the timeline endpoint surfaces as a
-               page-level access-denied state. Worker / site-manager
-               querying another user's report hits this. */
-            if (report && report._accessDenied) {
-              return { accessDenied: true, message: report.error };
-            }
-            if (!report || report._notFound || report.available_users) {
+            /* Non-admin path: getTimeline() above is called with no
+               `user`, so the backend already force-scopes to the
+               caller's own identity (aurora shim forces user=self;
+               legacy fallback resolves worker/site_manager to their
+               own data first) — a non-admin must never be hard-banned
+               from their own Today. Treat a stray _accessDenied the
+               same as _notFound: an empty/no-report state, not the
+               page-level AccessDenied composite. (Admin fan-out below
+               still surfaces _accessDenied — that's a real per-user
+               permission boundary there.) */
+            if (!report || report._notFound || report.available_users || report._accessDenied) {
               return { ok: false, report: report };
             }
             var data = buildTodayFromReport(report, actions, caller, date, siteSlugMap);
