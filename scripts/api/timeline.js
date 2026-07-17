@@ -46,9 +46,12 @@
              than blanking the page. _notFound is authoritative (the shim
              already fell back to S3 server-side) — return it. */
           if (r && !r._accessDenied) return r;
-        } catch (e) { /* org gateway/transport failure → report fallback */ }
+          if (!window.FS.api.legacyReadFallback) return r;  // D5: legacy retired → Aurora authoritative
+        } catch (e) {
+          if (!window.FS.api.legacyReadFallback) throw e;   // D5: no legacy transport fallback
+        }
       }
-      return window.FS.api.request('/timeline', { params: params });
+      return window.FS.api.request('/timeline', { params: params });   // legacy read path (flag-gated above)
     }
     await window.FS.api.delay(120);
 
