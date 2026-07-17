@@ -365,8 +365,15 @@
   </script>
 
   <script type="text/babel">
-    // Mount AppShell with dev switcher always visible in preview
-    window.FieldSight.mountAppShell('root', { showDevSwitcher: true });
+    // Dev role switcher: only on a dev host / local preview / explicit ?dev=1.
+    // Hidden on the customer (main) site — it drives mock roles and confuses
+    // real signed-in users.
+    var _devSwitcher = /^dev\./.test(location.hostname)
+      || location.hostname === 'localhost'
+      || location.hostname === '127.0.0.1'
+      || location.protocol === 'file:'
+      || new URLSearchParams(location.search).get('dev') === '1';
+    window.FieldSight.mountAppShell('root', { showDevSwitcher: _devSwitcher });
   </script>
 </body>
 </html>
