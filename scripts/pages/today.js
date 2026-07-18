@@ -207,7 +207,7 @@
     }).catch(function () { return []; });
   }
 
-  function buildTodayFromReport(report, actions, caller, date, siteSlugMap, idPrefix, onSiteMembers) {
+  function buildTodayFromReport(report, actions, caller, date, siteSlugMap, idPrefix, onSiteMembers, siteIdMap) {
     return window.FS.api.todayAdapter.adapt(report, {
       currentUserName: caller && caller.name,
       actionState:     actions || {},
@@ -215,6 +215,9 @@
       siteSlugByName:  siteSlugMap || {},
       idPrefix:        idPrefix || null,
       onSiteMembers:   onSiteMembers || [],
+      /* feat/editable-tasks-ui — org SITE UUID map, see getOrgSiteIdMap()
+         doc above. */
+      siteIdByName:    siteIdMap || {},
     });
   }
 
@@ -266,6 +269,34 @@
   async function getSiteSlugMap() {
     try {
       var res = await window.FS.api.sites.getSites();
+      var map = {};
+      ((res && res.sites) || []).forEach(function (s) {
+        if (s && s.name) map[s.name] = s.site_id;
+      });
+      return map;
+    } catch (e) {
+      return {};
+    }
+  }
+
+  /* feat/editable-tasks-ui — org SITE UUID counterpart of getSiteSlugMap()
+     above, built the SAME way (one-shot name→id map, name-matched against
+     report.site since a report never carries an id directly) but sourced
+     from org.getOrgSites() (Aurora-accessible sites, {sites:[{site_id,
+     name, ...}]} via _toPageSite) instead of the legacy report-gateway
+     /api/sites list — a DIFFERENT id space (see programme.js's "CRITICAL"
+     doc: org.getOrgSites()'s site_id is the ORG SITE UUID space, never the
+     report-side site_id). org.getSiteMembers(siteId) — the task-detail
+     assignee picker's source — expects THIS UUID space specifically (GET
+     /api/org/sites/{id}/members); passing the legacy report-side id there
+     would 404/empty. Same defensive posture as getSiteSlugMap(): any
+     error collapses to an empty map, so a lookup miss just yields
+     task.siteId: null (today-adapter.js), never blocks the page. Mock
+     mode: org.getOrgSites() itself falls back to fixtures.sites (see
+     org.js orgLive()), so this still resolves something in the demo. */
+  async function getOrgSiteIdMap() {
+    try {
+      var res = await window.FS.api.org.getOrgSites();
       var map = {};
       ((res && res.sites) || []).forEach(function (s) {
         if (s && s.name) map[s.name] = s.site_id;
@@ -436,6 +467,10 @@
          extra /api/sites call) and shared across a fallback-date retry
          via the closure below. */
       var siteSlugMapPromise   = getSiteSlugMap();
+      /* feat/editable-tasks-ui — org SITE UUID counterpart, fetched once
+         alongside siteSlugMapPromise for the same reason (cheap, shared
+         across every fanned-out report and the rolling loader below). */
+      var siteIdMapPromise     = getOrgSiteIdMap();
       /* Hoisted alongside siteSlugMapPromise — the folder list doesn't
          depend on `date`, so fetch it once per effect run and share it
          between loadFor() below and loadRollingOpenItems() further
@@ -453,11 +488,13 @@
             window.FS.api.timeline.getTimeline({ date: date }),
             window.FS.api.actions.getActions(date),
             siteSlugMapPromise,
+            siteIdMapPromise,
           ]).then(function (results) {
             if (cancelled) return null;
             var report     = results[0];
             var actions    = results[1].actions || {};
             var siteSlugMap = results[2];
+            var siteIdMap    = results[3];
             /* Non-admin path: getTimeline() above is called with no
                `user`, so the backend already force-scopes to the
                caller's own identity (aurora shim forces user=self;
@@ -478,7 +515,7 @@
             var onSiteSlug = resolveOnSiteSlug(report, siteSlugMap, resolveCallerPrimarySite(caller));
             return getOnSiteMembers(onSiteSlug).then(function (onSiteMembers) {
               if (cancelled) return null;
-              var data = buildTodayFromReport(report, actions, caller, date, siteSlugMap, null, onSiteMembers);
+              var data = buildTodayFromReport(report, actions, caller, date, siteSlugMap, null, onSiteMembers, siteIdMap);
               return {
                 ok:            true,
                 data:          data,
@@ -504,11 +541,13 @@
           adminFoldersPromise,
           siteSlugMapPromise,
           window.FS.api.actions.getActions(date),
+          siteIdMapPromise,
         ]).then(function (results) {
           if (cancelled) return null;
           var folders     = results[0];
           var siteSlugMap = results[1];
           var actionsRes  = results[2];
+          var siteIdMap    = results[3];
           if (actionsRes && actionsRes._accessDenied) {
             return { accessDenied: true, message: actionsRes.error };
           }
@@ -561,7 +600,7 @@
                 var onSiteMembers = slug ? (membersBySlug[slug] || []) : [];
                 return {
                   folder: x.folder,
-                  data:   buildTodayFromReport(x.report, actions, caller, date, siteSlugMap, x.folder, onSiteMembers),
+                  data:   buildTodayFromReport(x.report, actions, caller, date, siteSlugMap, x.folder, onSiteMembers, siteIdMap),
                 };
               });
               var merged = mergeTodayData(entries, folder);
@@ -638,12 +677,13 @@
 
         var foldersPromise = multiProject ? adminFoldersPromise : Promise.resolve([folder]);
 
-        return Promise.all([foldersPromise, siteSlugMapPromise, window.FS.api.window.getSpan()])
+        return Promise.all([foldersPromise, siteSlugMapPromise, window.FS.api.window.getSpan(), siteIdMapPromise])
           .then(function (results) {
           if (cancelled) return EMPTY;
           var folders     = (results[0] || []).filter(Boolean);
           var siteSlugMap = results[1];
           var span        = results[2] || {};
+          var siteIdMap    = results[3];
           /* feat/today-leftover-grouping — span.earliest (smallest
              hasReport date) replaces the old fixed -30d floor. Empty
              span (no reports at all yet) falls back to a generous 400d
@@ -736,7 +776,7 @@
                   if (report._notFound || report.available_users || report._accessDenied) return;
 
                   var actionState = byDate[x.date] || {};
-                  var data = buildTodayFromReport(report, actionState, caller, x.date, siteSlugMap, x.folder);
+                  var data = buildTodayFromReport(report, actionState, caller, x.date, siteSlugMap, x.folder, undefined, siteIdMap);
 
                   keep(data.myTasks,   myById,   actionState, x.date);
                   keep(data.teamTasks, teamById, actionState, x.date);
@@ -838,6 +878,36 @@
       removeTasksMatching(function (t) { return t.id === taskId; });
     }
 
+    /* feat/editable-tasks-ui — optimistic in-place field patch after a
+       successful PATCH /api/org/action-items/{id} (TodayRightDetail's
+       editors below). Mirrors removeTasksMatching's shape (scan both
+       buckets, one setState) but MERGES fields onto the matching item
+       instead of dropping it, so both the task-detail panel AND the
+       card in the middle-column list reflect the edit immediately —
+       no full reload needed. Known limitation: reassigning (responsible)
+       a task away from the caller doesn't move it from myTasks to
+       teamTasks (the split is computed once at adapt() time) — the item
+       stays in its original bucket, showing the new assignee, until the
+       next full reload. Out of scope here; the common case this page
+       ships for (a site_manager editing OTHER people's team tasks)
+       never hits it. */
+    function patchTask(taskId, patch) {
+      setState(function (s) {
+        if (s.status !== 'ok' || !s.data) return s;
+        function applyPatch(list) {
+          return (list || []).map(function (t) {
+            return t.id === taskId ? Object.assign({}, t, patch) : t;
+          });
+        }
+        return Object.assign({}, s, {
+          data: Object.assign({}, s.data, {
+            myTasks:   applyPatch(s.data.myTasks),
+            teamTasks: applyPatch(s.data.teamTasks),
+          }),
+        });
+      });
+    }
+
     /* fix/action-checkoff-sync (Bug 2) — Today previously had ZERO
        actionsBus subscriptions, so a check-off made on /timeline (either
        panel) was invisible here until a full remount. Match on
@@ -879,7 +949,7 @@
       });
     }, []);
 
-    return { state: state, removeMyTask: removeMyTask };
+    return { state: state, removeMyTask: removeMyTask, patchTask: patchTask };
   }
 
   /* ---------- In-page lookups (replace old MockData helpers) ----------- */
@@ -1028,6 +1098,47 @@
   }
 
   /* =====================================================================
+     feat/editable-tasks-ui — task-detail editors (priority/status/due/
+     assignee), wired to PATCH /api/org/action-items/{id}.
+     ---------------------------------------------------------------------
+     Kept separate from buildDetailRows/renderDetailRows above on purpose:
+     those two are SHARED between the main detail panel and the read-only
+     Related quick-look popup (TodayRightDetail's previewRows) — editors
+     must never leak into that popup. TodayRightDetail below builds its
+     OWN task-row array (editable when permitted) and still hands it to
+     the same renderDetailRows() shell for identical visual layout; the
+     popup keeps calling buildDetailRows() untouched.
+     ===================================================================== */
+
+  var PRIORITY_OPTIONS = [
+    { value: 'low',    label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high',   label: 'High' },
+  ];
+  var STATUS_OPTIONS = [
+    { value: 'open',        label: 'Open' },
+    { value: 'in_progress', label: 'In progress' },
+    { value: 'blocked',     label: 'Blocked' },
+    { value: 'done',        label: 'Done' },
+  ];
+
+  /* Reverse today-adapter.js deriveStatus()'s label formatting so the
+     <select>'s controlled `value` (a raw enum) can be seeded from the
+     item's already-derived display label — item.status/.priority only
+     ever carry the LABEL, never the raw column value. Deterministic
+     because deriveStatus's label rule is exactly
+     `s === 'in_progress' ? 'In progress' : capitalize(s)`; keep in
+     lockstep with that function if its label rule ever changes. */
+  function statusLabelToValue(label) {
+    if (!label) return 'open';
+    if (label === 'In progress') return 'in_progress';
+    return label.toLowerCase();
+  }
+  function priorityLabelToValue(label) {
+    return (label || 'medium').toLowerCase();
+  }
+
+  /* =====================================================================
      TodayProvider — owns the page state and exposes it via TodayContext.
      AppShell wraps Middle + Right in this so both columns see the same
      snapshot. (P-07)
@@ -1038,7 +1149,7 @@
     /* Stable-ish value object — not memoised because the TodayState
        hook already re-keys its effect on caller identity, and the
        consumers below read .state every render anyway. */
-    var ctx = { state: ts.state, removeMyTask: ts.removeMyTask };
+    var ctx = { state: ts.state, removeMyTask: ts.removeMyTask, patchTask: ts.patchTask };
     return React.createElement(TodayContext.Provider, { value: ctx },
       props.children);
   }
@@ -1727,6 +1838,8 @@
     var Button   = fs.Button;
     var IconBtn  = fs.IconButton;
     var Timeline = fs.Timeline;
+    var Select   = fs.Select;
+    var Input    = fs.Input;
 
     var sel = props.selectedItem;
 
@@ -1794,7 +1907,183 @@
       });
     }
 
-    var rows = buildDetailRows(item);
+    /* feat/editable-tasks-ui — priority/status/due/assignee editors.
+       Backend is the real authority gate (400/403/404 on the PATCH); this
+       FS.can() check is UX only — hides controls a caller's role could
+       never actually use, per the existing gated-control convention
+       (safety.js/quality.js/team.js/sites.js all check window.FS.can(
+       caller, window.FS.P(resource, action)) the same way — there is no
+       literal `FS.canDo` anywhere in this codebase). Two separate
+       permissions because the role model splits them: e.g. foreman has
+       task:assign:crew but not task:edit (no task:manage), so it can
+       reassign but not touch priority/status/due. */
+    var caller        = (window.AuthMock && window.AuthMock.currentUser) || {};
+    var canEditTask   = !!(window.FS && window.FS.can && window.FS.P
+                        && window.FS.can(caller, window.FS.P('task', 'edit')));
+    var canAssignTask = !!(window.FS && window.FS.can && window.FS.P
+                        && window.FS.can(caller, window.FS.P('task', 'assign')));
+
+    /* Optimistic per-field overrides (task-card.js's startCheckOff is the
+       precedent for this pattern elsewhere in the file: flip locally on
+       change, revert on failure) — keyed by the SAME field names the
+       PATCH body uses (priority/status/deadline/responsible), holding RAW
+       values (enum/ISO), never the derived display label. Reset whenever
+       the selected task changes so a previous item's in-flight edit can
+       never bleed into the next one. */
+    var draftRef = React.useState({});
+    var draft    = draftRef[0];
+    var setDraft = draftRef[1];
+    React.useEffect(function () { setDraft({}); }, [item.id]);
+
+    /* Assignee roster — FS.api.org.getSiteMembers(task.siteId), the SAME
+       Aurora call getSiteUsers()/the Sites/Team pages already use (see
+       org.js doc). Only fetched when the picker could actually be shown
+       (assign-permitted + a resolvable site) — never fired for a plain
+       read-only view. task.siteId is threaded from today-adapter.js's
+       ctx.siteIdByName (today.js's getOrgSiteIdMap()); a lookup miss
+       (siteId: null) is the documented degrade-to-disabled path below,
+       same as an empty/errored roster. */
+    var rosterRef = React.useState({ status: 'idle', users: [] });
+    var roster    = rosterRef[0];
+    var setRoster = rosterRef[1];
+    var rosterSiteId = (item.kind === 'task' && canAssignTask) ? item.siteId : null;
+    React.useEffect(function () {
+      if (!rosterSiteId) { setRoster({ status: 'idle', users: [] }); return undefined; }
+      var cancelled = false;
+      setRoster({ status: 'loading', users: [] });
+      var org = window.FS && window.FS.api && window.FS.api.org;
+      if (!org || !org.getSiteMembers) { setRoster({ status: 'error', users: [] }); return undefined; }
+      org.getSiteMembers(rosterSiteId).then(function (res) {
+        if (cancelled) return;
+        if (!res || res._accessDenied || res._notFound) { setRoster({ status: 'error', users: [] }); return; }
+        setRoster({ status: 'ok', users: (res.users || []).filter(function (u) { return u && u.name; }) });
+      }).catch(function () {
+        if (!cancelled) setRoster({ status: 'error', users: [] });
+      });
+      return function () { cancelled = true; };
+    }, [rosterSiteId]);
+
+    /* One generic commit path for all 4 fields — PATCH
+       /api/org/action-items/{id}, then either fold the FULL updated row
+       the backend returns back into the shared TodayContext snapshot
+       (ctx.patchTask — updates the list card AND this panel at once) or,
+       on _accessDenied/_notFound/thrown error, drop the optimistic
+       override (the control's controlled `value` falls back to the
+       item's real value — an automatic "revert", nothing else to undo)
+       and toast, exactly like actions.js's own real-backend error path. */
+    function commitTaskField(fieldKey, value) {
+      if (!item.actionItemId) return;
+      var api = window.FS && window.FS.api && window.FS.api.actions;
+      if (!api || !api.updateAction) return;
+      var patch = {};
+      patch[fieldKey] = value;
+      setDraft(function (d) {
+        var next = Object.assign({}, d);
+        next[fieldKey] = value;
+        return next;
+      });
+      function clearDraft() {
+        setDraft(function (d) {
+          var next = Object.assign({}, d);
+          delete next[fieldKey];
+          return next;
+        });
+      }
+      api.updateAction(item.actionItemId, patch).then(function (res) {
+        if (!res || res._accessDenied || res._notFound) {
+          clearDraft();
+          var toast = window.FS && window.FS.toast;
+          if (toast) {
+            toast.show({
+              message:  (res && res.error) || 'Could not update task',
+              tone:     'error',
+              duration: 5000,
+            });
+          }
+          return;
+        }
+        /* Re-derive display fields from the response via the SAME
+           helpers today-adapter.js uses during a full adapt() — never
+           hand-roll the label/tone/dueTime logic a second time here. */
+        var patchOut = {};
+        if (res.priority) {
+          patchOut.priority = res.priority.charAt(0).toUpperCase() + res.priority.slice(1);
+        }
+        if (res.status && window.FS.api.deriveStatus) {
+          var derived = window.FS.api.deriveStatus(res.status, false);
+          patchOut.status     = derived.status;
+          patchOut.statusTone = derived.statusTone;
+        }
+        if (res.deadline !== undefined) {
+          patchOut.deadline = res.deadline || null;
+          patchOut.dueTime  = window.FS.api.resolveDeadline
+            ? window.FS.api.resolveDeadline(res.deadline, item.date).display
+            : item.dueTime;
+        }
+        if (res.responsible) patchOut.assignee = res.responsible;
+        if (ctx && ctx.patchTask) ctx.patchTask(item.id, patchOut);
+        clearDraft();
+      }).catch(function (err) {
+        clearDraft();
+        var toast = window.FS && window.FS.toast;
+        if (toast) {
+          toast.show({
+            message:  'Could not update task' + ((err && err.message) ? ': ' + err.message : ''),
+            tone:     'error',
+            duration: 5000,
+          });
+        }
+      });
+    }
+
+    var fieldsEditable   = item.kind === 'task' && canEditTask && !!item.actionItemId;
+    var assigneeEditable = item.kind === 'task' && canAssignTask && !!item.actionItemId
+                          && !!item.siteId && roster.status === 'ok' && roster.users.length > 0;
+
+    var rows;
+    if (item.kind === 'task') {
+      var priorityValue = draft.priority !== undefined ? draft.priority : priorityLabelToValue(item.priority);
+      var statusValue   = draft.status   !== undefined ? draft.status   : statusLabelToValue(item.status);
+      var dueValue      = draft.deadline !== undefined ? draft.deadline : (item.deadline || '');
+      var currentAssignee = (item.assignee && item.assignee !== '—') ? item.assignee : '';
+      var assigneeValue = draft.responsible !== undefined ? draft.responsible : currentAssignee;
+
+      var priorityCell = fieldsEditable ? React.createElement(Select, {
+        size: 'sm', fullWidth: true, value: priorityValue, options: PRIORITY_OPTIONS,
+        onChange: function (e) { commitTaskField('priority', e.target.value); },
+      }) : (item.priority || 'Medium');
+
+      var statusCell = fieldsEditable ? React.createElement(Select, {
+        size: 'sm', fullWidth: true, value: statusValue, options: STATUS_OPTIONS,
+        onChange: function (e) { commitTaskField('status', e.target.value); },
+      }) : item.status;
+
+      /* BUG-19 — a native date input's value/onChange are already plain
+         'YYYY-MM-DD' strings (or '' for empty); no Date() parse needed
+         either direction, so there's nothing here to get NZDT-wrong. */
+      var dueCell = fieldsEditable ? React.createElement(Input, {
+        type: 'date', size: 'sm', fullWidth: true, value: dueValue,
+        onChange: function (e) { commitTaskField('deadline', e.target.value || null); },
+      }) : item.dueTime;
+
+      var assigneeCell = assigneeEditable ? React.createElement(Select, {
+        size: 'sm', fullWidth: true, value: assigneeValue,
+        placeholder: assigneeValue ? undefined : 'Select a member',
+        options: roster.users.map(function (u) { return { value: u.name, label: u.name }; }),
+        onChange: function (e) { commitTaskField('responsible', e.target.value); },
+      }) : item.assignee;
+
+      rows = [
+        ['Assignee', assigneeCell],
+        ['Due',      dueCell],
+        ['Status',   statusCell],
+        ['Priority', priorityCell],
+      ];
+      if (item.ageDays != null) rows.push(['Open since', formatAgeLabel(item.ageDays)]);
+      if (item.noDeadline) rows.push(['Deadline', 'None set']);
+    } else {
+      rows = buildDetailRows(item);
+    }
 
     var related  = getRelated(data, item);
     var timeline = getTimeline(item);
