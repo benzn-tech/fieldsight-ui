@@ -746,8 +746,20 @@
                        never a raw actionState[bareKey] lookup
                        (ANTI-REGRESSION IRON RULE). */
                     var auditEntry = window.FS.api.actions.lookupAction(actionState, item.folder, item.topic_id, item.actionIndex);
-                    var resolved = !!(auditEntry && auditEntry.checked);
-                    if (resolved) return; /* checked off — drop */
+                    /* feat/editable-tasks-ui (Task 3 reconciliation) — done-ness
+                       now lives in TWO places during the overlay-retirement
+                       window: the authoritative action_items.status column
+                       (a check-off via task-card.js now writes status:'done'
+                       through PATCH, NOT the DynamoDB overlay) AND the legacy
+                       overlay boolean (older days / the Timeline ActionItemRow
+                       still on toggleAction). Drop on EITHER, or a task
+                       completed via the new column path would resurface in this
+                       rolling OPEN-items list (badge 'Done') on the next load,
+                       since the overlay was never written for it. item.status is
+                       today-adapter.js deriveStatus()'s label ('Done' only when
+                       the column is done). */
+                    var resolved = item.status === 'Done' || !!(auditEntry && auditEntry.checked);
+                    if (resolved) return; /* done (column) or checked off (overlay) — drop */
 
                     item.date       = item.date || date;
                     /* topic_id restarts at 0 in every report, so
