@@ -26,6 +26,21 @@
   }
 
   async function getSiteUsers(site) {
+    /* Phase 2 (Aurora read consolidation): the org backend knows Aurora-only
+       sites that legacy /site-users (user_mapping-based) does not — that gap
+       was the "USERS ON SITE empty" bug. When org is live, read members from
+       Aurora; only fall back to legacy on an ACL divergence AND when the D5
+       legacyReadFallback flag is still on (so the legacy read path can be
+       retired by flipping the flag). Task 4 adds legacyReadFallback; until
+       then the `&&` short-circuits on undefined -> no fallback, fail-closed
+       to Aurora. */
+    if (!window.FS.api.useMocks && window.FS.api.orgBaseUrl && window.FS.api.org) {
+      var res = await window.FS.api.org.getSiteMembers(site);
+      if (res && res._accessDenied && window.FS.api.legacyReadFallback) {
+        return window.FS.api.request('/site-users', { params: { site: site } });
+      }
+      return res;
+    }
     if (!window.FS.api.useMocks) return window.FS.api.request('/site-users', { params: { site: site } });
     await window.FS.api.delay();
     var f = fixtures().sites || { users: [] };

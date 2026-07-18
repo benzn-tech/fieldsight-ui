@@ -89,6 +89,12 @@
        'aurora' only takes effect when orgBaseUrl is non-empty (kill switch). */
     timelineSource: env.timelineSource || 'report',
     orgWrites: env.orgWrites !== undefined ? !!env.orgWrites : false,
+    /* D5 (visibility spec) — legacy report-gateway read fallback (/timeline,
+       /dates, /site-users). Default ON during Phase 2 rollout; flip to false
+       (env.legacyReadFallback = false) to retire the legacy read paths once
+       Aurora reads are trusted — Aurora then stays authoritative even on an
+       _accessDenied divergence. */
+    legacyReadFallback: env.legacyReadFallback !== false,
     delay: delay,
     folderName: folderName,
     mockPresignedUrl: mockPresignedUrl,
