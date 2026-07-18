@@ -156,18 +156,65 @@
 
   /* ---------- Helper: derive Today from a backend report --------------- */
 
-  function buildTodayFromReport(report, actions, caller, date, siteSlugMap, idPrefix) {
+  /* fix/today-onsite-live — the caller's own accessible/membership site,
+     used as the FALLBACK for resolveOnSiteSlug() below when a report's
+     own site name can't be resolved to a slug. Previously this fell
+     back to the hardcoded literal 'sb1108-ellesmere' whenever
+     caller.name matched none of the sb1108-ellesmere fixture's 4 users
+     — which every LIVE caller not named one of those four hit, quietly
+     mis-scoping "on site now" to sb1108 regardless of the caller's REAL
+     site (e.g. Ben_UCPK on UC PK still saw sb1108's JT/DB/BL/SC).
+     caller.site is the caller's real membership site_id in live mode
+     (scripts/auth/session-bridge.js bridges FS.session.user.sites[0]
+     onto AuthMock.currentUser.site at sign-in); mock mode still prefers
+     a fixture name-match first (existing dev-role-switcher personas all
+     resolve here, unchanged behaviour). */
+  function resolveCallerPrimarySite(caller) {
     var sitesFx = (window.FieldSight && window.FieldSight.fixtures && window.FieldSight.fixtures.sites) || { users: [] };
     var match = (sitesFx.users || []).filter(function (u) { return u.name === (caller && caller.name); })[0];
-    var primarySite = match ? match.primary_site : 'sb1108-ellesmere';
+    return match ? match.primary_site : ((caller && caller.site) || null);
+  }
 
+  /* fix/today-onsite-live — which site slug "On site now" should query
+     for a given report: the report's OWN site (resolved via
+     siteSlugByName, built once per load — see getSiteSlugMap below),
+     falling back to the caller's own membership site
+     (resolveCallerPrimarySite above) only on a lookup miss. Mirrors
+     today-adapter.js's old (now removed) onSiteLookupSlug logic — moved
+     here because the live members fetch has to happen BEFORE adapt()
+     runs (adapt() is pure/sync, can't await). */
+  function resolveOnSiteSlug(report, siteSlugMap, primarySite) {
+    var siteName = (report && report.site) || '';
+    var siteSlug = (siteName && siteSlugMap[siteName]) || null;
+    return siteSlug || primarySite || null;
+  }
+
+  /* fix/today-onsite-live — LIVE per-site members for the "On site now"
+     widget, replacing today-adapter.js's old static fixture scan.
+     Reuses FS.api.sites.getSiteUsers — the same live/mock + ACL-
+     fallback wrapper every other page (timeline.js, sites.js, team.js,
+     evidence.js) already calls for "who's on this site"; it delegates
+     to FS.api.org.getSiteMembers (Aurora GET /sites/{id}/members) when
+     live. No slug / failure -> [] (never blocks the page — matches
+     every other defensive fetch in this file; never falls back to a
+     fixture). */
+  function getOnSiteMembers(siteSlug) {
+    var sitesApi = window.FS.api.sites;
+    if (!siteSlug || !sitesApi || !sitesApi.getSiteUsers) return Promise.resolve([]);
+    return sitesApi.getSiteUsers(siteSlug).then(function (res) {
+      if (!res || res._accessDenied || res._notFound) return [];
+      return res.users || [];
+    }).catch(function () { return []; });
+  }
+
+  function buildTodayFromReport(report, actions, caller, date, siteSlugMap, idPrefix, onSiteMembers) {
     return window.FS.api.todayAdapter.adapt(report, {
       currentUserName: caller && caller.name,
-      primarySite:     primarySite,
       actionState:     actions || {},
       date:            date,
       siteSlugByName:  siteSlugMap || {},
       idPrefix:        idPrefix || null,
+      onSiteMembers:   onSiteMembers || [],
     });
   }
 
@@ -424,14 +471,22 @@
             if (!report || report._notFound || report.available_users || report._accessDenied) {
               return { ok: false, report: report };
             }
-            var data = buildTodayFromReport(report, actions, caller, date, siteSlugMap);
-            return {
-              ok:            true,
-              data:          data,
-              actions:       actions,
-              effectiveDate: date,
-              today:         today,
-            };
+            /* fix/today-onsite-live — resolve + fetch the LIVE site
+               members for "On site now" BEFORE calling
+               buildTodayFromReport (adapt() is pure/sync — see
+               resolveOnSiteSlug/getOnSiteMembers above). */
+            var onSiteSlug = resolveOnSiteSlug(report, siteSlugMap, resolveCallerPrimarySite(caller));
+            return getOnSiteMembers(onSiteSlug).then(function (onSiteMembers) {
+              if (cancelled) return null;
+              var data = buildTodayFromReport(report, actions, caller, date, siteSlugMap, null, onSiteMembers);
+              return {
+                ok:            true,
+                data:          data,
+                actions:       actions,
+                effectiveDate: date,
+                today:         today,
+              };
+            });
           });
         }
 
@@ -474,20 +529,50 @@
             if (valid.length === 0) {
               return { ok: false, report: {} };
             }
-            var entries = valid.map(function (x) {
-              return {
-                folder: x.folder,
-                data:   buildTodayFromReport(x.report, actions, caller, date, siteSlugMap, x.folder),
+
+            /* fix/today-onsite-live — one members fetch per DISTINCT
+               resolved site slug across the fanned reports (not one
+               per report), pooled like every other fan-out in this
+               file. primarySite is the same caller-membership fallback
+               resolveOnSiteSlug uses on the single-project path above. */
+            var primarySite  = resolveCallerPrimarySite(caller);
+            var slugByFolder = {};
+            var uniqueSlugs  = {};
+            valid.forEach(function (x) {
+              var slug = resolveOnSiteSlug(x.report, siteSlugMap, primarySite);
+              slugByFolder[x.folder] = slug;
+              if (slug) uniqueSlugs[slug] = true;
+            });
+            var slugThunks = Object.keys(uniqueSlugs).map(function (slug) {
+              return function () {
+                return getOnSiteMembers(slug).then(function (members) {
+                  return { slug: slug, members: members };
+                });
               };
             });
-            var merged = mergeTodayData(entries, folder);
-            return {
-              ok:            true,
-              data:          merged,
-              actions:       actions,
-              effectiveDate: date,
-              today:         today,
-            };
+
+            return window.FS.api.pooledAll(slugThunks, 8).then(function (memberResults) {
+              if (cancelled) return null;
+              var membersBySlug = {};
+              (memberResults || []).forEach(function (r) { if (r) membersBySlug[r.slug] = r.members; });
+
+              var entries = valid.map(function (x) {
+                var slug = slugByFolder[x.folder];
+                var onSiteMembers = slug ? (membersBySlug[slug] || []) : [];
+                return {
+                  folder: x.folder,
+                  data:   buildTodayFromReport(x.report, actions, caller, date, siteSlugMap, x.folder, onSiteMembers),
+                };
+              });
+              var merged = mergeTodayData(entries, folder);
+              return {
+                ok:            true,
+                data:          merged,
+                actions:       actions,
+                effectiveDate: date,
+                today:         today,
+              };
+            });
           });
         });
       }
@@ -1356,20 +1441,29 @@
       /* "View daily report" CTA — full-width banner above the brief.
          Lifted out of MorningBriefCard so the action stands on its
          own (post-merge review feedback). Navigates to the canonical
-         /timeline view scoped to the brief's (date, user). The
-         &from=today flag tells TimelineMiddleColumn to render a
-         "← Back to today" link in its header (Sprint 4.5). Only shown
-         when TODAY itself has a report (effectiveDate === today) —
-         feat/today-rolling-open-items dropped the "latest available"
-         fallback, so there's no other date this could deep-link to. */
+         /timeline view for TODAY. The &from=today flag tells
+         TimelineMiddleColumn to render a "← Back to today" link in
+         its header (Sprint 4.5). Only shown when TODAY itself has a
+         report (effectiveDate === today) — feat/today-rolling-open-
+         items dropped the "latest available" fallback, so there's no
+         other date this could deep-link to.
+
+         fix/today-cta-403 — deliberately NEVER passes an explicit
+         user= param: this is always the CALLER'S OWN report
+         (effectiveDate only comes from loadFor(today)'s own-identity
+         fast path / admin fan-out above), and get_timeline_compat
+         routes an explicit user= onto its single-user EXACT-MATCH
+         path, which 403s unless the caller's session literally IS
+         that folder ("You don't have access to <folder>'s daily
+         report"). data.morningBrief.userFolder was a lossy fixture/
+         folder round-trip, not a reliable identity — dropped. Same
+         target shape as "Open timeline" (TimelineLink above), which
+         never passed user= and has always worked. */
       effectiveDate ? React.createElement('button', {
         type:      'button',
         className: 'fs-today__view-report-cta',
         onClick:   function () {
-          var qs = '?date=' + encodeURIComponent(effectiveDate);
-          var u  = data.morningBrief && data.morningBrief.userFolder;
-          if (u) qs += '&user=' + encodeURIComponent(u);
-          qs += '&from=today';
+          var qs = '?date=' + encodeURIComponent(effectiveDate) + '&from=today';
           window.FS.Router.navigate('/timeline' + qs);
         },
       },
@@ -1473,6 +1567,8 @@
                 /* §E — age + no-deadline read-only signals. */
                 ageLabel:      formatAgeLabel(task.ageDays),
                 noDeadline:    !!task.noDeadline,
+                /* §E-time — parent topic's time_range, when present. */
+                timeRange:     task.timeRange,
               });
             }),
           )
@@ -1491,6 +1587,7 @@
             site:       !isMultiProject ? task.site_name : null,
             ageLabel:   formatAgeLabel(task.ageDays),
             noDeadline: !!task.noDeadline,
+            timeRange:  task.timeRange,
           });
         }),
       ) : null,
@@ -1583,6 +1680,7 @@
                       site:           !leftoverIsMultiProject ? task.site_name : null,
                       ageLabel:       formatAgeLabel(task.ageDays),
                       noDeadline:     !!task.noDeadline,
+                      timeRange:      task.timeRange,
                       /* feat/leftover-batch-select (T1), extracted T4 —
                          only Leftover cards pass these; Recent/
                          programme/timeline TaskCard call sites omit
