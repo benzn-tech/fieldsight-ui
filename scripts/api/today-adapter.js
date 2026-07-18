@@ -17,7 +17,9 @@
                             via window.FS.canDo at call site)
      activity             ← topics ordered desc by time_range, mapped to
                             { speaker, snippet, timeAgo, channel }
-     onSite               ← getSiteUsers(currentUser.primary_site)
+     onSite               ← ctx.onSiteMembers, pre-fetched by today.js via
+                            FS.api.sites.getSiteUsers (adapt() itself is
+                            pure/sync and can't await — see ctx doc below)
 
    Pure function — no fetches; takes the report + a small caller context
    and returns a TODAY-shaped object the existing composites consume.
@@ -42,6 +44,17 @@
                          name) namespaces every derived `id` so merged lists
                          don't collide. Omitted on the single-report fast
                          path, so existing ids are byte-identical to before.
+     ctx.onSiteMembers   fix/today-onsite-live — Optional array of live
+                         site-member records ({device_id/name, ...} —
+                         FS.api.sites.getSiteUsers shape) for the "On
+                         site now" widget. today.js resolves which site
+                         to fetch (the report's own site, falling back
+                         to the caller's own membership site — never a
+                         hardcoded literal) and fetches it BEFORE calling
+                         adapt(), since adapt() is pure/sync and can't
+                         await. adapt() only reshapes it into onSite
+                         below. Omitted/empty -> onSite: [] (never a
+                         fixture fallback any more).
 
    feat/user-dim-audit-key (Task 6) — audit-state lookups and every
    derived task item now carry `folder` = the REPORT OWNER's folder
@@ -250,11 +263,13 @@
   function adapt(report, ctx) {
     ctx = ctx || {};
     var currentUserName = ctx.currentUserName || (window.AuthMock && window.AuthMock.currentUser && window.AuthMock.currentUser.name) || '';
-    var primarySite     = ctx.primarySite     || 'sb1108-ellesmere';
     var actionState     = ctx.actionState     || {}; /* composite/legacy map — read via FS.api.actions.lookupAction only */
     var nowMinutes      = ctx.nowMinutes      != null ? ctx.nowMinutes : (16 * 60); /* 16:00 NZDT */
     var siteSlugByName  = ctx.siteSlugByName  || {};
     var idPrefix        = ctx.idPrefix ? (ctx.idPrefix + '_') : '';
+    /* fix/today-onsite-live — pre-fetched live site-member records; see
+       ctx.onSiteMembers doc above. */
+    var onSiteMembers   = ctx.onSiteMembers   || [];
 
     if (!report || report._notFound) {
       return {
@@ -289,14 +304,6 @@
        callers must treat null as "unknown project", not drop the item. */
     var siteName = report.site || '';
     var siteSlug = (siteName && siteSlugByName[siteName]) || null;
-    /* Per-report "on site now" should reflect the SITE THE REPORT CAME
-       FROM, not necessarily the viewing caller's own primary_site — that
-       distinction only collapses to the same thing on the single-report
-       fast path (caller === report owner). Falls back to ctx.primarySite
-       when the report's site can't be resolved to a slug, preserving the
-       exact previous behaviour for that path. */
-    var onSiteLookupSlug = siteSlug || primarySite;
-
     /* ---- morningBrief: executive_summary is array of strings (v3.0+) --
        date + userFolder are passed through so MorningBriefCard's
        "Read full brief" button can deep-link to the canonical
@@ -393,6 +400,13 @@
              when the pattern isn't recognised (resolveDeadline never
              guesses a wrong date). */
           dueTime:     resolveDeadline(a.deadline, report.report_date || ctx.date).display,
+          /* §E-time — the PARENT TOPIC's time_range ('14:09 – 14:09'),
+             carried down onto every action item flattened from it.
+             action_items themselves have no time column; the topic is
+             the only place this timestamp lives. Rendered as a small
+             muted label on the Today task card (task-card.js) when
+             present. */
+          timeRange:   t.time_range || null,
           kind:        'task',
           /* feat/today-rolling-open-items — the report date this item
              was extracted from. today.js's rolling loader fans out
@@ -439,15 +453,16 @@
       };
     });
 
-    /* ---- onSite: pull users on the report's own site (falls back to
-       ctx.primarySite on a slug-lookup miss — see onSiteLookupSlug
-       above) -------------------------------------------------------- */
-    var onSite = [];
-    var sitesFx = (window.FieldSight && window.FieldSight.fixtures && window.FieldSight.fixtures.sites) || { users: [] };
-    sitesFx.users.forEach(function (u) {
-      if ((u.sites || []).indexOf(onSiteLookupSlug) !== -1) {
-        onSite.push({ id: u.device_id, name: u.name });
-      }
+    /* ---- onSite: LIVE per-site members, pre-fetched by today.js and
+       passed in as ctx.onSiteMembers (fix/today-onsite-live). Replaces
+       the old static fixtures.sites.users scan, which was never wired
+       to live data — it always surfaced the same 4 mock sb1108 people
+       regardless of which site the report actually belonged to. Site
+       resolution (which site to fetch) already happened in today.js
+       before the fetch — adapt() just reshapes the result into the
+       {id, name} OnSiteCard expects. */
+    var onSite = onSiteMembers.map(function (m) {
+      return { id: m.device_id || m.id || m.cognito_sub || m.name, name: m.name };
     });
 
     return {
