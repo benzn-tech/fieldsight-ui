@@ -100,6 +100,23 @@
         date: date, user: user, start: start, end: end,
       }).then(function (res) {
         if (cancelled) return;
+        /* _fetch.js sentinels (BACKEND-CONTEXT §8.2/§8.4): a 403 or a
+           genuine missing-transcript response must NOT fall through to
+           the segments.length===0 branch below — that branch's copy
+           ("recordings may have been archived") is misleading for a
+           real access-denied response and was masking the Aurora-route
+           403→wrong-identity bug (Issue B) as a routine empty state. */
+        if (res && res._accessDenied) {
+          setState({ status: 'denied', segments: [], message: res.error });
+          return;
+        }
+        if (res && res._notFound) {
+          setState({
+            status:   'notfound', segments: [],
+            message:  res.message || (res.raw && res.raw.message),
+          });
+          return;
+        }
         setState({
           status:   'ok',
           segments: res.speaker_segments || [],
@@ -148,6 +165,16 @@
     if (state.status === 'error') {
       return React.createElement('div', { className: 'fs-transcript-list__empty' },
         'Could not load transcript.');
+    }
+    if (state.status === 'denied') {
+      return React.createElement(window.FieldSight.AccessDenied, {
+        message: state.message,
+        scope:   'this transcript',
+      });
+    }
+    if (state.status === 'notfound') {
+      return React.createElement('div', { className: 'fs-transcript-list__empty' },
+        state.message || 'No transcript recorded for this date.');
     }
     if (state.segments.length === 0) {
       var emptyText = window.FS.api.useMocks
