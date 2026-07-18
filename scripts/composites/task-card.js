@@ -39,6 +39,10 @@
                     e.g. 'Today' / '3d ago'. How long this item has been
                     open, for the Today rolling list where cards mix
                     origin dates. Omitted/falsy → no age text rendered.
+     timeRange      string, optional (§E-time) — the parent topic's
+                    time_range, e.g. '14:09 – 14:09'. Small muted label,
+                    same treatment as ageLabel. Omitted/falsy → no time
+                    text rendered.
      noDeadline     boolean, optional (feat/today-rolling-open-items) —
                     renders a subtle "No deadline" chip (warning tone,
                     never safety-red/blocked-magenta per CLAUDE.md).
@@ -195,6 +199,20 @@
               className: 'fs-task-card__site',
               title:     props.site,
             }, props.site) : null,
+            /* §E-time — parent topic's time_range, e.g. '14:09 – 14:09'.
+               Subtle, muted, tokens-only inline style (no new CSS class
+               needed) — same visual weight as ageLabel just below.
+               Optional; omitted/falsy → meta row unchanged. */
+            props.timeRange ? React.createElement('span', {
+              className: 'fs-task-card__time',
+              title:     props.timeRange,
+              style: {
+                fontSize:   '11px',
+                color:      'var(--text-tertiary)',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+              },
+            }, props.timeRange) : null,
             /* feat/today-rolling-open-items — age + no-deadline signals.
                Both optional; omitted/falsy on any caller that doesn't
                pass them → meta row is byte-identical to before. */
