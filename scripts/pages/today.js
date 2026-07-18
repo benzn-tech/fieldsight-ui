@@ -896,26 +896,70 @@
        buckets, one setState) but MERGES fields onto the matching item
        instead of dropping it, so both the task-detail panel AND the
        card in the middle-column list reflect the edit immediately —
-       no full reload needed. Known limitation: reassigning (responsible)
-       a task away from the caller doesn't move it from myTasks to
-       teamTasks (the split is computed once at adapt() time) — the item
-       stays in its original bucket, showing the new assignee, until the
-       next full reload. Out of scope here; the common case this page
-       ships for (a site_manager editing OTHER people's team tasks)
-       never hits it. */
+       no full reload needed.
+
+       F2 — re-bucketing on reassignment: a patch carrying `assignee`
+       (commitTaskField only ever sets it from a truthy res.responsible,
+       so its presence always means a real reassignment) now MOVES the
+       item instead of just relabelling it in place:
+         - new assignee === caller.name           → myTasks
+         - new assignee !== caller.name AND the
+           caller can see team tasks               → teamTasks
+         - new assignee !== caller.name AND the
+           caller can NOT see team tasks (a worker) → dropped entirely
+           (it's no longer theirs, and workers never see anyone else's
+           tasks — pushing it into teamTasks would wrongly surface it)
+       The "can see team tasks" check mirrors today-adapter.js's own
+       gate verbatim (`if (role === 'worker') teamTasks = [];`) rather
+       than inventing a new one — `caller` here is the SAME object
+       useTodayState(caller) was called with, i.e.
+       window.AuthMock.currentUser, matching adapt()'s
+       window.AuthMock.currentUser.role read.
+       A patch with NO `assignee` key (priority/status/due only) keeps
+       the plain in-place merge — no bucket move. */
     function patchTask(taskId, patch) {
       setState(function (s) {
         if (s.status !== 'ok' || !s.data) return s;
-        function applyPatch(list) {
-          return (list || []).map(function (t) {
-            return t.id === taskId ? Object.assign({}, t, patch) : t;
+        var myList   = s.data.myTasks   || [];
+        var teamList = s.data.teamTasks || [];
+
+        var found = myList.filter(function (t) { return t.id === taskId; })[0]
+                 || teamList.filter(function (t) { return t.id === taskId; })[0];
+        if (!found) return s;
+
+        var merged = Object.assign({}, found, patch);
+
+        if (patch.assignee === undefined) {
+          /* No assignee change — merge in place in whichever bucket
+             already holds it, no move. */
+          function applyPatch(list) {
+            return list.map(function (t) { return t.id === taskId ? merged : t; });
+          }
+          return Object.assign({}, s, {
+            data: Object.assign({}, s.data, {
+              myTasks:   applyPatch(myList),
+              teamTasks: applyPatch(teamList),
+            }),
           });
         }
+
+        var nextMy   = myList.filter(function (t) { return t.id !== taskId; });
+        var nextTeam = teamList.filter(function (t) { return t.id !== taskId; });
+
+        var isMine = !!(caller && caller.name) && merged.assignee === caller.name;
+        /* Mirrors today-adapter.js adapt()'s exact worker gate:
+           `if (role === 'worker') teamTasks = [];` */
+        var canSeeTeamTasks = !(caller && caller.role === 'worker');
+
+        if (isMine) {
+          nextMy.push(merged);
+        } else if (canSeeTeamTasks) {
+          nextTeam.push(merged);
+        }
+        /* else: reassigned away from a worker caller — drop entirely. */
+
         return Object.assign({}, s, {
-          data: Object.assign({}, s.data, {
-            myTasks:   applyPatch(s.data.myTasks),
-            teamTasks: applyPatch(s.data.teamTasks),
-          }),
+          data: Object.assign({}, s.data, { myTasks: nextMy, teamTasks: nextTeam }),
         });
       });
     }
@@ -1935,6 +1979,16 @@
     var canAssignTask = !!(window.FS && window.FS.can && window.FS.P
                         && window.FS.can(caller, window.FS.P('task', 'assign')));
 
+    /* F1 — the caller's OWN task (they are the current assignee). Mirrors the
+       mine-vs-team key today-adapter.js uses (task.assignee === caller.name).
+       Backend already authorises the assignee to edit their own item, so the
+       UI must not hide the editors on it — any user can correct their own
+       task even without a task:edit/assign role permission. Must be computed
+       before fieldsEditable/assigneeEditable/rosterSiteId below, all of
+       which widen on it. */
+    var isOwnTask = item.kind === 'task' && item.assignee && item.assignee !== '—'
+                    && item.assignee === (caller && caller.name);
+
     /* Optimistic per-field overrides (task-card.js's startCheckOff is the
        precedent for this pattern elsewhere in the file: flip locally on
        change, revert on failure) — keyed by the SAME field names the
@@ -1958,7 +2012,7 @@
     var rosterRef = React.useState({ status: 'idle', users: [] });
     var roster    = rosterRef[0];
     var setRoster = rosterRef[1];
-    var rosterSiteId = (item.kind === 'task' && canAssignTask) ? item.siteId : null;
+    var rosterSiteId = (item.kind === 'task' && (canAssignTask || isOwnTask)) ? item.siteId : null;
     React.useEffect(function () {
       if (!rosterSiteId) { setRoster({ status: 'idle', users: [] }); return undefined; }
       var cancelled = false;
@@ -2048,8 +2102,8 @@
       });
     }
 
-    var fieldsEditable   = item.kind === 'task' && canEditTask && !!item.actionItemId;
-    var assigneeEditable = item.kind === 'task' && canAssignTask && !!item.actionItemId
+    var fieldsEditable   = item.kind === 'task' && (canEditTask || isOwnTask) && !!item.actionItemId;
+    var assigneeEditable = item.kind === 'task' && (canAssignTask || isOwnTask) && !!item.actionItemId
                           && !!item.siteId && roster.status === 'ok' && roster.users.length > 0;
 
     var rows;

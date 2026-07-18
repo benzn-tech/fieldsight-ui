@@ -200,6 +200,7 @@ export const ROLES = {
       P('programme', 'manage',  SCOPES.PROJECT),
       P('variance',  'view',    SCOPES.PROJECT),
       P('task',      'assign',  SCOPES.PROJECT),
+      P('task',      'edit',    SCOPES.PROJECT),  // F1b — own-content edit UI gate parity
       P('pattern',   'view',    SCOPES.PROJECT),
       P('pm_brief',  'view',    SCOPES.PROJECT),
       P('sites',     'view',    SCOPES.PROJECT),
