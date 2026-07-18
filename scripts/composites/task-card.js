@@ -9,13 +9,20 @@
    Sprint 2.4 (PLAN Phase D) adds optional check-off:
      • when `checkable` is true and the task carries topic_id +
        actionIndex, the avatar slot becomes a circular checkbox
-     • clicking it fires FS.api.actions.toggleAction (optimistic) and
-       transitions the row through:
+     • clicking it persists optimistically and transitions the row
+       through:
             border pulse → line-through → fade-out
        The animation respects prefers-reduced-motion via the global
        media query in tokens.css (which neutralises animation duration).
      • onAnimationEnd → onCheckedOff(task) so the parent can drop the
        row from its rendered list.
+     • feat/editable-tasks-ui (Task 3) — the persistence call itself
+       branches on task.actionItemId (durable action_items.id, stamped
+       by today-adapter.js): when present, writes the authoritative
+       status column via FS.api.actions.updateAction(id, {status:
+       'done'}); the legacy FS.api.actions.toggleAction DynamoDB
+       overlay is now only the fallback for id-less items (read shim
+       predates the id surfacing).
 
    Props:
      task           { id, title, assignee, status, statusTone, dueTime,
@@ -110,20 +117,33 @@
       var api = window.FS && window.FS.api && window.FS.api.actions;
       if (!api) return;
 
-      api.toggleAction({
-        date:         props.date,
-        topic_id:     task.topic_id,
-        action_index: task.actionIndex,
-        checked:      true,
-        action_text:  task.title,
-        /* feat/user-dim-audit-key (Task 6) — report OWNER's folder
-           (task.folder, stamped by today-adapter.js), never the
-           caller/currentUser. */
-        user_folder:  task.folder,
-      }).catch(function (err) {
+      /* feat/editable-tasks-ui (Task 3) — a check-off is now a status
+         transition on the authoritative action_items.status column,
+         keyed by the durable id (task.actionItemId, stamped by
+         today-adapter.js). This card only ever CHECKS — there is no
+         uncheck path here; the row fades out and onAnimationEnd drops
+         it from the parent's list — so the status write is hard-coded
+         to 'done', mirroring the legacy toggle's hard-coded checked:
+         true below. Legacy items with no actionItemId (read shim
+         predates the id surfacing) still use the DynamoDB toggle. */
+      var persist = task.actionItemId
+        ? api.updateAction(task.actionItemId, { status: 'done' })
+        : api.toggleAction({
+            date:         props.date,
+            topic_id:     task.topic_id,
+            action_index: task.actionIndex,
+            checked:      true,
+            action_text:  task.title,
+            /* feat/user-dim-audit-key (Task 6) — report OWNER's folder
+               (task.folder, stamped by today-adapter.js), never the
+               caller/currentUser. */
+            user_folder:  task.folder,
+          });
+
+      persist.catch(function (err) {
         /* If the persist call fails, abort the animation and let the
            user retry. */
-        console.error('[TaskCard] toggleAction failed', err);
+        console.error('[TaskCard] check-off failed', err);
         setCheckingOff(false);
       });
     }
