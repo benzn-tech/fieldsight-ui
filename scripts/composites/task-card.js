@@ -47,11 +47,16 @@
                     open, for the Today rolling list where cards mix
                     origin dates. Omitted/falsy → no age text rendered.
      timeRange      string, optional (§E-time) — the parent topic's
-                    time_range, e.g. '14:09 – 14:09'. Small muted label,
-                    same treatment as ageLabel. Omitted/falsy → no time
-                    text rendered.
+                    time_range, e.g. '14:09 – 14:09'. feat/editable-tasks-ui
+                    (concise-cards) — no longer rendered on the card itself;
+                    moved to the right detail panel's "Time" row (today.js
+                    TodayRightDetail reads item.timeRange directly, since
+                    the selected item IS the same task object this prop is
+                    sourced from). Prop is still accepted/passed by callers
+                    — left as a no-op here rather than stripped from every
+                    call site.
      noDeadline     boolean, optional (feat/today-rolling-open-items) —
-                    renders a subtle "No deadline" chip (warning tone,
+                    renders a subtle "No due date" chip (warning tone,
                     never safety-red/blocked-magenta per CLAUDE.md).
      batchMode      boolean, optional (feat/leftover-batch-select, T1) —
                     when true AND `checkable` is true, the SAME round
@@ -219,20 +224,6 @@
               className: 'fs-task-card__site',
               title:     props.site,
             }, props.site) : null,
-            /* §E-time — parent topic's time_range, e.g. '14:09 – 14:09'.
-               Subtle, muted, tokens-only inline style (no new CSS class
-               needed) — same visual weight as ageLabel just below.
-               Optional; omitted/falsy → meta row unchanged. */
-            props.timeRange ? React.createElement('span', {
-              className: 'fs-task-card__time',
-              title:     props.timeRange,
-              style: {
-                fontSize:   '11px',
-                color:      'var(--text-tertiary)',
-                whiteSpace: 'nowrap',
-                flexShrink: 0,
-              },
-            }, props.timeRange) : null,
             /* feat/today-rolling-open-items — age + no-deadline signals.
                Both optional; omitted/falsy on any caller that doesn't
                pass them → meta row is byte-identical to before. */
@@ -241,7 +232,7 @@
             }, props.ageLabel) : null,
             props.noDeadline ? React.createElement(Badge, {
               tone: 'warning', variant: 'outline', size: 'sm',
-            }, 'No deadline') : null,
+            }, 'No due date') : null,
             React.createElement(Badge, { tone: task.statusTone, size: 'sm' },
               task.status),
             React.createElement('span', { className: 'fs-task-card__due' },

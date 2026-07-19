@@ -82,11 +82,12 @@
   font-weight: var(--font-weight-medium);
   color: var(--text-primary);
   line-height: 1.35;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  /* concise-cards — clamped to a single scannable line (was 2-line
+     -webkit-box clamp); the full title + specific time now live in the
+     right detail panel. */
+  white-space: nowrap;
   overflow: hidden;
-  word-break: break-word;
+  text-overflow: ellipsis;
 }
 
 .fs-task-card__meta {

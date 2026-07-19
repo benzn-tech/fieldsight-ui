@@ -1090,7 +1090,7 @@
      Extracted from TodayRightDetail's inline rows switch so BOTH the
      main right-detail panel and the Related quick-look popup render the
      identical row shape for a given item: 'task' -> Assignee/Due/Status/
-     Priority (+ Open since / Deadline: None set when present), 'urgent'
+     Priority (+ Open since / Due: None set when present), 'urgent'
      -> Severity/Triggered by/Detail, 'activity' -> Speaker/When/Source/
      Channel. Pure — no React, just [label, value] pairs. */
   function buildDetailRows(item) {
@@ -1105,7 +1105,7 @@
       /* §E — age + no-deadline read-only signals, mirrored here for the
          right-detail view (the card list already surfaces them). */
       if (item.ageDays != null) rows.push(['Open since', formatAgeLabel(item.ageDays)]);
-      if (item.noDeadline) rows.push(['Deadline', 'None set']);
+      if (item.noDeadline) rows.push(['Due', 'None set']);
     } else if (item.kind === 'urgent') {
       rows = [
         ['Severity',     item.badgeLabel],
@@ -2142,11 +2142,17 @@
       rows = [
         ['Assignee', assigneeCell],
         ['Due',      dueCell],
-        ['Status',   statusCell],
-        ['Priority', priorityCell],
       ];
+      /* concise-cards — the specific clock time (parent topic's
+         time_range, e.g. '14:09 – 14:09') no longer renders on the Today
+         card (task-card.js); this is now its only home. item IS the same
+         task object today-adapter.js stamped .timeRange onto, so no extra
+         plumbing is needed. Optional; omitted/falsy → row omitted. */
+      if (item.timeRange) rows.push(['Time', item.timeRange]);
+      rows.push(['Status',   statusCell]);
+      rows.push(['Priority', priorityCell]);
       if (item.ageDays != null) rows.push(['Open since', formatAgeLabel(item.ageDays)]);
-      if (item.noDeadline) rows.push(['Deadline', 'None set']);
+      if (item.noDeadline) rows.push(['Due', 'None set']);
     } else {
       rows = buildDetailRows(item);
     }
