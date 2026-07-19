@@ -44,13 +44,6 @@
     return (r && r.params) || {};
   }
 
-  function parseHHMM(text) {
-    if (!text) return null;
-    var m = String(text).match(/(\d{1,2}):(\d{2})/);
-    if (!m) return null;
-    return (m[1].length === 1 ? '0' + m[1] : m[1]) + ':' + m[2];
-  }
-
   function fmtDate(yyyymmdd) {
     if (!yyyymmdd) return '';
     var p = String(yyyymmdd).split('-').map(Number);
@@ -66,35 +59,13 @@
     return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
   }
 
-  /* Heuristic deadline → ISO date. The deadline field is free text per
-     BACKEND-CONTEXT §5.1 ("Tomorrow 08:00", "Today 14:00", "By Friday",
-     "Friday 03 May", null). We try a few obvious shapes; unparseable
-     deadlines never count as overdue. */
-  function deadlineToISO(deadline, dateOfReport) {
-    if (!deadline) return null;
-    var d = String(deadline).trim();
-    /* Today / Tomorrow keywords resolve relative to the report's date. */
-    if (/^today\b/i.test(d) && dateOfReport)    return dateOfReport;
-    if (/^tomorrow\b/i.test(d) && dateOfReport) return window.FS.api.addDaysISO(dateOfReport, 1);
-    /* "DD MMM" or "DD MMM YYYY" */
-    var m = d.match(/(\d{1,2})\s+(\w+)\s*(\d{4})?/);
-    if (m) {
-      var months = { Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12 };
-      var mon = months[m[2].slice(0, 3).replace(/^\w/, function (c) { return c.toUpperCase(); })];
-      if (mon) {
-        var y = m[3] ? parseInt(m[3], 10)
-                     : (dateOfReport ? parseInt(dateOfReport.slice(0, 4), 10) : new Date().getUTCFullYear());
-        var day = parseInt(m[1], 10);
-        var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
-        return y + '-' + pad(mon) + '-' + pad(day);
-      }
-    }
-    return null;
-  }
-
+  /* Overdue check resolves the free-text deadline against the report's own
+     date via the shared resolveDeadline helper (today-adapter.js) — the
+     same helper Today + Timeline use for absolute due dates. Unparseable
+     deadlines (absolute: null) never count as overdue. */
   function isOverdue(row, today) {
     if (!row || row.audit.checked) return false;
-    var iso = deadlineToISO(row.deadline, row.date);
+    var iso = window.FS.api.resolveDeadline(row.deadline, row.date).absolute;
     if (!iso) return false;
     return iso < today;
   }
@@ -388,7 +359,7 @@
                 priority:    row.priority
                               ? row.priority.charAt(0).toUpperCase() + row.priority.slice(1)
                               : 'Medium',
-                dueTime:     parseHHMM(row.deadline) || (row.deadline ? row.deadline.slice(0, 14) : '—'),
+                dueTime:     window.FS.api.resolveDeadline(row.deadline, row.date).display || '—',
               };
               return React.createElement(TaskCard, {
                 key:      row.id,
@@ -513,7 +484,7 @@
           label: 'Owner',     value: row.responsible || '—',
         }),
         React.createElement(DetailRow, {
-          label: 'Deadline',  value: row.deadline || '—',
+          label: 'Due',       value: window.FS.api.resolveDeadline(row.deadline, row.date).display || '—',
         }),
         React.createElement(DetailRow, {
           label: 'Date',      value: fmtDate(row.date),
