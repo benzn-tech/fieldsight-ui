@@ -98,7 +98,12 @@
          before any role lookup), keeping the raw 'admin' string for display
          and for the aggregators' role === 'admin' checks. */
       patch.role    = sessionUser.role === 'pm' ? 'project_manager' : sessionUser.role;
-      patch.isAdmin = sessionUser.role === 'admin';
+      /* 'admin' and 'platform_admin' have no UI role slug (roles.js) — grant
+         the isAdmin flag so FS.can()/canSeeNav() honor them before any role
+         lookup (an unmapped role otherwise gets ZERO permissions: empty nav,
+         every page redirects). platform_admin is the tenant-split cross-company
+         operator; treat it as admin-like in the UI. */
+      patch.isAdmin = sessionUser.role === 'admin' || sessionUser.role === 'platform_admin';
     }
 
     /* auth-mock's boot restore applies the GLOBAL localStorage profile
