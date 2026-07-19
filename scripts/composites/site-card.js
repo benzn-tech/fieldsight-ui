@@ -10,7 +10,7 @@
    page feels consistent with the rest of the prototype.
 
    Props:
-     site       { site_id, name, location, client, user_count }
+     site       { site_id, name, location, client, user_count, company_name }
      kpi        { reports?, latestDate? } — derived in the page
      selected   boolean — applies a selected style to the card
      onSelect   (site) => void — click handler
@@ -58,6 +58,13 @@
                 site.name || site.site_id),
               React.createElement('div', { className: 'fs-site-card__sub' },
                 [site.location, site.client].filter(Boolean).join(' · ')),
+              /* #2 company tag — which company owns this site. Cross-company
+                 platform_admin sees varied companies; a single-company admin
+                 sees their own. Only rendered when the API supplies it. */
+              (Badge && site.company_name) ? React.createElement('div', { style: { marginTop: '4px' } },
+                React.createElement(Badge, { tone: 'info', size: 'sm', variant: 'subtle' },
+                  site.company_name)
+              ) : null,
             ),
           ),
           site.archived ? React.createElement(Badge, {

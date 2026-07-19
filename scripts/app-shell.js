@@ -741,8 +741,11 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
         }, formatTodayDate()) : null,
       ),
 
-      /* Batch A2 Task 1 — header project selector, SITE_SCOPED_ROUTES only. */
-      (SITE_SCOPED_ROUTES.indexOf(route) !== -1 && sitesList.length > 0) ? React.createElement('select', {
+      /* #5 — header project selector on EVERY page (was SITE_SCOPED_ROUTES
+         only). A consistent global project scope control at the top of all
+         pages; the /timeline deep-link special-cases below still apply where
+         relevant, other routes read/write the shared FS.siteContext. */
+      (sitesList.length > 0) ? React.createElement('select', {
         className:    'fs-settings__select',
         style:        { maxWidth: '220px' },
         /* On /timeline the URL's ?site= outranks the context (deep links) —
