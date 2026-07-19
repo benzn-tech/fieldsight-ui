@@ -130,7 +130,8 @@
       if (orgLive()) {
         window.FS.api.org.getMe().then(function (me) {
           if (cancelled || !me || me._accessDenied || me._notFound) return;
-          patchProfile({ firstName: me.first_name, lastName: me.last_name, email: me.email });
+          patchProfile({ firstName: me.first_name, lastName: me.last_name, email: me.email,
+            company: me.company_name || null, role: me.global_role || null });
           if (me.avatar_s3_key) {
             window.FS.api.org.resolveAssetUrl(me.avatar_s3_key).then(function (url) {
               if (cancelled || !url) return;
@@ -345,6 +346,8 @@
           Field('First name *', TextInput(p.firstName, function (v) { ctx.patchProfile({ firstName: v }); })),
           Field('Last name *', TextInput(p.lastName, function (v) { ctx.patchProfile({ lastName: v }); })),
           Field('Email', TextInput(p.email, null, { readOnly: true })),
+          Field('Company', TextInput(p.company || '—', null, { readOnly: true })),
+          Field('Role', TextInput(p.role ? p.role.replace(/_/g, ' ') : '—', null, { readOnly: true })),
           Field('Time format', SelectInput(p.timeFormat, TIME_FORMATS.map(function (o) { return { v: o.v, l: o.l }; }), function (v) { ctx.patchProfile({ timeFormat: v }); })),
           Field('Date format', SelectInput(p.dateFormat, DATE_FORMATS.map(function (o) { return { v: o.v, l: o.l }; }), function (v) { ctx.patchProfile({ dateFormat: v }); })),
           React.createElement('label', { className: 'fs-settings__checkbox-row' },
