@@ -229,6 +229,52 @@
       options.map(function (o) { return React.createElement('option', { key: o.v, value: o.v }, o.l); }));
   }
 
+  /* Debounced Photon type-ahead. On pick: calls onPick({ address, latitude,
+     longitude }) so the parent form fills the address text AND stashes coords.
+     On error/no-result it stays a plain free-text input (coords left null ->
+     backfilled later). Keyless; browser-direct (not via org API). */
+  function AddressAutocomplete(props) {
+    var refOpen = React.useState(false); var isOpen = refOpen[0], setOpen = refOpen[1];
+    var refList = React.useState([]); var list = refList[0], setList = refList[1];
+    var timer = React.useRef(null);
+    function onType(v) {
+      props.onText(v);
+      if (timer.current) clearTimeout(timer.current);
+      if (!v || !v.trim() || !(window.FS.api.org && window.FS.api.org.geocodeAddress)) {
+        setList([]); setOpen(false); return;
+      }
+      timer.current = setTimeout(function () {
+        window.FS.api.org.geocodeAddress(v).then(function (results) {
+          setList(results); setOpen(results.length > 0);
+        }).catch(function () {
+          setList([]); setOpen(false);
+        });
+      }, 350);
+    }
+    function pick(item) {
+      setOpen(false); setList([]);
+      props.onPick({ address: item.formatted, latitude: item.lat, longitude: item.lng });
+    }
+    return React.createElement('div', { style: { position: 'relative' } },
+      React.createElement('input', {
+        type: 'text', className: 'fs-settings__input', value: props.value || '',
+        placeholder: 'Start typing an address…',
+        onChange: function (e) { onType(e.target.value); },
+      }),
+      isOpen ? React.createElement('ul', {
+        className: 'fs-address-suggest',
+        style: { position: 'absolute', zIndex: 20, left: 0, right: 0, margin: 0,
+                 padding: '4px 0', listStyle: 'none',
+                 background: 'var(--surface-panel)', border: '1px solid var(--border-subtle)',
+                 borderRadius: '6px', maxHeight: '180px', overflowY: 'auto' },
+      }, list.map(function (item, i) {
+        return React.createElement('li', {
+          key: i, style: { padding: '6px 10px', cursor: 'pointer' },
+          onMouseDown: function (e) { e.preventDefault(); pick(item); },
+        }, item.formatted);
+      })) : null);
+  }
+
   /* ---------- NewProjectModal (Phase B — admin create project) --------- */
   function NewProjectModal(props) {
     var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
@@ -237,7 +283,7 @@
        reachable directly via useContext — simpler than prop-drilling
        setSiteIcon down through onCreated. */
     var ctx = React.useContext(SitesContext);
-    var refForm = React.useState({ name: '', location: '', region: 'south-island', client: '', project_value_nzd: '', planned_completion: '' });
+    var refForm = React.useState({ name: '', location: '', region: 'south-island', client: '', project_value_nzd: '', planned_completion: '', address: '', latitude: null, longitude: null });
     var form = refForm[0], setForm = refForm[1];
     var refBusy = React.useState(false); var busy = refBusy[0], setBusy = refBusy[1];
     var iconRef = React.useRef(null);
@@ -261,7 +307,7 @@
       setBusy(true);
       var live = orgLive();
       var creating = live
-        ? window.FS.api.org.createOrgSite({ name: form.name, location: form.location, client: form.client, icon_s3_key: form._iconKey || undefined })
+        ? window.FS.api.org.createOrgSite({ name: form.name, location: form.location, client: form.client, address: form.address || undefined, latitude: form.latitude, longitude: form.longitude, icon_s3_key: form._iconKey || undefined })
         : window.FS.api.sites.createSite(form);
       creating.then(function (site) {
         setBusy(false);
@@ -293,6 +339,11 @@
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm', onClick: function () { if (iconRef.current) iconRef.current.click(); } }, 'Upload icon')
         )),
         fFieldRow('Location', fText(form.location, function (v) { set('location', v); })),
+        fFieldRow('Address', React.createElement(AddressAutocomplete, {
+          value: form.address,
+          onText: function (v) { setForm(function (f) { return Object.assign({}, f, { address: v, latitude: null, longitude: null }); }); },
+          onPick: function (p) { setForm(function (f) { return Object.assign({}, f, { address: p.address, latitude: p.latitude, longitude: p.longitude }); }); },
+        })),
         fFieldRow('Region', fSelect(form.region, [{ v: 'south-island', l: 'South Island' }, { v: 'north-island', l: 'North Island' }], function (v) { set('region', v); })),
         fFieldRow('Client', fText(form.client, function (v) { set('client', v); })),
         fFieldRow('Project value (NZD)', fText(form.project_value_nzd, function (v) { set('project_value_nzd', v); }, 'number')),
@@ -310,10 +361,12 @@
     var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
     var site  = props.site || {};
     var refForm = React.useState({
-      name:     site.name || '',
-      location: site.location || '',
-      client:   site.client || '',
-      address:  site.address || '',
+      name:      site.name || '',
+      location:  site.location || '',
+      client:    site.client || '',
+      address:   site.address || '',
+      latitude:  site.latitude != null ? site.latitude : null,
+      longitude: site.longitude != null ? site.longitude : null,
     });
     var form = refForm[0], setForm = refForm[1];
     var refBusy = React.useState(false); var busy = refBusy[0], setBusy = refBusy[1];
@@ -323,6 +376,7 @@
       setBusy(true);
       window.FS.api.org.updateOrgSite(props.site.site_id, {
         name: form.name, location: form.location, client: form.client, address: form.address,
+        latitude: form.latitude, longitude: form.longitude,
       }).then(function (updated) {
         setBusy(false);
         if (window.FS.toast) window.FS.toast.show({ message: 'Project "' + ((updated && updated.name) || form.name) + '" updated', tone: 'success' });
@@ -339,7 +393,11 @@
         fFieldRow('Project name *', fText(form.name, function (v) { set('name', v); })),
         fFieldRow('Location', fText(form.location, function (v) { set('location', v); })),
         fFieldRow('Client', fText(form.client, function (v) { set('client', v); })),
-        fFieldRow('Address', fText(form.address, function (v) { set('address', v); })),
+        fFieldRow('Address', React.createElement(AddressAutocomplete, {
+          value: form.address,
+          onText: function (v) { setForm(function (f) { return Object.assign({}, f, { address: v, latitude: null, longitude: null }); }); },
+          onPick: function (p) { setForm(function (f) { return Object.assign({}, f, { address: p.address, latitude: p.latitude, longitude: p.longitude }); }); },
+        })),
         React.createElement('div', { className: 'fs-settings__actions' },
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: props.onClose }, 'Cancel'),
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--md', disabled: busy, onClick: submit }, busy ? 'Saving…' : 'Save changes')

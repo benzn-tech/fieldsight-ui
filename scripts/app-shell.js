@@ -176,6 +176,12 @@ function wmoLookup(code) {
    the value on that fixture in scripts/mock/sites.fixture.js. */
 const WEATHER_DEFAULT_COORD = { lat: -43.5321, lng: 172.6362 };
 
+/* site_id -> { lat, lng } | null, filled once from the org API (real Aurora
+   coordinates, now that the site record carries latitude/longitude). null = a
+   resolved site that has no coordinate yet (un-backfilled) -> caller falls back
+   to fixture coord / default. */
+const orgSiteCoordCache = {};
+
 /* Module-level cache: `${lat},${lng},${date},${h|r}` → { data, ts }.
    Cheap insurance against refetch storms (route/site churn while a
    popover is open, StrictMode double-invoke, etc). Historical ('h')
@@ -253,10 +259,44 @@ function WeatherIndicator() {
 
   const sitesList = (window.FieldSight.fixtures && window.FieldSight.fixtures.sites
     && window.FieldSight.fixtures.sites.sites) || [];
-  const activeSite = activeSiteId
+  const fixtureSite = activeSiteId
     ? sitesList.find(function(s) { return s.site_id === activeSiteId; })
     : null;
-  const coord = (activeSite && activeSite.coord) || WEATHER_DEFAULT_COORD;
+
+  /* Real Aurora coordinate for the active site, fetched once from the org API
+     (spec §3.6). Falls back to the fixture coord, then the NZ default, so the
+     indicator never disappears (BUG-20-safe: getOrgSites uses the guarded
+     org request; a non-JSON SPA-shell 200 resolves to _notFound, not a crash). */
+  const [siteCoord, setSiteCoord] = React.useState(function() {
+    return activeSiteId ? orgSiteCoordCache[activeSiteId] || null : null;
+  });
+  React.useEffect(function() {
+    if (!activeSiteId) { setSiteCoord(null); return undefined; }
+    if (orgSiteCoordCache[activeSiteId] !== undefined) {
+      setSiteCoord(orgSiteCoordCache[activeSiteId]);
+      return undefined;
+    }
+    if (!(window.FS && window.FS.api && window.FS.api.org
+          && window.FS.api.org.getOrgSites)) { return undefined; }
+    let cancelled = false;
+    window.FS.api.org.getOrgSites().then(function(res) {
+      const list = (res && res.sites) || [];
+      list.forEach(function(s) {
+        if (s && s.site_id && s.latitude != null && s.longitude != null) {
+          orgSiteCoordCache[s.site_id] = { lat: s.latitude, lng: s.longitude };
+        }
+      });
+      if (orgSiteCoordCache[activeSiteId] === undefined) {
+        orgSiteCoordCache[activeSiteId] = null;  // resolved: this site has no coord
+      }
+      if (!cancelled) setSiteCoord(orgSiteCoordCache[activeSiteId]);
+    }).catch(function() { if (!cancelled) setSiteCoord(null); });
+    return function() { cancelled = true; };
+  }, [activeSiteId]);
+
+  const coord = siteCoord
+    || (fixtureSite && fixtureSite.coord)
+    || WEATHER_DEFAULT_COORD;
 
   /* status: 'loading' | 'success' | 'error' */
   const [liveState, setLiveState] = React.useState({ status: 'loading', data: null });
