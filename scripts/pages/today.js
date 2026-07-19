@@ -387,11 +387,12 @@
      grouped into project-headed sections (multi-project). `renderItem`
      is the existing per-row renderer each call site already has. */
   function renderMaybeGrouped(items, isMultiProject, renderItem) {
-    if (!isMultiProject) {
-      return React.createElement('div', {
-        style: { display: 'flex', flexDirection: 'column', gap: '6px' },
-      }, (items || []).map(renderItem));
-    }
+    /* #4 — project is ALWAYS a high-level group header (even single-project),
+       so a section reads "SB1108 Ellesmere College" with that project's items
+       nested under it. Replaces the removed per-card site chip: the chip is
+       gone from the cards and this group header carries the project instead.
+       (isMultiProject is now vestigial — kept in the signature so the call
+       sites don't have to change.) */
     var groups = groupByProject(items);
     return React.createElement('div', { className: 'fs-today__project-groups' },
       groups.map(function (g) {
@@ -1368,9 +1369,11 @@
        sees, so flatten groupByProject's own output here and pass THAT
        to useMultiSelect — not leftoverItems — so a Shift+Click between
        two visually-adjacent cards can't reach into a different group. */
-    var leftoverRenderItems = leftoverIsMultiProject
-      ? groupByProject(leftoverItems).reduce(function (acc, g) { return acc.concat(g.rows); }, [])
-      : leftoverItems;
+    /* #4 — the Leftover body now ALWAYS renders project-grouped (see
+       renderMaybeGrouped), so Shift-range selection must walk the grouped
+       order unconditionally — not just when multi-project. */
+    var leftoverRenderItems = groupByProject(leftoverItems)
+      .reduce(function (acc, g) { return acc.concat(g.rows); }, []);
 
     /* T4 — batchMode/anchor/Shift-Ctrl selection state + dispatch, now
        the ONE shared implementation (scripts/composites/multi-select-
