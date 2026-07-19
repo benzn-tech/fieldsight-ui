@@ -638,11 +638,12 @@
   /* ---------- TasksRightDetail ---------------------------------------- */
 
   function TasksRightDetail(props) {
-    var fs        = window.FieldSight;
-    var Card      = fs.Card;
-    var Badge     = fs.Badge;
-    var Button    = fs.Button;
-    var IconBtn   = fs.IconButton;
+    var fs           = window.FieldSight;
+    var Card         = fs.Card;
+    var Badge        = fs.Badge;
+    var Button       = fs.Button;
+    var IconBtn      = fs.IconButton;
+    var EvidenceTabs = fs.EvidenceTabs;
 
     var ctx = React.useContext(TasksContext);
     var sel = props.selectedItem;
@@ -650,6 +651,14 @@
     var refBusy = React.useState(false);
     var busy    = refBusy[0];
     var setBusy = refBusy[1];
+
+    /* feat/editable-tasks-ui — Details/History tab split (reuses the
+       /evidence page's EvidenceTabs composite). Declared before the
+       `!sel` early return below so hook order stays stable across
+       selection changes, matching refBusy's placement. */
+    var refTab    = React.useState('details');
+    var activeTab = refTab[0];
+    var setTab    = refTab[1];
 
     if (!sel || sel.kind !== 'task_row') {
       return React.createElement('div', { className: 'fs-tasks-detail__placeholder' },
@@ -723,50 +732,74 @@
         }) : null,
       ),
 
-      /* Field rows */
-      React.createElement('div', { className: 'fs-tasks-detail__rows' },
-        React.createElement(DetailRow, {
-          label: 'Owner',     value: row.responsible || '—',
-        }),
-        React.createElement(DetailRow, {
-          label: 'Due',       value: window.FS.api.resolveDeadline(row.deadline, row.date).display || '—',
-        }),
-        React.createElement(DetailRow, {
-          label: 'Date',      value: fmtDate(row.date),
-        }),
-        React.createElement(DetailRow, {
-          label: 'From topic',value: row.topic_title,
-        }),
-        React.createElement(DetailRow, {
-          label: 'Category',  value: row.topic_category,
-        }),
-        React.createElement(DetailRow, {
-          label: 'Reporter',  value: row.user_name,
-        }),
-      ),
+      /* feat/editable-tasks-ui — Details/History tab split. Details holds
+         the full action text (already unclamped in the header above) +
+         field rows + action buttons; History holds the Sprint 11 C.3
+         cross-day audit drawer, moved under its own tab rather than
+         always-rendered inline. */
+      EvidenceTabs ? React.createElement(EvidenceTabs, {
+        tabs: [
+          { key: 'details', label: 'Details' },
+          { key: 'history', label: 'History' },
+        ],
+        active:   activeTab,
+        onChange: setTab,
+      }) : null,
 
-      /* Sprint 11 C.3 — Cross-day history drawer.
-         Pulls every audit entry (any date) for the same logical
-         action (matched by topic_id + action_index) so the drawer
-         can show "this action was opened 3 May, closed 5 May, re-
-         opened 6 May…". Q-S11-3 default: role-aware visibility —
-         admin/gm see all check events; regular users see only
-         their own resolutions. */
-      React.createElement(ActionHistoryPanel, { row: row }),
+      activeTab === 'history'
+        ? (
+            /* Sprint 11 C.3 — Cross-day history drawer.
+               Pulls every audit entry (any date) for the same logical
+               action (matched by topic_id + action_index) so the drawer
+               can show "this action was opened 3 May, closed 5 May, re-
+               opened 6 May…". Q-S11-3 default: role-aware visibility —
+               admin/gm see all check events; regular users see only
+               their own resolutions. */
+            React.createElement(ActionHistoryPanel, { row: row })
+          )
+        : React.createElement(React.Fragment, null,
 
-      /* Actions */
-      React.createElement('div', { className: 'fs-tasks-detail__actions' },
-        !row.audit.checked
-          ? React.createElement(Button, {
-              size: 'sm', leftIcon: 'check',
-              onClick: onMarkComplete, disabled: busy,
-            }, busy ? 'Saving…' : 'Mark complete')
-          : null,
-        React.createElement(Button, {
-          variant: 'secondary', size: 'sm', rightIcon: 'arrow-right',
-          onClick: onOpenInTimeline,
-        }, 'Open in timeline'),
-      ),
+            /* Field rows */
+            React.createElement('div', { className: 'fs-tasks-detail__rows' },
+              React.createElement(DetailRow, {
+                label: 'Owner',     value: row.responsible || '—',
+              }),
+              React.createElement(DetailRow, {
+                label: 'Due',       value: window.FS.api.resolveDeadline(row.deadline, row.date).display || '—',
+              }),
+              React.createElement(DetailRow, {
+                label: 'Date',      value: fmtDate(row.date),
+              }),
+              React.createElement(DetailRow, {
+                label: 'From topic',value: row.topic_title,
+              }),
+              React.createElement(DetailRow, {
+                label: 'Category',  value: row.topic_category,
+              }),
+              React.createElement(DetailRow, {
+                label: 'Reporter',  value: row.user_name,
+              }),
+              /* No Time row: unlike Today's rows (item.timeRange, stamped
+                 by today-adapter.js from the topic's time_range), the
+                 tasks-aggregator.js row shape (see its header comment)
+                 does not carry topic time_range onto the row — nothing to
+                 show without inventing a field that isn't there. */
+            ),
+
+            /* Actions */
+            React.createElement('div', { className: 'fs-tasks-detail__actions' },
+              !row.audit.checked
+                ? React.createElement(Button, {
+                    size: 'sm', leftIcon: 'check',
+                    onClick: onMarkComplete, disabled: busy,
+                  }, busy ? 'Saving…' : 'Mark complete')
+                : null,
+              React.createElement(Button, {
+                variant: 'secondary', size: 'sm', rightIcon: 'arrow-right',
+                onClick: onOpenInTimeline,
+              }, 'Open in timeline'),
+            ),
+          ),
     );
   }
 

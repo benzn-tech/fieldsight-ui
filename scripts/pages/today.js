@@ -2209,8 +2209,10 @@
             margin: 0, fontSize: '18px', fontWeight: 600,
             color: 'var(--text-primary)', lineHeight: 1.3,
             flex: 1, minWidth: 0,
-            display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 3,
-            overflow: 'hidden', wordBreak: 'break-word',
+            /* feat/editable-tasks-ui — full text, no clamp: the card title
+               (task-card.js .fs-task-card__title) is the 1-line scannable
+               summary; this detail panel is the full-text home. */
+            wordBreak: 'break-word',
           },
         }, item.title || item.snippet || '(item)'),
         React.createElement(IconBtn, {
