@@ -634,7 +634,18 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
   const [sitesList, setSitesList] = React.useState([]);
   React.useEffect(function () {
     var cancelled = false;
-    window.FS.api.sites.getSites().then(function (res) {
+    /* Source the header selector's sites from the SAME place the pages do —
+       Aurora org.getOrgSites() when org-live (mirrors sites.js/timeline.js
+       orgLive()). Sourcing from the legacy sites.getSites() gave
+       platform_admin a DIFFERENT list than the pages: a project picked on
+       Timeline wasn't in the header list (selector reset to "All projects"),
+       and a project picked in the header wasn't in Timeline's Aurora list
+       (Timeline fell back to its own "Pick a project" card). One source ⇒
+       the two selectors agree. */
+    var live = !!(window.FS && window.FS.api && !window.FS.api.useMocks
+      && window.FS.api.orgBaseUrl && window.FS.api.org);
+    var req = live ? window.FS.api.org.getOrgSites() : window.FS.api.sites.getSites();
+    req.then(function (res) {
       if (cancelled) return;
       setSitesList((res && res.sites) || []);
     }).catch(function () {
