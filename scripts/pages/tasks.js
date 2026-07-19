@@ -217,6 +217,7 @@
     var TasksFilterChips  = fs.TasksFilterChips;
     var TaskCard          = fs.TaskCard;
     var RangeToolbar      = fs.RangeToolbar;
+    var CreateTaskModal   = fs.CreateTaskModal;
     var onSelect          = props.onSelect || function () {};
 
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
@@ -237,6 +238,14 @@
     var setVisible   = refVisible[1];
 
     React.useEffect(function () { setVisible(PAGE_SIZE); }, [filter]);
+
+    /* feat/editable-tasks-ui — "+ New task" modal open state, mirrors
+       quality.js's ctx.showCreate: conditionally MOUNTED (not just
+       open-toggled) below, so a Cancel/close fully resets CreateTaskModal's
+       internal form state for the next open — see create-task-modal.js. */
+    var refShowCreateTask  = React.useState(false);
+    var showCreateTask     = refShowCreateTask[0];
+    var setShowCreateTask  = refShowCreateTask[1];
 
     /* feat/editable-tasks-ui — guards the bulk "Resolve N" button
        against double-submit while the pooled toggleAction batch is in
@@ -497,6 +506,20 @@
             React.createElement('div', { className: 'fs-tasks__subtitle' },
               'Action items assigned across reports — yours, your team’s, by status'),
           ),
+          /* feat/editable-tasks-ui — "+ New task" entry point, primary
+             home for CreateTaskModal (see file header note there). Always
+             available on /tasks (the tasks hub) — no role gate, unlike
+             /quality's "+ Log Item" (quality:manage-gated): task creation
+             has no equivalent domain-manager permission in roles.js today,
+             and gating it incorrectly is worse than not gating it, per the
+             brief this shipped under. */
+          CreateTaskModal
+            ? React.createElement('button', {
+                type:      'button',
+                className: 'fs-tasks__new-task-btn',
+                onClick:   function () { setShowCreateTask(true); },
+              }, '+ New task')
+            : null,
           /* feat/editable-tasks-ui — Batch Select toggle, same shared
              .fs-multi-select__toggle classes /today's Leftover section
              and /safety's Multi-Select toggle use (composites.css).
@@ -520,6 +543,23 @@
           }, 'ⓘ'),
         ),
       ),
+
+      /* feat/editable-tasks-ui — Create task modal. Conditionally MOUNTED
+         (not just open-toggled) so CreateTaskModal's internal form state
+         resets on every open, mirroring quality.js's
+         `ctx.showCreate && QualityCreateModal ? ... : null` pattern.
+         onCreated is a no-op beyond the modal's own toast/close — see
+         create-task-modal.js's TOPIC-SCOPING NOTE: the mock write has no
+         row shape this page's aggregator-fed list can surface, so there
+         is nothing here to prepend/refetch into `rows`. */
+      showCreateTask && CreateTaskModal
+        ? React.createElement(CreateTaskModal, {
+            open:      true,
+            onClose:   function () { setShowCreateTask(false); },
+            onCreated: function () {},
+            siteId:    (window.FS.siteContext && window.FS.siteContext.get()) || '',
+          })
+        : null,
 
       /* Date-range selector — Today / 7d / 30d / All / Custom */
       toolbar,
