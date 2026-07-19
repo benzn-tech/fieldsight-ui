@@ -1098,14 +1098,13 @@
     if (item.kind === 'task') {
       rows = [
         ['Assignee', item.assignee],
-        ['Due',      item.dueTime],
+        ['Due',      item.dueTime || 'None set'],
         ['Status',   item.status],
         ['Priority', item.priority || 'Medium'],
       ];
       /* §E — age + no-deadline read-only signals, mirrored here for the
          right-detail view (the card list already surfaces them). */
       if (item.ageDays != null) rows.push(['Open since', formatAgeLabel(item.ageDays)]);
-      if (item.noDeadline) rows.push(['Due', 'None set']);
     } else if (item.kind === 'urgent') {
       rows = [
         ['Severity',     item.badgeLabel],
@@ -2130,7 +2129,7 @@
       var dueCell = fieldsEditable ? React.createElement(Input, {
         type: 'date', size: 'sm', fullWidth: true, value: dueValue,
         onChange: function (e) { commitTaskField('deadline', e.target.value || null); },
-      }) : item.dueTime;
+      }) : (item.dueTime || 'None set');
 
       var assigneeCell = assigneeEditable ? React.createElement(Select, {
         size: 'sm', fullWidth: true, value: assigneeValue,
@@ -2152,7 +2151,6 @@
       rows.push(['Status',   statusCell]);
       rows.push(['Priority', priorityCell]);
       if (item.ageDays != null) rows.push(['Open since', formatAgeLabel(item.ageDays)]);
-      if (item.noDeadline) rows.push(['Due', 'None set']);
     } else {
       rows = buildDetailRows(item);
     }
