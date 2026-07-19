@@ -9,13 +9,20 @@
    Sprint 2.4 (PLAN Phase D) adds optional check-off:
      • when `checkable` is true and the task carries topic_id +
        actionIndex, the avatar slot becomes a circular checkbox
-     • clicking it fires FS.api.actions.toggleAction (optimistic) and
-       transitions the row through:
+     • clicking it persists optimistically and transitions the row
+       through:
             border pulse → line-through → fade-out
        The animation respects prefers-reduced-motion via the global
        media query in tokens.css (which neutralises animation duration).
      • onAnimationEnd → onCheckedOff(task) so the parent can drop the
        row from its rendered list.
+     • feat/editable-tasks-ui (Task 3) — the persistence call itself
+       branches on task.actionItemId (durable action_items.id, stamped
+       by today-adapter.js): when present, writes the authoritative
+       status column via FS.api.actions.updateAction(id, {status:
+       'done'}); the legacy FS.api.actions.toggleAction DynamoDB
+       overlay is now only the fallback for id-less items (read shim
+       predates the id surfacing).
 
    Props:
      task           { id, title, assignee, status, statusTone, dueTime,
@@ -40,11 +47,16 @@
                     open, for the Today rolling list where cards mix
                     origin dates. Omitted/falsy → no age text rendered.
      timeRange      string, optional (§E-time) — the parent topic's
-                    time_range, e.g. '14:09 – 14:09'. Small muted label,
-                    same treatment as ageLabel. Omitted/falsy → no time
-                    text rendered.
+                    time_range, e.g. '14:09 – 14:09'. feat/editable-tasks-ui
+                    (concise-cards) — no longer rendered on the card itself;
+                    moved to the right detail panel's "Time" row (today.js
+                    TodayRightDetail reads item.timeRange directly, since
+                    the selected item IS the same task object this prop is
+                    sourced from). Prop is still accepted/passed by callers
+                    — left as a no-op here rather than stripped from every
+                    call site.
      noDeadline     boolean, optional (feat/today-rolling-open-items) —
-                    renders a subtle "No deadline" chip (warning tone,
+                    renders a subtle "No due date" chip (warning tone,
                     never safety-red/blocked-magenta per CLAUDE.md).
      batchMode      boolean, optional (feat/leftover-batch-select, T1) —
                     when true AND `checkable` is true, the SAME round
@@ -110,20 +122,33 @@
       var api = window.FS && window.FS.api && window.FS.api.actions;
       if (!api) return;
 
-      api.toggleAction({
-        date:         props.date,
-        topic_id:     task.topic_id,
-        action_index: task.actionIndex,
-        checked:      true,
-        action_text:  task.title,
-        /* feat/user-dim-audit-key (Task 6) — report OWNER's folder
-           (task.folder, stamped by today-adapter.js), never the
-           caller/currentUser. */
-        user_folder:  task.folder,
-      }).catch(function (err) {
+      /* feat/editable-tasks-ui (Task 3) — a check-off is now a status
+         transition on the authoritative action_items.status column,
+         keyed by the durable id (task.actionItemId, stamped by
+         today-adapter.js). This card only ever CHECKS — there is no
+         uncheck path here; the row fades out and onAnimationEnd drops
+         it from the parent's list — so the status write is hard-coded
+         to 'done', mirroring the legacy toggle's hard-coded checked:
+         true below. Legacy items with no actionItemId (read shim
+         predates the id surfacing) still use the DynamoDB toggle. */
+      var persist = task.actionItemId
+        ? api.updateAction(task.actionItemId, { status: 'done' })
+        : api.toggleAction({
+            date:         props.date,
+            topic_id:     task.topic_id,
+            action_index: task.actionIndex,
+            checked:      true,
+            action_text:  task.title,
+            /* feat/user-dim-audit-key (Task 6) — report OWNER's folder
+               (task.folder, stamped by today-adapter.js), never the
+               caller/currentUser. */
+            user_folder:  task.folder,
+          });
+
+      persist.catch(function (err) {
         /* If the persist call fails, abort the animation and let the
            user retry. */
-        console.error('[TaskCard] toggleAction failed', err);
+        console.error('[TaskCard] check-off failed', err);
         setCheckingOff(false);
       });
     }
@@ -199,20 +224,6 @@
               className: 'fs-task-card__site',
               title:     props.site,
             }, props.site) : null,
-            /* §E-time — parent topic's time_range, e.g. '14:09 – 14:09'.
-               Subtle, muted, tokens-only inline style (no new CSS class
-               needed) — same visual weight as ageLabel just below.
-               Optional; omitted/falsy → meta row unchanged. */
-            props.timeRange ? React.createElement('span', {
-              className: 'fs-task-card__time',
-              title:     props.timeRange,
-              style: {
-                fontSize:   '11px',
-                color:      'var(--text-tertiary)',
-                whiteSpace: 'nowrap',
-                flexShrink: 0,
-              },
-            }, props.timeRange) : null,
             /* feat/today-rolling-open-items — age + no-deadline signals.
                Both optional; omitted/falsy on any caller that doesn't
                pass them → meta row is byte-identical to before. */
@@ -221,7 +232,7 @@
             }, props.ageLabel) : null,
             props.noDeadline ? React.createElement(Badge, {
               tone: 'warning', variant: 'outline', size: 'sm',
-            }, 'No deadline') : null,
+            }, 'No due date') : null,
             React.createElement(Badge, { tone: task.statusTone, size: 'sm' },
               task.status),
             React.createElement('span', { className: 'fs-task-card__due' },

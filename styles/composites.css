@@ -82,11 +82,12 @@
   font-weight: var(--font-weight-medium);
   color: var(--text-primary);
   line-height: 1.35;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  /* concise-cards — clamped to a single scannable line (was 2-line
+     -webkit-box clamp); the full title + specific time now live in the
+     right detail panel. */
+  white-space: nowrap;
   overflow: hidden;
-  word-break: break-word;
+  text-overflow: ellipsis;
 }
 
 .fs-task-card__meta {
@@ -6971,6 +6972,127 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 [data-theme="dark"] .fs-quality-create-modal__select,
 [data-theme="dark"] .fs-safety-create-modal__input,
 [data-theme="dark"] .fs-quality-create-modal__input {
+  background:   var(--surface-input, var(--surface-raised));
+  border-color: var(--border-default);
+  color:        var(--text-primary);
+}
+
+
+/* ==========================================================================
+   §FEAT-EDITABLE-TASKS-UI · CREATE TASK MODAL
+   --------------------------------------------------------------------------
+   Structurally identical to .fs-safety-create-modal / .fs-quality-create-
+   modal above (same field/label/input/select/actions shell) — duplicated
+   under its own block name rather than folded into that shared selector
+   list, since "quality"/"safety" naming on a Tasks-page modal would read
+   wrong at the callsite. See scripts/composites/create-task-modal.js.
+   ========================================================================== */
+
+.fs-create-task-modal {
+  width:      100%;
+  max-width:  480px;
+  padding:    24px;
+  background: var(--surface-panel);
+  border-radius: var(--radius-lg);
+  display:    flex;
+  flex-direction: column;
+  gap:        16px;
+}
+
+.fs-create-task-modal__title {
+  font-size:   var(--text-lg);
+  font-weight: 600;
+  color:       var(--text-primary);
+  margin:      0;
+}
+
+.fs-create-task-modal__field {
+  display:        flex;
+  flex-direction: column;
+  gap:            6px;
+  flex:           1 1 0;
+}
+
+.fs-create-task-modal__row {
+  display: flex;
+  gap:     12px;
+}
+
+.fs-create-task-modal__label {
+  font-size:   var(--text-sm);
+  font-weight: 500;
+  color:       var(--text-secondary);
+}
+
+.fs-create-task-modal__required {
+  color: var(--color-danger-500, #ef4444);
+  margin-left: 2px;
+}
+
+.fs-create-task-modal__select,
+.fs-create-task-modal__input {
+  width:           100%;
+  padding:         8px 10px;
+  border:          1px solid var(--border-default);
+  border-radius:   var(--radius-sm);
+  background:      var(--surface-input, var(--surface-base));
+  color:           var(--text-primary);
+  font-size:       var(--text-sm);
+  font-family:     var(--font-sans);
+  box-sizing:      border-box;
+  transition:      border-color 120ms ease;
+}
+
+.fs-create-task-modal__select:focus,
+.fs-create-task-modal__input:focus {
+  outline:      none;
+  border-color: var(--color-accent-500);
+  box-shadow:   0 0 0 2px var(--focus-ring, rgba(59,130,246,.25));
+}
+
+.fs-create-task-modal__error {
+  font-size:  var(--text-sm);
+  color:      var(--color-danger-600, #dc2626);
+  background: var(--surface-danger-subtle, #fff1f2);
+  border:     1px solid var(--color-danger-200, #fecdd3);
+  border-radius: var(--radius-sm);
+  padding:    8px 10px;
+}
+
+.fs-create-task-modal__actions {
+  display:         flex;
+  justify-content: flex-end;
+  gap:             10px;
+  padding-top:     4px;
+}
+
+.fs-tasks__new-task-btn {
+  flex-shrink:     0;
+  padding:         7px 14px;
+  background:      var(--color-accent-500);
+  color:           var(--color-neutral-900);
+  border:          none;
+  border-radius:   var(--radius-sm);
+  font-size:       13px;
+  font-weight:     600;
+  cursor:          pointer;
+  white-space:     nowrap;
+  transition:      background 120ms ease, box-shadow 120ms ease;
+}
+
+.fs-tasks__new-task-btn:hover { background: var(--color-accent-600); box-shadow: var(--shadow-sm); }
+
+.fs-tasks__new-task-btn:focus-visible {
+  outline:        2px solid var(--fs-focus-ring, var(--color-accent-400));
+  outline-offset: 2px;
+}
+
+[data-theme="dark"] .fs-create-task-modal {
+  background: var(--surface-panel);
+}
+
+[data-theme="dark"] .fs-create-task-modal__select,
+[data-theme="dark"] .fs-create-task-modal__input {
   background:   var(--surface-input, var(--surface-raised));
   border-color: var(--border-default);
   color:        var(--text-primary);
