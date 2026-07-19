@@ -265,15 +265,27 @@
       };
     }), 8)).filter(Boolean);
 
+    /* IB-1 permission-robustness fix — SWALLOW per-date denials instead of
+       killing the whole range on the first 403. A denied date just drops
+       out of `byDate` (callers already treat a missing date as "no audit
+       info", see lookupAction()); only surface `_accessDenied` for the
+       WHOLE range when EVERY date came back denied — a genuine total
+       denial, not a partial one. Mirrors the inline per-date getActions()
+       swallow in compliance-aggregator.js's fanoutDates(). */
     var byDate = {};
-    var anyDenied = null;
+    var deniedCount = 0;
+    var lastDenied = null;
     perDay.forEach(function (x) {
-      if (x.res && x.res._accessDenied) { anyDenied = x.res; return; }
+      if (x.res && x.res._accessDenied) {
+        deniedCount++;
+        lastDenied = x.res;
+        return;
+      }
       byDate[x.date] = (x.res && x.res.actions) || {};
     });
 
-    if (anyDenied) {
-      return { _accessDenied: true, error: anyDenied.error || 'Access denied' };
+    if (perDay.length > 0 && deniedCount === perDay.length) {
+      return { _accessDenied: true, error: (lastDenied && lastDenied.error) || 'Access denied' };
     }
     return { byDate: byDate, dates: dates };
   }

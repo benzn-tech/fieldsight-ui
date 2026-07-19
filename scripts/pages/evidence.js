@@ -151,11 +151,19 @@
     var photos    = refPhotos[0];
     var setPhotos = refPhotos[1];
 
-    /* Fable review #4 — mirror the aggregators' A2 rule: with an anchored
-       site, sm/pm widen from forced-self to the site fan-out (getSiteUsers
-       is server-side permission-scoped to self + own-site workers). Workers
-       stay forced-self always. */
-    var user = caller.role === 'worker' || (!isAdminLike(caller) && !activeSite)
+    /* Fable review #4 (batch IB-2 revision) — mirror the aggregators' A2
+       rule: sm/pm (non-admin, non-worker) NEVER get forced to self-only,
+       whether or not a site is anchored. With an anchored site they widen
+       to the site fan-out (getSiteUsers, server-side permission-scoped to
+       self + own-site workers); with NO site anchored they widen further
+       to the unscoped all-users fan-out (allUsersFoldersPromise below —
+       server/graceful-degrade drops any folder they can't read, IB-1).
+       Previously `!isAdminLike(caller) && !activeSite` forced sm/pm to
+       callerFolder() here, which collapsed Evidence to the caller's own
+       (usually-empty) media whenever no site was picked — the page read
+       as "no data" for every site_manager until they happened to select
+       a site. Workers stay forced-self always — that rule is unchanged. */
+    var user = caller.role === 'worker'
       ? callerFolder()
       : null;
 
@@ -256,10 +264,30 @@
         });
       }).then(function (perDay) {
         if (cancelled) return;
+
+        /* IB-1 mirror (compliance-aggregator.fanoutDates) — a denied
+           per-day report just yields zero photos for that day (dropped
+           below, same as _notFound); accessible days still render. Only
+           surface a distinct denied state when EVERY item that came back
+           was a denial with nothing accessible AND nothing genuinely
+           empty either — otherwise this is indistinguishable from (and
+           falls through to) the ordinary "no photos in range" empty
+           state, which is correct when the fan-out is a mix of
+           _notFound/accessible days. */
+        var reportItems = perDay.filter(function (x) { return x && x.report; });
+        var deniedItems = reportItems.filter(function (x) { return x.report._accessDenied; });
+        if (deniedItems.length > 0 && deniedItems.length === reportItems.length) {
+          setPhotos({
+            status: 'error', perDay: [], totalCount: 0,
+            message: 'You don’t have access to this media.',
+          });
+          return;
+        }
+
         var rows = [];
         var total = 0;
         perDay.forEach(function (x) {
-          if (!x || !x.report || x.report._notFound || x.report.available_users) return;
+          if (!x || !x.report || x.report._notFound || x.report._accessDenied || x.report.available_users) return;
           var photosForDate = [];
           (x.report.topics || []).forEach(function (t) {
             (t.related_photos || []).forEach(function (filename) {
@@ -327,7 +355,7 @@
     }
     if (photos.status === 'error') {
       return React.createElement('div', { className: 'fs-evidence__empty' },
-        'Could not load photos.');
+        photos.message || 'Could not load photos.');
     }
     if (!photos.perDay.length) {
       return React.createElement('div', { className: 'fs-evidence__empty' },
