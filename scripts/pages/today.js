@@ -1725,11 +1725,12 @@
                 checkable:     task.topic_id != null && task.actionIndex != null && !!task.date,
                 date:          task.date,
                 onCheckedOff:  onCheckedOff,
-                /* Part B — single-project caller gets a subtle project
-                   chip per card instead of group headers (reuses the
-                   "SiteName · date" label pattern from search-palette.js
-                   / ask-chat.js, here just the site half). */
-                site:          !isMultiProject ? task.site_name : null,
+                /* #4 — no per-card project chip. Project is a HIGH-LEVEL
+                   grouping only: multi-project renders project-headed
+                   groups (renderMaybeGrouped) and single-project reads its
+                   project from the global header selector (#5, now on every
+                   page). Never a chip on the card itself. */
+                site:          null,
                 /* §E — age + no-deadline read-only signals. */
                 ageLabel:      formatAgeLabel(task.ageDays),
                 noDeadline:    !!task.noDeadline,
@@ -1750,7 +1751,7 @@
             onSelect:   onSelect,
             isMine:     false,
             selected:   selectedId === task.id,
-            site:       !isMultiProject ? task.site_name : null,
+            site:       null,   /* #4 — project is a group header, not a card chip */
             ageLabel:   formatAgeLabel(task.ageDays),
             noDeadline: !!task.noDeadline,
             timeRange:  task.timeRange,
@@ -1843,7 +1844,7 @@
                       checkable:      task.topic_id != null && task.actionIndex != null && !!task.date,
                       date:           task.date,
                       onCheckedOff:   onCheckedOff,
-                      site:           !leftoverIsMultiProject ? task.site_name : null,
+                      site:           null,   /* #4 — leftover already groups by project; no card chip */
                       ageLabel:       formatAgeLabel(task.ageDays),
                       noDeadline:     !!task.noDeadline,
                       timeRange:      task.timeRange,
