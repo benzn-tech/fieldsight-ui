@@ -26,11 +26,36 @@
        action:       string,                       // free text
        responsible:  string | null,
        priority:     'high' | 'medium' | 'low' | null,
+       status:       'open' | 'in_progress' | 'blocked' | 'done' | null,
+                     // feat/editable-tasks-ui — the read shim's authoritative
+                     // action_items.status column (a.status), threaded straight
+                     // through RAW (unlike today-adapter.js's item.status, which
+                     // stores the DERIVED label) — tasks.js's TasksRightDetail
+                     // editors derive the display label themselves via
+                     // FS.api.deriveStatus(row.status, row.audit.checked), same
+                     // helper today.js uses. null for legacy/pre-migration items.
        deadline:     string | null,                // free text e.g. "Today 09:00"
        topic_title:  string,
        topic_category: string,
        user_name:    string,                       // owner of the report
        user_folder:  string,                       // folder form
+       actionItemId: string | null,
+                     // feat/editable-tasks-ui — durable action_items.id (a.id,
+                     // read shim), the PATCH /api/org/action-items/{id} handle —
+                     // same field today-adapter.js threads as item.actionItemId.
+                     // null for any legacy/pre-migration item the shim hasn't
+                     // stamped yet; TasksRightDetail's editors must treat null
+                     // as "not editable" and never PATCH with it.
+       siteId:       string | null,
+                     // feat/editable-tasks-ui — org SITE UUID (org.getOrgSites()'s
+                     // site_id space, NOT the legacy report-gateway site_id —
+                     // see today-adapter.js's ctx.siteIdByName doc for the full
+                     // "two id spaces" explanation), resolved from the report's
+                     // site NAME via a one-shot getOrgSiteIdMap() fetched once per
+                     // aggregator call (mirrors today.js's identically-named
+                     // helper). Feeds the assignee picker's
+                     // FS.api.org.getSiteMembers(row.siteId) call; null on a
+                     // lookup miss degrades that picker to read-only.
        audit: {
          checked:    boolean,
          checked_by: string | null,
@@ -77,6 +102,30 @@
       return ((window.FieldSight && window.FieldSight.fixtures
           && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [])
           .map(deriveFolder).filter(Boolean);
+    }
+  }
+
+  /* feat/editable-tasks-ui — org SITE UUID map (org.getOrgSites()'s site_id,
+     the _toPageSite space — see today-adapter.js's ctx.siteIdByName doc for
+     the full "two id spaces" explanation), keyed by report site NAME
+     (report.site, the only site field a report carries). Feeds row.siteId
+     (see the row-shape doc above), threaded to TasksRightDetail's assignee
+     picker (FS.api.org.getSiteMembers(row.siteId)) the same way today.js
+     threads it through today-adapter.js. Mirrors today.js's
+     getOrgSiteIdMap() verbatim (own copy — same convention as
+     adminUserFolders() above); any error collapses to an empty map so a
+     lookup miss just yields row.siteId: null (degrade to read-only
+     picker), never blocks the page. */
+  async function getOrgSiteIdMap() {
+    try {
+      var res = await window.FS.api.org.getOrgSites();
+      var map = {};
+      ((res && res.sites) || []).forEach(function (s) {
+        if (s && s.name) map[s.name] = s.site_id;
+      });
+      return map;
+    } catch (e) {
+      return {};
     }
   }
 
@@ -171,10 +220,15 @@
     var auditPromise = window.FS.api.actions.getActionsRange({
       from: datesInRange[0], to: datesInRange[datesInRange.length - 1],
     });
+    /* feat/editable-tasks-ui — fetched in parallel with the timeline/audit
+       fan-out above (cheap, one extra org call), never gating the rest of
+       the load. */
+    var siteIdMapPromise = getOrgSiteIdMap();
 
-    var both = await Promise.all([timelinePromise, auditPromise]);
+    var both = await Promise.all([timelinePromise, auditPromise, siteIdMapPromise]);
     var perDay = both[0];
     var auditRange = both[1];
+    var siteIdMap = both[2];
 
     /* 3) Surface page-level access-denied only when the caller genuinely
        can't read anything.
@@ -210,6 +264,11 @@
          plan §1.3/owner≠caller. Hoisted once per report for the id + the
          lookupAction() call below. */
       var folder = r.user_name ? window.FS.api.folderName(r.user_name) : null;
+      /* feat/editable-tasks-ui — report.site is a DISPLAY NAME only (no
+         slug/id travels with a report — same fact today-adapter.js
+         documents); resolved once per report against siteIdMap. */
+      var siteName = r.site || '';
+      var siteId   = (siteName && siteIdMap[siteName]) || null;
       (r.topics || []).forEach(function (t) {
         (t.action_items || []).forEach(function (a, idx) {
           var key = window.FS.api.actions.lookupAction(auditByDate[x.date], folder, t.topic_id, idx) || {};
@@ -221,11 +280,17 @@
             action:         a.action,
             responsible:    a.responsible || null,
             priority:       a.priority || null,
+            /* feat/editable-tasks-ui — raw action_items.status column, see
+               the row-shape doc's `status` entry above. */
+            status:         a.status || null,
             deadline:       a.deadline || null,
             topic_title:    t.topic_title,
             topic_category: t.category,
             user_name:      r.user_name,
             user_folder:    folder,
+            /* feat/editable-tasks-ui — see the row-shape doc above. */
+            actionItemId:   a.id || null,
+            siteId:         siteId,
             audit: {
               checked:    !!key.checked,
               checked_by: key.checked_by || null,

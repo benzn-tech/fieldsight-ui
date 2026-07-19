@@ -164,6 +164,24 @@
       });
     }
 
+    /* feat/editable-tasks-ui — optimistic in-place field patch after a
+       successful PATCH /api/org/action-items/{id} (TasksRightDetail's
+       editors below). Mirrors today.js's patchTask, simplified: /tasks has
+       no myTasks/teamTasks split to re-bucket across (filter chips —
+       All/Mine/Open/Overdue/Done — are computed at RENDER time from this
+       one flat `rows` list, see TasksMiddleColumn's bucketsEarly), so a
+       plain merge-in-place is enough — the filter buckets and the TaskCard
+       list both re-derive from the patched row automatically. */
+    function patchRow(rowId, patch) {
+      setState(function (s) {
+        if (s.status !== 'ok') return s;
+        var next = (s.rows || []).map(function (r) {
+          return r.id === rowId ? Object.assign({}, r, patch) : r;
+        });
+        return Object.assign({}, s, { rows: next });
+      });
+    }
+
     /* feat/editable-tasks-ui — cross-surface sync: a check-off made
        elsewhere (Today's rolling list, Timeline's ActionItemRow) fires
        window.FS.actionsBus with {date, topic_id, action_index,
@@ -205,7 +223,7 @@
       });
     }, []);
 
-    var ctx = { state: state, removeRow: removeRow, view: view, setView: setView };
+    var ctx = { state: state, removeRow: removeRow, patchRow: patchRow, view: view, setView: setView };
     return React.createElement(TasksContext.Provider, { value: ctx },
       props.children);
   }
@@ -675,6 +693,26 @@
     );
   }
 
+  /* =====================================================================
+     feat/editable-tasks-ui — task-detail editors (priority/status/due/
+     assignee), wired to PATCH /api/org/action-items/{id}. Own copy of
+     today.js's identically-named/valued constants — this codebase's
+     established convention is each page keeps its own copy rather than
+     sharing an export (see CLAUDE.md "Admin permission flow" note on
+     adminUserFolders() for the same pattern elsewhere).
+     ===================================================================== */
+  var PRIORITY_OPTIONS = [
+    { value: 'low',    label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high',   label: 'High' },
+  ];
+  var STATUS_OPTIONS = [
+    { value: 'open',        label: 'Open' },
+    { value: 'in_progress', label: 'In progress' },
+    { value: 'blocked',     label: 'Blocked' },
+    { value: 'done',        label: 'Done' },
+  ];
+
   /* ---------- TasksRightDetail ---------------------------------------- */
 
   function TasksRightDetail(props) {
@@ -684,6 +722,8 @@
     var Button       = fs.Button;
     var IconBtn      = fs.IconButton;
     var EvidenceTabs = fs.EvidenceTabs;
+    var Select       = fs.Select;
+    var Input        = fs.Input;
 
     var ctx = React.useContext(TasksContext);
     var sel = props.selectedItem;
@@ -700,7 +740,75 @@
     var activeTab = refTab[0];
     var setTab    = refTab[1];
 
-    if (!sel || sel.kind !== 'task_row') {
+    /* feat/editable-tasks-ui — resolve the LIVE row from TasksContext
+       (ctx.state.rows), falling back to the selectedItem's own snapshot
+       row. Mirrors today.js's `findItemById(data, sel.id) || sel` — after
+       a successful edit, ctx.patchRow merges the PATCH response into
+       ctx.state.rows, so re-reading it here (rather than trusting the
+       possibly-stale `sel.row` captured at click time) is what makes the
+       panel reflect the edit without a reload. Declared before the `!sel`
+       early return so the hooks below it (draft/roster) stay unconditional
+       — same hook-order discipline as refBusy/refTab above. */
+    var liveRows = (ctx && ctx.state && ctx.state.status === 'ok') ? ctx.state.rows : null;
+    var row = (sel && sel.row) || null;
+    if (sel && liveRows) {
+      var liveMatch = liveRows.filter(function (r) { return r.id === sel.id; })[0];
+      if (liveMatch) row = liveMatch;
+    }
+
+    /* feat/editable-tasks-ui — priority/status/due/assignee editors.
+       Backend is the real authority gate (400/403/404 on the PATCH); this
+       FS.can() check is UX only, exactly mirroring today.js's
+       TodayRightDetail (see that file for the full rationale comment —
+       not repeated here). */
+    var caller        = (window.AuthMock && window.AuthMock.currentUser) || {};
+    var canEditTask   = !!(window.FS && window.FS.can && window.FS.P
+                        && window.FS.can(caller, window.FS.P('task', 'edit')));
+    var canAssignTask = !!(window.FS && window.FS.can && window.FS.P
+                        && window.FS.can(caller, window.FS.P('task', 'assign')));
+
+    /* F1 — the caller's OWN task (they are the current responsible party).
+       Mirrors today.js's isOwnTask; must be computed before
+       fieldsEditable/assigneeEditable/rosterSiteId below, which widen on
+       it. Guarded on `row` since this runs before the `!sel`/`!row` early
+       return. */
+    var isOwnTask = !!(row && row.responsible && row.responsible === (caller && caller.name));
+
+    /* Optimistic per-field overrides — same shape/precedent as today.js's
+       draftRef (keyed by the PATCH body's field names, holding RAW
+       values). Reset whenever the selected row changes. */
+    var draftRef = React.useState({});
+    var draft    = draftRef[0];
+    var setDraft = draftRef[1];
+    React.useEffect(function () { setDraft({}); }, [row && row.id]);
+
+    /* Assignee roster — FS.api.org.getSiteMembers(row.siteId), identical
+       call + gating to today.js's TodayRightDetail. row.siteId is threaded
+       from tasks-aggregator.js's getOrgSiteIdMap() (mirrors today.js's own
+       getOrgSiteIdMap() threaded via today-adapter.js's ctx.siteIdByName);
+       a lookup miss (siteId: null) degrades the picker to read-only below,
+       same as an empty/errored roster. */
+    var rosterRef = React.useState({ status: 'idle', users: [] });
+    var roster    = rosterRef[0];
+    var setRoster = rosterRef[1];
+    var rosterSiteId = (row && (canAssignTask || isOwnTask)) ? row.siteId : null;
+    React.useEffect(function () {
+      if (!rosterSiteId) { setRoster({ status: 'idle', users: [] }); return undefined; }
+      var cancelled = false;
+      setRoster({ status: 'loading', users: [] });
+      var org = window.FS && window.FS.api && window.FS.api.org;
+      if (!org || !org.getSiteMembers) { setRoster({ status: 'error', users: [] }); return undefined; }
+      org.getSiteMembers(rosterSiteId).then(function (res) {
+        if (cancelled) return;
+        if (!res || res._accessDenied || res._notFound) { setRoster({ status: 'error', users: [] }); return; }
+        setRoster({ status: 'ok', users: (res.users || []).filter(function (u) { return u && u.name; }) });
+      }).catch(function () {
+        if (!cancelled) setRoster({ status: 'error', users: [] });
+      });
+      return function () { cancelled = true; };
+    }, [rosterSiteId]);
+
+    if (!sel || sel.kind !== 'task_row' || !row) {
       return React.createElement('div', { className: 'fs-tasks-detail__placeholder' },
         React.createElement('div', { className: 'fs-tasks-detail__placeholder-title' },
           'Select an action'),
@@ -709,9 +817,104 @@
       );
     }
 
-    var row = sel.row;
     var today = ctx && ctx.state && ctx.state.today;
     var overdue = isOverdue(row, today);
+
+    /* One generic commit path for all 4 fields — PATCH
+       /api/org/action-items/{id}, then fold the FULL updated row's fields
+       back into TasksContext (ctx.patchRow — updates the list card AND
+       this panel at once) or, on _accessDenied/_notFound/thrown error,
+       drop the optimistic override and toast. Mirrors today.js's
+       commitTaskField exactly; row.priority/row.status here are already
+       RAW enum values (tasks-aggregator.js, unlike today-adapter.js's
+       item.priority/.status which are DERIVED labels), so — unlike
+       today.js — there's no label re-derivation needed on the response,
+       just a straight pass-through. */
+    function commitRowField(fieldKey, value) {
+      if (!row.actionItemId) return;
+      var api = window.FS && window.FS.api && window.FS.api.actions;
+      if (!api || !api.updateAction) return;
+      var patch = {};
+      patch[fieldKey] = value;
+      setDraft(function (d) {
+        var next = Object.assign({}, d);
+        next[fieldKey] = value;
+        return next;
+      });
+      function clearDraft() {
+        setDraft(function (d) {
+          var next = Object.assign({}, d);
+          delete next[fieldKey];
+          return next;
+        });
+      }
+      api.updateAction(row.actionItemId, patch).then(function (res) {
+        if (!res || res._accessDenied || res._notFound) {
+          clearDraft();
+          var toast = window.FS && window.FS.toast;
+          if (toast) {
+            toast.show({
+              message:  (res && res.error) || 'Could not update task',
+              tone:     'error',
+              duration: 5000,
+            });
+          }
+          return;
+        }
+        var patchOut = {};
+        if (res.priority)             patchOut.priority    = res.priority;
+        if (res.status !== undefined) patchOut.status       = res.status || null;
+        if (res.deadline !== undefined) patchOut.deadline   = res.deadline || null;
+        if (res.responsible)          patchOut.responsible  = res.responsible;
+        if (ctx && ctx.patchRow) ctx.patchRow(row.id, patchOut);
+        clearDraft();
+      }).catch(function (err) {
+        clearDraft();
+        var toast = window.FS && window.FS.toast;
+        if (toast) {
+          toast.show({
+            message:  'Could not update task' + ((err && err.message) ? ': ' + err.message : ''),
+            tone:     'error',
+            duration: 5000,
+          });
+        }
+      });
+    }
+
+    var fieldsEditable   = (canEditTask || isOwnTask) && !!row.actionItemId;
+    var assigneeEditable = (canAssignTask || isOwnTask) && !!row.actionItemId
+                          && !!row.siteId && roster.status === 'ok' && roster.users.length > 0;
+
+    var priorityValue   = draft.priority   !== undefined ? draft.priority   : (row.priority || 'medium');
+    var statusValue     = draft.status     !== undefined ? draft.status     : (row.status   || 'open');
+    var dueValue         = draft.deadline   !== undefined ? draft.deadline   : (row.deadline  || '');
+    var currentAssignee = row.responsible || '';
+    var assigneeValue   = draft.responsible !== undefined ? draft.responsible : currentAssignee;
+
+    var ownerCell = assigneeEditable ? React.createElement(Select, {
+      size: 'sm', fullWidth: true, value: assigneeValue,
+      placeholder: assigneeValue ? undefined : 'Select a member',
+      options: roster.users.map(function (u) { return { value: u.name, label: u.name }; }),
+      onChange: function (e) { commitRowField('responsible', e.target.value); },
+    }) : (row.responsible || '—');
+
+    /* BUG-19 — a native date input's value/onChange are already plain
+       'YYYY-MM-DD' strings (or '' for empty); no Date() parse needed
+       either direction. Mirrors today.js's dueCell verbatim. */
+    var dueCell = fieldsEditable ? React.createElement(Input, {
+      type: 'date', size: 'sm', fullWidth: true, value: dueValue,
+      onChange: function (e) { commitRowField('deadline', e.target.value || null); },
+    }) : (window.FS.api.resolveDeadline(row.deadline, row.date).display || '—');
+
+    var statusCell = fieldsEditable ? React.createElement(Select, {
+      size: 'sm', fullWidth: true, value: statusValue, options: STATUS_OPTIONS,
+      onChange: function (e) { commitRowField('status', e.target.value); },
+    }) : window.FS.api.deriveStatus(row.status, row.audit.checked).status;
+
+    var priorityCell = fieldsEditable ? React.createElement(Select, {
+      size: 'sm', fullWidth: true, value: priorityValue, options: PRIORITY_OPTIONS,
+      onChange: function (e) { commitRowField('priority', e.target.value); },
+    }) : (row.priority ? row.priority.charAt(0).toUpperCase() + row.priority.slice(1) : 'Medium');
 
     function onMarkComplete() {
       if (busy || row.audit.checked) return;
@@ -799,13 +1002,24 @@
           )
         : React.createElement(React.Fragment, null,
 
-            /* Field rows */
+            /* Field rows — feat/editable-tasks-ui: Owner/Due/Status/Priority
+               now render editable Select/Input controls (ownerCell/dueCell/
+               statusCell/priorityCell above) when fieldsEditable/
+               assigneeEditable permit, exactly like today.js's
+               TodayRightDetail; otherwise they fall back to the same
+               plain-text values these rows always showed. */
             React.createElement('div', { className: 'fs-tasks-detail__rows' },
               React.createElement(DetailRow, {
-                label: 'Owner',     value: row.responsible || '—',
+                label: 'Owner',     value: ownerCell,
               }),
               React.createElement(DetailRow, {
-                label: 'Due',       value: window.FS.api.resolveDeadline(row.deadline, row.date).display || '—',
+                label: 'Due',       value: dueCell,
+              }),
+              React.createElement(DetailRow, {
+                label: 'Status',    value: statusCell,
+              }),
+              React.createElement(DetailRow, {
+                label: 'Priority',  value: priorityCell,
               }),
               React.createElement(DetailRow, {
                 label: 'Date',      value: fmtDate(row.date),
