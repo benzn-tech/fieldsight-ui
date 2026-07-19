@@ -162,11 +162,21 @@
       window.FS.api.actions.getActionsRange({ from: dates[0], to: dates[dates.length - 1] }),
     ]);
 
+    /* Audit leg: getActionsRange() already swallows per-date denials and
+       only signals _accessDenied when EVERY date's audit was denied. */
     if (audit && audit._accessDenied) {
       return { _accessDenied: true, error: audit.error };
     }
-    var deniedHit = reports.filter(function (r) { return r.report && r.report._accessDenied; })[0];
-    if (deniedHit) return { _accessDenied: true, error: deniedHit.report.error };
+    /* Timeline leg: IB-1 fix — drop individual denied (date,user) reports
+       and keep whatever came back accessible; only surface _accessDenied
+       if NOTHING accessible came back at all. */
+    var deniedReports = reports.filter(function (r) { return r.report && r.report._accessDenied; });
+    if (deniedReports.length > 0) {
+      reports = reports.filter(function (r) { return !(r.report && r.report._accessDenied); });
+      if (reports.length === 0) {
+        return { _accessDenied: true, error: deniedReports[0].report.error };
+      }
+    }
 
     var byDate = (audit && audit.byDate) || {};
 

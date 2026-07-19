@@ -283,11 +283,19 @@
         throw new Error('Could not load data — all requests failed. Please retry.');
       }
       var actionsByDateAdmin = await actionsByDatePromise;
-      var deniedAdmin = perDayAdmin.filter(function (x) {
+      /* IB-1 fix — drop individual denied (date,folder) reports and keep
+         whatever came back accessible; only surface _accessDenied if
+         NOTHING accessible came back at all. */
+      var deniedAdminItems = perDayAdmin.filter(function (x) {
         return x.report && x.report._accessDenied;
-      })[0];
-      if (deniedAdmin) {
-        return { _accessDenied: true, error: deniedAdmin.report.error };
+      });
+      if (deniedAdminItems.length > 0) {
+        perDayAdmin = perDayAdmin.filter(function (x) {
+          return !(x.report && x.report._accessDenied);
+        });
+        if (perDayAdmin.length === 0) {
+          return { _accessDenied: true, error: deniedAdminItems[0].report.error };
+        }
       }
       return { perDay: perDayAdmin, dates: datesInRange, actionsByDate: actionsByDateAdmin };
     }
@@ -298,11 +306,19 @@
     }));
     var actionsByDate = await actionsByDatePromise;
 
-    var deniedHit = perDay.filter(function (x) {
+    /* IB-1 fix — drop individual denied (date,folder) reports and keep
+       whatever came back accessible; only surface _accessDenied if
+       NOTHING accessible came back at all. */
+    var deniedItems = perDay.filter(function (x) {
       return x.report && x.report._accessDenied;
-    })[0];
-    if (deniedHit) {
-      return { _accessDenied: true, error: deniedHit.report.error };
+    });
+    if (deniedItems.length > 0) {
+      perDay = perDay.filter(function (x) {
+        return !(x.report && x.report._accessDenied);
+      });
+      if (perDay.length === 0) {
+        return { _accessDenied: true, error: deniedItems[0].report.error };
+      }
     }
 
     return { perDay: perDay, dates: datesInRange, actionsByDate: actionsByDate };

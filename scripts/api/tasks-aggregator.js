@@ -176,15 +176,27 @@
     var perDay = both[0];
     var auditRange = both[1];
 
-    /* 3) Surface page-level access-denied if either fan-out hit it. */
+    /* 3) Surface page-level access-denied only when the caller genuinely
+       can't read anything.
+       Audit leg: getActionsRange() already swallows per-date denials and
+       only signals _accessDenied when EVERY date's audit was denied. */
     if (auditRange && auditRange._accessDenied) {
       return { _accessDenied: true, error: auditRange.error };
     }
-    var deniedHit = perDay.filter(function (x) {
+    /* Timeline leg: IB-1 fix — drop individual denied (date,folder) items
+       and keep whatever came back accessible; a partial 403 degrades to
+       "missing rows", not a dead page. Only surface _accessDenied if
+       NOTHING accessible came back at all. */
+    var deniedItems = perDay.filter(function (x) {
       return x.report && x.report._accessDenied;
-    })[0];
-    if (deniedHit) {
-      return { _accessDenied: true, error: deniedHit.report.error };
+    });
+    if (deniedItems.length > 0) {
+      perDay = perDay.filter(function (x) {
+        return !(x.report && x.report._accessDenied);
+      });
+      if (perDay.length === 0) {
+        return { _accessDenied: true, error: deniedItems[0].report.error };
+      }
     }
 
     /* 4) Flatten into rows. Skip days where the report was not found,
