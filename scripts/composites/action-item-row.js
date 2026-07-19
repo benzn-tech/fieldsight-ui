@@ -42,6 +42,17 @@
 
   var PRIORITY_TONE = { high: 'danger', medium: 'warning', low: 'info' };
 
+  /* feat/editable-tasks-ui follow-up (F3) — true when the authoritative
+     action_items.status column (stamped onto props.action as `.status`
+     by the Aurora /timeline read shim, render_report_shape) says this
+     item is done. Used to widen the checkbox's checked state beyond the
+     legacy DynamoDB overlay (props.initialChecked) so a task completed
+     on Today (column write, overlay never touched) still shows checked
+     here. */
+  function isColumnDone(props) {
+    return !!(props.action && props.action.status === 'done');
+  }
+
   /* Format ISO timestamp → "3 May, 2:14 pm" in NZ time. Returns '' on
      missing or unparseable input. Used to show when an action was
      ticked, as a small audit trail next to "Checked by …". */
@@ -71,7 +82,7 @@
     var checkedBy     = props.checkedBy;
     var checkedAt     = props.checkedAt;
 
-    var ref = React.useState(!!props.initialChecked);
+    var ref = React.useState(!!props.initialChecked || isColumnDone(props));
     var checked    = ref[0];
     var setChecked = ref[1];
 
@@ -80,11 +91,15 @@
     /* Sprint 6.7.1 — sync local checked state when initialChecked
        prop changes (e.g., parent state was updated by a sibling
        ActionItemRow's toggle). Skip while a request is in flight to
-       avoid clobbering an optimistic update. */
+       avoid clobbering an optimistic update.
+       feat/editable-tasks-ui follow-up (F3) — also re-sync when the
+       authoritative column status flips (isColumnDone), so a re-render
+       carrying a freshly-'done' action.status keeps the box checked
+       even when the legacy overlay was never written. */
     React.useEffect(function () {
       if (pendingRef.current) return;
-      setChecked(!!props.initialChecked);
-    }, [props.initialChecked]);
+      setChecked(!!props.initialChecked || isColumnDone(props));
+    }, [props.initialChecked, props.action && props.action.status]);
 
     /* Sprint 6.7.1 — listen for cross-component toggles via the bus.
        When ANOTHER ActionItemRow with the same key successfully
@@ -111,17 +126,42 @@
       pendingRef.current = true;
 
       var api = window.FS && window.FS.api && window.FS.api.actions;
-      var p   = api ? api.toggleAction({
-        date:         date,
-        topic_id:     topicId,
-        action_index: actionIndex,
-        checked:      next,
-        action_text:  action.action,
-        user_folder:  userFolder,
-      }) : Promise.resolve();
+      var p;
+      if (api && api.updateAction && action && action.id) {
+        /* feat/editable-tasks-ui follow-up (F3) — authoritative column
+           path (matches the Today card's task-card.js check-off): PATCH
+           the durable action_items row by its id. Unlike the Today card
+           (check-only, hard-coded 'done'), this row IS uncheck-capable,
+           so a check maps to 'done' and an uncheck maps back to 'open'. */
+        p = api.updateAction(action.id, { status: next ? 'done' : 'open' });
+      } else if (api) {
+        /* Legacy DynamoDB overlay fallback — id-less items (read shim
+           predates the id surfacing, or a non-Aurora report path). */
+        p = api.toggleAction({
+          date:         date,
+          topic_id:     topicId,
+          action_index: actionIndex,
+          checked:      next,
+          action_text:  action.action,
+          user_folder:  userFolder,
+        });
+      } else {
+        p = Promise.resolve();
+      }
 
       p.then(function (res) {
         pendingRef.current = false;
+        /* feat/editable-tasks-ui follow-up (F3) — updateAction's 403/404
+           RESOLVE to {_accessDenied}/{_notFound} envelopes rather than
+           throwing (mirrors every other org.js write; see today.js's
+           commitTaskField for the same guard). Treat those the same as
+           a rejected promise: revert the optimistic check and bail
+           before announcing/broadcasting/onToggled. */
+        if (res && (res._accessDenied || res._notFound)) {
+          console.error('[ActionItemRow] toggle denied, reverting', res);
+          setChecked(prev);
+          return;
+        }
         /* Sprint 8.5.4 — announce to screen readers via the global
            polite live region. Skip when the toggle came from a sibling
            bus event (no UI interaction → no announce needed). */
@@ -130,7 +170,11 @@
           region.textContent = next ? 'Marked complete' : 'Marked incomplete';
         }
         /* Sprint 6.7.1 — broadcast server truth so sibling
-           ActionItemRows + parent state slots can sync. */
+           ActionItemRows + parent state slots can sync.
+           feat/editable-tasks-ui follow-up (F3) — the updateAction
+           response is the action_items row ({id, status, responsible,
+           deadline, ...}); it has no checked_by/checked_at, so these
+           already-guarded reads just fall through to null on that path. */
         var bus = window.FS && window.FS.actionsBus;
         if (bus) {
           bus.emit({

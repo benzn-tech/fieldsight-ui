@@ -24,6 +24,16 @@
           body { date, topic_id, action_index, action_text, responsible, ... }
           → { id, ...action }
 
+   PATCH  /api/org/action-items/{id}    (useMocks=false, writeMocks=false — feat/editable-tasks-ui)
+          AURORA ORG WRITE (rides orgRequest, NOT the report gateway above —
+          a durable action_items.id, not a date/topic/index composite key).
+          body { priority?, status?, deadline?, responsible? } (partial)
+          → the FULL updated row: { id, topic_id, site_id, text, responsible,
+            deadline, deadline_text, priority, status, created_at,
+            updated_at, updated_by }
+          400 (bad enum / non-member / empty), 403 (no authority),
+          404 (missing/cross-company).
+
    Key helpers — ALL readers/writers go through these, never hand-roll a key:
      actionKey(user_folder, topic_id, action_index)
        `<user_folder>|<topic_id>_<action_index>`, or bare `<topic_id>_<action_index>`
@@ -194,6 +204,33 @@
     return { id: date + '_' + key, created: true };
   }
 
+  /* feat/editable-tasks-ui — PATCH one action item's editable fields
+     (priority/status/deadline/responsible) by its durable action_items.id
+     (read shim now stamps this onto every item as `a.id`, threaded through
+     today-adapter.js as task.actionItemId). This is an AURORA org write
+     (PATCH /api/org/action-items/{id}), NOT the legacy report gateway —
+     unlike createAction above (which still rides `request('/actions', ...)`
+     against the report gateway), so this rides `orgRequest` instead. Returns
+     the FULL updated row: {id, topic_id, site_id, text, responsible,
+     deadline, deadline_text, priority, status, created_at, updated_at,
+     updated_by}. 400 (bad enum / non-member / empty) and 5xx REJECT (the
+     org request() plumbing throws on any non-401/403/404 non-ok status);
+     403/404 RESOLVE to {_accessDenied}/{_notFound} envelopes — callers must
+     handle both shapes, mirroring every other org.js write.
+     Mock merges the patch so the task-detail editors demo without a
+     backend (mirrors createAction's mock branch, minus the audit-key
+     bookkeeping — there's no legacy composite key for a durable id). */
+  async function updateAction(actionItemId, patch) {
+    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
+      return window.FS.api.orgRequest('/action-items/' + encodeURIComponent(actionItemId), {
+        method: 'PATCH',
+        body:   patch || {},
+      });
+    }
+    await window.FS.api.delay(60);
+    return Object.assign({ id: actionItemId }, patch || {});
+  }
+
   /* Sprint 4.2 — cross-day audit aggregation. */
   async function getActionsRange(opts) {
     opts = opts || {};
@@ -228,15 +265,27 @@
       };
     }), 8)).filter(Boolean);
 
+    /* IB-1 permission-robustness fix — SWALLOW per-date denials instead of
+       killing the whole range on the first 403. A denied date just drops
+       out of `byDate` (callers already treat a missing date as "no audit
+       info", see lookupAction()); only surface `_accessDenied` for the
+       WHOLE range when EVERY date came back denied — a genuine total
+       denial, not a partial one. Mirrors the inline per-date getActions()
+       swallow in compliance-aggregator.js's fanoutDates(). */
     var byDate = {};
-    var anyDenied = null;
+    var deniedCount = 0;
+    var lastDenied = null;
     perDay.forEach(function (x) {
-      if (x.res && x.res._accessDenied) { anyDenied = x.res; return; }
+      if (x.res && x.res._accessDenied) {
+        deniedCount++;
+        lastDenied = x.res;
+        return;
+      }
       byDate[x.date] = (x.res && x.res.actions) || {};
     });
 
-    if (anyDenied) {
-      return { _accessDenied: true, error: anyDenied.error || 'Access denied' };
+    if (perDay.length > 0 && deniedCount === perDay.length) {
+      return { _accessDenied: true, error: (lastDenied && lastDenied.error) || 'Access denied' };
     }
     return { byDate: byDate, dates: dates };
   }
@@ -246,6 +295,7 @@
     getActionsRange: getActionsRange,
     toggleAction:    toggleAction,
     createAction:    createAction,
+    updateAction:    updateAction,
     actionKey:       actionKey,
     lookupAction:    lookupAction,
   };

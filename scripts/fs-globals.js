@@ -280,6 +280,7 @@
         P('safety','view',SCOPES.PROJECT), P('quality','view',SCOPES.PROJECT),
         P('report','approve',SCOPES.PROJECT), P('programme','manage',SCOPES.PROJECT),
         P('variance','view',SCOPES.PROJECT), P('task','assign',SCOPES.PROJECT),
+        P('task','edit',SCOPES.PROJECT),    /* F1b — own-content edit UI gate parity */
         P('pattern','view',SCOPES.PROJECT), P('pm_brief','view',SCOPES.PROJECT),
         P('sites','view',SCOPES.PROJECT),
         P('insights','view',SCOPES.PROJECT),  /* Sprint 9 Track A */

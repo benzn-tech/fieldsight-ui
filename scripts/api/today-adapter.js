@@ -85,12 +85,24 @@
     return p.charAt(0).toUpperCase() + p.slice(1);
   }
 
-  /* Action items don't carry a status — derive from the actions audit
-     state (BACKEND-CONTEXT §4.10) so the toggle persists across the
-     Today and Timeline surfaces. */
-  function deriveStatus(checked) {
-    if (checked) return { status: 'Done',  statusTone: 'success' };
-    return { status: 'Open', statusTone: 'info' };
+  /* feat/editable-tasks-ui — status is now the AUTHORITATIVE
+     action_items.status column (Task 1, PATCH /api/org/action-items/{id}).
+     The DynamoDB check-off boolean (BACKEND-CONTEXT §4.10) is kept ONLY as
+     a legacy fallback: used when the item carries no column status
+     (pre-migration days), so a historical check-off never visibly
+     reverts. Tone vocabulary verified against the real Badge component
+     (scripts/components/badge.js: neutral|accent|success|warning|danger|
+     info — NO 'magenta' tone exists there, despite tokens.css defining a
+     bespoke --status-blocked magenta/fuchsia hue for a future dedicated
+     treatment) and against every other 'blocked' status→tone mapping
+     already shipped in this codebase (quality.js statusTone(),
+     timeline.js MEETING_STATUS_TONE, programme-task-card.js) — all of
+     them use 'danger' for blocked. Matched here for consistency. */
+  var STATUS_TONE = { done: 'success', in_progress: 'info', blocked: 'danger', open: 'info' };
+  function deriveStatus(columnStatus, checked) {
+    var s = columnStatus || (checked ? 'done' : 'open');
+    var label = s === 'in_progress' ? 'In progress' : s.charAt(0).toUpperCase() + s.slice(1);
+    return { status: label, statusTone: STATUS_TONE[s] || 'info' };
   }
 
   /* Pull a HH:MM from the deadline string when present. The backend
@@ -266,6 +278,20 @@
     var actionState     = ctx.actionState     || {}; /* composite/legacy map — read via FS.api.actions.lookupAction only */
     var nowMinutes      = ctx.nowMinutes      != null ? ctx.nowMinutes : (16 * 60); /* 16:00 NZDT */
     var siteSlugByName  = ctx.siteSlugByName  || {};
+    /* feat/editable-tasks-ui — org SITE UUID space (org.getOrgSites()'s
+       site_id, i.e. _toPageSite's s.id — see programme.js's "CRITICAL"
+       doc on this id space), keyed by report site NAME. A DIFFERENT id
+       space than siteSlugByName above (that one is the legacy report-
+       gateway /api/sites site_id); org.getSiteMembers(siteId) — the
+       assignee-picker source — expects THIS UUID space specifically
+       (GET /api/org/sites/{id}/members). today.js builds this the same
+       way it builds siteSlugByName: a one-shot name→id map fetched once
+       per load (getOrgSiteIdMap(), mirroring getSiteSlugMap()) and
+       threaded in here. Missing/empty on a lookup miss — every derived
+       item still gets siteId: null rather than throwing; callers
+       (task-detail assignee picker) must degrade to a disabled read-only
+       control on null, never crash. */
+    var siteIdByName    = ctx.siteIdByName    || {};
     var idPrefix        = ctx.idPrefix ? (ctx.idPrefix + '_') : '';
     /* fix/today-onsite-live — pre-fetched live site-member records; see
        ctx.onSiteMembers doc above. */
@@ -304,6 +330,9 @@
        callers must treat null as "unknown project", not drop the item. */
     var siteName = report.site || '';
     var siteSlug = (siteName && siteSlugByName[siteName]) || null;
+    /* feat/editable-tasks-ui — org UUID counterpart of siteSlug above,
+       same name-match, different id space (see ctx.siteIdByName doc). */
+    var siteId   = (siteName && siteIdByName[siteName]) || null;
     /* ---- morningBrief: executive_summary is array of strings (v3.0+) --
        date + userFolder are passed through so MorningBriefCard's
        "Read full brief" button can deep-link to the canonical
@@ -374,9 +403,25 @@
         var key = t.topic_id + '_' + idx;
         var auditEntry = window.FS.api.actions.lookupAction(actionState, ownerFolder, t.topic_id, idx);
         var checked = !!(auditEntry && auditEntry.checked);
-        var status = deriveStatus(checked);
+        /* feat/editable-tasks-ui — a.status is the read shim's new
+           authoritative action_items.status column; checked (DynamoDB
+           audit) is now only consulted as the pre-migration fallback
+           inside deriveStatus itself. */
+        var status = deriveStatus(a.status, checked);
         var task = {
           id:          idPrefix + 'action_' + key,
+          /* feat/editable-tasks-ui — durable action_items.id (read shim),
+             the PATCH /api/org/action-items/{id} handle. Null for any
+             legacy/pre-migration item the shim hasn't stamped yet — the
+             task-detail editors must treat null as "not editable", never
+             crash. */
+          actionItemId: a.id || null,
+          /* feat/editable-tasks-ui — org SITE UUID for this task's site
+             (see ctx.siteIdByName doc above); null on a lookup miss. Feeds
+             the assignee picker's FS.api.org.getSiteMembers(task.siteId)
+             call — null degrades the picker to a disabled read-only
+             control rather than crashing. */
+          siteId:      siteId,
           topic_id:    t.topic_id,
           actionIndex: idx,
           title:       a.action,
@@ -488,5 +533,11 @@
      namespace. Load order doesn't matter — only called at render time,
      well after all scripts have loaded. */
   window.FS.api.resolveDeadline = resolveDeadline;
+  /* feat/editable-tasks-ui — flat on FS.api, same rationale as
+     resolveDeadline above: scripts/pages/today.js's task-detail editors
+     need to recompute a task's {status, statusTone} from the FULL updated
+     row PATCH /api/org/action-items/{id} returns, without duplicating the
+     STATUS_TONE map or re-running adapt()/a full page reload. */
+  window.FS.api.deriveStatus = deriveStatus;
 
 })();

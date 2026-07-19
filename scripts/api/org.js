@@ -94,6 +94,36 @@
     return { sites: (res.sites || []).map(_toPageSite) };
   }
 
+  /* Photon geocode/autocomplete — free, keyless, called DIRECTLY from the
+     browser (NOT through the in-VPC org API, which cannot make outbound calls,
+     BUG-36). Returns up to 5 {formatted, lat, lng}; [] on any error/no result
+     so the caller degrades to a plain free-text address (coords left null ->
+     backfill later). geometry.coordinates is [lng, lat]. */
+  async function geocodeAddress(query) {
+    if (!query || !query.trim()) return [];
+    var url = 'https://photon.komoot.io/api?q=' + encodeURIComponent(query)
+      + '&limit=5&lang=en';
+    try {
+      var resp = await fetch(url);
+      if (!resp.ok) return [];
+      var data = await resp.json();
+      return ((data && data.features) || []).map(function (f) {
+        var c = (f.geometry && f.geometry.coordinates) || [];
+        var p = f.properties || {};
+        var line = [];
+        if (p.housenumber && p.street) line.push(p.housenumber + ' ' + p.street);
+        else if (p.street) line.push(p.street);
+        else if (p.name) line.push(p.name);
+        ['city', 'postcode', 'state', 'country'].forEach(function (k) {
+          if (p[k]) line.push(p[k]);
+        });
+        return { formatted: line.join(', '), lat: c[1], lng: c[0] };
+      }).filter(function (x) { return x.lat != null && x.lng != null; });
+    } catch (e) {
+      return [];
+    }
+  }
+
   async function createOrgSite(body) {
     if (orgWrite()) return api.orgRequest('/sites', { method: 'POST', body: body });
     await api.delay(400);
@@ -331,7 +361,7 @@
   window.FS.api.org = {
     getMe: getMe,
     updateProfile: updateProfile,
-    getOrgSites: getOrgSites, createOrgSite: createOrgSite, updateOrgSite: updateOrgSite,
+    getOrgSites: getOrgSites, createOrgSite: createOrgSite, updateOrgSite: updateOrgSite, geocodeAddress: geocodeAddress,
     archiveSite: archiveSite, unarchiveSite: unarchiveSite,
     getMembers: getMembers, createMember: createMember, updateMemberRole: updateMemberRole,
     setMemberFolder: setMemberFolder,

@@ -174,7 +174,48 @@ function wmoLookup(code) {
 /* sb1108-ellesmere (Christchurch) — sensible NZ fallback when there is no
    active site (siteContext) or the active site has no `coord` yet. Mirrors
    the value on that fixture in scripts/mock/sites.fixture.js. */
+/* Wind bearing (degrees) → 16-point compass label, e.g. 214 → 'SW'.
+   Open-Meteo gives current_weather.winddirection / daily
+   winddirection_10m_dominant in meteorological degrees (from which the wind
+   blows). '' when unknown so the caller can omit it. */
+const _WX_COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+                     'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+function degToCompass(deg) {
+  if (deg == null || isNaN(deg)) return '';
+  return _WX_COMPASS[Math.round(Number(deg) / 22.5) % 16];
+}
+
+/* BUG-19-safe date/time formatting for the forecast strips. Open-Meteo
+   returns Pacific/Auckland-local ISO strings (hourly 'YYYY-MM-DDTHH:MM',
+   daily 'YYYY-MM-DD'); parse by slicing / UTC arithmetic, never
+   new Date('YYYY-MM-DD') (which drifts a day in NZ). */
+const _WX_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const _WX_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function _wxHourLabel(iso) {
+  const h = parseInt(String(iso).slice(11, 13), 10);
+  if (isNaN(h)) return '';
+  const h12 = (h % 12) || 12;
+  return h12 + (h < 12 ? 'am' : 'pm');
+}
+function _wxDayName(iso) {
+  const p = String(iso).slice(0, 10).split('-');
+  if (p.length !== 3) return '';
+  return _WX_DAYS[new Date(Date.UTC(+p[0], +p[1] - 1, +p[2])).getUTCDay()];
+}
+function _wxDayDate(iso) {
+  const p = String(iso).slice(0, 10).split('-');
+  if (p.length !== 3) return '';
+  return (+p[2]) + ' ' + _WX_MONTHS[(+p[1]) - 1];
+}
+
 const WEATHER_DEFAULT_COORD = { lat: -43.5321, lng: 172.6362 };
+
+/* site_id -> { lat, lng } | null, filled once from the org API (real Aurora
+   coordinates, now that the site record carries latitude/longitude). null = a
+   resolved site that has no coordinate yet (un-backfilled) -> caller falls back
+   to fixture coord / default. */
+const orgSiteCoordCache = {};
 
 /* Module-level cache: `${lat},${lng},${date},${h|r}` → { data, ts }.
    Cheap insurance against refetch storms (route/site churn while a
@@ -253,10 +294,44 @@ function WeatherIndicator() {
 
   const sitesList = (window.FieldSight.fixtures && window.FieldSight.fixtures.sites
     && window.FieldSight.fixtures.sites.sites) || [];
-  const activeSite = activeSiteId
+  const fixtureSite = activeSiteId
     ? sitesList.find(function(s) { return s.site_id === activeSiteId; })
     : null;
-  const coord = (activeSite && activeSite.coord) || WEATHER_DEFAULT_COORD;
+
+  /* Real Aurora coordinate for the active site, fetched once from the org API
+     (spec §3.6). Falls back to the fixture coord, then the NZ default, so the
+     indicator never disappears (BUG-20-safe: getOrgSites uses the guarded
+     org request; a non-JSON SPA-shell 200 resolves to _notFound, not a crash). */
+  const [siteCoord, setSiteCoord] = React.useState(function() {
+    return activeSiteId ? orgSiteCoordCache[activeSiteId] || null : null;
+  });
+  React.useEffect(function() {
+    if (!activeSiteId) { setSiteCoord(null); return undefined; }
+    if (orgSiteCoordCache[activeSiteId] !== undefined) {
+      setSiteCoord(orgSiteCoordCache[activeSiteId]);
+      return undefined;
+    }
+    if (!(window.FS && window.FS.api && window.FS.api.org
+          && window.FS.api.org.getOrgSites)) { return undefined; }
+    let cancelled = false;
+    window.FS.api.org.getOrgSites().then(function(res) {
+      const list = (res && res.sites) || [];
+      list.forEach(function(s) {
+        if (s && s.site_id && s.latitude != null && s.longitude != null) {
+          orgSiteCoordCache[s.site_id] = { lat: s.latitude, lng: s.longitude };
+        }
+      });
+      if (orgSiteCoordCache[activeSiteId] === undefined) {
+        orgSiteCoordCache[activeSiteId] = null;  // resolved: this site has no coord
+      }
+      if (!cancelled) setSiteCoord(orgSiteCoordCache[activeSiteId]);
+    }).catch(function() { if (!cancelled) setSiteCoord(null); });
+    return function() { cancelled = true; };
+  }, [activeSiteId]);
+
+  const coord = siteCoord
+    || (fixtureSite && fixtureSite.coord)
+    || WEATHER_DEFAULT_COORD;
 
   /* status: 'loading' | 'success' | 'error' */
   const [liveState, setLiveState] = React.useState({ status: 'loading', data: null });
@@ -282,10 +357,13 @@ function WeatherIndicator() {
       ? 'https://archive-api.open-meteo.com/v1/archive?latitude=' + coord.lat
         + '&longitude=' + coord.lng + '&start_date=' + selectedDate
         + '&end_date=' + selectedDate
-        + '&daily=temperature_2m_max,temperature_2m_min,weathercode,windspeed_10m_max'
+        + '&daily=temperature_2m_max,temperature_2m_min,weathercode,windspeed_10m_max,winddirection_10m_dominant'
         + '&timezone=Pacific/Auckland'
       : 'https://api.open-meteo.com/v1/forecast?latitude=' + coord.lat
-        + '&longitude=' + coord.lng + '&current_weather=true&timezone=Pacific/Auckland';
+        + '&longitude=' + coord.lng + '&current_weather=true'
+        + '&hourly=temperature_2m,weathercode,winddirection_10m'
+        + '&daily=temperature_2m_max,temperature_2m_min,weathercode,windspeed_10m_max,winddirection_10m_dominant'
+        + '&forecast_days=7&timezone=Pacific/Auckland';
 
     fetch(url)
       .then(function(res) {
@@ -308,19 +386,55 @@ function WeatherIndicator() {
             condition:      wmo.icon,
             conditionLabel: wmo.label,
             wind:           Math.round(daily.windspeed_10m_max[0]) + ' km/h',
+            windDir:        degToCompass(daily.winddirection_10m_dominant && daily.winddirection_10m_dominant[0]),
             humidity:       null,
+            hourly:         [],   /* forecast strips are forward-looking; a past date has none */
+            daily:          [],
             tag:            'Historical · ' + selectedDate,
           };
         } else {
           const cw = json && json.current_weather;
           if (!cw || cw.temperature == null) throw new Error('no realtime data');
           const wmo = wmoLookup(cw.weathercode);
+          /* Next-12h strip from json.hourly, starting at the current hour
+             (string-compare the 'YYYY-MM-DDTHH' prefix — BUG-19 safe). */
+          const _h = (json && json.hourly) || {};
+          const _htimes = _h.time || [];
+          const _nowKey = String(cw.time || '').slice(0, 13);
+          let _start = 0;
+          for (let _i = 0; _i < _htimes.length; _i++) {
+            if (String(_htimes[_i]).slice(0, 13) >= _nowKey) { _start = _i; break; }
+          }
+          const _hourly = [];
+          for (let _j = _start; _j < Math.min(_start + 12, _htimes.length); _j++) {
+            _hourly.push({
+              hour: _wxHourLabel(_htimes[_j]),
+              condition: wmoLookup(_h.weathercode && _h.weathercode[_j]).icon,
+              temp: Math.round(_h.temperature_2m[_j]),
+            });
+          }
+          /* 7-day strip from json.daily. */
+          const _d = (json && json.daily) || {};
+          const _dtimes = _d.time || [];
+          const _daily = [];
+          for (let _k = 0; _k < _dtimes.length; _k++) {
+            _daily.push({
+              day: _wxDayName(_dtimes[_k]),
+              date: _wxDayDate(_dtimes[_k]),
+              condition: wmoLookup(_d.weathercode && _d.weathercode[_k]).icon,
+              high: Math.round(_d.temperature_2m_max[_k]),
+              low: Math.round(_d.temperature_2m_min[_k]),
+            });
+          }
           result = {
             temp:           Math.round(cw.temperature),
             condition:      wmo.icon,
             conditionLabel: wmo.label,
             wind:           Math.round(cw.windspeed) + ' km/h',
+            windDir:        degToCompass(cw.winddirection),
             humidity:       null,
+            hourly:         _hourly,
+            daily:          _daily,
             tag:            'Live',
           };
         }
@@ -373,18 +487,18 @@ function WeatherIndicator() {
 
     (open && display) ? React.createElement(WeatherPopover, {
       current: display,
-      hourly: (mockWeather && mockWeather.hourly) || [],
-      daily: (mockWeather && mockWeather.daily) || [],
+      hourly: (display && display.hourly) || (mockWeather && mockWeather.hourly) || [],
+      daily: (display && display.daily) || (mockWeather && mockWeather.daily) || [],
       onClose: function() { setOpen(false); },
     }) : null,
   );
 }
 
 /* ---------- Weather popover content ----------------------------------- */
-/* `current` is date/site-aware (live Open-Meteo result or mock fallback);
-   `hourly`/`daily` stay mock — Open-Meteo forecast data for those strips
-   is a v2 nice-to-have, not required for the headline indicator to be
-   date-aware (see task brief). */
+/* `current`/`hourly`/`daily` are all live Open-Meteo forecast data now
+   (current_weather + hourly[next 12h] + daily[7d], with wind direction),
+   or the static mock fixture on a fetch failure. `hourly`/`daily` are empty
+   on a historical date (forward-looking strips don't apply) and self-hide. */
 function WeatherPopover(props) {
   const NavIcon = window.FieldSight && window.FieldSight.NavIcon;
   const Badge = window.FieldSight && window.FieldSight.Badge;
@@ -412,45 +526,52 @@ function WeatherPopover(props) {
         React.createElement('div', { className: 'fs-weather-popover__current-label' },
           current.conditionLabel),
         React.createElement('div', { className: 'fs-weather-popover__current-meta' },
-          'Wind ' + current.wind + (current.humidity ? ' · Humidity ' + current.humidity : '')),
+          'Wind ' + current.wind
+            + (current.windDir ? ' · ' + current.windDir : '')
+            + (current.humidity ? ' · Humidity ' + current.humidity : '')),
       ),
     ),
 
-    /* Next 12h hourly strip */
-    React.createElement('div', { className: 'fs-weather-popover__section-label' },
-      'Next 12 hours'),
-    React.createElement('div', { className: 'fs-weather-popover__hourly' },
-      props.hourly.map(function(h, i) {
-        return React.createElement('div', {
-          key: i, className: 'fs-weather-popover__hour',
-        },
-          React.createElement('div', { className: 'fs-weather-popover__hour-time' },
-            h.hour),
-          NavIcon && React.createElement(NavIcon, { name: h.condition, size: 16 }),
-          React.createElement('div', { className: 'fs-weather-popover__hour-temp' },
-            h.temp + '°'),
-        );
-      }),
-    ),
+    /* Next 12h hourly strip (real forecast data; hidden on a historical
+       date, whose forward-looking strip is empty). */
+    props.hourly.length ? React.createElement(React.Fragment, null,
+      React.createElement('div', { className: 'fs-weather-popover__section-label' },
+        'Next 12 hours'),
+      React.createElement('div', { className: 'fs-weather-popover__hourly' },
+        props.hourly.map(function(h, i) {
+          return React.createElement('div', {
+            key: i, className: 'fs-weather-popover__hour',
+          },
+            React.createElement('div', { className: 'fs-weather-popover__hour-time' },
+              h.hour),
+            NavIcon && React.createElement(NavIcon, { name: h.condition, size: 16 }),
+            React.createElement('div', { className: 'fs-weather-popover__hour-temp' },
+              h.temp + '°'),
+          );
+        }),
+      )
+    ) : null,
 
-    /* 7-day daily */
-    React.createElement('div', { className: 'fs-weather-popover__section-label' },
-      '7-day forecast'),
-    React.createElement('div', { className: 'fs-weather-popover__daily' },
-      props.daily.map(function(d, i) {
-        return React.createElement('div', {
-          key: i, className: 'fs-weather-popover__day',
-        },
-          React.createElement('span', { className: 'fs-weather-popover__day-name' },
-            d.day),
-          React.createElement('span', { className: 'fs-weather-popover__day-date' },
-            d.date),
-          NavIcon && React.createElement(NavIcon, { name: d.condition, size: 16 }),
-          React.createElement('span', { className: 'fs-weather-popover__day-range' },
-            d.high + '° / ' + d.low + '°'),
-        );
-      }),
-    ),
+    /* 7-day daily (real forecast data; hidden on a historical date). */
+    props.daily.length ? React.createElement(React.Fragment, null,
+      React.createElement('div', { className: 'fs-weather-popover__section-label' },
+        '7-day forecast'),
+      React.createElement('div', { className: 'fs-weather-popover__daily' },
+        props.daily.map(function(d, i) {
+          return React.createElement('div', {
+            key: i, className: 'fs-weather-popover__day',
+          },
+            React.createElement('span', { className: 'fs-weather-popover__day-name' },
+              d.day),
+            React.createElement('span', { className: 'fs-weather-popover__day-date' },
+              d.date),
+            NavIcon && React.createElement(NavIcon, { name: d.condition, size: 16 }),
+            React.createElement('span', { className: 'fs-weather-popover__day-range' },
+              d.high + '° / ' + d.low + '°'),
+          );
+        }),
+      )
+    ) : null,
   );
 }
 const MIDDLE_WIDTH_MIN     = 280;
@@ -513,7 +634,18 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
   const [sitesList, setSitesList] = React.useState([]);
   React.useEffect(function () {
     var cancelled = false;
-    window.FS.api.sites.getSites().then(function (res) {
+    /* Source the header selector's sites from the SAME place the pages do —
+       Aurora org.getOrgSites() when org-live (mirrors sites.js/timeline.js
+       orgLive()). Sourcing from the legacy sites.getSites() gave
+       platform_admin a DIFFERENT list than the pages: a project picked on
+       Timeline wasn't in the header list (selector reset to "All projects"),
+       and a project picked in the header wasn't in Timeline's Aurora list
+       (Timeline fell back to its own "Pick a project" card). One source ⇒
+       the two selectors agree. */
+    var live = !!(window.FS && window.FS.api && !window.FS.api.useMocks
+      && window.FS.api.orgBaseUrl && window.FS.api.org);
+    var req = live ? window.FS.api.org.getOrgSites() : window.FS.api.sites.getSites();
+    req.then(function (res) {
       if (cancelled) return;
       setSitesList((res && res.sites) || []);
     }).catch(function () {
@@ -620,8 +752,11 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
         }, formatTodayDate()) : null,
       ),
 
-      /* Batch A2 Task 1 — header project selector, SITE_SCOPED_ROUTES only. */
-      (SITE_SCOPED_ROUTES.indexOf(route) !== -1 && sitesList.length > 0) ? React.createElement('select', {
+      /* #5 — header project selector on EVERY page (was SITE_SCOPED_ROUTES
+         only). A consistent global project scope control at the top of all
+         pages; the /timeline deep-link special-cases below still apply where
+         relevant, other routes read/write the shared FS.siteContext. */
+      (sitesList.length > 0) ? React.createElement('select', {
         className:    'fs-settings__select',
         style:        { maxWidth: '220px' },
         /* On /timeline the URL's ?site= outranks the context (deep links) —

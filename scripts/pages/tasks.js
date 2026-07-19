@@ -44,13 +44,6 @@
     return (r && r.params) || {};
   }
 
-  function parseHHMM(text) {
-    if (!text) return null;
-    var m = String(text).match(/(\d{1,2}):(\d{2})/);
-    if (!m) return null;
-    return (m[1].length === 1 ? '0' + m[1] : m[1]) + ':' + m[2];
-  }
-
   function fmtDate(yyyymmdd) {
     if (!yyyymmdd) return '';
     var p = String(yyyymmdd).split('-').map(Number);
@@ -66,35 +59,13 @@
     return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
   }
 
-  /* Heuristic deadline → ISO date. The deadline field is free text per
-     BACKEND-CONTEXT §5.1 ("Tomorrow 08:00", "Today 14:00", "By Friday",
-     "Friday 03 May", null). We try a few obvious shapes; unparseable
-     deadlines never count as overdue. */
-  function deadlineToISO(deadline, dateOfReport) {
-    if (!deadline) return null;
-    var d = String(deadline).trim();
-    /* Today / Tomorrow keywords resolve relative to the report's date. */
-    if (/^today\b/i.test(d) && dateOfReport)    return dateOfReport;
-    if (/^tomorrow\b/i.test(d) && dateOfReport) return window.FS.api.addDaysISO(dateOfReport, 1);
-    /* "DD MMM" or "DD MMM YYYY" */
-    var m = d.match(/(\d{1,2})\s+(\w+)\s*(\d{4})?/);
-    if (m) {
-      var months = { Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12 };
-      var mon = months[m[2].slice(0, 3).replace(/^\w/, function (c) { return c.toUpperCase(); })];
-      if (mon) {
-        var y = m[3] ? parseInt(m[3], 10)
-                     : (dateOfReport ? parseInt(dateOfReport.slice(0, 4), 10) : new Date().getUTCFullYear());
-        var day = parseInt(m[1], 10);
-        var pad = function (n) { return n < 10 ? '0' + n : '' + n; };
-        return y + '-' + pad(mon) + '-' + pad(day);
-      }
-    }
-    return null;
-  }
-
+  /* Overdue check resolves the free-text deadline against the report's own
+     date via the shared resolveDeadline helper (today-adapter.js) — the
+     same helper Today + Timeline use for absolute due dates. Unparseable
+     deadlines (absolute: null) never count as overdue. */
   function isOverdue(row, today) {
     if (!row || row.audit.checked) return false;
-    var iso = deadlineToISO(row.deadline, row.date);
+    var iso = window.FS.api.resolveDeadline(row.deadline, row.date).absolute;
     if (!iso) return false;
     return iso < today;
   }
@@ -193,7 +164,66 @@
       });
     }
 
-    var ctx = { state: state, removeRow: removeRow, view: view, setView: setView };
+    /* feat/editable-tasks-ui — optimistic in-place field patch after a
+       successful PATCH /api/org/action-items/{id} (TasksRightDetail's
+       editors below). Mirrors today.js's patchTask, simplified: /tasks has
+       no myTasks/teamTasks split to re-bucket across (filter chips —
+       All/Mine/Open/Overdue/Done — are computed at RENDER time from this
+       one flat `rows` list, see TasksMiddleColumn's bucketsEarly), so a
+       plain merge-in-place is enough — the filter buckets and the TaskCard
+       list both re-derive from the patched row automatically. */
+    function patchRow(rowId, patch) {
+      setState(function (s) {
+        if (s.status !== 'ok') return s;
+        var next = (s.rows || []).map(function (r) {
+          return r.id === rowId ? Object.assign({}, r, patch) : r;
+        });
+        return Object.assign({}, s, { rows: next });
+      });
+    }
+
+    /* feat/editable-tasks-ui — cross-surface sync: a check-off made
+       elsewhere (Today's rolling list, Timeline's ActionItemRow) fires
+       window.FS.actionsBus with {date, topic_id, action_index,
+       user_folder, checked, ...} (actions-bus.js + actions.js — only
+       emitted in LIVE mode, useMocks:false; a no-op subscription in
+       mock mode, which is expected). Mirrors today.js's
+       removeTasksMatching/bus-subscribe pattern (fix/action-checkoff-
+       sync Bug 2), matched here on the SAME 4 fields
+       tasks-aggregator.js rows already carry natively — date/topic_id/
+       action_index/user_folder — no camelCase adapter translation
+       needed here (unlike Today's rolling items, which carry
+       actionIndex/folder instead). Un-checking (checked===false) is
+       left alone, same reasoning as Today: re-adding a resolved row
+       needs its full aggregator-shaped data, which the bus event
+       doesn't carry — a range/filter change (which remounts the fetch)
+       picks it back up. */
+    React.useEffect(function () {
+      var bus = window.FS && window.FS.actionsBus;
+      if (!bus) return undefined;
+      return bus.subscribe(function (payload) {
+        if (!payload || !payload.checked) return;
+        setState(function (s) {
+          if (s.status !== 'ok') return s;
+          var next = (s.rows || []).filter(function (r) {
+            if (r.date !== payload.date
+                || r.topic_id !== payload.topic_id
+                || r.action_index !== payload.action_index) return true;
+            /* Both sides present and differ → a different owner's
+               same-shaped action on the same date — keep it. Either
+               side missing (legacy row/payload with no folder) → fall
+               through to the looser date+topic+index match, same
+               leniency as today.js. */
+            if (payload.user_folder && r.user_folder && r.user_folder !== payload.user_folder) return true;
+            return false; /* matched — drop */
+          });
+          if (next.length === (s.rows || []).length) return s;
+          return Object.assign({}, s, { rows: next });
+        });
+      });
+    }, []);
+
+    var ctx = { state: state, removeRow: removeRow, patchRow: patchRow, view: view, setView: setView };
     return React.createElement(TasksContext.Provider, { value: ctx },
       props.children);
   }
@@ -205,6 +235,7 @@
     var TasksFilterChips  = fs.TasksFilterChips;
     var TaskCard          = fs.TaskCard;
     var RangeToolbar      = fs.RangeToolbar;
+    var CreateTaskModal   = fs.CreateTaskModal;
     var onSelect          = props.onSelect || function () {};
 
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
@@ -226,12 +257,82 @@
 
     React.useEffect(function () { setVisible(PAGE_SIZE); }, [filter]);
 
-    var ctx = React.useContext(TasksContext);
+    /* feat/editable-tasks-ui — "+ New task" modal open state, mirrors
+       quality.js's ctx.showCreate: conditionally MOUNTED (not just
+       open-toggled) below, so a Cancel/close fully resets CreateTaskModal's
+       internal form state for the next open — see create-task-modal.js. */
+    var refShowCreateTask  = React.useState(false);
+    var showCreateTask     = refShowCreateTask[0];
+    var setShowCreateTask  = refShowCreateTask[1];
+
+    /* feat/editable-tasks-ui — guards the bulk "Resolve N" button
+       against double-submit while the pooled toggleAction batch is in
+       flight. Mirrors today.js's resolvingRef / safety.js's
+       refBulkResolving. */
+    var refBulkResolving = React.useState(false);
+    var bulkResolving    = refBulkResolving[0];
+    var setBulkResolving = refBulkResolving[1];
+
+    var ctx   = React.useContext(TasksContext);
+    var state = ctx && ctx.state;
+
+    /* feat/editable-tasks-ui — batch multi-select over the on-screen
+       (filtered, sorted, paginated) rows — mirrors safety.js's
+       groupsEarly/batchEligibleRows pattern (safety.js:260-270): the
+       useMultiSelect() hook call below needs `items` in on-screen
+       order BEFORE it's called, and hook calls must stay unconditional
+       per rules-of-hooks, so this whole "what's rendered right now"
+       computation is duplicated defensively here (state may still be
+       'loading') rather than after the status early-returns below,
+       which is where the equivalent rows/buckets/visible computation
+       used to live exclusively. Reused verbatim once state.status ===
+       'ok' is confirmed further down — not recomputed. */
+    var rowsEarly  = (state && state.status === 'ok') ? (state.rows || []) : [];
+    var todayEarly = (state && state.today) || window.FS.api.todayNZDT();
+
+    var bucketsEarly = {
+      all:     rowsEarly,
+      mine:    rowsEarly.filter(function (r) { return r.responsible === myName; }),
+      open:    rowsEarly.filter(function (r) { return !r.audit.checked; }),
+      overdue: rowsEarly.filter(function (r) { return isOverdue(r, todayEarly); }),
+      done:    rowsEarly.filter(function (r) { return  r.audit.checked; }),
+    };
+    var countsEarly = {
+      all:     bucketsEarly.all.length,
+      mine:    bucketsEarly.mine.length,
+      open:    bucketsEarly.open.length,
+      overdue: bucketsEarly.overdue.length,
+      done:    bucketsEarly.done.length,
+    };
+
+    /* Sort: open first by (overdue desc, deadline asc, date desc),
+       then done at the bottom — same comparator the post-early-return
+       code below used to own exclusively. */
+    var visibleEarly = (bucketsEarly[filter] || bucketsEarly.all).slice().sort(function (a, b) {
+      if (a.audit.checked !== b.audit.checked) return a.audit.checked ? 1 : -1;
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      return (a.action || '').localeCompare(b.action || '');
+    });
+    var totalVisibleEarly = visibleEarly.length;
+    var hasMoreEarly      = visibleCount < totalVisibleEarly;
+    visibleEarly          = visibleEarly.slice(0, visibleCount);
+
+    /* Batch-eligible = still open — mirrors safety.js excluding
+       already-resolved rows from Select all / Resolve N (its F4): a
+       Done task has nothing to bulk-resolve, and letting it into the
+       selection would silently no-op on toggleAction (checked: true
+       when it's already true). */
+    var batchEligibleRows = visibleEarly.filter(function (r) { return !r.audit.checked; });
+
+    var multiSelect = window.FieldSight.useMultiSelect({
+      items: batchEligibleRows,
+      getId: function (r) { return r.id; },
+    });
+
     if (!ctx) {
       console.warn('[TasksMiddleColumn] TasksContext missing');
       return null;
     }
-    var state = ctx.state;
 
     /* Built once and rendered in EVERY non-terminal branch (loading/error/ok):
        RangeToolbar owns resolving the initial preset into {from,to} via its
@@ -305,52 +406,153 @@
       );
     }
 
-    var rows  = state.rows  || [];
-    var today = state.today || window.FS.api.todayNZDT();
-
-    /* Pre-compute filter buckets — used both for chip counts and the
-       active-filter render below. */
-    var buckets = {
-      all:     rows,
-      mine:    rows.filter(function (r) { return r.responsible === myName; }),
-      open:    rows.filter(function (r) { return !r.audit.checked; }),
-      overdue: rows.filter(function (r) { return isOverdue(r, today); }),
-      done:    rows.filter(function (r) { return  r.audit.checked; }),
-    };
-    var counts = {
-      all:     buckets.all.length,
-      mine:    buckets.mine.length,
-      open:    buckets.open.length,
-      overdue: buckets.overdue.length,
-      done:    buckets.done.length,
-    };
-
-    var visible = buckets[filter] || buckets.all;
-
-    /* Sort: open first by (overdue desc, deadline asc, date desc),
-       then done at the bottom. */
-    visible = visible.slice().sort(function (a, b) {
-      if (a.audit.checked !== b.audit.checked) return a.audit.checked ? 1 : -1;
-      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
-      return (a.action || '').localeCompare(b.action || '');
-    });
-
-    /* Sprint 8.8.1 — client-side pagination */
-    var totalVisible = visible.length;
-    var hasMore      = visibleCount < totalVisible;
-    visible          = visible.slice(0, visibleCount);
+    /* Reuse the "early" computation from above (rows/today/buckets/
+       counts/visible/pagination, incl. batchEligibleRows + multiSelect)
+       — only reachable here once state.status === 'ok', so these are
+       now guaranteed correct. Not recomputed. */
+    var rows         = rowsEarly;
+    var today        = todayEarly;
+    var buckets      = bucketsEarly;
+    var counts       = countsEarly;
+    var visible      = visibleEarly;
+    var totalVisible = totalVisibleEarly;
+    var hasMore      = hasMoreEarly;
 
     var selectedId = props.selectedItem && props.selectedItem.kind === 'task_row'
       ? props.selectedItem.id
       : null;
 
+    /* feat/editable-tasks-ui — bulk "Resolve N", piggybacking the SAME
+       actions-toggle endpoint the single-row check-off circle (below,
+       via TaskCard's checkable prop) and TasksRightDetail's Mark
+       complete button both use. Mirrors today.js's bulkResolveLeftover
+       / safety.js's bulkMarkResolved: each selected row carries its OWN
+       date/topic_id/action_index (rows span many dates/owners — no
+       single "today" to check off against), and user_folder is the
+       report OWNER's folder (feat/user-dim-audit-key, Task 6) — the
+       aggregator already stamps this onto every row as `user_folder`
+       (tasks-aggregator.js), never the caller/currentUser. Partial
+       failure: a failed toggle keeps that row selected (retry-able) and
+       is reported via toast; successes are dropped from the rendered
+       list (ctx.removeRow — the SAME optimistic-removal path the
+       single check-off circle and Mark-complete button already use)
+       and the selection. */
+    function bulkResolveSelected() {
+      var candidates = multiSelect.selectedItems;
+      if (bulkResolving || candidates.length === 0) return;
+      var api = window.FS && window.FS.api;
+      if (!api || !api.actions || !api.pooledAll) return;
+
+      setBulkResolving(true);
+
+      var thunks = candidates.map(function (row) {
+        return function () {
+          return api.actions.toggleAction({
+            date:         row.date,
+            topic_id:     row.topic_id,
+            action_index: row.action_index,
+            checked:      true,
+            action_text:  row.action,
+            /* row.folder is never actually set by the aggregator (it
+               stamps the owner folder as `user_folder` — see
+               tasks-aggregator.js) so this resolves to row.user_folder
+               in practice; kept as `row.folder || row.user_folder` to
+               mirror Today's exact owner-folder fallback expression,
+               in case a future caller ever hands this a Today-shaped
+               row (which DOES carry `.folder`). */
+            user_folder:  row.folder || row.user_folder,
+          }).then(function () { return { ok: true, row: row }; })
+            .catch(function (err) {
+              console.error('[Tasks] bulk resolve failed for', row.id, err);
+              return { ok: false, row: row };
+            });
+        };
+      });
+
+      window.FS.api.pooledAll(thunks, 6).then(function (results) {
+        var okIds = {};
+        var okCount = 0, failCount = 0;
+        (results || []).forEach(function (r) {
+          if (r && r.ok) { okIds[r.row.id] = true; okCount++; }
+          else { failCount++; }
+        });
+
+        Object.keys(okIds).forEach(function (id) { if (ctx.removeRow) ctx.removeRow(id); });
+
+        /* multiSelect.setSelectedIds is the hook's raw escape-hatch
+           setter (beyond its 6-field spec) — kept for exactly this
+           case: a failed toggle must stay selected for retry, so this
+           can't be a blanket multiSelect.clear(). Mirrors today.js's
+           bulkResolveLeftover / safety.js's bulkMarkResolved. */
+        multiSelect.setSelectedIds(function (prev) {
+          var next = {};
+          Object.keys(prev).forEach(function (id) { if (!okIds[id]) next[id] = prev[id]; });
+          return next;
+        });
+        setBulkResolving(false);
+
+        var toast = window.FS && window.FS.toast;
+        if (!toast) return;
+        if (failCount === 0) {
+          toast.show({
+            message: 'Resolved ' + okCount + ' task' + (okCount === 1 ? '' : 's'),
+            tone:    'success',
+          });
+        } else if (okCount === 0) {
+          toast.show({
+            message: 'Could not resolve ' + failCount + ' task' + (failCount === 1 ? '' : 's') + ' — try again',
+            tone:    'error',
+          });
+        } else {
+          toast.show({
+            message: 'Resolved ' + okCount + ', ' + failCount + ' failed — still selected, try again',
+            tone:    'warning',
+          });
+        }
+      });
+    }
+
     return React.createElement('div', { className: 'fs-tasks' },
 
       /* Header */
       React.createElement('div', { className: 'fs-tasks__header' },
-        React.createElement('h2', { className: 'fs-tasks__title' }, 'Tasks'),
-        React.createElement('div', { className: 'fs-tasks__subtitle' },
-          'Action items assigned across reports — yours, your team’s, by status'),
+        React.createElement('div', {
+          style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' },
+        },
+          React.createElement('div', null,
+            React.createElement('h2', { className: 'fs-tasks__title' }, 'Tasks'),
+            React.createElement('div', { className: 'fs-tasks__subtitle' },
+              'Action items assigned across reports — yours, your team’s, by status'),
+          ),
+          /* feat/editable-tasks-ui — "+ New task" entry point, primary
+             home for CreateTaskModal (see file header note there). Always
+             available on /tasks (the tasks hub) — no role gate, unlike
+             /quality's "+ Log Item" (quality:manage-gated): task creation
+             has no equivalent domain-manager permission in roles.js today,
+             and gating it incorrectly is worse than not gating it, per the
+             brief this shipped under. */
+          CreateTaskModal
+            ? React.createElement('button', {
+                type:      'button',
+                className: 'fs-tasks__new-task-btn',
+                onClick:   function () { setShowCreateTask(true); },
+              }, '+ New task')
+            : null,
+          /* feat/editable-tasks-ui — Batch Select toggle, same shared
+             .fs-multi-select__toggle classes /today's Leftover section
+             and /safety's Multi-Select toggle use (composites.css).
+             Reachable whenever the CURRENT page of rows has at least
+             one batch-eligible (open) row. */
+          batchEligibleRows.length > 0
+            ? React.createElement('button', {
+                type:            'button',
+                className:       'fs-multi-select__toggle'
+                  + (multiSelect.batchMode ? ' fs-multi-select__toggle--active' : ''),
+                onClick:         function () { multiSelect.setBatchMode(function (prev) { return !prev; }); },
+                'aria-pressed':  multiSelect.batchMode,
+              }, multiSelect.batchMode ? 'Batch Select: On' : 'Batch Select')
+            : null,
+        ),
         React.createElement('div', { className: 'fs-tasks__meta' },
           rows.length + ' actions · ' + fmtDate(state.from) + ' → ' + fmtDate(state.to),
           React.createElement('span', {
@@ -359,6 +561,23 @@
           }, 'ⓘ'),
         ),
       ),
+
+      /* feat/editable-tasks-ui — Create task modal. Conditionally MOUNTED
+         (not just open-toggled) so CreateTaskModal's internal form state
+         resets on every open, mirroring quality.js's
+         `ctx.showCreate && QualityCreateModal ? ... : null` pattern.
+         onCreated is a no-op beyond the modal's own toast/close — see
+         create-task-modal.js's TOPIC-SCOPING NOTE: the mock write has no
+         row shape this page's aggregator-fed list can surface, so there
+         is nothing here to prepend/refetch into `rows`. */
+      showCreateTask && CreateTaskModal
+        ? React.createElement(CreateTaskModal, {
+            open:      true,
+            onClose:   function () { setShowCreateTask(false); },
+            onCreated: function () {},
+            siteId:    (window.FS.siteContext && window.FS.siteContext.get()) || '',
+          })
+        : null,
 
       /* Date-range selector — Today / 7d / 30d / All / Custom */
       toolbar,
@@ -369,6 +588,21 @@
         counts:   counts,
         onChange: function (next) { setFilter(next); },
       }),
+
+      /* feat/editable-tasks-ui — bulk action bar (shared
+         MultiSelectBulkBar composite — same one /today's Leftover +
+         /safety use), shown whenever Batch Select mode is on. */
+      multiSelect.batchMode
+        ? React.createElement(fs.MultiSelectBulkBar, {
+            count:   multiSelect.selectedItems.length,
+            actions: [
+              { key: 'resolve', primary: true, onClick: bulkResolveSelected,
+                disabled: bulkResolving || multiSelect.selectedItems.length === 0,
+                label: bulkResolving ? 'Resolving…' : 'Resolve ' + multiSelect.selectedItems.length },
+              { key: 'clear', label: 'Clear', onClick: multiSelect.clear, disabled: bulkResolving },
+            ],
+          })
+        : null,
 
       /* List */
       visible.length === 0
@@ -388,14 +622,54 @@
                 priority:    row.priority
                               ? row.priority.charAt(0).toUpperCase() + row.priority.slice(1)
                               : 'Medium',
-                dueTime:     parseHHMM(row.deadline) || (row.deadline ? row.deadline.slice(0, 14) : '—'),
+                dueTime:     window.FS.api.resolveDeadline(row.deadline, row.date).display || '—',
+                /* feat/editable-tasks-ui — the report OWNER's folder
+                   (feat/user-dim-audit-key, Task 6), read by
+                   task-card.js's checkable path as `task.folder` and
+                   sent as `user_folder` on its toggleAction call. `row`
+                   has no `.folder` field of its own (tasks-aggregator.js
+                   stamps it as `user_folder`) — `row.folder ||
+                   row.user_folder` mirrors the exact owner-folder
+                   fallback used elsewhere in this feature. */
+                folder:      row.folder || row.user_folder,
               };
+              /* feat/editable-tasks-ui — batch-eligible = still open
+                 (mirrors batchEligibleRows above / safety.js's per-row
+                 batchEligible gate): a Done row keeps opening the
+                 detail panel regardless of Batch Select mode — no fake
+                 selection affordance for a row with nothing left to
+                 resolve. */
+              var batchEligible = !row.audit.checked;
+              var batchSelected = multiSelect.batchMode && batchEligible && !!multiSelect.selectedIds[row.id];
               return React.createElement(TaskCard, {
-                key:      row.id,
-                task:     task,
-                isMine:   row.responsible === myName,
-                selected: selectedId === row.id,
-                onSelect: function () {
+                key:           row.id,
+                task:          task,
+                isMine:        row.responsible === myName,
+                selected:      selectedId === row.id,
+                /* Row-level check-off (feat/editable-tasks-ui) — only
+                   open rows get the round checkbox; a Done row falls
+                   back to TaskCard's default avatar. date/topic_id/
+                   actionIndex/folder above are what task-card.js's
+                   checkable path needs to call
+                   FS.api.actions.toggleAction in place. On success the
+                   row drops out of TasksProvider's snapshot via
+                   ctx.removeRow — mirrors TasksRightDetail's
+                   onMarkComplete. */
+                checkable:     !row.audit.checked,
+                date:          row.date,
+                onCheckedOff:  function (t) { if (ctx.removeRow) ctx.removeRow(t.id); },
+                /* Batch select (feat/editable-tasks-ui) — the SAME
+                   round button doubles as a multi-select toggle while
+                   multiSelect.batchMode is on (task-card.js's
+                   handleCheckClick branches on batchMode internally). */
+                batchMode:     multiSelect.batchMode,
+                batchSelected: batchSelected,
+                onBatchToggle: multiSelect.onItemClick,
+                onSelect:      function () {
+                  if (multiSelect.batchMode && batchEligible) {
+                    multiSelect.onItemClick(row);
+                    return;
+                  }
                   onSelect({
                     kind:        'task_row',
                     id:          row.id,
@@ -419,14 +693,37 @@
     );
   }
 
+  /* =====================================================================
+     feat/editable-tasks-ui — task-detail editors (priority/status/due/
+     assignee), wired to PATCH /api/org/action-items/{id}. Own copy of
+     today.js's identically-named/valued constants — this codebase's
+     established convention is each page keeps its own copy rather than
+     sharing an export (see CLAUDE.md "Admin permission flow" note on
+     adminUserFolders() for the same pattern elsewhere).
+     ===================================================================== */
+  var PRIORITY_OPTIONS = [
+    { value: 'low',    label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high',   label: 'High' },
+  ];
+  var STATUS_OPTIONS = [
+    { value: 'open',        label: 'Open' },
+    { value: 'in_progress', label: 'In progress' },
+    { value: 'blocked',     label: 'Blocked' },
+    { value: 'done',        label: 'Done' },
+  ];
+
   /* ---------- TasksRightDetail ---------------------------------------- */
 
   function TasksRightDetail(props) {
-    var fs        = window.FieldSight;
-    var Card      = fs.Card;
-    var Badge     = fs.Badge;
-    var Button    = fs.Button;
-    var IconBtn   = fs.IconButton;
+    var fs           = window.FieldSight;
+    var Card         = fs.Card;
+    var Badge        = fs.Badge;
+    var Button       = fs.Button;
+    var IconBtn      = fs.IconButton;
+    var EvidenceTabs = fs.EvidenceTabs;
+    var Select       = fs.Select;
+    var Input        = fs.Input;
 
     var ctx = React.useContext(TasksContext);
     var sel = props.selectedItem;
@@ -435,7 +732,83 @@
     var busy    = refBusy[0];
     var setBusy = refBusy[1];
 
-    if (!sel || sel.kind !== 'task_row') {
+    /* feat/editable-tasks-ui — Details/History tab split (reuses the
+       /evidence page's EvidenceTabs composite). Declared before the
+       `!sel` early return below so hook order stays stable across
+       selection changes, matching refBusy's placement. */
+    var refTab    = React.useState('details');
+    var activeTab = refTab[0];
+    var setTab    = refTab[1];
+
+    /* feat/editable-tasks-ui — resolve the LIVE row from TasksContext
+       (ctx.state.rows), falling back to the selectedItem's own snapshot
+       row. Mirrors today.js's `findItemById(data, sel.id) || sel` — after
+       a successful edit, ctx.patchRow merges the PATCH response into
+       ctx.state.rows, so re-reading it here (rather than trusting the
+       possibly-stale `sel.row` captured at click time) is what makes the
+       panel reflect the edit without a reload. Declared before the `!sel`
+       early return so the hooks below it (draft/roster) stay unconditional
+       — same hook-order discipline as refBusy/refTab above. */
+    var liveRows = (ctx && ctx.state && ctx.state.status === 'ok') ? ctx.state.rows : null;
+    var row = (sel && sel.row) || null;
+    if (sel && liveRows) {
+      var liveMatch = liveRows.filter(function (r) { return r.id === sel.id; })[0];
+      if (liveMatch) row = liveMatch;
+    }
+
+    /* feat/editable-tasks-ui — priority/status/due/assignee editors.
+       Backend is the real authority gate (400/403/404 on the PATCH); this
+       FS.can() check is UX only, exactly mirroring today.js's
+       TodayRightDetail (see that file for the full rationale comment —
+       not repeated here). */
+    var caller        = (window.AuthMock && window.AuthMock.currentUser) || {};
+    var canEditTask   = !!(window.FS && window.FS.can && window.FS.P
+                        && window.FS.can(caller, window.FS.P('task', 'edit')));
+    var canAssignTask = !!(window.FS && window.FS.can && window.FS.P
+                        && window.FS.can(caller, window.FS.P('task', 'assign')));
+
+    /* F1 — the caller's OWN task (they are the current responsible party).
+       Mirrors today.js's isOwnTask; must be computed before
+       fieldsEditable/assigneeEditable/rosterSiteId below, which widen on
+       it. Guarded on `row` since this runs before the `!sel`/`!row` early
+       return. */
+    var isOwnTask = !!(row && row.responsible && row.responsible === (caller && caller.name));
+
+    /* Optimistic per-field overrides — same shape/precedent as today.js's
+       draftRef (keyed by the PATCH body's field names, holding RAW
+       values). Reset whenever the selected row changes. */
+    var draftRef = React.useState({});
+    var draft    = draftRef[0];
+    var setDraft = draftRef[1];
+    React.useEffect(function () { setDraft({}); }, [row && row.id]);
+
+    /* Assignee roster — FS.api.org.getSiteMembers(row.siteId), identical
+       call + gating to today.js's TodayRightDetail. row.siteId is threaded
+       from tasks-aggregator.js's getOrgSiteIdMap() (mirrors today.js's own
+       getOrgSiteIdMap() threaded via today-adapter.js's ctx.siteIdByName);
+       a lookup miss (siteId: null) degrades the picker to read-only below,
+       same as an empty/errored roster. */
+    var rosterRef = React.useState({ status: 'idle', users: [] });
+    var roster    = rosterRef[0];
+    var setRoster = rosterRef[1];
+    var rosterSiteId = (row && (canAssignTask || isOwnTask)) ? row.siteId : null;
+    React.useEffect(function () {
+      if (!rosterSiteId) { setRoster({ status: 'idle', users: [] }); return undefined; }
+      var cancelled = false;
+      setRoster({ status: 'loading', users: [] });
+      var org = window.FS && window.FS.api && window.FS.api.org;
+      if (!org || !org.getSiteMembers) { setRoster({ status: 'error', users: [] }); return undefined; }
+      org.getSiteMembers(rosterSiteId).then(function (res) {
+        if (cancelled) return;
+        if (!res || res._accessDenied || res._notFound) { setRoster({ status: 'error', users: [] }); return; }
+        setRoster({ status: 'ok', users: (res.users || []).filter(function (u) { return u && u.name; }) });
+      }).catch(function () {
+        if (!cancelled) setRoster({ status: 'error', users: [] });
+      });
+      return function () { cancelled = true; };
+    }, [rosterSiteId]);
+
+    if (!sel || sel.kind !== 'task_row' || !row) {
       return React.createElement('div', { className: 'fs-tasks-detail__placeholder' },
         React.createElement('div', { className: 'fs-tasks-detail__placeholder-title' },
           'Select an action'),
@@ -444,9 +817,104 @@
       );
     }
 
-    var row = sel.row;
     var today = ctx && ctx.state && ctx.state.today;
     var overdue = isOverdue(row, today);
+
+    /* One generic commit path for all 4 fields — PATCH
+       /api/org/action-items/{id}, then fold the FULL updated row's fields
+       back into TasksContext (ctx.patchRow — updates the list card AND
+       this panel at once) or, on _accessDenied/_notFound/thrown error,
+       drop the optimistic override and toast. Mirrors today.js's
+       commitTaskField exactly; row.priority/row.status here are already
+       RAW enum values (tasks-aggregator.js, unlike today-adapter.js's
+       item.priority/.status which are DERIVED labels), so — unlike
+       today.js — there's no label re-derivation needed on the response,
+       just a straight pass-through. */
+    function commitRowField(fieldKey, value) {
+      if (!row.actionItemId) return;
+      var api = window.FS && window.FS.api && window.FS.api.actions;
+      if (!api || !api.updateAction) return;
+      var patch = {};
+      patch[fieldKey] = value;
+      setDraft(function (d) {
+        var next = Object.assign({}, d);
+        next[fieldKey] = value;
+        return next;
+      });
+      function clearDraft() {
+        setDraft(function (d) {
+          var next = Object.assign({}, d);
+          delete next[fieldKey];
+          return next;
+        });
+      }
+      api.updateAction(row.actionItemId, patch).then(function (res) {
+        if (!res || res._accessDenied || res._notFound) {
+          clearDraft();
+          var toast = window.FS && window.FS.toast;
+          if (toast) {
+            toast.show({
+              message:  (res && res.error) || 'Could not update task',
+              tone:     'error',
+              duration: 5000,
+            });
+          }
+          return;
+        }
+        var patchOut = {};
+        if (res.priority)             patchOut.priority    = res.priority;
+        if (res.status !== undefined) patchOut.status       = res.status || null;
+        if (res.deadline !== undefined) patchOut.deadline   = res.deadline || null;
+        if (res.responsible)          patchOut.responsible  = res.responsible;
+        if (ctx && ctx.patchRow) ctx.patchRow(row.id, patchOut);
+        clearDraft();
+      }).catch(function (err) {
+        clearDraft();
+        var toast = window.FS && window.FS.toast;
+        if (toast) {
+          toast.show({
+            message:  'Could not update task' + ((err && err.message) ? ': ' + err.message : ''),
+            tone:     'error',
+            duration: 5000,
+          });
+        }
+      });
+    }
+
+    var fieldsEditable   = (canEditTask || isOwnTask) && !!row.actionItemId;
+    var assigneeEditable = (canAssignTask || isOwnTask) && !!row.actionItemId
+                          && !!row.siteId && roster.status === 'ok' && roster.users.length > 0;
+
+    var priorityValue   = draft.priority   !== undefined ? draft.priority   : (row.priority || 'medium');
+    var statusValue     = draft.status     !== undefined ? draft.status     : (row.status   || 'open');
+    var dueValue         = draft.deadline   !== undefined ? draft.deadline   : (row.deadline  || '');
+    var currentAssignee = row.responsible || '';
+    var assigneeValue   = draft.responsible !== undefined ? draft.responsible : currentAssignee;
+
+    var ownerCell = assigneeEditable ? React.createElement(Select, {
+      size: 'sm', fullWidth: true, value: assigneeValue,
+      placeholder: assigneeValue ? undefined : 'Select a member',
+      options: roster.users.map(function (u) { return { value: u.name, label: u.name }; }),
+      onChange: function (e) { commitRowField('responsible', e.target.value); },
+    }) : (row.responsible || '—');
+
+    /* BUG-19 — a native date input's value/onChange are already plain
+       'YYYY-MM-DD' strings (or '' for empty); no Date() parse needed
+       either direction. Mirrors today.js's dueCell verbatim. */
+    var dueCell = fieldsEditable ? React.createElement(Input, {
+      type: 'date', size: 'sm', fullWidth: true, value: dueValue,
+      onChange: function (e) { commitRowField('deadline', e.target.value || null); },
+    }) : (window.FS.api.resolveDeadline(row.deadline, row.date).display || '—');
+
+    var statusCell = fieldsEditable ? React.createElement(Select, {
+      size: 'sm', fullWidth: true, value: statusValue, options: STATUS_OPTIONS,
+      onChange: function (e) { commitRowField('status', e.target.value); },
+    }) : window.FS.api.deriveStatus(row.status, row.audit.checked).status;
+
+    var priorityCell = fieldsEditable ? React.createElement(Select, {
+      size: 'sm', fullWidth: true, value: priorityValue, options: PRIORITY_OPTIONS,
+      onChange: function (e) { commitRowField('priority', e.target.value); },
+    }) : (row.priority ? row.priority.charAt(0).toUpperCase() + row.priority.slice(1) : 'Medium');
 
     function onMarkComplete() {
       if (busy || row.audit.checked) return;
@@ -507,50 +975,85 @@
         }) : null,
       ),
 
-      /* Field rows */
-      React.createElement('div', { className: 'fs-tasks-detail__rows' },
-        React.createElement(DetailRow, {
-          label: 'Owner',     value: row.responsible || '—',
-        }),
-        React.createElement(DetailRow, {
-          label: 'Deadline',  value: row.deadline || '—',
-        }),
-        React.createElement(DetailRow, {
-          label: 'Date',      value: fmtDate(row.date),
-        }),
-        React.createElement(DetailRow, {
-          label: 'From topic',value: row.topic_title,
-        }),
-        React.createElement(DetailRow, {
-          label: 'Category',  value: row.topic_category,
-        }),
-        React.createElement(DetailRow, {
-          label: 'Reporter',  value: row.user_name,
-        }),
-      ),
+      /* feat/editable-tasks-ui — Details/History tab split. Details holds
+         the full action text (already unclamped in the header above) +
+         field rows + action buttons; History holds the Sprint 11 C.3
+         cross-day audit drawer, moved under its own tab rather than
+         always-rendered inline. */
+      EvidenceTabs ? React.createElement(EvidenceTabs, {
+        tabs: [
+          { key: 'details', label: 'Details' },
+          { key: 'history', label: 'History' },
+        ],
+        active:   activeTab,
+        onChange: setTab,
+      }) : null,
 
-      /* Sprint 11 C.3 — Cross-day history drawer.
-         Pulls every audit entry (any date) for the same logical
-         action (matched by topic_id + action_index) so the drawer
-         can show "this action was opened 3 May, closed 5 May, re-
-         opened 6 May…". Q-S11-3 default: role-aware visibility —
-         admin/gm see all check events; regular users see only
-         their own resolutions. */
-      React.createElement(ActionHistoryPanel, { row: row }),
+      activeTab === 'history'
+        ? (
+            /* Sprint 11 C.3 — Cross-day history drawer.
+               Pulls every audit entry (any date) for the same logical
+               action (matched by topic_id + action_index) so the drawer
+               can show "this action was opened 3 May, closed 5 May, re-
+               opened 6 May…". Q-S11-3 default: role-aware visibility —
+               admin/gm see all check events; regular users see only
+               their own resolutions. */
+            React.createElement(ActionHistoryPanel, { row: row })
+          )
+        : React.createElement(React.Fragment, null,
 
-      /* Actions */
-      React.createElement('div', { className: 'fs-tasks-detail__actions' },
-        !row.audit.checked
-          ? React.createElement(Button, {
-              size: 'sm', leftIcon: 'check',
-              onClick: onMarkComplete, disabled: busy,
-            }, busy ? 'Saving…' : 'Mark complete')
-          : null,
-        React.createElement(Button, {
-          variant: 'secondary', size: 'sm', rightIcon: 'arrow-right',
-          onClick: onOpenInTimeline,
-        }, 'Open in timeline'),
-      ),
+            /* Field rows — feat/editable-tasks-ui: Owner/Due/Status/Priority
+               now render editable Select/Input controls (ownerCell/dueCell/
+               statusCell/priorityCell above) when fieldsEditable/
+               assigneeEditable permit, exactly like today.js's
+               TodayRightDetail; otherwise they fall back to the same
+               plain-text values these rows always showed. */
+            React.createElement('div', { className: 'fs-tasks-detail__rows' },
+              React.createElement(DetailRow, {
+                label: 'Owner',     value: ownerCell,
+              }),
+              React.createElement(DetailRow, {
+                label: 'Due',       value: dueCell,
+              }),
+              React.createElement(DetailRow, {
+                label: 'Status',    value: statusCell,
+              }),
+              React.createElement(DetailRow, {
+                label: 'Priority',  value: priorityCell,
+              }),
+              React.createElement(DetailRow, {
+                label: 'Date',      value: fmtDate(row.date),
+              }),
+              React.createElement(DetailRow, {
+                label: 'From topic',value: row.topic_title,
+              }),
+              React.createElement(DetailRow, {
+                label: 'Category',  value: row.topic_category,
+              }),
+              React.createElement(DetailRow, {
+                label: 'Reporter',  value: row.user_name,
+              }),
+              /* No Time row: unlike Today's rows (item.timeRange, stamped
+                 by today-adapter.js from the topic's time_range), the
+                 tasks-aggregator.js row shape (see its header comment)
+                 does not carry topic time_range onto the row — nothing to
+                 show without inventing a field that isn't there. */
+            ),
+
+            /* Actions */
+            React.createElement('div', { className: 'fs-tasks-detail__actions' },
+              !row.audit.checked
+                ? React.createElement(Button, {
+                    size: 'sm', leftIcon: 'check',
+                    onClick: onMarkComplete, disabled: busy,
+                  }, busy ? 'Saving…' : 'Mark complete')
+                : null,
+              React.createElement(Button, {
+                variant: 'secondary', size: 'sm', rightIcon: 'arrow-right',
+                onClick: onOpenInTimeline,
+              }, 'Open in timeline'),
+            ),
+          ),
     );
   }
 
