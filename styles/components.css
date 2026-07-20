@@ -297,6 +297,15 @@
   border-color: var(--border-strong);
 }
 
+/* The native date/time calendar-picker icon is a dark browser SVG that does
+   NOT follow `color`, so it's near-invisible on dark surfaces. Invert it in
+   dark mode (theme.js sets [data-theme="dark"] for explicit AND auto dark).
+   The field text itself already flips via var(--text-primary). */
+[data-theme="dark"] .fs-field__control::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(1.5);
+  cursor: pointer;
+}
+
 .fs-field__control:focus,
 .fs-field__control:focus-visible {
   outline: none;
