@@ -326,6 +326,24 @@
     return { users: [], site: siteId };
   }
 
+  /* GET /api/org/sites/{id}/contributors?date=YYYY-MM-DD → { folders:[...] }.
+     Recording folders with topics attributed to (site,date) that may NOT be
+     site members (G5b site-tagging of a non-member recorder, e.g. an admin).
+     The aggregated timeline unions these with getSiteMembers folders so their
+     site-tagged topics stop vanishing from the site view (aggregation quirk).
+     Live READ (org reads run live even on dev); mock / access-denied / no date
+     → no extra folders, i.e. members-only fan-out, unchanged. */
+  async function getSiteContributors(siteId, date) {
+    if (orgLive() && date) {
+      var res = await api.orgRequest('/sites/' + encodeURIComponent(siteId)
+        + '/contributors?date=' + encodeURIComponent(date));
+      if (res && (res._accessDenied || res._notFound)) return { folders: [] };
+      return { folders: (res && res.folders) || [] };
+    }
+    await api.delay();
+    return { folders: [] };
+  }
+
   // -------- strategic rollup (feat 4c) --------
   /* GET /api/org/rollup/portfolio → { sites: [{ site_id (ORG UUID),
      open_safety, open_high_safety, open_actions, total_actions,
@@ -378,6 +396,7 @@
     updateObservation: updateObservation, archiveObservation: archiveObservation,
     getLiveItems: getLiveItems,
     getSiteMembers: getSiteMembers,
+    getSiteContributors: getSiteContributors,
     getPortfolioRollup: getPortfolioRollup,
     _folderName: folderName,   /* exported for batch-2b fan-out reuse */
     _toPageMember: _toPageMember, _toPageSite: _toPageSite,   /* page-shape adapters, batch-2b */
