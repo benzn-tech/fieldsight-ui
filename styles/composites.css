@@ -1853,6 +1853,14 @@
   color: var(--text-tertiary);
 }
 
+/* ContentHistoryPanel loading/empty states (Task 18 Step 1's given code
+   uses this class as-is). */
+.fs-muted {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  padding: 8px 0;
+}
+
 
 /* =========================================================================
    PhotoGrid — thumbnail grid for topic.related_photos
