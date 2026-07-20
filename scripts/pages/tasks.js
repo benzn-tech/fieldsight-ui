@@ -898,12 +898,16 @@
       onChange: function (e) { commitRowField('responsible', e.target.value); },
     }) : (row.responsible || '—');
 
-    /* BUG-19 — a native date input's value/onChange are already plain
-       'YYYY-MM-DD' strings (or '' for empty); no Date() parse needed
-       either direction. Mirrors today.js's dueCell verbatim. */
-    var dueCell = fieldsEditable ? React.createElement(Input, {
-      type: 'date', size: 'sm', fullWidth: true, value: dueValue,
-      onChange: function (e) { commitRowField('deadline', e.target.value || null); },
+    /* fix/english-date-field — native <input type="date"> replaced with
+       DateField (in-page English, theme-aware picker; the native
+       calendar popup renders in the OS locale and can't be forced to
+       English via HTML/CSS — see date-field.js header doc). DateField's
+       onChange already hands back 'YYYY-MM-DD' | null directly — no
+       Date() parse either direction, so BUG-19 doesn't apply here.
+       Mirrors today.js's dueCell verbatim. */
+    var dueCell = fieldsEditable ? React.createElement(fs.DateField, {
+      size: 'sm', value: dueValue || null,
+      onChange: function (iso) { commitRowField('deadline', iso || null); },
     }) : (window.FS.api.resolveDeadline(row.deadline, row.date).display || '—');
 
     var statusCell = fieldsEditable ? React.createElement(Select, {

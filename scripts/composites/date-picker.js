@@ -38,6 +38,14 @@
      onRangeChange  (from, to) => void — fired only once BOTH ends are
                     chosen (not after the first click)
 
+     plain          true => skip the /api/dates fetch (no density dots)
+                    and, in inline mode, omit the legend footer. Backward
+                    compatible / opt-in — default false leaves /safety and
+                    /quality's dotted behaviour untouched. Added for
+                    fix/english-date-field's DateField composite, which
+                    wraps DatePicker as a plain due-date control where the
+                    report-density heat map is just noise.
+
    Exported to:
      window.FieldSight.DatePicker
    ========================================================================== */
@@ -266,6 +274,7 @@
       || 24;
     var site = props.site || null;
     var user = props.user || null;   /* narrows dots to one user's report days */
+    var plain = !!props.plain;       /* skip /api/dates + legend — see header doc */
 
     var refDates = React.useState({ status: 'loading', map: {} });
     var datesS    = refDates[0];
@@ -299,6 +308,7 @@
     var setMonth = refMonth[1];
 
     React.useEffect(function () {
+      if (plain) return undefined; /* leave datesS.map = {} — no dots to fetch */
       var cancelled = false;
       window.FS.api.dates.getDates({ months: monthsRange, site: site, user: user }).then(function (res) {
         if (cancelled) return;
@@ -308,7 +318,7 @@
         setDatesS({ status: 'error', map: {} });
       });
       return function () { cancelled = true; };
-    }, [monthsRange, site, user]);
+    }, [monthsRange, site, user, plain]);
 
     /* When the selected date (or, in range mode, the range start)
        changes externally, follow it in the modal. */
@@ -391,7 +401,7 @@
           onSelect:      function (iso) { props.onChange(iso); },
           onRangeSelect: onRangeSelect,
         }),
-        React.createElement('div', { className: 'fs-date-picker__legend' },
+        plain ? null : React.createElement('div', { className: 'fs-date-picker__legend' },
           React.createElement('span', null,
             React.createElement('span', { className: 'fs-date-picker__cell-dot fs-date-picker__cell-dot--i1' }), ' light'),
           React.createElement('span', null,
