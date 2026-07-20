@@ -5,7 +5,10 @@
 
    Middle column:
      • Header (title + total-sites count)
-     • List of SiteCard rows, each with users/reports/latest KPI mini-strip
+     • List of SiteCard rows, each with users / open actions / last-activity
+       KPI mini-strip (Open + Last activity from the item-store portfolio
+       rollup — /api/org/rollup/portfolio; legacy reports history is
+       right-detail-only now)
      • Click a site → right pane populates
 
    Right detail:
@@ -67,6 +70,18 @@
     return bucket;
   }
 
+  /* Map the portfolio rollup's sites[] (item store — /api/org/rollup/
+     portfolio) by site_id. Card KPIs read open_actions + last_activity_at
+     from here; the legacy reports bucket above is kept ONLY for the
+     right-detail "Recent reports" list. */
+  function bucketRollupBySite(rollupSites) {
+    var map = {};
+    (rollupSites || []).forEach(function (r) {
+      if (r && r.site_id) map[r.site_id] = r;
+    });
+    return map;
+  }
+
   /* Reports carry a `site` field that holds the human site name
      (e.g. "SB1108 Ellesmere College"). Map it to a site_id by
      trying common shapes; gracefully degrades to no-bucket if the
@@ -116,10 +131,16 @@
       Promise.all([
         (orgLive() ? window.FS.api.org.getOrgSites({ includeArchived: showArchived }) : window.FS.api.sites.getSites()),
         window.FS.api.reports.getReportsHistory(50),
+        /* Card KPIs (Open / Last activity) — item-store rollup. KPI-only
+           enrichment: a rollup failure (or an _accessDenied envelope, which
+           has no .sites) must not blank the whole Sites page, so degrade to
+           an empty rollup instead of rejecting the Promise.all. */
+        window.FS.api.org.getPortfolioRollup().catch(function () { return { sites: [] }; }),
       ]).then(function (results) {
         if (cancelled) return;
         var sitesRes  = results[0];
         var reportsRes = results[1];
+        var rollupRes  = results[2];
 
         if (sitesRes && sitesRes._accessDenied) {
           setState({ status: 'access_denied', message: sitesRes.error });
@@ -143,11 +164,13 @@
         }
 
         var reportsBySite = bucketReportsBySite((reportsRes && reportsRes.reports) || []);
+        var rollupBySite = bucketRollupBySite((rollupRes && rollupRes.sites) || []);
 
         setState({
           status:        'ok',
           sites:         sites,
           reportsBySite: reportsBySite,
+          rollupBySite:  rollupBySite,
           role:          (sitesRes && sitesRes.role) || caller.role || '',
         });
 
@@ -455,8 +478,8 @@
       );
     }
 
-    var sites         = state.sites || [];
-    var reportsBySite = state.reportsBySite || {};
+    var sites        = state.sites || [];
+    var rollupBySite = state.rollupBySite || {};
     var selectedId    = props.selectedItem && props.selectedItem.kind === 'site'
       ? props.selectedItem.site_id
       : null;
@@ -506,10 +529,13 @@
 
       React.createElement('div', { className: 'fs-sites__list' },
         sites.map(function (site) {
-          var rows = reportsBySite[site.site_id] || [];
+          /* Card KPIs from the item-store rollup: Open = open action items
+             (open_actions ONLY — no safety flags, per design), Last
+             activity = all-time max topics.report_date (ISO string). */
+          var roll = rollupBySite[site.site_id] || {};
           var kpi = {
-            reports:    rows.length,
-            latestDate: rows.length ? rows[0].date : null,
+            open:         roll.open_actions != null ? roll.open_actions : 0,
+            lastActivity: roll.last_activity_at || null,
           };
           return React.createElement(SiteCard, {
             key:      site.site_id,
