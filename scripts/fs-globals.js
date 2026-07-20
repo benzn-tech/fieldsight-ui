@@ -262,7 +262,8 @@
       level: 3, label: 'Site Manager', scope: SCOPES.SITE,
       defaultLanding: '/today',
       permissions: [
-        P('task','manage',SCOPES.SITE), P('report','create',SCOPES.SITE),
+        P('task','manage',SCOPES.SITE), P('content','edit',SCOPES.SITE),  /* editable content correction (spec §5.5) */
+        P('report','create',SCOPES.SITE),
         P('report','approve',SCOPES.SITE), P('dashboard','view',SCOPES.SITE),
         P('pre_start','manage',SCOPES.SITE), P('evidence','view',SCOPES.SITE),
         P('safety','view',SCOPES.SITE), P('quality','view',SCOPES.SITE),
@@ -281,6 +282,7 @@
         P('report','approve',SCOPES.PROJECT), P('programme','manage',SCOPES.PROJECT),
         P('variance','view',SCOPES.PROJECT), P('task','assign',SCOPES.PROJECT),
         P('task','edit',SCOPES.PROJECT),    /* F1b — own-content edit UI gate parity */
+        P('content','edit',SCOPES.PROJECT), /* editable content correction (spec §5.5) */
         P('pattern','view',SCOPES.PROJECT), P('pm_brief','view',SCOPES.PROJECT),
         P('sites','view',SCOPES.PROJECT),
         P('insights','view',SCOPES.PROJECT),  /* Sprint 9 Track A */

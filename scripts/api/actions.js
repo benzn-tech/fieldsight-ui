@@ -231,6 +231,42 @@
     return Object.assign({ id: actionItemId }, patch || {});
   }
 
+  /* editable-content-correction — PATCH one free-text content field
+     (topic title/summary, action_items.text/responsible, findings.*,
+     safety_observations.observation) by its durable Aurora id. AURORA org
+     write (PATCH /api/org/content/{table}/{id}), mirrors updateAction.
+     Resolves {row, candidates} on success (candidates = D2 glossary diff
+     terms), or {_accessDenied}/{_notFound}. Mock returns the merged patch. */
+  async function updateContent(table, id, patch) {
+    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
+      return window.FS.api.orgRequest(
+        '/content/' + encodeURIComponent(table) + '/' + encodeURIComponent(id),
+        { method: 'PATCH', body: patch || {} });
+    }
+    await window.FS.api.delay(60);
+    return { row: Object.assign({ id: id }, patch || {}), candidates: [] };
+  }
+
+  /* editable-content-correction — content_edits trail for one row. */
+  async function getContentHistory(table, id) {
+    if (!window.FS.api.useMocks) {
+      return window.FS.api.orgRequest(
+        '/content/' + encodeURIComponent(table) + '/' + encodeURIComponent(id) + '/history');
+    }
+    await window.FS.api.delay(40);
+    return { edits: [] };
+  }
+
+  /* editable-content-correction — confirm a glossary candidate into a scoped
+     name_aliases row (site_manager+ enforced server-side). */
+  async function confirmAlias(body) {
+    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
+      return window.FS.api.orgRequest('/aliases', { method: 'POST', body: body || {} });
+    }
+    await window.FS.api.delay(60);
+    return Object.assign({ id: 'mock-alias' }, body || {});
+  }
+
   /* Sprint 4.2 — cross-day audit aggregation. */
   async function getActionsRange(opts) {
     opts = opts || {};
@@ -296,6 +332,9 @@
     toggleAction:    toggleAction,
     createAction:    createAction,
     updateAction:    updateAction,
+    updateContent:   updateContent,
+    getContentHistory: getContentHistory,
+    confirmAlias:    confirmAlias,
     actionKey:       actionKey,
     lookupAction:    lookupAction,
   };

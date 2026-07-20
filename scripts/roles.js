@@ -170,6 +170,7 @@ export const ROLES = {
     defaultLanding: '/today',
     permissions: [
       P('task',      'manage',  SCOPES.SITE),
+      P('content',   'edit',    SCOPES.SITE),   // editable content correction (spec §5.5)
       P('report',    'create',  SCOPES.SITE),
       P('report',    'approve', SCOPES.SITE),
       P('dashboard', 'view',    SCOPES.SITE),
@@ -201,6 +202,7 @@ export const ROLES = {
       P('variance',  'view',    SCOPES.PROJECT),
       P('task',      'assign',  SCOPES.PROJECT),
       P('task',      'edit',    SCOPES.PROJECT),  // F1b — own-content edit UI gate parity
+      P('content',   'edit',    SCOPES.PROJECT),  // editable content correction (spec §5.5)
       P('pattern',   'view',    SCOPES.PROJECT),
       P('pm_brief',  'view',    SCOPES.PROJECT),
       P('sites',     'view',    SCOPES.PROJECT),

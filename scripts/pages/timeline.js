@@ -1279,19 +1279,248 @@
     };
   }
 
+  /* editable-content-correction (Task 18) — D7 two-tier authority: per-item
+     correction (EditableText/canEditContent) is author/pm/site_manager/
+     admin, but PROMOTING a correction to a name_aliases glossary row is
+     site_manager+ only. roles.js/fs-globals.js export ROLES + level +
+     HIERARCHY_ROLES but not a hasMinimumRole helper on window.FS (the plan's
+     "FS.roles.hasMinimumRole(...) if available" hedge — it isn't), so this
+     mirrors roles.js's hasMinimumRole logic locally, plus an isAdmin bypass
+     (consistent with FS.can's own isAdmin short-circuit). */
+  function isSiteManagerPlus(caller) {
+    if (!caller) return false;
+    if (caller.isAdmin === true) return true;
+    var HR = window.FS && window.FS.HIERARCHY_ROLES;
+    var ROLES = window.FS && window.FS.ROLES;
+    if (!HR || !ROLES || HR.indexOf(caller.role) === -1 || HR.indexOf('site_manager') === -1) return false;
+    return (ROLES[caller.role] && ROLES[caller.role].level || 0)
+        >= (ROLES.site_manager && ROLES.site_manager.level || 0);
+  }
+
+  /* editable-content-correction (Task 18 Step 3) — offered by EditableText
+     after a save whose response carries D2 diff candidates. diff_candidates()
+     returns bare strings (new proper-noun-like tokens present in the saved
+     text but not the prior text) — it does NOT pair each with the surface
+     form it replaced, so that "wrong" side is collected from the confirming
+     user rather than guessed. */
+  function GlossaryConfirm(props) {
+    var IconBtn = window.FieldSight.IconButton;
+    var busyRef = React.useState(null);
+    var busyTerm = busyRef[0], setBusyTerm = busyRef[1];
+    return React.createElement('div', { className: 'fs-topic-detail__glossary-confirm' },
+      props.candidates.map(function (term) {
+        function onConfirm() {
+          var wrong = window.prompt(
+            'Add "' + term + '" to the site glossary. What was the previous (incorrect) spelling?', '');
+          if (!wrong || !wrong.trim()) return;
+          setBusyTerm(term);
+          window.FS.api.actions.confirmAlias({
+            wrong_term: wrong.trim(), right_term: term, kind: 'other',
+          }).then(function (res) {
+            setBusyTerm(null);
+            var toast = window.FS && window.FS.toast;
+            if (!res || res._accessDenied) {
+              if (toast) toast.show({ message: (res && res.error) || 'Could not add to glossary',
+                                      tone: 'error', duration: 5000 });
+              return;
+            }
+            if (props.onConfirmed) props.onConfirmed(term);
+            if (toast) toast.show({ message: 'Added "' + term + '" to the glossary',
+                                    tone: 'success', duration: 3000 });
+          }).catch(function () {
+            setBusyTerm(null);
+            var toast = window.FS && window.FS.toast;
+            if (toast) toast.show({ message: 'Could not add to glossary', tone: 'error', duration: 5000 });
+          });
+        }
+        return React.createElement('span', { key: term },
+          'Add to glossary: ' + term + ' ',
+          IconBtn ? React.createElement(IconBtn, {
+            icon: 'check', ariaLabel: 'Confirm "' + term + '" as a glossary correction',
+            size: 'sm', variant: 'ghost', disabled: busyTerm === term,
+            onClick: onConfirm,
+          }) : null,
+        );
+      }),
+    );
+  }
+
+  /* editable-content-correction — inline free-text editor. Blur (or Ctrl+Enter)
+     commits via updateContent(table, id, {field: value}); optimistic, reverts +
+     toasts on failure. Read-only fallback renders `display`.
+     showGlossaryConfirm (Task 18) — when true AND the save response carries
+     D2 diff candidates, renders GlossaryConfirm beneath the textarea. */
+  function EditableText(props) {
+    var editable = props.editable;
+    var ref = React.useState(props.value || '');
+    var value = ref[0], setValue = ref[1];
+    var busyRef = React.useState(false);
+    var busy = busyRef[0], setBusy = busyRef[1];
+    var candidatesRef = React.useState([]);
+    var candidates = candidatesRef[0], setCandidates = candidatesRef[1];
+
+    if (!editable) {
+      return React.createElement(props.tag || 'span',
+        { className: props.className }, props.display != null ? props.display : (props.value || '—'));
+    }
+    function commit() {
+      var next = value;
+      if (next === (props.value || '')) return;
+      setBusy(true);
+      window.FS.api.actions.updateContent(props.table, props.id, (function () {
+        var p = {}; p[props.field] = next; return p;
+      })()).then(function (res) {
+        setBusy(false);
+        if (!res || res._accessDenied || res._notFound) {
+          setValue(props.value || '');
+          var toast = window.FS && window.FS.toast;
+          if (toast) toast.show({ message: (res && res.error) || 'Could not save edit',
+                                  tone: 'error', duration: 5000 });
+          return;
+        }
+        if (props.showGlossaryConfirm && res.candidates && res.candidates.length) {
+          setCandidates(res.candidates);
+        }
+        if (props.onSaved) props.onSaved(res);
+      }).catch(function () {
+        setBusy(false);
+        setValue(props.value || '');
+        var toast = window.FS && window.FS.toast;
+        if (toast) toast.show({ message: 'Could not save edit', tone: 'error', duration: 5000 });
+      });
+    }
+    return React.createElement(React.Fragment, null,
+      React.createElement('textarea', {
+        className: 'fs-content-edit' + (busy ? ' fs-content-edit--busy' : ''),
+        value: value, rows: props.rows || 2, disabled: busy,
+        'aria-label': props.ariaLabel || props.field,
+        onChange: function (e) { setValue(e.target.value); },
+        onBlur: commit,
+        onKeyDown: function (e) { if (e.ctrlKey && e.key === 'Enter') commit(); },
+      }),
+      candidates.length > 0 ? React.createElement(GlossaryConfirm, {
+        candidates: candidates,
+        onConfirmed: function (term) {
+          setCandidates(function (cur) { return cur.filter(function (c) { return c !== term; }); });
+        },
+      }) : null,
+    );
+  }
+
+  /* editable-content-correction (Task 18 Step 1) — content_edits audit
+     trail for one row, mirrors tasks.js's ActionHistoryPanel (fetch on
+     mount, render a list). */
+  function ContentHistoryPanel(props) {
+    var dataRef = React.useState({ status: 'loading' });
+    var data = dataRef[0], setData = dataRef[1];
+    React.useEffect(function () {
+      var alive = true;
+      window.FS.api.actions.getContentHistory(props.table, props.id).then(function (res) {
+        if (!alive) return;
+        setData({ status: 'ok', edits: (res && res.edits) || [] });
+      }).catch(function () { if (alive) setData({ status: 'error', edits: [] }); });
+      return function () { alive = false; };
+    }, [props.table, props.id]);
+    if (data.status === 'loading') return React.createElement('div', { className: 'fs-muted' }, 'Loading…');
+    if (!data.edits.length) return React.createElement('div', { className: 'fs-muted' }, 'No edits yet.');
+    return React.createElement('ul', { className: 'fs-content-history' },
+      data.edits.map(function (e) {
+        return React.createElement('li', { key: e.id, className: 'fs-content-history__item' },
+          React.createElement('span', { className: 'fs-content-history__field' }, e.field),
+          React.createElement('span', { className: 'fs-content-history__diff' },
+            '“' + (e.before_text || '') + '” → “' + (e.after_text || '') + '”'),
+          React.createElement('span', { className: 'fs-content-history__meta' },
+            (e.actor_role || '') + ' · ' + (e.created_at || '')));
+      }));
+  }
+
   function OverviewTab(props) {
     var topic = props.topic;
     var SafetyFlagRow = window.FieldSight.SafetyFlagRow;
     var ActionItemRow = window.FieldSight.ActionItemRow;
+    var IconBtn        = window.FieldSight.IconButton;
 
     var actions = topic.action_items || [];
     var flags   = topic.safety_flags || [];
     var deciss  = topic.key_decisions || [];
+    /* editable-content-correction — `findings` is the raw per-topic passthrough
+       (Task 8, D3 "additive passthrough"); domain==='safety' entries are
+       already surfaced above via `flags` (render_report_shape builds flags
+       FROM the same findings when present), so this section only needs the
+       rest (quality + any other future domain) to avoid showing the same
+       row twice. */
+    var findings = (topic.findings || []).filter(function (f) {
+      return f && f.domain !== 'safety';
+    });
 
-    return React.createElement('div', { className: 'fs-topic-detail__overview' },
-      topic.summary ? React.createElement('p', {
-        className: 'fs-topic-detail__summary',
-      }, topic.summary) : null,
+    /* editable-content-correction — UX-only gate (backend patch_content ACL
+       is authoritative); site_manager+/PM see it via content:edit,
+       report authors see it on their own report via isOwnReport (threaded
+       down from TimelineRightDetail below). hasContentEditPerm (the pure
+       role-permission half, WITHOUT the isOwnReport OR-branch) additionally
+       gates glossary promotion below — D7 requires site_manager+ for that,
+       so an author editing their own report but below site_manager can
+       correct text but not promote it to the glossary. */
+    var caller = (window.AuthMock && window.AuthMock.currentUser) || null;
+    var hasContentEditPerm = !!(window.FS && window.FS.can && window.FS.P
+        && window.FS.can(caller, window.FS.P('content', 'edit')));
+    var canEditContent = hasContentEditPerm || !!props.isOwnReport;
+    var canConfirmGlossary = hasContentEditPerm && isSiteManagerPlus(caller);
+    var topicRowId = topic.topic_row_id;   // durable topics.id (backend Task 8)
+
+    /* Action items + safety flags render via the shared ActionItemRow /
+       SafetyFlagRow composites (unmodified — Task 17 is scoped to
+       timeline.js only), so a per-row pencil toggle swaps in an
+       EditableText for just that field instead of duplicating the
+       composite's own text node. `overrides` remembers the last-saved text
+       per row (keyed by table+id) so the composite keeps showing the
+       corrected value after the inline editor closes; both reset whenever
+       the selected topic changes. */
+    var editingRef = React.useState(null);
+    var editingKey = editingRef[0], setEditingKey = editingRef[1];
+    var overridesRef = React.useState({});
+    var overrides = overridesRef[0], setOverrides = overridesRef[1];
+    /* editable-content-correction (Task 18 Step 2) — Details/History split
+       for this topic's content; resets to Details alongside the edit state
+       whenever the selected topic changes. */
+    var detailTabRef = React.useState('details');
+    var detailTab = detailTabRef[0], setDetailTab = detailTabRef[1];
+    React.useEffect(function () {
+      setEditingKey(null);
+      setOverrides({});
+      setDetailTab('details');
+    }, [topic.topic_id, topicRowId]);
+
+    function editToggle(key, label) {
+      if (!IconBtn || !canEditContent) return null;
+      var active = editingKey === key;
+      return React.createElement(IconBtn, {
+        icon: active ? 'x' : 'pencil',
+        ariaLabel: (active ? 'Cancel editing ' : 'Edit ') + label,
+        size: 'sm', variant: 'ghost',
+        onClick: function () { setEditingKey(active ? null : key); },
+      });
+    }
+
+    /* editable-content-correction (Task 18 Step 2) — Details/History split,
+       same shape as tasks.js's EvidenceTabs usage (~983): 'details' is
+       everything below (unchanged from Task 17); 'history' renders
+       ContentHistoryPanel against the topic's own durable id. Only shown
+       once a durable id exists (meeting topics have none). */
+    var detailsBody = React.createElement('div', { className: 'fs-topic-detail__overview' },
+      React.createElement(EditableText, {
+        /* key forces a fresh mount (and fresh internal useState) whenever the
+           selected topic changes — EditableText seeds its textarea value
+           from props.value ONLY at mount, and this element (unlike the
+           per-row action/flag editors) is always rendered, never toggled
+           off, so without a topic-scoped key it would keep showing the
+           PREVIOUS topic's stale draft after switching topics. */
+        key: 'summary-' + (topicRowId || topic.topic_id),
+        editable: canEditContent && !!topicRowId, table: 'topics', id: topicRowId,
+        field: 'summary', value: topic.summary || '', display: topic.summary,
+        tag: 'p', className: 'fs-topic-detail__summary', rows: 3,
+        ariaLabel: 'Edit topic summary', showGlossaryConfirm: canConfirmGlossary,
+      }),
 
       deciss.length > 0
         ? React.createElement('div', { className: 'fs-topic-detail__section' },
@@ -1332,25 +1561,54 @@
               var idx   = pair.idx;
               var state = pair.state;
               var key   = topic.topic_id + '_' + idx;
+              /* editable-content-correction — text-edit toggle for this
+                 action item (Task 17 Step 3). `override` is the latest
+                 saved text (if any); ActionItemRow keeps rendering it via
+                 `displayAction` so the row shows the correction immediately,
+                 no full topic re-fetch needed. */
+              var editKey  = 'action_items:' + a.id;
+              var override = overrides[editKey];
+              var displayAction = override !== undefined ? Object.assign({}, a, { action: override }) : a;
+              var rowEditable = canEditContent && !!a.id;
               return React.createElement('div', {
                 key:       key,
                 className: 'fs-topic-detail__action-item'
                   + (pair.checked ? ' fs-row--resolved' : ''),
-              }, React.createElement(ActionItemRow, {
-                date:           props.date,
-                topicId:        topic.topic_id,
-                actionIndex:    idx,
-                userFolder:     props.userFolder,
-                action:         a,
-                initialChecked: pair.checked,
-                checkedBy:      state.checked_by,
-                /* fix/action-checkoff-sync (Bug 3) — was omitted, so the
-                   right panel never showed the "· <time>" half of
-                   "Checked by X · <time>" that the middle TopicCard
-                   already renders (topic-card.js ~228). ActionItemRow
-                   already handles both props; this just feeds it. */
-                checkedAt:      state.checked_at,
-              }));
+              },
+                React.createElement('div', { className: 'fs-topic-detail__editable-row' },
+                  React.createElement(ActionItemRow, {
+                    date:           props.date,
+                    topicId:        topic.topic_id,
+                    actionIndex:    idx,
+                    userFolder:     props.userFolder,
+                    action:         displayAction,
+                    initialChecked: pair.checked,
+                    checkedBy:      state.checked_by,
+                    /* fix/action-checkoff-sync (Bug 3) — was omitted, so the
+                       right panel never showed the "· <time>" half of
+                       "Checked by X · <time>" that the middle TopicCard
+                       already renders (topic-card.js ~228). ActionItemRow
+                       already handles both props; this just feeds it. */
+                    checkedAt:      state.checked_at,
+                  }),
+                  rowEditable ? editToggle(editKey, 'action item text') : null,
+                ),
+                rowEditable && editingKey === editKey ? React.createElement(EditableText, {
+                  editable: true, table: 'action_items', id: a.id, field: 'text',
+                  value: override !== undefined ? override : (a.action || ''),
+                  ariaLabel: 'Edit action item text', rows: 2,
+                  showGlossaryConfirm: canConfirmGlossary,
+                  onSaved: function (res) {
+                    var next = res && res.row && res.row.text;
+                    setOverrides(function (cur) {
+                      var n = Object.assign({}, cur);
+                      n[editKey] = next != null ? next : '';
+                      return n;
+                    });
+                    setEditingKey(null);
+                  },
+                }) : null,
+              );
             }),
           )
         : null,
@@ -1361,10 +1619,90 @@
               className: 'fs-topic-detail__section-label fs-topic-detail__section-label--danger',
             }, 'Safety flags'),
             flags.map(function (f, i) {
-              return React.createElement(SafetyFlagRow, { key: i, flag: f });
+              /* editable-content-correction — text-edit toggle for this
+                 safety flag (Task 17 Step 4). flag.source_table (either
+                 'findings' or the legacy 'safety_observations' fallback)
+                 threads straight into updateContent's table argument. */
+              var editKey  = 'flag:' + (f.source_table || '') + ':' + f.id;
+              var override = overrides[editKey];
+              var displayFlag = override !== undefined ? Object.assign({}, f, { observation: override }) : f;
+              var rowEditable = canEditContent && !!f.id;
+              return React.createElement('div', { key: i },
+                React.createElement('div', { className: 'fs-topic-detail__editable-row' },
+                  React.createElement(SafetyFlagRow, { flag: displayFlag }),
+                  rowEditable ? editToggle(editKey, 'safety flag observation') : null,
+                ),
+                rowEditable && editingKey === editKey ? React.createElement(EditableText, {
+                  editable: true, table: f.source_table, id: f.id, field: 'observation',
+                  value: override !== undefined ? override : (f.observation || ''),
+                  ariaLabel: 'Edit safety flag observation', rows: 2,
+                  showGlossaryConfirm: canConfirmGlossary,
+                  onSaved: function (res) {
+                    var next = res && res.row && res.row.observation;
+                    setOverrides(function (cur) {
+                      var n = Object.assign({}, cur);
+                      n[editKey] = next != null ? next : '';
+                      return n;
+                    });
+                    setEditingKey(null);
+                  },
+                }) : null,
+              );
             }),
           )
         : null,
+
+      /* editable-content-correction (Task 17 Step 4) — findings not already
+         covered by the Safety flags section above (i.e. quality-domain +
+         any future domain). No pre-existing composite shows this content,
+         so — unlike action items/flags — EditableText is the sole display
+         surface here, exactly like the summary field above: always an
+         inline editor when canEditContent, otherwise a plain read-only
+         node. */
+      findings.length > 0
+        ? React.createElement('div', { className: 'fs-topic-detail__section' },
+            React.createElement('div', { className: 'fs-topic-detail__section-label' },
+              'Findings'),
+            findings.map(function (f, i) {
+              var rowEditable = canEditContent && !!f.id;
+              var caption = [f.entity_name, f.entity_trade].filter(Boolean).join(' · ');
+              return React.createElement('div', { key: f.id || i, className: 'fs-topic-detail__finding' },
+                caption ? React.createElement('div', {
+                  className: 'fs-topic-detail__finding-caption',
+                }, caption) : null,
+                React.createElement(EditableText, {
+                  editable: rowEditable, table: 'findings', id: f.id, field: 'observation',
+                  value: f.observation || '', display: f.observation,
+                  tag: 'div', className: 'fs-topic-detail__finding-observation', rows: 2,
+                  ariaLabel: 'Edit finding observation', showGlossaryConfirm: canConfirmGlossary,
+                }),
+                (rowEditable || f.recommended_action) ? React.createElement(EditableText, {
+                  editable: rowEditable, table: 'findings', id: f.id, field: 'recommended_action',
+                  value: f.recommended_action || '', display: f.recommended_action,
+                  tag: 'div', className: 'fs-topic-detail__finding-action', rows: 2,
+                  ariaLabel: 'Edit finding recommended action', showGlossaryConfirm: canConfirmGlossary,
+                }) : null,
+              );
+            }),
+          )
+        : null,
+    );
+
+    var EvidenceTabs = window.FieldSight.EvidenceTabs;
+    if (!topicRowId || !EvidenceTabs) return detailsBody;
+
+    return React.createElement(React.Fragment, null,
+      React.createElement(EvidenceTabs, {
+        tabs: [
+          { key: 'details', label: 'Details' },
+          { key: 'history', label: 'History' },
+        ],
+        active:   detailTab,
+        onChange: setDetailTab,
+      }),
+      detailTab === 'history'
+        ? React.createElement(ContentHistoryPanel, { table: 'topics', id: topicRowId })
+        : detailsBody,
     );
   }
 
@@ -1553,6 +1891,15 @@
        for callers that only set that. */
     var ownerFolder = sel.user || (sel.user_name && window.FS.api.folderName(sel.user_name)) || null;
 
+    /* editable-content-correction — "own report" fallback for the UX-only
+       canEditContent gate (Task 17): true when the signed-in caller IS the
+       report owner, mirroring how ownerFolder is derived above. Threaded
+       into OverviewTab as props.isOwnReport and reused below for the
+       topic-title editor. */
+    var rdCaller = (window.AuthMock && window.AuthMock.currentUser) || null;
+    var isOwnReport = !!(ownerFolder && rdCaller && rdCaller.name
+        && window.FS.api.folderName(rdCaller.name) === ownerFolder);
+
     var mediaProps = {
       date:  sel.date,
       user:  sel.user || (sel.user_name && window.FS.api.folderName(sel.user_name)),
@@ -1586,6 +1933,7 @@
       bodyByTab = {
         overview:   React.createElement(OverviewTab, {
           topic: topic, date: sel.date, actionState: refActions[0], userFolder: ownerFolder,
+          isOwnReport: isOwnReport,
         }),
         transcript: TranscriptList ? React.createElement(TranscriptList,
           Object.assign({}, mediaProps, {
@@ -1614,6 +1962,17 @@
       };
     }
 
+    /* editable-content-correction (Task 17 Step 5) — topic title, single
+       row keyed off the same durable topics.id as the summary field
+       (OverviewTab computes its own copy of this gate; safe for meeting
+       topics too since they carry no topic_row_id, so `editable` is
+       always false there regardless of canEditTitle). */
+    var hasContentEditPermTitle = !!(window.FS && window.FS.can && window.FS.P
+        && window.FS.can(rdCaller, window.FS.P('content', 'edit')));
+    var canEditTitle = hasContentEditPermTitle || isOwnReport;
+    var canConfirmGlossaryTitle = hasContentEditPermTitle && isSiteManagerPlus(rdCaller);
+    var titleRowId = topic.topic_row_id;
+
     /* Status pill (meeting only) — sits next to the category badge. */
     var statusPill = isMeeting && topic.status
       ? React.createElement(Badge, {
@@ -1631,8 +1990,15 @@
         React.createElement('div', { className: 'fs-topic-detail__header-main' },
           React.createElement('div', { className: 'fs-topic-detail__time' },
             topic.time_range || '—'),
-          React.createElement('h2', { className: 'fs-topic-detail__title' },
-            topic.topic_title || '(untitled)'),
+          React.createElement(EditableText, {
+            /* key forces a fresh mount per topic — see the matching comment
+               on the summary EditableText above (same stale-draft risk). */
+            key: 'title-' + (titleRowId || topic.topic_id || (sel && sel.id)),
+            editable: canEditTitle && !!titleRowId, table: 'topics', id: titleRowId,
+            field: 'title', value: topic.topic_title || '', display: topic.topic_title || '(untitled)',
+            tag: 'h2', className: 'fs-topic-detail__title', rows: 1,
+            ariaLabel: 'Edit topic title', showGlossaryConfirm: canConfirmGlossaryTitle,
+          }),
           React.createElement('div', { className: 'fs-topic-detail__metaline' },
             CategoryBadge ? React.createElement(CategoryBadge, {
               category: topic.category,
