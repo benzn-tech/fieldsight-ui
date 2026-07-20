@@ -329,11 +329,17 @@
   // -------- strategic rollup (feat 4c) --------
   /* GET /api/org/rollup/portfolio → { sites: [{ site_id (ORG UUID),
      open_safety, open_high_safety, open_actions, total_actions,
-     overdue_actions, topics_count, participants, status }] }. Safety/
-     actions counts are all-time, topics_count is a 30-day window. ACL:
-     admin/gm see all company sites, everyone else sees their
-     memberships. Mock mirrors getLiveItems' "nothing until seeded"
-     posture — empty sites list, no fabricated rollup rows. */
+     overdue_actions, topics_count, participants, last_activity_at,
+     status }] }. Safety/actions counts are all-time, topics_count/
+     participants a 30-day window, last_activity_at the ALL-TIME
+     MAX(topics.report_date) as an ISO YYYY-MM-DD string (null until the
+     site has any topic). Sites cards read open_actions + last_activity_at
+     for their Open / Last activity KPIs. ACL: admin/gm see all company
+     sites, everyone else sees their memberships (platform_admin gets
+     cross-company reach via _allowed_site_ids server-side). Mock mirrors
+     getLiveItems' "nothing until seeded" posture — empty sites list, no
+     fabricated rollup rows (pure ?mocks=1 preview renders Open 0 / '—';
+     dev Amplify uses LIVE reads so it shows real values). */
   async function getPortfolioRollup() {
     if (orgLive()) return api.orgRequest('/rollup/portfolio');
     await api.delay();

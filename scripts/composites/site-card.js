@@ -4,14 +4,15 @@
    Renders one site as a clickable Card row on the /sites page:
 
      Header   : site name + location + client
-     KPI strip: users · reports · latest report date
+     KPI strip: users · open action items · last activity date
 
    Mirrors the visual pattern of TaskCard / UrgentCard so the Sites
    page feels consistent with the rest of the prototype.
 
    Props:
      site       { site_id, name, location, client, user_count, company_name }
-     kpi        { reports?, latestDate? } — derived in the page
+     kpi        { open?, lastActivity? } — derived in the page from the
+                item-store portfolio rollup (open_actions / last_activity_at)
      selected   boolean — applies a selected style to the card
      onSelect   (site) => void — click handler
 
@@ -79,12 +80,12 @@
             value: site.user_count != null ? site.user_count : '—',
           }),
           React.createElement(Kpi, {
-            label: 'Reports',
-            value: kpi.reports != null ? kpi.reports : 0,
+            label: 'Open',
+            value: kpi.open != null ? kpi.open : 0,
           }),
           React.createElement(Kpi, {
-            label: 'Latest',
-            value: fmtDate(kpi.latestDate),
+            label: 'Last activity',
+            value: fmtDate(kpi.lastActivity),
             mono:  true,
           }),
         ),
