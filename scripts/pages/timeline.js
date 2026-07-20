@@ -375,12 +375,34 @@
       var cancelled = false;
       setState({ status: 'loading' });
 
-      window.FS.api.sites.getSiteUsers(props.site).then(function (res) {
+      Promise.all([
+        window.FS.api.sites.getSiteUsers(props.site),
+        /* aggregation-attribution fix: recorders whose topics are site-tagged
+           via G5b (recordings.site_id) but who are NOT site members. Without
+           this union, a non-member recorder's topics (e.g. an admin's) vanish
+           from the site view even though ?user=<folder> shows them. Degrade to
+           members-only if the contributors call fails. */
+        window.FS.api.org.getSiteContributors(props.site, props.date)
+          .catch(function () { return { folders: [] }; }),
+      ]).then(function (both) {
         if (cancelled) return;
-        var users  = (res && res.users) || [];
-        var thunks = users.map(function (u) {
+        var users  = (both[0] && both[0].users) || [];
+        /* folder → section user object. Members first (richer: name / role /
+           device), then contributor-only folders as synthetic entries so a
+           non-member recorder still gets a section. Deduped by folder. */
+        var byFolder = {};
+        users.forEach(function (u) {
+          if (u && u.folder_name) byFolder[u.folder_name] = u;
+        });
+        ((both[1] && both[1].folders) || []).forEach(function (folder) {
+          if (folder && !byFolder[folder]) {
+            byFolder[folder] = { folder_name: folder, name: unfolder(folder), role: null };
+          }
+        });
+        var thunks = Object.keys(byFolder).map(function (folder) {
+          var u = byFolder[folder];
           return function () {
-            return window.FS.api.timeline.getTimeline({ date: props.date, user: u.folder_name })
+            return window.FS.api.timeline.getTimeline({ date: props.date, user: folder })
               .then(function (r) { return { user: u, report: r }; });
           };
         });
