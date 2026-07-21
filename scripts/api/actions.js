@@ -267,6 +267,33 @@
     return Object.assign({ id: 'mock-alias' }, body || {});
   }
 
+  async function createRedaction(targetId, reason) {
+    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
+      return window.FS.api.orgRequest('/redactions',
+        { method: 'POST', body: { target_id: targetId, reason: reason || 'non_work' } });
+    }
+    await window.FS.api.delay(60);
+    return { redaction: { id: 'mock-red', target_id: targetId, reason: reason || 'non_work' } };
+  }
+
+  async function revertRedaction(redactionId) {
+    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
+      return window.FS.api.orgRequest('/redactions/' + encodeURIComponent(redactionId) + '/revert',
+        { method: 'POST', body: {} });
+    }
+    await window.FS.api.delay(60);
+    return { redaction: { id: redactionId, reverted_at: 'mock' } };
+  }
+
+  async function submitClassificationFeedback(payload) {
+    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
+      return window.FS.api.orgRequest('/classification-feedback',
+        { method: 'POST', body: payload || {} });
+    }
+    await window.FS.api.delay(60);
+    return { feedback: Object.assign({ id: 'mock-fb' }, payload || {}) };
+  }
+
   /* Sprint 4.2 — cross-day audit aggregation. */
   async function getActionsRange(opts) {
     opts = opts || {};
@@ -335,6 +362,9 @@
     updateContent:   updateContent,
     getContentHistory: getContentHistory,
     confirmAlias:    confirmAlias,
+    createRedaction: createRedaction,
+    revertRedaction: revertRedaction,
+    submitClassificationFeedback: submitClassificationFeedback,
     actionKey:       actionKey,
     lookupAction:    lookupAction,
   };
