@@ -1084,6 +1084,18 @@
       ? props.selectedItem.topic_id
       : null;
 
+    /* life-conversation separation (Task 11) — same content:edit-OR-own-report
+       gate OverviewTab computes (~line 1489), recomputed here because the
+       removed-area section lives in the middle column, a different function.
+       `caller` (~line 660) and `report`/`user` (~line 1045/662) are already
+       in scope by this point (past every early-return branch above). */
+    var hasContentEditPerm = !!(window.FS && window.FS.can && window.FS.P
+        && window.FS.can(caller, window.FS.P('content', 'edit')));
+    var ownerFolder = user || (report && report.user_name && window.FS.api.folderName(report.user_name)) || null;
+    var isOwnReport = !!(ownerFolder && caller && caller.name
+        && window.FS.api.folderName(caller.name) === ownerFolder);
+    var canEditContent = hasContentEditPerm || isOwnReport;
+
     var AskChat            = window.FieldSight.AskChat;
     var MeetingTopicCard   = window.FieldSight.MeetingTopicCard;
 
@@ -1174,6 +1186,13 @@
       );
     }
 
+    /* life-conversation separation (Task 11) — a redacted (confirmed-personal)
+       topic is hidden from the default topic list and relocated to a
+       collapsed "已移除 / 个人" section with a revert control, reviewers only
+       (spec §5 "hidden + recoverable"). */
+    var visibleTopics = (report.topics || []).filter(function (t) { return !t.redacted; });
+    var removedTopics = (report.topics || []).filter(function (t) { return t.redacted; });
+
     /* ---- Daily report view (default) ---- */
     return React.createElement('div', {
       className: 'fs-timeline-page',
@@ -1190,7 +1209,7 @@
       React.createElement('div', { className: 'fs-timeline-page__section-label' },
         'Topics'),
       React.createElement('div', { className: 'fs-timeline-page__topics' },
-        (report.topics || []).map(function (topic) {
+        visibleTopics.map(function (topic) {
           /* Sprint 6.6.4 — focus mode + flash. When a deep-link target
              is set, the matching topic auto-opens (via defaultOpen
              boolean) and gets highlight=true (scrollIntoView + 3-pulse
@@ -1239,6 +1258,18 @@
         }),
       ),
 
+      /* life-conversation separation (Task 11) — collapsed "已移除 / 个人"
+         area: confirmed-personal topics are hidden from the list above but
+         stay recoverable here (reviewers only) via revertRedaction. */
+      removedTopics.length && canEditContent ? React.createElement('details', {
+        className: 'fs-timeline-page__removed',
+      },
+        React.createElement('summary', null, '已移除 / 个人 (' + removedTopics.length + ')'),
+        removedTopics.map(function (topic) {
+          return React.createElement(RemovedTopic, { key: topic.topic_id, topic: topic });
+        }),
+      ) : null,
+
       /* Per-report Ask Agent (PLAN Phase G). Stateless — each question
          is independent. Scope='both' grounds across transcript +
          report. */
@@ -1260,6 +1291,31 @@
         }),
       ) : null,
     );
+  }
+
+  /* life-conversation separation (Task 11) — one row in TimelineMiddleColumn's
+     "已移除 / 个人" collapsed section. Module-level (not nested inside
+     TimelineMiddleColumn) to match this file's convention (GlossaryConfirm/
+     EditableText/etc. are all siblings, not re-declared every render). */
+  function RemovedTopic(props) {
+    var IconBtn = window.FieldSight.IconButton;
+    var busyRef = React.useState(false); var busy = busyRef[0], setBusy = busyRef[1];
+    return React.createElement('div', { className: 'fs-timeline-page__removed-row' },
+      React.createElement('span', null, unfolder(props.topic.topic_title || props.topic.title || 'Removed')),
+      IconBtn ? React.createElement(IconBtn, {
+        icon: 'rotate-ccw', size: 'sm', variant: 'ghost', disabled: busy || !props.topic.redaction_id,
+        ariaLabel: '恢复',
+        onClick: function () {
+          if (busy || !props.topic.redaction_id) return;
+          setBusy(true);
+          window.FS.api.actions.revertRedaction(props.topic.redaction_id).then(function (r) {
+            setBusy(false);
+            var toast = window.FS && window.FS.toast;
+            if (!r || r._accessDenied) { if (toast) toast.show({ message: (r && r.error) || 'Could not restore', tone: 'error', duration: 5000 }); return; }
+            if (toast) toast.show({ message: 'Restored', tone: 'success', duration: 3000 });
+          }).catch(function () { setBusy(false); });
+        },
+      }) : null);
   }
 
   /* =====================================================================
@@ -1364,6 +1420,64 @@
           }) : null,
         );
       }),
+    );
+  }
+
+  /* life-conversation separation (Task 11) — one confirm+remove action writes
+     BOTH the redaction (createRedaction) and the human verdict
+     (submitClassificationFeedback). Placed beside GlossaryConfirm since both
+     are small per-topic review affordances rendered inline in the detail
+     pane. */
+  function TopicReviewButtons(props) {
+    // props: { topicRowId, workClass, workConfidence, category, onRemoved }
+    var IconBtn = window.FieldSight.IconButton;
+    var busyRef = React.useState(false);
+    var busy = busyRef[0], setBusy = busyRef[1];
+    if (!IconBtn || !props.topicRowId) return null;
+    var isFlagged = props.workClass === 'non_work';
+
+    function toast(msg, tone) {
+      var t = window.FS && window.FS.toast;
+      if (t) t.show({ message: msg, tone: tone || 'success', duration: tone === 'error' ? 5000 : 3000 });
+    }
+    function feedback(verdict) {
+      return window.FS.api.actions.submitClassificationFeedback({
+        topic_id: props.topicRowId, human_verdict: verdict,
+        classifier_verdict: props.workClass || null,
+        classifier_confidence: props.workConfidence != null ? props.workConfidence : null,
+        topic_category: props.category || null,
+      });
+    }
+    function remove(verdict) {
+      if (busy) return;
+      setBusy(true);
+      Promise.all([
+        window.FS.api.actions.createRedaction(props.topicRowId, 'non_work'),
+        feedback(verdict),
+      ]).then(function (r) {
+        setBusy(false);
+        if (!r[0] || r[0]._accessDenied || r[0]._notFound) { toast((r[0] && r[0].error) || 'Could not remove', 'error'); return; }
+        toast('Removed from reports');
+        if (props.onRemoved) props.onRemoved();
+      }).catch(function () { setBusy(false); toast('Could not remove', 'error'); });
+    }
+    function keepAsWork() {
+      if (busy) return;
+      setBusy(true);
+      feedback('reject_is_work').then(function () { setBusy(false); toast('Kept as work'); })
+        .catch(function () { setBusy(false); toast('Could not save', 'error'); });
+    }
+
+    return React.createElement('div', { className: 'fs-topic-detail__review' },
+      isFlagged
+        ? React.createElement(React.Fragment, null,
+            React.createElement('span', { className: 'fs-topic-detail__review-flag' }, '疑似个人 · 待确认 '),
+            React.createElement(IconBtn, { icon: 'check', size: 'sm', variant: 'ghost', disabled: busy,
+              ariaLabel: '确认个人并移除', onClick: function () { remove('confirm_non_work'); } }),
+            React.createElement(IconBtn, { icon: 'x', size: 'sm', variant: 'ghost', disabled: busy,
+              ariaLabel: '其实是工作', onClick: keepAsWork }))
+        : React.createElement(IconBtn, { icon: 'user-x', size: 'sm', variant: 'ghost', disabled: busy,
+            ariaLabel: '标为个人并移除', onClick: function () { remove('missed_personal'); } }),
     );
   }
 
@@ -1530,6 +1644,18 @@
        ContentHistoryPanel against the topic's own durable id. Only shown
        once a durable id exists (meeting topics have none). */
     var detailsBody = React.createElement('div', { className: 'fs-topic-detail__overview' },
+      /* life-conversation separation (Task 11) — reviewer-only affordance
+         near the topic title: confirm/reject the machine's work_class call,
+         soft-removing a confirmed-personal topic (createRedaction) and
+         logging the human verdict (submitClassificationFeedback). Gated by
+         the same canEditContent used by the edit affordances below. */
+      canEditContent && topicRowId ? React.createElement(TopicReviewButtons, {
+        topicRowId:     topicRowId,
+        workClass:      topic.work_class,
+        workConfidence: topic.work_confidence,
+        category:       topic.category,
+        onRemoved:      null,   // v1: toast + next data refresh; no onContentChanged prop exists here
+      }) : null,
       React.createElement(EditableText, {
         /* key forces a fresh mount (and fresh internal useState) whenever the
            selected topic changes — EditableText seeds its textarea value
