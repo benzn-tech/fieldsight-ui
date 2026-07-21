@@ -132,6 +132,13 @@
     if (value !== undefined)        inputProps.value = value;
     else if (defaultValue !== undefined) inputProps.defaultValue = defaultValue;
 
+    /* Force the native date/time picker + placeholder to English regardless of
+       the browser's OS locale (was rendering the calendar in Chinese). */
+    if (type === 'date' || type === 'time' || type === 'datetime-local' ||
+        type === 'month' || type === 'week') {
+      inputProps.lang = 'en';
+    }
+
     return React.createElement(FieldShell, {
       id: id, size: size, label: label, required: required,
       hint: hint, error: error, disabled: disabled,

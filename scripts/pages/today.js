@@ -2127,12 +2127,16 @@
         onChange: function (e) { commitTaskField('status', e.target.value); },
       }) : item.status;
 
-      /* BUG-19 — a native date input's value/onChange are already plain
-         'YYYY-MM-DD' strings (or '' for empty); no Date() parse needed
-         either direction, so there's nothing here to get NZDT-wrong. */
-      var dueCell = fieldsEditable ? React.createElement(Input, {
-        type: 'date', size: 'sm', fullWidth: true, value: dueValue,
-        onChange: function (e) { commitTaskField('deadline', e.target.value || null); },
+      /* fix/english-date-field — native <input type="date"> replaced with
+         DateField (in-page English, theme-aware picker; the native
+         calendar popup renders in the OS locale and can't be forced to
+         English via HTML/CSS — see date-field.js header doc). DateField's
+         onChange already hands back 'YYYY-MM-DD' | null directly — no
+         Date() parse either direction, so there's nothing here to get
+         NZDT-wrong. */
+      var dueCell = fieldsEditable ? React.createElement(fs.DateField, {
+        size: 'sm', value: dueValue || null,
+        onChange: function (iso) { commitTaskField('deadline', iso || null); },
       }) : (item.dueTime || 'None set');
 
       var assigneeCell = assigneeEditable ? React.createElement(Select, {

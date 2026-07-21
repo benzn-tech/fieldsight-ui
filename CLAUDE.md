@@ -247,6 +247,18 @@ re-introducing one is the most common way to break the prototype.
 - **Modal `siteId` falls back to `fixtures.sites.sites[0].site_id`**
   when `state.user` is null (admin path), otherwise the modal mounts
   with `siteId=''` and silently no-ops on submit.
+- **Site-aggregated timeline must union non-member contributors.**
+  `AggregatedDayView` fans out `getSiteUsers × getTimeline` — folders
+  enumerated by site MEMBERSHIP only. A recording site-tagged via
+  pipeline G5b (`recordings.site_id`) to a non-member recorder — e.g. an
+  admin who walked a site they don't belong to — is attributed to the
+  site yet absent from memberships, so its topics vanish from the site
+  view even though `?user=<folder>` still shows them. Fix: also fetch
+  `org.getSiteContributors(site, date)`
+  (`GET /api/org/sites/{id}/contributors`) and fan out over
+  `members ∪ contributors`, deduped by folder. The contributors call
+  degrades to members-only on failure, so a stale backend is a no-op,
+  not a regression.
 
 ### Showcase
 

@@ -326,14 +326,38 @@
     return { users: [], site: siteId };
   }
 
+  /* GET /api/org/sites/{id}/contributors?date=YYYY-MM-DD → { folders:[...] }.
+     Recording folders with topics attributed to (site,date) that may NOT be
+     site members (G5b site-tagging of a non-member recorder, e.g. an admin).
+     The aggregated timeline unions these with getSiteMembers folders so their
+     site-tagged topics stop vanishing from the site view (aggregation quirk).
+     Live READ (org reads run live even on dev); mock / access-denied / no date
+     → no extra folders, i.e. members-only fan-out, unchanged. */
+  async function getSiteContributors(siteId, date) {
+    if (orgLive() && date) {
+      var res = await api.orgRequest('/sites/' + encodeURIComponent(siteId)
+        + '/contributors?date=' + encodeURIComponent(date));
+      if (res && (res._accessDenied || res._notFound)) return { folders: [] };
+      return { folders: (res && res.folders) || [] };
+    }
+    await api.delay();
+    return { folders: [] };
+  }
+
   // -------- strategic rollup (feat 4c) --------
   /* GET /api/org/rollup/portfolio → { sites: [{ site_id (ORG UUID),
      open_safety, open_high_safety, open_actions, total_actions,
-     overdue_actions, topics_count, participants, status }] }. Safety/
-     actions counts are all-time, topics_count is a 30-day window. ACL:
-     admin/gm see all company sites, everyone else sees their
-     memberships. Mock mirrors getLiveItems' "nothing until seeded"
-     posture — empty sites list, no fabricated rollup rows. */
+     overdue_actions, topics_count, participants, last_activity_at,
+     status }] }. Safety/actions counts are all-time, topics_count/
+     participants a 30-day window, last_activity_at the ALL-TIME
+     MAX(topics.report_date) as an ISO YYYY-MM-DD string (null until the
+     site has any topic). Sites cards read open_actions + last_activity_at
+     for their Open / Last activity KPIs. ACL: admin/gm see all company
+     sites, everyone else sees their memberships (platform_admin gets
+     cross-company reach via _allowed_site_ids server-side). Mock mirrors
+     getLiveItems' "nothing until seeded" posture — empty sites list, no
+     fabricated rollup rows (pure ?mocks=1 preview renders Open 0 / '—';
+     dev Amplify uses LIVE reads so it shows real values). */
   async function getPortfolioRollup() {
     if (orgLive()) return api.orgRequest('/rollup/portfolio');
     await api.delay();
@@ -372,6 +396,7 @@
     updateObservation: updateObservation, archiveObservation: archiveObservation,
     getLiveItems: getLiveItems,
     getSiteMembers: getSiteMembers,
+    getSiteContributors: getSiteContributors,
     getPortfolioRollup: getPortfolioRollup,
     _folderName: folderName,   /* exported for batch-2b fan-out reuse */
     _toPageMember: _toPageMember, _toPageSite: _toPageSite,   /* page-shape adapters, batch-2b */

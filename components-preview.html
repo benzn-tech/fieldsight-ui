@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="styles/tokens.css?v=1" />
   <link rel="stylesheet" href="styles/app-shell.css?v=3" />
   <link rel="stylesheet" href="styles/components.css?v=5" />
-  <link rel="stylesheet" href="styles/composites.css?v=15" />
+  <link rel="stylesheet" href="styles/composites.css?v=16" />
 
   <style>
     html, body { overflow: auto; height: auto; }
@@ -97,6 +97,12 @@
   <script type="text/babel" src="scripts/composites/timeline.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/stat-card.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/kpi-strip.js?v=1"></script>
+  <!-- Sprint 2.5 (Phase E) Calendar/date picker — loaded as a dependency of
+       DateField below (inline plain mode); no dedicated showcase section. -->
+  <script type="text/babel" src="scripts/composites/date-picker.js?v=7"></script>
+  <!-- fix/english-date-field — compact English due-date trigger + popover.
+       Must load AFTER date-picker.js. -->
+  <script type="text/babel" src="scripts/composites/date-field.js?v=1"></script>
 
   <!-- Sprint 8 — new L5 composites -->
   <script type="text/babel" src="scripts/composites/error-banner.js?v=1"></script>
@@ -155,7 +161,11 @@
             SuggestionReview,
             /* T4 — shared multi-select hook + bulk-bar (Today Leftover /
                Safety / Quality) */
-            useMultiSelect, MultiSelectBulkBar } = window.FieldSight;
+            useMultiSelect, MultiSelectBulkBar,
+            /* fix/english-date-field — DateField wraps DatePicker
+               (inline plain mode); DatePicker itself is loaded as a
+               dependency but has no dedicated showcase section. */
+            DateField } = window.FieldSight;
 
     function Section({ title, children }) {
       return (
@@ -172,6 +182,32 @@
           <div className="row-label">{label}</div>
           {children}
         </div>
+      );
+    }
+
+    /* fix/english-date-field smoke render — interactive so the popover
+       (open/close, cell click commit, Clear) can actually be exercised,
+       unlike most rows above which are static prop demos. */
+    function DateFieldDemo() {
+      const [sm, setSm]     = React.useState('2026-07-20');
+      const [md, setMd]     = React.useState('2026-07-20');
+      const [lg, setLg]     = React.useState(null);
+      const [dis, setDis]   = React.useState('2026-07-20');
+      return (
+        <Row label="sizes">
+          <div style={{ width: 180 }}>
+            <DateField size="sm" value={sm} onChange={setSm} />
+          </div>
+          <div style={{ width: 200 }}>
+            <DateField size="md" value={md} onChange={setMd} />
+          </div>
+          <div style={{ width: 220 }}>
+            <DateField size="lg" value={lg} onChange={setLg} placeholder="Set date" />
+          </div>
+          <div style={{ width: 200 }}>
+            <DateField size="md" value={dis} onChange={setDis} disabled />
+          </div>
+        </Row>
       );
     }
 
@@ -484,6 +520,16 @@
                         options={[{value:'a', label:'Option A'},{value:'b', label:'Option B'}]} />
               </div>
             </Row>
+          </Section>
+
+          <Section title="fix/english-date-field · DateField">
+            <p className="subtitle" style={{ margin: '0 0 10px' }}>
+              In-page English, theme-aware replacement for native
+              <code>&lt;input type="date"&gt;</code> — its calendar popup
+              can't be forced to English via HTML/CSS. Wraps DatePicker in
+              <code> inline plain</code> mode (no /api/dates density dots).
+            </p>
+            <DateFieldDemo />
           </Section>
 
           <Section title="Real-world form composition">
