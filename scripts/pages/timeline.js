@@ -1311,7 +1311,7 @@
           window.FS.api.actions.revertRedaction(props.topic.redaction_id).then(function (r) {
             setBusy(false);
             var toast = window.FS && window.FS.toast;
-            if (!r || r._accessDenied) { if (toast) toast.show({ message: (r && r.error) || 'Could not restore', tone: 'error', duration: 5000 }); return; }
+            if (!r || r._accessDenied || r._notFound) { if (toast) toast.show({ message: (r && r.error) || 'Could not restore', tone: 'error', duration: 5000 }); return; }
             if (toast) toast.show({ message: 'Restored', tone: 'success', duration: 3000 });
           }).catch(function () { setBusy(false); });
         },
