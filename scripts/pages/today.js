@@ -2113,7 +2113,10 @@
     if (item.kind === 'task') {
       var priorityValue = draft.priority !== undefined ? draft.priority : priorityLabelToValue(item.priority);
       var statusValue   = draft.status   !== undefined ? draft.status   : statusLabelToValue(item.status);
-      var dueValue      = draft.deadline !== undefined ? draft.deadline : (item.deadline || '');
+      /* fix/date-field-crash — DateField needs strict 'YYYY-MM-DD' | null, never
+         the raw free-text deadline (crashes DatePicker on open). Draft is already
+         clean ISO; stored deadline is normalised via resolveDeadline. */
+      var dueValue      = draft.deadline !== undefined ? draft.deadline : ((window.FS.api.resolveDeadline && window.FS.api.resolveDeadline(item.deadline, item.date).absolute) || '');
       var currentAssignee = (item.assignee && item.assignee !== '—') ? item.assignee : '';
       var assigneeValue = draft.responsible !== undefined ? draft.responsible : currentAssignee;
 

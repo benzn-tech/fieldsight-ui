@@ -208,30 +208,37 @@
     if (!reportDateISO || !api || !api.addDaysISO) return { absolute: null, display: text };
 
     var lower = text.toLowerCase();
-    var absolute = null;
 
-    if (/\btoday\b/.test(lower)) {
-      absolute = reportDateISO;
-    } else if (/\btomorrow\b/.test(lower)) {
-      absolute = api.addDaysISO(reportDateISO, 1);
-    } else {
-      var weekdayMatch = lower.match(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday|sun|mon|tues|tue|weds|wed|thurs|thur|thu|fri|sat)\b/);
-      if (weekdayMatch) {
-        var targetDow  = WEEKDAY_INDEX[weekdayMatch[1]];
-        var currentDow = weekdayOfISO(reportDateISO);
-        var delta = (targetDow - currentDow + 7) % 7;
-        if (delta === 0) delta = 7; /* strictly AFTER reportDate, never same-day */
-        absolute = api.addDaysISO(reportDateISO, delta);
-      } else if (/\bnext\s+week\b/.test(lower)) {
-        absolute = api.addDaysISO(reportDateISO, 7);
+    /* An explicit date already in the text is authoritative — the extractor
+       often renders a relative phrase AND the resolved date, e.g. "Week after
+       next Tuesday (2026-07-28 approx.)"; the (2026-07-28) is ground truth and
+       must win over re-deriving the weekday. So try the bare/ISO date FIRST,
+       then fall back to relative phrasing when no explicit date is present. */
+    var absolute = tryParseBareDate(text, reportDateISO);
+
+    if (!absolute) {
+      if (/\btoday\b/.test(lower)) {
+        absolute = reportDateISO;
+      } else if (/\btomorrow\b/.test(lower)) {
+        absolute = api.addDaysISO(reportDateISO, 1);
       } else {
-        var withinMatch = lower.match(/\b(?:within|in)\s+(\d+)\s*(day|week)s?\b/);
-        if (withinMatch) {
-          var n = parseInt(withinMatch[1], 10);
-          var days = withinMatch[2] === 'week' ? n * 7 : n;
-          absolute = api.addDaysISO(reportDateISO, days);
+        var weekdayMatch = lower.match(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday|sun|mon|tues|tue|weds|wed|thurs|thur|thu|fri|sat)\b/);
+        if (weekdayMatch) {
+          var targetDow  = WEEKDAY_INDEX[weekdayMatch[1]];
+          var currentDow = weekdayOfISO(reportDateISO);
+          var delta = (targetDow - currentDow + 7) % 7;
+          if (delta === 0) delta = 7; /* strictly AFTER reportDate, never same-day */
+          absolute = api.addDaysISO(reportDateISO, delta);
+        } else if (/\bnext\s+week\b/.test(lower)) {
+          absolute = api.addDaysISO(reportDateISO, 7);
         } else {
-          absolute = tryParseBareDate(text, reportDateISO);
+          var withinMatch = lower.match(/\b(?:within|in)\s+(\d+)\s*(day|week)s?\b/);
+          if (withinMatch) {
+            var n = parseInt(withinMatch[1], 10);
+            var days = withinMatch[2] === 'week' ? n * 7 : n;
+            absolute = api.addDaysISO(reportDateISO, days);
+          }
+          /* else: no explicit date and no recognised relative phrase -> null */
         }
       }
     }
