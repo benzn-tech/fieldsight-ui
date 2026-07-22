@@ -49,6 +49,66 @@
     return user && (user.role === 'admin' || user.role === 'gm' || user.isAdmin);
   }
 
+  /* ---------- life-conversation separation: optimistic overrides --------- */
+  /* Q2 follow-up. A redaction/revert commits at the org-api, but the next
+     getTimeline often reads a STALE warm-Lambda snapshot for a few seconds
+     (BUG: read-after-write lag on the writer endpoint), so a plain refetch
+     leaves the topic in its old bucket — or worse, flickers back. Instead the
+     review buttons apply an optimistic patch keyed by the durable topic_row_id
+     (stable across the lag, unlike the per-report topic_id); render merges it on
+     top of the fetched report so the topic moves at once, and each refetch
+     reconciles the patch away once the server has caught up. These three pure
+     helpers hold that logic (unit-tested — tests/timeline-redaction-overrides). */
+
+  /* Merge each optimistic patch onto the topic with the matching topic_row_id.
+     Returns a new list; overridden topics are shallow-cloned (never mutated).
+     Topics without a topic_row_id (e.g. meeting topics) are passed through. */
+  function applyTopicOverrides(topics, overrides) {
+    var list = topics || [];
+    if (!overrides || Object.keys(overrides).length === 0) return list;
+    return list.map(function (t) {
+      var patch = t && t.topic_row_id ? overrides[t.topic_row_id] : null;
+      return patch ? Object.assign({}, t, patch) : t;
+    });
+  }
+
+  /* Split the (already override-merged) topics into the visible list and the
+     "已移除 / 个人" area on the redacted flag, preserving order within each. */
+  function partitionTopics(topics) {
+    var visible = [], removed = [];
+    (topics || []).forEach(function (t) {
+      (t && t.redacted ? removed : visible).push(t);
+    });
+    return { visible: visible, removed: removed };
+  }
+
+  /* Given a freshly fetched report, drop every override field the server has
+     now caught up to; an override whose fields are all confirmed is retired.
+     Overrides whose topic is missing from the fresh report are kept (the read
+     hasn't surfaced it yet). null and undefined compare equal (a reverted
+     redaction_id may come back as either). */
+  function reconcileTopicOverrides(overrides, freshTopics) {
+    if (!overrides || Object.keys(overrides).length === 0) return {};
+    var byRow = {};
+    (freshTopics || []).forEach(function (t) {
+      if (t && t.topic_row_id) byRow[t.topic_row_id] = t;
+    });
+    var next = {};
+    Object.keys(overrides).forEach(function (rowId) {
+      var patch = overrides[rowId];
+      var server = byRow[rowId];
+      if (!server) { next[rowId] = patch; return; }   // not yet in the read → keep
+      var remaining = {};
+      Object.keys(patch).forEach(function (field) {
+        var s = server[field] == null ? null : server[field];
+        var p = patch[field] == null ? null : patch[field];
+        if (s !== p) remaining[field] = patch[field];   // server hasn't caught up → keep
+      });
+      if (Object.keys(remaining).length > 0) next[rowId] = remaining;
+    });
+    return next;
+  }
+
   /* Pick the most recent date with a report from /api/dates, or null.
      Mirrors the helper in today.js so the two pages share the same
      fallback semantics — when "today" has no report, the user lands
@@ -740,6 +800,15 @@
     var retryCount = retryRef[0];
     var setRetry   = retryRef[1];
 
+    /* life-conversation separation (Q2) — optimistic redaction/revert patches
+       keyed by durable topic_row_id, merged over the fetched report so a
+       removed/restored topic switches bucket instantly and doesn't flicker on
+       the stale post-write refetch; reconciled away as the org-api read catches
+       up (see applyTopicOverrides / reconcileTopicOverrides above). */
+    var overridesRef = React.useState({});
+    var overrides    = overridesRef[0];
+    var setOverrides = overridesRef[1];
+
     /* Sprint 2.8 (Phase H) — when both a daily report and meeting
        minutes exist for the date, the user picks which to view. */
     var refView = React.useState('daily');
@@ -874,6 +943,10 @@
           actions: actions,
           meeting: meeting,
         });
+        /* Retire any optimistic redaction/revert patch the server has now
+           caught up to; a still-stale read keeps the patch so the topic
+           stays in its optimistic bucket rather than flickering back. */
+        setOverrides(function (cur) { return reconcileTopicOverrides(cur, report.topics); });
       }).catch(function (err) {
         if (cancelled) return;
         setState({ status: 'error', error: { code: (err && err.status) || 0, message: (err && err.message) || 'Could not load report', retryable: true }, retry: function () { setRetry(function (n) { return n + 1; }); } });
@@ -886,10 +959,36 @@
        reflects the new `redacted`/`work_class` state. Decoupled via a window
        event (no prop plumbing through the detail pane). */
     React.useEffect(function () {
-      function onRefresh() { setRetry(function (n) { return n + 1; }); }
+      function onRefresh(e) {
+        /* Q2 — when the review button carries a { topicRowId, patch } detail,
+           apply it optimistically and DON'T refetch: the write already
+           committed, so the patch alone moves the topic to its new bucket at
+           once, with no "Loading report…" flash and no chance of the stale
+           read-after-write refetch clobbering it. Overrides self-heal on the
+           next detail-less refetch (reconcile) or clear on date/user change.
+           Detail-less callers (content edits, keep-as-work) refetch as before —
+           they need fresh server fields the patch layer doesn't carry. */
+        var d = e && e.detail;
+        if (d && d.topicRowId && d.patch) {
+          setOverrides(function (cur) {
+            var next = Object.assign({}, cur);
+            next[d.topicRowId] = Object.assign({}, cur[d.topicRowId], d.patch);
+            return next;
+          });
+          return;
+        }
+        setRetry(function (n) { return n + 1; });
+      }
       window.addEventListener('fs:timeline-refresh', onRefresh);
       return function () { window.removeEventListener('fs:timeline-refresh', onRefresh); };
     }, []);
+
+    /* Drop optimistic patches when the viewed report changes — a new date/user
+       has different topic_row_ids. Keyed on date/user ONLY (never retryCount),
+       so a just-applied patch survives its own reconcile refetch. */
+    React.useEffect(function () {
+      setOverrides({});
+    }, [date, user]);
 
     /* Sprint 6.7.1 — keep state.actions in sync with cross-component
        toggles (the right-detail OverviewTab also renders the same
@@ -1200,8 +1299,9 @@
        topic is hidden from the default topic list and relocated to a
        collapsed "已移除 / 个人" section with a revert control, reviewers only
        (spec §5 "hidden + recoverable"). */
-    var visibleTopics = (report.topics || []).filter(function (t) { return !t.redacted; });
-    var removedTopics = (report.topics || []).filter(function (t) { return t.redacted; });
+    var _partition    = partitionTopics(applyTopicOverrides(report.topics, overrides));
+    var visibleTopics = _partition.visible;
+    var removedTopics = _partition.removed;
 
     /* ---- Daily report view (default) ---- */
     return React.createElement('div', {
@@ -1323,7 +1423,12 @@
             var toast = window.FS && window.FS.toast;
             if (!r || r._accessDenied || r._notFound) { if (toast) toast.show({ message: (r && r.error) || 'Could not restore', tone: 'error', duration: 5000 }); return; }
             if (toast) toast.show({ message: 'Restored', tone: 'success', duration: 3000 });
-            window.dispatchEvent(new CustomEvent('fs:timeline-refresh'));   // topic returns to the visible list
+            /* Optimistic patch (Q2): return the topic to the visible list at
+               once (clear redacted + its id), rather than waiting for the
+               stale post-write refetch to catch up. */
+            window.dispatchEvent(new CustomEvent('fs:timeline-refresh', {
+              detail: { topicRowId: props.topic.topic_row_id, patch: { redacted: false, redaction_id: null } },
+            }));
           }).catch(function () { setBusy(false); });
         },
       }) : null);
@@ -1469,7 +1574,15 @@
         setBusy(false);
         if (!r[0] || r[0]._accessDenied || r[0]._notFound) { toast((r[0] && r[0].error) || 'Could not remove', 'error'); return; }
         toast('Removed from reports');
-        window.dispatchEvent(new CustomEvent('fs:timeline-refresh'));   // refetch -> topic moves to the removed area
+        /* Optimistic patch (Q2): move the topic into the "已移除 / 个人" area
+           immediately, carrying the just-issued redaction id so the revert
+           control there is enabled without waiting for the refetch. */
+        var newId = r[0].redaction && r[0].redaction.id;
+        var patch = { redacted: true };
+        if (newId) patch.redaction_id = newId;
+        window.dispatchEvent(new CustomEvent('fs:timeline-refresh', {
+          detail: { topicRowId: props.topicRowId, patch: patch },
+        }));
         if (props.onRemoved) props.onRemoved();
       }).catch(function () { setBusy(false); toast('Could not remove', 'error'); });
     }
@@ -2212,5 +2325,16 @@
     Middle: TimelineMiddleColumn,
     Right:  TimelineRightDetail,
   };
+
+  /* Expose the pure life-sep override helpers to Node's test runner only
+     (CommonJS). No-op in the browser (Babel standalone leaves `module`
+     undefined), so the page bundle is unaffected. */
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      applyTopicOverrides: applyTopicOverrides,
+      partitionTopics: partitionTopics,
+      reconcileTopicOverrides: reconcileTopicOverrides,
+    };
+  }
 
 })();
