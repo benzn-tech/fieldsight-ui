@@ -379,6 +379,15 @@
     var retryCount = retryRef[0];
     var setRetry   = retryRef[1];
 
+    /* life-conversation separation (Q2) — optimistic redaction/revert patches,
+       same mechanism as TimelineMiddleColumn but applied PER SECTION here. Keyed
+       by durable topic_row_id; merged over each section's report before
+       partitioning so a removed/restored topic switches bucket instantly, with
+       no refetch of this view's expensive per-user fan-out. */
+    var overridesRef = React.useState({});
+    var overrides    = overridesRef[0];
+    var setOverrides = overridesRef[1];
+
     /* fix/action-checkoff-sync (Bug 1) — this view renders ONE date
        (props.date) fanned out across every user on the site, so a
        single getActions(date) call covers every section's TopicCards.
@@ -485,6 +494,13 @@
             return an < bn ? -1 : (an > bn ? 1 : 0);
           });
           setState({ status: 'ok', sections: sections });
+          /* Retire optimistic patches the fresh fan-out has caught up to
+             (across every section's topics). */
+          var freshTopics = [];
+          sections.forEach(function (s) {
+            (s.report.topics || []).forEach(function (t) { freshTopics.push(t); });
+          });
+          setOverrides(function (cur) { return reconcileTopicOverrides(cur, freshTopics); });
         });
       }).catch(function () {
         if (cancelled) return;
@@ -497,6 +513,28 @@
 
       return function () { cancelled = true; };
     }, [props.site, props.date, retryCount]);
+
+    /* Q2 — apply optimistic redaction/revert patches dispatched by the shared
+       right-detail review buttons, and reset them when the viewed day/site
+       changes. Mirrors TimelineMiddleColumn; both views' listeners coexist
+       harmlessly (only the mounted-and-rendered view's overrides are read). */
+    React.useEffect(function () {
+      function onRefresh(e) {
+        var d = e && e.detail;
+        if (d && d.topicRowId && d.patch) {
+          setOverrides(function (cur) {
+            var next = Object.assign({}, cur);
+            next[d.topicRowId] = Object.assign({}, cur[d.topicRowId], d.patch);
+            return next;
+          });
+          return;   // patch alone moves the topic; skip the expensive refetch
+        }
+        setRetry(function (n) { return n + 1; });
+      }
+      window.addEventListener('fs:timeline-refresh', onRefresh);
+      return function () { window.removeEventListener('fs:timeline-refresh', onRefresh); };
+    }, []);
+    React.useEffect(function () { setOverrides({}); }, [props.site, props.date]);
 
     if (state.status === 'loading') {
       return React.createElement('div', { className: 'fs-timeline-page__loading' },
@@ -529,6 +567,15 @@
       ? props.selectedItem.id
       : null;
 
+    /* life-conversation separation (Q2) — same content:edit-OR-own-report gate
+       the single-user view and the detail-pane review buttons use, so a
+       reviewer's per-section "已移除 / 个人" area shows exactly where the review
+       buttons do. hasContentEditPerm is caller-level; isOwnReport is per-section
+       (computed inside the map). */
+    var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
+    var hasContentEditPerm = !!(window.FS && window.FS.can && window.FS.P
+        && window.FS.can(caller, window.FS.P('content', 'edit')));
+
     return React.createElement(React.Fragment, null,
       sections.map(function (section) {
         var report         = section.report;
@@ -537,6 +584,13 @@
         var roleLabel = section.user.role
           ? section.user.role.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); })
           : null;
+
+        /* Q2 — merge optimistic patches, then split this section's topics into
+           the visible list and its own "已移除 / 个人" area. */
+        var _p = partitionTopics(applyTopicOverrides(report.topics, overrides));
+        var isOwnReport = !!(caller && caller.name
+            && window.FS.api.folderName(caller.name) === sectionUser);
+        var sectionCanEdit = hasContentEditPerm || isOwnReport;
 
         return React.createElement('div', {
           key:       sectionUser,
@@ -570,7 +624,7 @@
           React.createElement('div', { className: 'fs-timeline-page__section-label' },
             'Topics'),
           React.createElement('div', { className: 'fs-timeline-page__topics' },
-            (report.topics || []).map(function (topic) {
+            _p.visible.map(function (topic) {
               return React.createElement(TopicCard, {
                 key:           topic.topic_id,
                 topic:         topic,
@@ -605,6 +659,22 @@
               });
             }),
           ),
+
+          /* life-conversation separation (Q2) — this section's collapsed
+             "已移除 / 个人" area, mirroring the single-user view. Reviewer-only
+             (sectionCanEdit); redacted topics stay recoverable via RemovedTopic.
+             Keys are namespaced by section owner (topic_id is per-report). */
+          _p.removed.length && sectionCanEdit ? React.createElement('details', {
+            className: 'fs-timeline-page__removed',
+          },
+            React.createElement('summary', null, '已移除 / 个人 (' + _p.removed.length + ')'),
+            _p.removed.map(function (topic) {
+              return React.createElement(RemovedTopic, {
+                key:   sectionUser + '_' + topic.topic_id,
+                topic: topic,
+              });
+            }),
+          ) : null,
         );
       }),
     );
