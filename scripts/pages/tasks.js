@@ -887,7 +887,12 @@
 
     var priorityValue   = draft.priority   !== undefined ? draft.priority   : (row.priority || 'medium');
     var statusValue     = draft.status     !== undefined ? draft.status     : (row.status   || 'open');
-    var dueValue         = draft.deadline   !== undefined ? draft.deadline   : (row.deadline  || '');
+    /* fix/date-field-crash — DateField needs a strict 'YYYY-MM-DD' | null, never
+       the raw free-text deadline ("Week after next Tuesday (2026-07-28 approx.)"),
+       which crashes DatePicker on open. A draft is already a clean ISO from a
+       prior DateField onChange; the stored deadline is normalised via
+       resolveDeadline (embedded date wins) so old fuzzy values open + edit. */
+    var dueValue         = draft.deadline   !== undefined ? draft.deadline   : (window.FS.api.resolveDeadline(row.deadline, row.date).absolute || '');
     var currentAssignee = row.responsible || '';
     var assigneeValue   = draft.responsible !== undefined ? draft.responsible : currentAssignee;
 

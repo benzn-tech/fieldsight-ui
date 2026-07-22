@@ -62,10 +62,19 @@
   var MONTH_SHORT     = ['Jan','Feb','Mar','Apr','May','Jun',
                          'Jul','Aug','Sep','Oct','Nov','Dec'];
 
+  /* Strict 'YYYY-MM-DD' -> UTC Date, or null. Returning a real null (never an
+     Invalid Date) is load-bearing: a non-ISO `date` prop (e.g. a free-text
+     deadline "Week after next Tuesday (2026-07-28 approx.)") would otherwise
+     become an Invalid Date whose downstream toISO()/.toISOString() THROWS
+     RangeError and crashes the whole picker. null falls back to `new Date()`. */
   function parseISO(yyyymmdd) {
     if (!yyyymmdd) return null;
-    var p = yyyymmdd.split('-').map(Number);
-    return new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+    var p = String(yyyymmdd).split('-');
+    if (p.length !== 3) return null;
+    var y = Number(p[0]), m = Number(p[1]), d = Number(p[2]);
+    if (!isFinite(y) || !isFinite(m) || !isFinite(d) || m < 1 || m > 12 || d < 1 || d > 31) return null;
+    var dt = new Date(Date.UTC(y, m - 1, d));
+    return isNaN(dt.getTime()) ? null : dt;
   }
 
   function toISO(d) {
@@ -478,4 +487,10 @@
 
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.DatePicker = DatePicker;
+
+  /* Expose the pure date helpers to Node's test runner only (CommonJS).
+     No-op in the browser (Babel-standalone leaves `module` undefined). */
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { parseISO: parseISO, toISO: toISO };
+  }
 })();

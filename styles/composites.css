@@ -1776,6 +1776,8 @@
   box-shadow: 0 0 0 3px rgba(255, 217, 102, 0.20);
 }
 .fs-content-edit--busy { opacity: 0.6; cursor: wait; }
+/* content-correction Phase D — explicit Save/Cancel controls under the editor */
+.fs-content-edit__controls { display: flex; gap: 4px; margin-top: 4px; }
 
 .fs-topic-detail__editable-row {
   display: flex;
@@ -1846,7 +1848,18 @@
   font-size: 13px;
   line-height: 1.5;
   color: var(--text-primary);
+  white-space: pre-wrap;   /* diff tokens carry their own whitespace */
 }
+
+/* content-correction Phase D — word-level diff highlighting */
+.fs-content-history__del {
+  text-decoration: line-through;
+  color: var(--color-danger, #d64545);
+}
+.fs-content-history__ins {
+  color: var(--color-success, #2e7d32);
+}
+.fs-content-history__same { color: var(--text-primary); }
 
 .fs-content-history__meta {
   font-size: 11px;

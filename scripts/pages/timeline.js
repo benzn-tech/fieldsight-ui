@@ -49,6 +49,125 @@
     return user && (user.role === 'admin' || user.role === 'gm' || user.isAdmin);
   }
 
+  /* ---------- life-conversation separation: optimistic overrides --------- */
+  /* Q2 follow-up. A redaction/revert commits at the org-api, but the next
+     getTimeline often reads a STALE warm-Lambda snapshot for a few seconds
+     (BUG: read-after-write lag on the writer endpoint), so a plain refetch
+     leaves the topic in its old bucket — or worse, flickers back. Instead the
+     review buttons apply an optimistic patch keyed by the durable topic_row_id
+     (stable across the lag, unlike the per-report topic_id); render merges it on
+     top of the fetched report so the topic moves at once, and each refetch
+     reconciles the patch away once the server has caught up. These three pure
+     helpers hold that logic (unit-tested — tests/timeline-redaction-overrides). */
+
+  /* Merge each optimistic patch onto the topic with the matching topic_row_id.
+     Returns a new list; overridden topics are shallow-cloned (never mutated).
+     Topics without a topic_row_id (e.g. meeting topics) are passed through. */
+  function applyTopicOverrides(topics, overrides) {
+    var list = topics || [];
+    if (!overrides || Object.keys(overrides).length === 0) return list;
+    return list.map(function (t) {
+      var patch = t && t.topic_row_id ? overrides[t.topic_row_id] : null;
+      return patch ? Object.assign({}, t, patch) : t;
+    });
+  }
+
+  /* Split the (already override-merged) topics into the visible list and the
+     "已移除 / 个人" area on the redacted flag, preserving order within each. */
+  function partitionTopics(topics) {
+    var visible = [], removed = [];
+    (topics || []).forEach(function (t) {
+      (t && t.redacted ? removed : visible).push(t);
+    });
+    return { visible: visible, removed: removed };
+  }
+
+  /* Given a freshly fetched report, drop every override field the server has
+     now caught up to; an override whose fields are all confirmed is retired.
+     Overrides whose topic is missing from the fresh report are kept (the read
+     hasn't surfaced it yet). null and undefined compare equal (a reverted
+     redaction_id may come back as either). */
+  function reconcileTopicOverrides(overrides, freshTopics) {
+    if (!overrides || Object.keys(overrides).length === 0) return {};
+    var byRow = {};
+    (freshTopics || []).forEach(function (t) {
+      if (t && t.topic_row_id) byRow[t.topic_row_id] = t;
+    });
+    var next = {};
+    Object.keys(overrides).forEach(function (rowId) {
+      var patch = overrides[rowId];
+      var server = byRow[rowId];
+      if (!server) { next[rowId] = patch; return; }   // not yet in the read → keep
+      var remaining = {};
+      Object.keys(patch).forEach(function (field) {
+        var s = server[field] == null ? null : server[field];
+        var p = patch[field] == null ? null : patch[field];
+        if (s !== p) remaining[field] = patch[field];   // server hasn't caught up → keep
+      });
+      if (Object.keys(remaining).length > 0) next[rowId] = remaining;
+    });
+    return next;
+  }
+
+  /* ---------- content-correction Phase D: history word diff ------------- */
+  /* Whitespace-tokenized LCS word diff. Tokens keep their trailing whitespace
+     so joining same+ins reproduces `after` and same+del reproduces `before`.
+     Consecutive same-type runs are merged. (unit-tested — tests/content-edit-format) */
+  function _tokenizeWords(s) { return (s || '').match(/\S+\s*/g) || []; }
+  function diffWords(before, after) {
+    var a = _tokenizeWords(before), b = _tokenizeWords(after);
+    var m = a.length, n = b.length;
+    var dp = [];
+    for (var i = 0; i <= m; i++) { var row = []; for (var j = 0; j <= n; j++) row.push(0); dp.push(row); }
+    for (var i = m - 1; i >= 0; i--) {
+      for (var j = n - 1; j >= 0; j--) {
+        dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+    var segs = [];
+    function push(type, text) {
+      if (segs.length && segs[segs.length - 1].type === type) segs[segs.length - 1].text += text;
+      else segs.push({ type: type, text: text });
+    }
+    var i = 0, j = 0;
+    while (i < m && j < n) {
+      if (a[i] === b[j]) { push('same', a[i]); i++; j++; }
+      else if (dp[i + 1][j] >= dp[i][j + 1]) { push('del', a[i]); i++; }
+      else { push('ins', b[j]); j++; }
+    }
+    while (i < m) { push('del', a[i]); i++; }
+    while (j < n) { push('ins', b[j]); j++; }
+    return segs;
+  }
+
+  /* A UTC content_edits.created_at → NZ local "YYYY/MM/DD HH:MM". Intl with an
+     explicit IANA zone is DST-correct and is NOT the BUG-19 naive-parse pattern
+     (the input carries a +00:00 offset, so it is unambiguous). */
+  function formatEditTime(iso) {
+    if (!iso) return '';
+    var d = new Date(String(iso).replace(' ', 'T'));
+    if (isNaN(d.getTime())) return String(iso);
+    var parts = new Intl.DateTimeFormat('en-NZ', {
+      timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(d);
+    var p = {};
+    parts.forEach(function (x) { p[x.type] = x.value; });
+    var hour = p.hour === '24' ? '00' : p.hour;   // Intl may emit '24' at midnight
+    return p.year + '/' + p.month + '/' + p.day + ' ' + hour + ':' + p.minute;
+  }
+
+  /* One content_edits row → display parts for ContentHistoryPanel. */
+  function formatContentEdit(edit) {
+    edit = edit || {};
+    return {
+      field: edit.field,
+      when: formatEditTime(edit.created_at),
+      who: edit.actor_name || edit.actor_role || 'Unknown',
+      segments: diffWords(edit.before_text || '', edit.after_text || ''),
+    };
+  }
+
   /* Pick the most recent date with a report from /api/dates, or null.
      Mirrors the helper in today.js so the two pages share the same
      fallback semantics — when "today" has no report, the user lands
@@ -319,6 +438,15 @@
     var retryCount = retryRef[0];
     var setRetry   = retryRef[1];
 
+    /* life-conversation separation (Q2) — optimistic redaction/revert patches,
+       same mechanism as TimelineMiddleColumn but applied PER SECTION here. Keyed
+       by durable topic_row_id; merged over each section's report before
+       partitioning so a removed/restored topic switches bucket instantly, with
+       no refetch of this view's expensive per-user fan-out. */
+    var overridesRef = React.useState({});
+    var overrides    = overridesRef[0];
+    var setOverrides = overridesRef[1];
+
     /* fix/action-checkoff-sync (Bug 1) — this view renders ONE date
        (props.date) fanned out across every user on the site, so a
        single getActions(date) call covers every section's TopicCards.
@@ -425,6 +553,13 @@
             return an < bn ? -1 : (an > bn ? 1 : 0);
           });
           setState({ status: 'ok', sections: sections });
+          /* Retire optimistic patches the fresh fan-out has caught up to
+             (across every section's topics). */
+          var freshTopics = [];
+          sections.forEach(function (s) {
+            (s.report.topics || []).forEach(function (t) { freshTopics.push(t); });
+          });
+          setOverrides(function (cur) { return reconcileTopicOverrides(cur, freshTopics); });
         });
       }).catch(function () {
         if (cancelled) return;
@@ -437,6 +572,28 @@
 
       return function () { cancelled = true; };
     }, [props.site, props.date, retryCount]);
+
+    /* Q2 — apply optimistic redaction/revert patches dispatched by the shared
+       right-detail review buttons, and reset them when the viewed day/site
+       changes. Mirrors TimelineMiddleColumn; both views' listeners coexist
+       harmlessly (only the mounted-and-rendered view's overrides are read). */
+    React.useEffect(function () {
+      function onRefresh(e) {
+        var d = e && e.detail;
+        if (d && d.topicRowId && d.patch) {
+          setOverrides(function (cur) {
+            var next = Object.assign({}, cur);
+            next[d.topicRowId] = Object.assign({}, cur[d.topicRowId], d.patch);
+            return next;
+          });
+          return;   // patch alone moves the topic; skip the expensive refetch
+        }
+        setRetry(function (n) { return n + 1; });
+      }
+      window.addEventListener('fs:timeline-refresh', onRefresh);
+      return function () { window.removeEventListener('fs:timeline-refresh', onRefresh); };
+    }, []);
+    React.useEffect(function () { setOverrides({}); }, [props.site, props.date]);
 
     if (state.status === 'loading') {
       return React.createElement('div', { className: 'fs-timeline-page__loading' },
@@ -469,6 +626,15 @@
       ? props.selectedItem.id
       : null;
 
+    /* life-conversation separation (Q2) — same content:edit-OR-own-report gate
+       the single-user view and the detail-pane review buttons use, so a
+       reviewer's per-section "已移除 / 个人" area shows exactly where the review
+       buttons do. hasContentEditPerm is caller-level; isOwnReport is per-section
+       (computed inside the map). */
+    var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
+    var hasContentEditPerm = !!(window.FS && window.FS.can && window.FS.P
+        && window.FS.can(caller, window.FS.P('content', 'edit')));
+
     return React.createElement(React.Fragment, null,
       sections.map(function (section) {
         var report         = section.report;
@@ -477,6 +643,13 @@
         var roleLabel = section.user.role
           ? section.user.role.replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); })
           : null;
+
+        /* Q2 — merge optimistic patches, then split this section's topics into
+           the visible list and its own "已移除 / 个人" area. */
+        var _p = partitionTopics(applyTopicOverrides(report.topics, overrides));
+        var isOwnReport = !!(caller && caller.name
+            && window.FS.api.folderName(caller.name) === sectionUser);
+        var sectionCanEdit = hasContentEditPerm || isOwnReport;
 
         return React.createElement('div', {
           key:       sectionUser,
@@ -510,7 +683,7 @@
           React.createElement('div', { className: 'fs-timeline-page__section-label' },
             'Topics'),
           React.createElement('div', { className: 'fs-timeline-page__topics' },
-            (report.topics || []).map(function (topic) {
+            _p.visible.map(function (topic) {
               return React.createElement(TopicCard, {
                 key:           topic.topic_id,
                 topic:         topic,
@@ -545,6 +718,22 @@
               });
             }),
           ),
+
+          /* life-conversation separation (Q2) — this section's collapsed
+             "已移除 / 个人" area, mirroring the single-user view. Reviewer-only
+             (sectionCanEdit); redacted topics stay recoverable via RemovedTopic.
+             Keys are namespaced by section owner (topic_id is per-report). */
+          _p.removed.length && sectionCanEdit ? React.createElement('details', {
+            className: 'fs-timeline-page__removed',
+          },
+            React.createElement('summary', null, '已移除 / 个人 (' + _p.removed.length + ')'),
+            _p.removed.map(function (topic) {
+              return React.createElement(RemovedTopic, {
+                key:   sectionUser + '_' + topic.topic_id,
+                topic: topic,
+              });
+            }),
+          ) : null,
         );
       }),
     );
@@ -740,6 +929,15 @@
     var retryCount = retryRef[0];
     var setRetry   = retryRef[1];
 
+    /* life-conversation separation (Q2) — optimistic redaction/revert patches
+       keyed by durable topic_row_id, merged over the fetched report so a
+       removed/restored topic switches bucket instantly and doesn't flicker on
+       the stale post-write refetch; reconciled away as the org-api read catches
+       up (see applyTopicOverrides / reconcileTopicOverrides above). */
+    var overridesRef = React.useState({});
+    var overrides    = overridesRef[0];
+    var setOverrides = overridesRef[1];
+
     /* Sprint 2.8 (Phase H) — when both a daily report and meeting
        minutes exist for the date, the user picks which to view. */
     var refView = React.useState('daily');
@@ -874,12 +1072,52 @@
           actions: actions,
           meeting: meeting,
         });
+        /* Retire any optimistic redaction/revert patch the server has now
+           caught up to; a still-stale read keeps the patch so the topic
+           stays in its optimistic bucket rather than flickering back. */
+        setOverrides(function (cur) { return reconcileTopicOverrides(cur, report.topics); });
       }).catch(function (err) {
         if (cancelled) return;
         setState({ status: 'error', error: { code: (err && err.status) || 0, message: (err && err.message) || 'Could not load report', retryable: true }, retry: function () { setRetry(function (n) { return n + 1; }); } });
       });
       return function () { cancelled = true; };
     }, [date, user, retryCount]);
+
+    /* life-conversation separation — a redaction / revert / keep-as-work in
+       the right-detail refetches the report so the visible/removed partition
+       reflects the new `redacted`/`work_class` state. Decoupled via a window
+       event (no prop plumbing through the detail pane). */
+    React.useEffect(function () {
+      function onRefresh(e) {
+        /* Q2 — when the review button carries a { topicRowId, patch } detail,
+           apply it optimistically and DON'T refetch: the write already
+           committed, so the patch alone moves the topic to its new bucket at
+           once, with no "Loading report…" flash and no chance of the stale
+           read-after-write refetch clobbering it. Overrides self-heal on the
+           next detail-less refetch (reconcile) or clear on date/user change.
+           Detail-less callers (content edits, keep-as-work) refetch as before —
+           they need fresh server fields the patch layer doesn't carry. */
+        var d = e && e.detail;
+        if (d && d.topicRowId && d.patch) {
+          setOverrides(function (cur) {
+            var next = Object.assign({}, cur);
+            next[d.topicRowId] = Object.assign({}, cur[d.topicRowId], d.patch);
+            return next;
+          });
+          return;
+        }
+        setRetry(function (n) { return n + 1; });
+      }
+      window.addEventListener('fs:timeline-refresh', onRefresh);
+      return function () { window.removeEventListener('fs:timeline-refresh', onRefresh); };
+    }, []);
+
+    /* Drop optimistic patches when the viewed report changes — a new date/user
+       has different topic_row_ids. Keyed on date/user ONLY (never retryCount),
+       so a just-applied patch survives its own reconcile refetch. */
+    React.useEffect(function () {
+      setOverrides({});
+    }, [date, user]);
 
     /* Sprint 6.7.1 — keep state.actions in sync with cross-component
        toggles (the right-detail OverviewTab also renders the same
@@ -1084,6 +1322,18 @@
       ? props.selectedItem.topic_id
       : null;
 
+    /* life-conversation separation (Task 11) — same content:edit-OR-own-report
+       gate OverviewTab computes (~line 1489), recomputed here because the
+       removed-area section lives in the middle column, a different function.
+       `caller` (~line 660) and `report`/`user` (~line 1045/662) are already
+       in scope by this point (past every early-return branch above). */
+    var hasContentEditPerm = !!(window.FS && window.FS.can && window.FS.P
+        && window.FS.can(caller, window.FS.P('content', 'edit')));
+    var ownerFolder = user || (report && report.user_name && window.FS.api.folderName(report.user_name)) || null;
+    var isOwnReport = !!(ownerFolder && caller && caller.name
+        && window.FS.api.folderName(caller.name) === ownerFolder);
+    var canEditContent = hasContentEditPerm || isOwnReport;
+
     var AskChat            = window.FieldSight.AskChat;
     var MeetingTopicCard   = window.FieldSight.MeetingTopicCard;
 
@@ -1174,6 +1424,14 @@
       );
     }
 
+    /* life-conversation separation (Task 11) — a redacted (confirmed-personal)
+       topic is hidden from the default topic list and relocated to a
+       collapsed "已移除 / 个人" section with a revert control, reviewers only
+       (spec §5 "hidden + recoverable"). */
+    var _partition    = partitionTopics(applyTopicOverrides(report.topics, overrides));
+    var visibleTopics = _partition.visible;
+    var removedTopics = _partition.removed;
+
     /* ---- Daily report view (default) ---- */
     return React.createElement('div', {
       className: 'fs-timeline-page',
@@ -1190,7 +1448,7 @@
       React.createElement('div', { className: 'fs-timeline-page__section-label' },
         'Topics'),
       React.createElement('div', { className: 'fs-timeline-page__topics' },
-        (report.topics || []).map(function (topic) {
+        visibleTopics.map(function (topic) {
           /* Sprint 6.6.4 — focus mode + flash. When a deep-link target
              is set, the matching topic auto-opens (via defaultOpen
              boolean) and gets highlight=true (scrollIntoView + 3-pulse
@@ -1239,6 +1497,18 @@
         }),
       ),
 
+      /* life-conversation separation (Task 11) — collapsed "已移除 / 个人"
+         area: confirmed-personal topics are hidden from the list above but
+         stay recoverable here (reviewers only) via revertRedaction. */
+      removedTopics.length && canEditContent ? React.createElement('details', {
+        className: 'fs-timeline-page__removed',
+      },
+        React.createElement('summary', null, '已移除 / 个人 (' + removedTopics.length + ')'),
+        removedTopics.map(function (topic) {
+          return React.createElement(RemovedTopic, { key: topic.topic_id, topic: topic });
+        }),
+      ) : null,
+
       /* Per-report Ask Agent (PLAN Phase G). Stateless — each question
          is independent. Scope='both' grounds across transcript +
          report. */
@@ -1260,6 +1530,37 @@
         }),
       ) : null,
     );
+  }
+
+  /* life-conversation separation (Task 11) — one row in TimelineMiddleColumn's
+     "已移除 / 个人" collapsed section. Module-level (not nested inside
+     TimelineMiddleColumn) to match this file's convention (GlossaryConfirm/
+     EditableText/etc. are all siblings, not re-declared every render). */
+  function RemovedTopic(props) {
+    var IconBtn = window.FieldSight.IconButton;
+    var busyRef = React.useState(false); var busy = busyRef[0], setBusy = busyRef[1];
+    return React.createElement('div', { className: 'fs-timeline-page__removed-row' },
+      React.createElement('span', null, unfolder(props.topic.topic_title || props.topic.title || 'Removed')),
+      IconBtn ? React.createElement(IconBtn, {
+        icon: 'rotate-ccw', size: 'sm', variant: 'ghost', disabled: busy || !props.topic.redaction_id,
+        ariaLabel: '恢复',
+        onClick: function () {
+          if (busy || !props.topic.redaction_id) return;
+          setBusy(true);
+          window.FS.api.actions.revertRedaction(props.topic.redaction_id).then(function (r) {
+            setBusy(false);
+            var toast = window.FS && window.FS.toast;
+            if (!r || r._accessDenied || r._notFound) { if (toast) toast.show({ message: (r && r.error) || 'Could not restore', tone: 'error', duration: 5000 }); return; }
+            if (toast) toast.show({ message: 'Restored', tone: 'success', duration: 3000 });
+            /* Optimistic patch (Q2): return the topic to the visible list at
+               once (clear redacted + its id), rather than waiting for the
+               stale post-write refetch to catch up. */
+            window.dispatchEvent(new CustomEvent('fs:timeline-refresh', {
+              detail: { topicRowId: props.topic.topic_row_id, patch: { redacted: false, redaction_id: null } },
+            }));
+          }).catch(function () { setBusy(false); });
+        },
+      }) : null);
   }
 
   /* =====================================================================
@@ -1367,6 +1668,75 @@
     );
   }
 
+  /* life-conversation separation (Task 11) — one confirm+remove action writes
+     BOTH the redaction (createRedaction) and the human verdict
+     (submitClassificationFeedback). Placed beside GlossaryConfirm since both
+     are small per-topic review affordances rendered inline in the detail
+     pane. */
+  function TopicReviewButtons(props) {
+    // props: { topicRowId, workClass, workConfidence, category, onRemoved }
+    var IconBtn = window.FieldSight.IconButton;
+    var busyRef = React.useState(false);
+    var busy = busyRef[0], setBusy = busyRef[1];
+    if (!IconBtn || !props.topicRowId) return null;
+    var isFlagged = props.workClass === 'non_work';
+
+    function toast(msg, tone) {
+      var t = window.FS && window.FS.toast;
+      if (t) t.show({ message: msg, tone: tone || 'success', duration: tone === 'error' ? 5000 : 3000 });
+    }
+    function feedback(verdict) {
+      return window.FS.api.actions.submitClassificationFeedback({
+        topic_id: props.topicRowId, human_verdict: verdict,
+        classifier_verdict: props.workClass || null,
+        classifier_confidence: props.workConfidence != null ? props.workConfidence : null,
+        topic_category: props.category || null,
+      });
+    }
+    function remove(verdict) {
+      if (busy) return;
+      setBusy(true);
+      Promise.all([
+        window.FS.api.actions.createRedaction(props.topicRowId, 'non_work'),
+        feedback(verdict),
+      ]).then(function (r) {
+        setBusy(false);
+        if (!r[0] || r[0]._accessDenied || r[0]._notFound) { toast((r[0] && r[0].error) || 'Could not remove', 'error'); return; }
+        toast('Removed from reports');
+        /* Optimistic patch (Q2): move the topic into the "已移除 / 个人" area
+           immediately, carrying the just-issued redaction id so the revert
+           control there is enabled without waiting for the refetch. */
+        var newId = r[0].redaction && r[0].redaction.id;
+        var patch = { redacted: true };
+        if (newId) patch.redaction_id = newId;
+        window.dispatchEvent(new CustomEvent('fs:timeline-refresh', {
+          detail: { topicRowId: props.topicRowId, patch: patch },
+        }));
+        if (props.onRemoved) props.onRemoved();
+      }).catch(function () { setBusy(false); toast('Could not remove', 'error'); });
+    }
+    function keepAsWork() {
+      if (busy) return;
+      setBusy(true);
+      feedback('reject_is_work').then(function () {
+        setBusy(false); toast('Kept as work');
+        window.dispatchEvent(new CustomEvent('fs:timeline-refresh'));   // clears the "suspected personal" flag
+      }).catch(function () { setBusy(false); toast('Could not save', 'error'); });
+    }
+
+    return React.createElement('div', { className: 'fs-topic-detail__review' },
+      isFlagged
+        ? React.createElement(React.Fragment, null,
+            React.createElement('span', { className: 'fs-topic-detail__review-flag' }, '疑似个人 · 待确认 '),
+            React.createElement(IconBtn, { icon: 'check', size: 'sm', variant: 'ghost', disabled: busy,
+              ariaLabel: '确认个人并移除', onClick: function () { remove('confirm_non_work'); } }),
+            React.createElement(IconBtn, { icon: 'x', size: 'sm', variant: 'ghost', disabled: busy,
+              ariaLabel: '其实是工作', onClick: keepAsWork }))
+        : React.createElement(IconBtn, { icon: 'user-x', size: 'sm', variant: 'ghost', disabled: busy,
+            ariaLabel: '标为个人并移除', onClick: function () { remove('missed_personal'); } }),
+    );
+  }
+
   /* editable-content-correction — inline free-text editor. Blur (or Ctrl+Enter)
      commits via updateContent(table, id, {field: value}); optimistic, reverts +
      toasts on failure. Read-only fallback renders `display`.
@@ -1385,9 +1755,14 @@
       return React.createElement(props.tag || 'span',
         { className: props.className }, props.display != null ? props.display : (props.value || '—'));
     }
+    /* content-correction Phase D — explicit ✓ Save. Unchanged value: just exit.
+       Success: exit the editor UNLESS glossary candidates need confirming (keep
+       it open for GlossaryConfirm). Failure: revert + toast, stay open to retry
+       or cancel. onExitEdit closes pencil-toggle (Pattern B) editors; absent for
+       always-on (Pattern A) fields. */
     function commit() {
       var next = value;
-      if (next === (props.value || '')) return;
+      if (next === (props.value || '')) { if (props.onExitEdit) props.onExitEdit(); return; }
       setBusy(true);
       window.FS.api.actions.updateContent(props.table, props.id, (function () {
         var p = {}; p[props.field] = next; return p;
@@ -1402,8 +1777,11 @@
         }
         if (props.showGlossaryConfirm && res.candidates && res.candidates.length) {
           setCandidates(res.candidates);
+          if (props.onSaved) props.onSaved(res);
+          return;   // keep the editor open so the user can confirm glossary terms
         }
         if (props.onSaved) props.onSaved(res);
+        if (props.onExitEdit) props.onExitEdit();
       }).catch(function () {
         setBusy(false);
         setValue(props.value || '');
@@ -1411,15 +1789,36 @@
         if (toast) toast.show({ message: 'Could not save edit', tone: 'error', duration: 5000 });
       });
     }
+
+    /* ✕ Cancel — discard the in-progress edit (restore last-saved value) and
+       exit; never writes. */
+    function cancel() {
+      setValue(props.value || '');
+      setCandidates([]);
+      if (props.onExitEdit) props.onExitEdit();
+    }
+    var IconBtn = window.FieldSight.IconButton;
     return React.createElement(React.Fragment, null,
       React.createElement('textarea', {
         className: 'fs-content-edit' + (busy ? ' fs-content-edit--busy' : ''),
         value: value, rows: props.rows || 2, disabled: busy,
         'aria-label': props.ariaLabel || props.field,
         onChange: function (e) { setValue(e.target.value); },
-        onBlur: commit,
-        onKeyDown: function (e) { if (e.ctrlKey && e.key === 'Enter') commit(); },
+        /* blur no longer commits (explicit-save). Ctrl+Enter saves, Esc cancels. */
+        onKeyDown: function (e) {
+          if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); commit(); }
+          else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+        },
       }),
+      React.createElement('div', { className: 'fs-content-edit__controls' },
+        IconBtn ? React.createElement(IconBtn, {
+          icon: 'check', size: 'sm', variant: 'ghost', disabled: busy,
+          ariaLabel: 'Save', onClick: commit,
+        }) : null,
+        IconBtn ? React.createElement(IconBtn, {
+          icon: 'x', size: 'sm', variant: 'ghost', disabled: busy,
+          ariaLabel: 'Cancel', onClick: cancel,
+        }) : null),
       candidates.length > 0 ? React.createElement(GlossaryConfirm, {
         candidates: candidates,
         onConfirmed: function (term) {
@@ -1447,12 +1846,18 @@
     if (!data.edits.length) return React.createElement('div', { className: 'fs-muted' }, 'No edits yet.');
     return React.createElement('ul', { className: 'fs-content-history' },
       data.edits.map(function (e) {
+        var f = formatContentEdit(e);
         return React.createElement('li', { key: e.id, className: 'fs-content-history__item' },
-          React.createElement('span', { className: 'fs-content-history__field' }, e.field),
-          React.createElement('span', { className: 'fs-content-history__diff' },
-            '“' + (e.before_text || '') + '” → “' + (e.after_text || '') + '”'),
-          React.createElement('span', { className: 'fs-content-history__meta' },
-            (e.actor_role || '') + ' · ' + (e.created_at || '')));
+          React.createElement('div', { className: 'fs-content-history__meta' },
+            React.createElement('span', { className: 'fs-content-history__field' }, f.field),
+            ' · ' + f.when + ' · edited by ' + f.who),
+          React.createElement('div', { className: 'fs-content-history__diff' },
+            f.segments.map(function (seg, i) {
+              var cls = seg.type === 'del' ? 'fs-content-history__del'
+                      : seg.type === 'ins' ? 'fs-content-history__ins'
+                      : 'fs-content-history__same';
+              return React.createElement('span', { key: i, className: cls }, seg.text);
+            })));
       }));
   }
 
@@ -1530,6 +1935,18 @@
        ContentHistoryPanel against the topic's own durable id. Only shown
        once a durable id exists (meeting topics have none). */
     var detailsBody = React.createElement('div', { className: 'fs-topic-detail__overview' },
+      /* life-conversation separation (Task 11) — reviewer-only affordance
+         near the topic title: confirm/reject the machine's work_class call,
+         soft-removing a confirmed-personal topic (createRedaction) and
+         logging the human verdict (submitClassificationFeedback). Gated by
+         the same canEditContent used by the edit affordances below. */
+      canEditContent && topicRowId ? React.createElement(TopicReviewButtons, {
+        topicRowId:     topicRowId,
+        workClass:      topic.work_class,
+        workConfidence: topic.work_confidence,
+        category:       topic.category,
+        onRemoved:      null,   // v1: toast + next data refresh; no onContentChanged prop exists here
+      }) : null,
       React.createElement(EditableText, {
         /* key forces a fresh mount (and fresh internal useState) whenever the
            selected topic changes — EditableText seeds its textarea value
@@ -1629,6 +2046,7 @@
                     });
                     setEditingKey(null);
                   },
+                  onExitEdit: function () { setEditingKey(null); },
                 }) : null,
               );
             }),
@@ -1668,6 +2086,7 @@
                     });
                     setEditingKey(null);
                   },
+                  onExitEdit: function () { setEditingKey(null); },
                 }) : null,
               );
             }),
@@ -2072,5 +2491,19 @@
     Middle: TimelineMiddleColumn,
     Right:  TimelineRightDetail,
   };
+
+  /* Expose the pure life-sep override helpers to Node's test runner only
+     (CommonJS). No-op in the browser (Babel standalone leaves `module`
+     undefined), so the page bundle is unaffected. */
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      applyTopicOverrides: applyTopicOverrides,
+      partitionTopics: partitionTopics,
+      reconcileTopicOverrides: reconcileTopicOverrides,
+      diffWords: diffWords,
+      formatEditTime: formatEditTime,
+      formatContentEdit: formatContentEdit,
+    };
+  }
 
 })();
