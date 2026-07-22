@@ -109,6 +109,37 @@
     return next;
   }
 
+  /* ---------- content-correction Phase D: history word diff ------------- */
+  /* Whitespace-tokenized LCS word diff. Tokens keep their trailing whitespace
+     so joining same+ins reproduces `after` and same+del reproduces `before`.
+     Consecutive same-type runs are merged. (unit-tested — tests/content-edit-format) */
+  function _tokenizeWords(s) { return (s || '').match(/\S+\s*/g) || []; }
+  function diffWords(before, after) {
+    var a = _tokenizeWords(before), b = _tokenizeWords(after);
+    var m = a.length, n = b.length;
+    var dp = [];
+    for (var i = 0; i <= m; i++) { var row = []; for (var j = 0; j <= n; j++) row.push(0); dp.push(row); }
+    for (var i = m - 1; i >= 0; i--) {
+      for (var j = n - 1; j >= 0; j--) {
+        dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+    var segs = [];
+    function push(type, text) {
+      if (segs.length && segs[segs.length - 1].type === type) segs[segs.length - 1].text += text;
+      else segs.push({ type: type, text: text });
+    }
+    var i = 0, j = 0;
+    while (i < m && j < n) {
+      if (a[i] === b[j]) { push('same', a[i]); i++; j++; }
+      else if (dp[i + 1][j] >= dp[i][j + 1]) { push('del', a[i]); i++; }
+      else { push('ins', b[j]); j++; }
+    }
+    while (i < m) { push('del', a[i]); i++; }
+    while (j < n) { push('ins', b[j]); j++; }
+    return segs;
+  }
+
   /* Pick the most recent date with a report from /api/dates, or null.
      Mirrors the helper in today.js so the two pages share the same
      fallback semantics — when "today" has no report, the user lands
@@ -2404,6 +2435,7 @@
       applyTopicOverrides: applyTopicOverrides,
       partitionTopics: partitionTopics,
       reconcileTopicOverrides: reconcileTopicOverrides,
+      diffWords: diffWords,
     };
   }
 
