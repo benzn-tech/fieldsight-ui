@@ -1755,9 +1755,14 @@
       return React.createElement(props.tag || 'span',
         { className: props.className }, props.display != null ? props.display : (props.value || '—'));
     }
+    /* content-correction Phase D — explicit ✓ Save. Unchanged value: just exit.
+       Success: exit the editor UNLESS glossary candidates need confirming (keep
+       it open for GlossaryConfirm). Failure: revert + toast, stay open to retry
+       or cancel. onExitEdit closes pencil-toggle (Pattern B) editors; absent for
+       always-on (Pattern A) fields. */
     function commit() {
       var next = value;
-      if (next === (props.value || '')) return;
+      if (next === (props.value || '')) { if (props.onExitEdit) props.onExitEdit(); return; }
       setBusy(true);
       window.FS.api.actions.updateContent(props.table, props.id, (function () {
         var p = {}; p[props.field] = next; return p;
@@ -1772,8 +1777,11 @@
         }
         if (props.showGlossaryConfirm && res.candidates && res.candidates.length) {
           setCandidates(res.candidates);
+          if (props.onSaved) props.onSaved(res);
+          return;   // keep the editor open so the user can confirm glossary terms
         }
         if (props.onSaved) props.onSaved(res);
+        if (props.onExitEdit) props.onExitEdit();
       }).catch(function () {
         setBusy(false);
         setValue(props.value || '');
@@ -1781,15 +1789,36 @@
         if (toast) toast.show({ message: 'Could not save edit', tone: 'error', duration: 5000 });
       });
     }
+
+    /* ✕ Cancel — discard the in-progress edit (restore last-saved value) and
+       exit; never writes. */
+    function cancel() {
+      setValue(props.value || '');
+      setCandidates([]);
+      if (props.onExitEdit) props.onExitEdit();
+    }
+    var IconBtn = window.FieldSight.IconButton;
     return React.createElement(React.Fragment, null,
       React.createElement('textarea', {
         className: 'fs-content-edit' + (busy ? ' fs-content-edit--busy' : ''),
         value: value, rows: props.rows || 2, disabled: busy,
         'aria-label': props.ariaLabel || props.field,
         onChange: function (e) { setValue(e.target.value); },
-        onBlur: commit,
-        onKeyDown: function (e) { if (e.ctrlKey && e.key === 'Enter') commit(); },
+        /* blur no longer commits (explicit-save). Ctrl+Enter saves, Esc cancels. */
+        onKeyDown: function (e) {
+          if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); commit(); }
+          else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+        },
       }),
+      React.createElement('div', { className: 'fs-content-edit__controls' },
+        IconBtn ? React.createElement(IconBtn, {
+          icon: 'check', size: 'sm', variant: 'ghost', disabled: busy,
+          ariaLabel: 'Save', onClick: commit,
+        }) : null,
+        IconBtn ? React.createElement(IconBtn, {
+          icon: 'x', size: 'sm', variant: 'ghost', disabled: busy,
+          ariaLabel: 'Cancel', onClick: cancel,
+        }) : null),
       candidates.length > 0 ? React.createElement(GlossaryConfirm, {
         candidates: candidates,
         onConfirmed: function (term) {
@@ -2017,6 +2046,7 @@
                     });
                     setEditingKey(null);
                   },
+                  onExitEdit: function () { setEditingKey(null); },
                 }) : null,
               );
             }),
@@ -2056,6 +2086,7 @@
                     });
                     setEditingKey(null);
                   },
+                  onExitEdit: function () { setEditingKey(null); },
                 }) : null,
               );
             }),

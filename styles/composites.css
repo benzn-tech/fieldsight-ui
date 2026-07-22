@@ -1776,6 +1776,8 @@
   box-shadow: 0 0 0 3px rgba(255, 217, 102, 0.20);
 }
 .fs-content-edit--busy { opacity: 0.6; cursor: wait; }
+/* content-correction Phase D — explicit Save/Cancel controls under the editor */
+.fs-content-edit__controls { display: flex; gap: 4px; margin-top: 4px; }
 
 .fs-topic-detail__editable-row {
   display: flex;
