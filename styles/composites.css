@@ -1846,7 +1846,18 @@
   font-size: 13px;
   line-height: 1.5;
   color: var(--text-primary);
+  white-space: pre-wrap;   /* diff tokens carry their own whitespace */
 }
+
+/* content-correction Phase D — word-level diff highlighting */
+.fs-content-history__del {
+  text-decoration: line-through;
+  color: var(--color-danger, #d64545);
+}
+.fs-content-history__ins {
+  color: var(--color-success, #2e7d32);
+}
+.fs-content-history__same { color: var(--text-primary); }
 
 .fs-content-history__meta {
   font-size: 11px;

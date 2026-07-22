@@ -1817,12 +1817,18 @@
     if (!data.edits.length) return React.createElement('div', { className: 'fs-muted' }, 'No edits yet.');
     return React.createElement('ul', { className: 'fs-content-history' },
       data.edits.map(function (e) {
+        var f = formatContentEdit(e);
         return React.createElement('li', { key: e.id, className: 'fs-content-history__item' },
-          React.createElement('span', { className: 'fs-content-history__field' }, e.field),
-          React.createElement('span', { className: 'fs-content-history__diff' },
-            '“' + (e.before_text || '') + '” → “' + (e.after_text || '') + '”'),
-          React.createElement('span', { className: 'fs-content-history__meta' },
-            (e.actor_role || '') + ' · ' + (e.created_at || '')));
+          React.createElement('div', { className: 'fs-content-history__meta' },
+            React.createElement('span', { className: 'fs-content-history__field' }, f.field),
+            ' · ' + f.when + ' · edited by ' + f.who),
+          React.createElement('div', { className: 'fs-content-history__diff' },
+            f.segments.map(function (seg, i) {
+              var cls = seg.type === 'del' ? 'fs-content-history__del'
+                      : seg.type === 'ins' ? 'fs-content-history__ins'
+                      : 'fs-content-history__same';
+              return React.createElement('span', { key: i, className: cls }, seg.text);
+            })));
       }));
   }
 
