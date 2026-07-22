@@ -881,6 +881,16 @@
       return function () { cancelled = true; };
     }, [date, user, retryCount]);
 
+    /* life-conversation separation — a redaction / revert / keep-as-work in
+       the right-detail refetches the report so the visible/removed partition
+       reflects the new `redacted`/`work_class` state. Decoupled via a window
+       event (no prop plumbing through the detail pane). */
+    React.useEffect(function () {
+      function onRefresh() { setRetry(function (n) { return n + 1; }); }
+      window.addEventListener('fs:timeline-refresh', onRefresh);
+      return function () { window.removeEventListener('fs:timeline-refresh', onRefresh); };
+    }, []);
+
     /* Sprint 6.7.1 — keep state.actions in sync with cross-component
        toggles (the right-detail OverviewTab also renders the same
        action_items via its own ActionItemRow instances). When any
@@ -1313,6 +1323,7 @@
             var toast = window.FS && window.FS.toast;
             if (!r || r._accessDenied || r._notFound) { if (toast) toast.show({ message: (r && r.error) || 'Could not restore', tone: 'error', duration: 5000 }); return; }
             if (toast) toast.show({ message: 'Restored', tone: 'success', duration: 3000 });
+            window.dispatchEvent(new CustomEvent('fs:timeline-refresh'));   // topic returns to the visible list
           }).catch(function () { setBusy(false); });
         },
       }) : null);
@@ -1458,14 +1469,17 @@
         setBusy(false);
         if (!r[0] || r[0]._accessDenied || r[0]._notFound) { toast((r[0] && r[0].error) || 'Could not remove', 'error'); return; }
         toast('Removed from reports');
+        window.dispatchEvent(new CustomEvent('fs:timeline-refresh'));   // refetch -> topic moves to the removed area
         if (props.onRemoved) props.onRemoved();
       }).catch(function () { setBusy(false); toast('Could not remove', 'error'); });
     }
     function keepAsWork() {
       if (busy) return;
       setBusy(true);
-      feedback('reject_is_work').then(function () { setBusy(false); toast('Kept as work'); })
-        .catch(function () { setBusy(false); toast('Could not save', 'error'); });
+      feedback('reject_is_work').then(function () {
+        setBusy(false); toast('Kept as work');
+        window.dispatchEvent(new CustomEvent('fs:timeline-refresh'));   // clears the "suspected personal" flag
+      }).catch(function () { setBusy(false); toast('Could not save', 'error'); });
     }
 
     return React.createElement('div', { className: 'fs-topic-detail__review' },
