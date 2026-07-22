@@ -109,6 +109,65 @@
     return next;
   }
 
+  /* ---------- content-correction Phase D: history word diff ------------- */
+  /* Whitespace-tokenized LCS word diff. Tokens keep their trailing whitespace
+     so joining same+ins reproduces `after` and same+del reproduces `before`.
+     Consecutive same-type runs are merged. (unit-tested — tests/content-edit-format) */
+  function _tokenizeWords(s) { return (s || '').match(/\S+\s*/g) || []; }
+  function diffWords(before, after) {
+    var a = _tokenizeWords(before), b = _tokenizeWords(after);
+    var m = a.length, n = b.length;
+    var dp = [];
+    for (var i = 0; i <= m; i++) { var row = []; for (var j = 0; j <= n; j++) row.push(0); dp.push(row); }
+    for (var i = m - 1; i >= 0; i--) {
+      for (var j = n - 1; j >= 0; j--) {
+        dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+    var segs = [];
+    function push(type, text) {
+      if (segs.length && segs[segs.length - 1].type === type) segs[segs.length - 1].text += text;
+      else segs.push({ type: type, text: text });
+    }
+    var i = 0, j = 0;
+    while (i < m && j < n) {
+      if (a[i] === b[j]) { push('same', a[i]); i++; j++; }
+      else if (dp[i + 1][j] >= dp[i][j + 1]) { push('del', a[i]); i++; }
+      else { push('ins', b[j]); j++; }
+    }
+    while (i < m) { push('del', a[i]); i++; }
+    while (j < n) { push('ins', b[j]); j++; }
+    return segs;
+  }
+
+  /* A UTC content_edits.created_at → NZ local "YYYY/MM/DD HH:MM". Intl with an
+     explicit IANA zone is DST-correct and is NOT the BUG-19 naive-parse pattern
+     (the input carries a +00:00 offset, so it is unambiguous). */
+  function formatEditTime(iso) {
+    if (!iso) return '';
+    var d = new Date(String(iso).replace(' ', 'T'));
+    if (isNaN(d.getTime())) return String(iso);
+    var parts = new Intl.DateTimeFormat('en-NZ', {
+      timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(d);
+    var p = {};
+    parts.forEach(function (x) { p[x.type] = x.value; });
+    var hour = p.hour === '24' ? '00' : p.hour;   // Intl may emit '24' at midnight
+    return p.year + '/' + p.month + '/' + p.day + ' ' + hour + ':' + p.minute;
+  }
+
+  /* One content_edits row → display parts for ContentHistoryPanel. */
+  function formatContentEdit(edit) {
+    edit = edit || {};
+    return {
+      field: edit.field,
+      when: formatEditTime(edit.created_at),
+      who: edit.actor_name || edit.actor_role || 'Unknown',
+      segments: diffWords(edit.before_text || '', edit.after_text || ''),
+    };
+  }
+
   /* Pick the most recent date with a report from /api/dates, or null.
      Mirrors the helper in today.js so the two pages share the same
      fallback semantics — when "today" has no report, the user lands
@@ -1696,9 +1755,14 @@
       return React.createElement(props.tag || 'span',
         { className: props.className }, props.display != null ? props.display : (props.value || '—'));
     }
+    /* content-correction Phase D — explicit ✓ Save. Unchanged value: just exit.
+       Success: exit the editor UNLESS glossary candidates need confirming (keep
+       it open for GlossaryConfirm). Failure: revert + toast, stay open to retry
+       or cancel. onExitEdit closes pencil-toggle (Pattern B) editors; absent for
+       always-on (Pattern A) fields. */
     function commit() {
       var next = value;
-      if (next === (props.value || '')) return;
+      if (next === (props.value || '')) { if (props.onExitEdit) props.onExitEdit(); return; }
       setBusy(true);
       window.FS.api.actions.updateContent(props.table, props.id, (function () {
         var p = {}; p[props.field] = next; return p;
@@ -1713,8 +1777,11 @@
         }
         if (props.showGlossaryConfirm && res.candidates && res.candidates.length) {
           setCandidates(res.candidates);
+          if (props.onSaved) props.onSaved(res);
+          return;   // keep the editor open so the user can confirm glossary terms
         }
         if (props.onSaved) props.onSaved(res);
+        if (props.onExitEdit) props.onExitEdit();
       }).catch(function () {
         setBusy(false);
         setValue(props.value || '');
@@ -1722,15 +1789,36 @@
         if (toast) toast.show({ message: 'Could not save edit', tone: 'error', duration: 5000 });
       });
     }
+
+    /* ✕ Cancel — discard the in-progress edit (restore last-saved value) and
+       exit; never writes. */
+    function cancel() {
+      setValue(props.value || '');
+      setCandidates([]);
+      if (props.onExitEdit) props.onExitEdit();
+    }
+    var IconBtn = window.FieldSight.IconButton;
     return React.createElement(React.Fragment, null,
       React.createElement('textarea', {
         className: 'fs-content-edit' + (busy ? ' fs-content-edit--busy' : ''),
         value: value, rows: props.rows || 2, disabled: busy,
         'aria-label': props.ariaLabel || props.field,
         onChange: function (e) { setValue(e.target.value); },
-        onBlur: commit,
-        onKeyDown: function (e) { if (e.ctrlKey && e.key === 'Enter') commit(); },
+        /* blur no longer commits (explicit-save). Ctrl+Enter saves, Esc cancels. */
+        onKeyDown: function (e) {
+          if (e.ctrlKey && e.key === 'Enter') { e.preventDefault(); commit(); }
+          else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+        },
       }),
+      React.createElement('div', { className: 'fs-content-edit__controls' },
+        IconBtn ? React.createElement(IconBtn, {
+          icon: 'check', size: 'sm', variant: 'ghost', disabled: busy,
+          ariaLabel: 'Save', onClick: commit,
+        }) : null,
+        IconBtn ? React.createElement(IconBtn, {
+          icon: 'x', size: 'sm', variant: 'ghost', disabled: busy,
+          ariaLabel: 'Cancel', onClick: cancel,
+        }) : null),
       candidates.length > 0 ? React.createElement(GlossaryConfirm, {
         candidates: candidates,
         onConfirmed: function (term) {
@@ -1758,12 +1846,18 @@
     if (!data.edits.length) return React.createElement('div', { className: 'fs-muted' }, 'No edits yet.');
     return React.createElement('ul', { className: 'fs-content-history' },
       data.edits.map(function (e) {
+        var f = formatContentEdit(e);
         return React.createElement('li', { key: e.id, className: 'fs-content-history__item' },
-          React.createElement('span', { className: 'fs-content-history__field' }, e.field),
-          React.createElement('span', { className: 'fs-content-history__diff' },
-            '“' + (e.before_text || '') + '” → “' + (e.after_text || '') + '”'),
-          React.createElement('span', { className: 'fs-content-history__meta' },
-            (e.actor_role || '') + ' · ' + (e.created_at || '')));
+          React.createElement('div', { className: 'fs-content-history__meta' },
+            React.createElement('span', { className: 'fs-content-history__field' }, f.field),
+            ' · ' + f.when + ' · edited by ' + f.who),
+          React.createElement('div', { className: 'fs-content-history__diff' },
+            f.segments.map(function (seg, i) {
+              var cls = seg.type === 'del' ? 'fs-content-history__del'
+                      : seg.type === 'ins' ? 'fs-content-history__ins'
+                      : 'fs-content-history__same';
+              return React.createElement('span', { key: i, className: cls }, seg.text);
+            })));
       }));
   }
 
@@ -1952,6 +2046,7 @@
                     });
                     setEditingKey(null);
                   },
+                  onExitEdit: function () { setEditingKey(null); },
                 }) : null,
               );
             }),
@@ -1991,6 +2086,7 @@
                     });
                     setEditingKey(null);
                   },
+                  onExitEdit: function () { setEditingKey(null); },
                 }) : null,
               );
             }),
@@ -2404,6 +2500,9 @@
       applyTopicOverrides: applyTopicOverrides,
       partitionTopics: partitionTopics,
       reconcileTopicOverrides: reconcileTopicOverrides,
+      diffWords: diffWords,
+      formatEditTime: formatEditTime,
+      formatContentEdit: formatContentEdit,
     };
   }
 
