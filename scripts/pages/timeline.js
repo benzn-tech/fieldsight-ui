@@ -140,6 +140,34 @@
     return segs;
   }
 
+  /* A UTC content_edits.created_at → NZ local "YYYY/MM/DD HH:MM". Intl with an
+     explicit IANA zone is DST-correct and is NOT the BUG-19 naive-parse pattern
+     (the input carries a +00:00 offset, so it is unambiguous). */
+  function formatEditTime(iso) {
+    if (!iso) return '';
+    var d = new Date(String(iso).replace(' ', 'T'));
+    if (isNaN(d.getTime())) return String(iso);
+    var parts = new Intl.DateTimeFormat('en-NZ', {
+      timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(d);
+    var p = {};
+    parts.forEach(function (x) { p[x.type] = x.value; });
+    var hour = p.hour === '24' ? '00' : p.hour;   // Intl may emit '24' at midnight
+    return p.year + '/' + p.month + '/' + p.day + ' ' + hour + ':' + p.minute;
+  }
+
+  /* One content_edits row → display parts for ContentHistoryPanel. */
+  function formatContentEdit(edit) {
+    edit = edit || {};
+    return {
+      field: edit.field,
+      when: formatEditTime(edit.created_at),
+      who: edit.actor_name || edit.actor_role || 'Unknown',
+      segments: diffWords(edit.before_text || '', edit.after_text || ''),
+    };
+  }
+
   /* Pick the most recent date with a report from /api/dates, or null.
      Mirrors the helper in today.js so the two pages share the same
      fallback semantics — when "today" has no report, the user lands
@@ -2436,6 +2464,8 @@
       partitionTopics: partitionTopics,
       reconcileTopicOverrides: reconcileTopicOverrides,
       diffWords: diffWords,
+      formatEditTime: formatEditTime,
+      formatContentEdit: formatContentEdit,
     };
   }
 
