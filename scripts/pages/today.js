@@ -1602,45 +1602,14 @@
       className: 'fs-page fs-page--today',
     },
 
-      /* fix/today-timeline-and-focus — always-present header action,
-         NOT gated on effectiveDate (unlike the "View daily report" CTA
-         below). */
+      /* fix/today-timeline-and-focus — always-present header action to open
+         the timeline.
+         fix/today-remove-duplicate-report-cta — the "View daily report" CTA
+         that used to sit here navigated to the SAME
+         /timeline?date=<today>&from=today as this button, so it was a
+         duplicate affordance stacked right below "Open timeline". Removed;
+         "Open timeline" (TimelineLink) is the single canonical entry point. */
       React.createElement(TimelineLink, null),
-
-      /* "View daily report" CTA — full-width banner above the brief.
-         Lifted out of MorningBriefCard so the action stands on its
-         own (post-merge review feedback). Navigates to the canonical
-         /timeline view for TODAY. The &from=today flag tells
-         TimelineMiddleColumn to render a "← Back to today" link in
-         its header (Sprint 4.5). Only shown when TODAY itself has a
-         report (effectiveDate === today) — feat/today-rolling-open-
-         items dropped the "latest available" fallback, so there's no
-         other date this could deep-link to.
-
-         fix/today-cta-403 — deliberately NEVER passes an explicit
-         user= param: this is always the CALLER'S OWN report
-         (effectiveDate only comes from loadFor(today)'s own-identity
-         fast path / admin fan-out above), and get_timeline_compat
-         routes an explicit user= onto its single-user EXACT-MATCH
-         path, which 403s unless the caller's session literally IS
-         that folder ("You don't have access to <folder>'s daily
-         report"). data.morningBrief.userFolder was a lossy fixture/
-         folder round-trip, not a reliable identity — dropped. Same
-         target shape as "Open timeline" (TimelineLink above), which
-         never passed user= and has always worked. */
-      effectiveDate ? React.createElement('button', {
-        type:      'button',
-        className: 'fs-today__view-report-cta',
-        onClick:   function () {
-          var qs = '?date=' + encodeURIComponent(effectiveDate) + '&from=today';
-          window.FS.Router.navigate('/timeline' + qs);
-        },
-      },
-        React.createElement('span', { className: 'fs-today__view-report-cta-text' },
-          'View daily report'),
-        React.createElement('span', { className: 'fs-today__view-report-cta-arrow' },
-          '→'),
-      ) : null,
 
       /* MORNING BRIEF — §B: today-scoped, only when TODAY itself has a
          report (effectiveDate truthy). Otherwise simply absent, rather
