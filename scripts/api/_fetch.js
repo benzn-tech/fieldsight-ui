@@ -219,6 +219,19 @@
       throw err;
     }
 
+    /* fix/read-cache-stale-after-write — a successful write (any non-GET)
+       invalidates the module-level TTL read-cache (_cache.js). That cache
+       assumes reports/date-index aren't edited in-app; life-conversation
+       separation (redactions) + content-correction (topic/action/finding
+       edits) now DO edit them, so without this a getTimeline/getDates read
+       within the 3-min TTL served the stale pre-edit report until a full
+       reload — the recurring "refresh still shows the old value". Clearing
+       the whole cache is safe: worst case is one extra refetch. */
+    var _method = (opts.method || 'GET').toUpperCase();
+    if (_method !== 'GET' && window.FS && window.FS.api && window.FS.api.cache) {
+      window.FS.api.cache.clear();
+    }
+
     return body;
   }
 
