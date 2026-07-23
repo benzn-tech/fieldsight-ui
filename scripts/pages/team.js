@@ -368,18 +368,35 @@
 
     function changeRole(deviceId, role) {
       /* deviceId IS the cognito_sub in live mode (adapter maps it in
-         _toPageMember), so this correctly keys the org write. */
-      if (orgLive()) {
-        window.FS.api.org.updateMemberRole(deviceId, toOrgRole(role));
-      } else if (window.FS.api.sites.updateUserRole) {
-        window.FS.api.sites.updateUserRole(deviceId, role);
-      }
-      setState(function (s) {
-        if (s.status !== 'ok') return s;
-        var patched = (s.users || []).map(function (u) { return u.device_id === deviceId ? Object.assign({}, u, { role: role }) : u; });
-        return Object.assign({}, s, { users: patched, groups: groupUsersBySite(patched), totals: Object.assign({}, s.totals, { roles: countDistinctRoles(patched) }) });
+         _toPageMember), so this correctly keys the org write.
+         fix/role-write-silent-fail — was fire-and-forget: it never awaited the
+         write and unconditionally applied an optimistic patch + "Position
+         updated" toast. When the org-api rejects (e.g. a non-admin caller hits
+         `patch_member_role`'s 403 "admin role required"), the failure was
+         swallowed, the UI lied, and the change did NOT persist — a refresh then
+         revealed the old role. Now: await, apply ONLY on success, surface the
+         real error otherwise. */
+      var toast = window.FS && window.FS.toast;
+      var writeP = orgLive()
+        ? window.FS.api.org.updateMemberRole(deviceId, toOrgRole(role))
+        : (window.FS.api.sites.updateUserRole
+            ? window.FS.api.sites.updateUserRole(deviceId, role)
+            : Promise.resolve(null));
+
+      Promise.resolve(writeP).then(function (res) {
+        if (res && (res._accessDenied || res._notFound)) {
+          if (toast) toast.show({ message: (res.error) || 'Could not update position', tone: 'error', duration: 5000 });
+          return;   // do NOT change the UI — the write did not persist
+        }
+        setState(function (s) {
+          if (s.status !== 'ok') return s;
+          var patched = (s.users || []).map(function (u) { return u.device_id === deviceId ? Object.assign({}, u, { role: role }) : u; });
+          return Object.assign({}, s, { users: patched, groups: groupUsersBySite(patched), totals: Object.assign({}, s.totals, { roles: countDistinctRoles(patched) }) });
+        });
+        if (toast) toast.show({ message: 'Position updated', tone: 'success' });
+      }).catch(function () {
+        if (toast) toast.show({ message: 'Could not update position', tone: 'error', duration: 5000 });
       });
-      if (window.FS && window.FS.toast) window.FS.toast.show({ message: 'Position updated', tone: 'success' });
     }
 
     var ctx = {
