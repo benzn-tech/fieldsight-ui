@@ -25,7 +25,19 @@
   async function _fetchFresh(key) {
     var res;
     if (!window.FS.api.useMocks) {
-      res = await window.FS.api.request('/media/presigned-url', { params: { key: key } });
+      var params = { key: key };
+      /* authority flip (pipeline plan 2026-07-14): the legacy
+         /media/presigned-url gateway resolves the caller from the OLD
+         DynamoDB identity store, a different store than Aurora `users` —
+         an Aurora-only account (e.g. a site_manager with no DynamoDB row)
+         403s there even though the S3 object exists. Mirrors
+         transcripts.js's aurora gate verbatim; 'aurora' only takes effect
+         when orgBaseUrl is non-empty (kill switch). */
+      if (window.FS.api.timelineSource === 'aurora' && window.FS.api.orgBaseUrl) {
+        res = await window.FS.api.orgRequest('/media/presigned-url', { params: params });
+      } else {
+        res = await window.FS.api.request('/media/presigned-url', { params: params });
+      }
     } else {
       await window.FS.api.delay(40);
       res = {

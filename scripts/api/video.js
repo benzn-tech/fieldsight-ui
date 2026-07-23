@@ -28,9 +28,18 @@
   async function getVideoSegments(opts) {
     opts = opts || {};
     if (!window.FS.api.useMocks) {
-      return window.FS.api.request('/video-segments', {
-        params: { date: opts.date, user: opts.user, start: opts.start, end: opts.end },
-      });
+      var params = { date: opts.date, user: opts.user, start: opts.start, end: opts.end };
+      /* authority flip (pipeline plan 2026-07-14): the legacy /video-segments
+         gateway resolves the caller from the OLD DynamoDB identity store,
+         a different store than Aurora `users` — an Aurora-only account
+         (e.g. a site_manager with no DynamoDB row) 403s there even though
+         the video segment S3 objects exist. Mirrors transcripts.js's aurora
+         gate verbatim; 'aurora' only takes effect when orgBaseUrl is
+         non-empty (kill switch). */
+      if (window.FS.api.timelineSource === 'aurora' && window.FS.api.orgBaseUrl) {
+        return window.FS.api.orgRequest('/video-segments', { params: params });
+      }
+      return window.FS.api.request('/video-segments', { params: params });
     }
     await window.FS.api.delay(120);
 
