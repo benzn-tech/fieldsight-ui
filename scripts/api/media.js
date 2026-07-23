@@ -46,6 +46,15 @@
         key:        key,
       };
     }
+    /* Do not cache failure sentinels (_accessDenied / _notFound from
+       _fetch.js) — they resolve rather than throw, and res.url is
+       undefined. Caching one here would poison the TTL cache for the
+       remainder of the window, so a retry after the underlying
+       permission/availability issue is fixed would still fail. */
+    if (!res || !res.url) {
+      _urlCache.delete(key);
+      return res;
+    }
     var expiresAt = Date.now() + (res.expires_in || 900) * 1000;
     _urlCache.set(key, { url: res.url, expiresAt: expiresAt });
     return res;
