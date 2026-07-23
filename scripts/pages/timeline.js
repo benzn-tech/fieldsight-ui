@@ -73,7 +73,7 @@
   }
 
   /* Split the (already override-merged) topics into the visible list and the
-     "已移除 / 个人" area on the redacted flag, preserving order within each. */
+     "Removed / personal" area on the redacted flag, preserving order within each. */
   function partitionTopics(topics) {
     var visible = [], removed = [];
     (topics || []).forEach(function (t) {
@@ -628,7 +628,7 @@
 
     /* life-conversation separation (Q2) — same content:edit-OR-own-report gate
        the single-user view and the detail-pane review buttons use, so a
-       reviewer's per-section "已移除 / 个人" area shows exactly where the review
+       reviewer's per-section "Removed / personal" area shows exactly where the review
        buttons do. hasContentEditPerm is caller-level; isOwnReport is per-section
        (computed inside the map). */
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
@@ -645,7 +645,7 @@
           : null;
 
         /* Q2 — merge optimistic patches, then split this section's topics into
-           the visible list and its own "已移除 / 个人" area. */
+           the visible list and its own "Removed / personal" area. */
         var _p = partitionTopics(applyTopicOverrides(report.topics, overrides));
         var isOwnReport = !!(caller && caller.name
             && window.FS.api.folderName(caller.name) === sectionUser);
@@ -720,13 +720,13 @@
           ),
 
           /* life-conversation separation (Q2) — this section's collapsed
-             "已移除 / 个人" area, mirroring the single-user view. Reviewer-only
+             "Removed / personal" area, mirroring the single-user view. Reviewer-only
              (sectionCanEdit); redacted topics stay recoverable via RemovedTopic.
              Keys are namespaced by section owner (topic_id is per-report). */
           _p.removed.length && sectionCanEdit ? React.createElement('details', {
             className: 'fs-timeline-page__removed',
           },
-            React.createElement('summary', null, '已移除 / 个人 (' + _p.removed.length + ')'),
+            React.createElement('summary', null, 'Removed / personal (' + _p.removed.length + ')'),
             _p.removed.map(function (topic) {
               return React.createElement(RemovedTopic, {
                 key:   sectionUser + '_' + topic.topic_id,
@@ -792,7 +792,7 @@
           || (targetTopicTitle !== null && (t.topic_title || '') === targetTopicTitle);
     }
 
-    /* 联动 — deep-link project sync: a route carrying &site (a cross-project
+    /* cross-project deep-link project sync: a route carrying &site (a cross-project
        search result or Ask citation) points the top-bar project selector at
        that project, so the selector always matches the content shown. Ref-
        guarded to fire once per site change, not on every render. */
@@ -1426,7 +1426,7 @@
 
     /* life-conversation separation (Task 11) — a redacted (confirmed-personal)
        topic is hidden from the default topic list and relocated to a
-       collapsed "已移除 / 个人" section with a revert control, reviewers only
+       collapsed "Removed / personal" section with a revert control, reviewers only
        (spec §5 "hidden + recoverable"). */
     var _partition    = partitionTopics(applyTopicOverrides(report.topics, overrides));
     var visibleTopics = _partition.visible;
@@ -1497,13 +1497,13 @@
         }),
       ),
 
-      /* life-conversation separation (Task 11) — collapsed "已移除 / 个人"
+      /* life-conversation separation (Task 11) — collapsed "Removed / personal"
          area: confirmed-personal topics are hidden from the list above but
          stay recoverable here (reviewers only) via revertRedaction. */
       removedTopics.length && canEditContent ? React.createElement('details', {
         className: 'fs-timeline-page__removed',
       },
-        React.createElement('summary', null, '已移除 / 个人 (' + removedTopics.length + ')'),
+        React.createElement('summary', null, 'Removed / personal (' + removedTopics.length + ')'),
         removedTopics.map(function (topic) {
           return React.createElement(RemovedTopic, { key: topic.topic_id, topic: topic });
         }),
@@ -1533,7 +1533,7 @@
   }
 
   /* life-conversation separation (Task 11) — one row in TimelineMiddleColumn's
-     "已移除 / 个人" collapsed section. Module-level (not nested inside
+     "Removed / personal" collapsed section. Module-level (not nested inside
      TimelineMiddleColumn) to match this file's convention (GlossaryConfirm/
      EditableText/etc. are all siblings, not re-declared every render). */
   function RemovedTopic(props) {
@@ -1543,7 +1543,7 @@
       React.createElement('span', null, unfolder(props.topic.topic_title || props.topic.title || 'Removed')),
       IconBtn ? React.createElement(IconBtn, {
         icon: 'rotate-ccw', size: 'sm', variant: 'ghost', disabled: busy || !props.topic.redaction_id,
-        ariaLabel: '恢复',
+        ariaLabel: 'Restore',
         onClick: function () {
           if (busy || !props.topic.redaction_id) return;
           setBusy(true);
@@ -1703,7 +1703,7 @@
         setBusy(false);
         if (!r[0] || r[0]._accessDenied || r[0]._notFound) { toast((r[0] && r[0].error) || 'Could not remove', 'error'); return; }
         toast('Removed from reports');
-        /* Optimistic patch (Q2): move the topic into the "已移除 / 个人" area
+        /* Optimistic patch (Q2): move the topic into the "Removed / personal" area
            immediately, carrying the just-issued redaction id so the revert
            control there is enabled without waiting for the refetch. */
         var newId = r[0].redaction && r[0].redaction.id;
@@ -1727,13 +1727,13 @@
     return React.createElement('div', { className: 'fs-topic-detail__review' },
       isFlagged
         ? React.createElement(React.Fragment, null,
-            React.createElement('span', { className: 'fs-topic-detail__review-flag' }, '疑似个人 · 待确认 '),
+            React.createElement('span', { className: 'fs-topic-detail__review-flag' }, 'Possibly personal · needs review '),
             React.createElement(IconBtn, { icon: 'check', size: 'sm', variant: 'ghost', disabled: busy,
-              ariaLabel: '确认个人并移除', onClick: function () { remove('confirm_non_work'); } }),
+              ariaLabel: 'Confirm personal and remove', onClick: function () { remove('confirm_non_work'); } }),
             React.createElement(IconBtn, { icon: 'x', size: 'sm', variant: 'ghost', disabled: busy,
-              ariaLabel: '其实是工作', onClick: keepAsWork }))
+              ariaLabel: 'Actually work-related', onClick: keepAsWork }))
         : React.createElement(IconBtn, { icon: 'user-x', size: 'sm', variant: 'ghost', disabled: busy,
-            ariaLabel: '标为个人并移除', onClick: function () { remove('missed_personal'); } }),
+            ariaLabel: 'Mark as personal and remove', onClick: function () { remove('missed_personal'); } }),
     );
   }
 
