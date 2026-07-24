@@ -80,11 +80,23 @@
      at all — tasks-aggregator.js omits them before this function ever
      sees the row. Only the literal 'non_work' is excluded — missing/other
      values (undefined, 'work') count as work, matching the `!== 'work'`-
-     avoiding convention the aggregator itself follows. */
-  function computeBuckets(rows, myName, today) {
+     avoiding convention the aggregator itself follows.
+
+     fix/mine-team-attribution — the `mine` bucket now goes through the
+     SHARED FS.api.isMineTask predicate (scripts/api/mine-team.js) instead
+     of a strict `r.responsible === myName` check, so an unassigned row
+     (responsible null/''/'—') owned by the viewer's own folder counts as
+     Mine, "Ben_Lin" vs "Ben Lin" matches, and case/whitespace differences
+     match — the exact same rule today-adapter.js's myTasks/teamTasks
+     split applies, so the two pages can never disagree on the same row.
+     `viewer` is { name, folderName } — folderName is the viewer's real
+     folder_name when known, else derived from name (see isMineTask doc).
+     row.folder is set on Today-shaped rows; Tasks rows (tasks-aggregator.js)
+     carry it as `user_folder` — `r.folder || r.user_folder` covers both. */
+  function computeBuckets(rows, viewer, today) {
     return {
       all:     rows,
-      mine:    rows.filter(function (r) { return r.responsible === myName; }),
+      mine:    rows.filter(function (r) { return window.FS.api.isMineTask(r.responsible, r.folder || r.user_folder, viewer); }),
       open:    rows.filter(function (r) { return !r.audit.checked && r.work_class !== 'non_work'; }),
       overdue: rows.filter(function (r) { return isOverdue(r, today) && r.work_class !== 'non_work'; }),
       done:    rows.filter(function (r) { return  r.audit.checked; }),
@@ -261,6 +273,12 @@
 
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
     var myName = caller.name || '';
+    /* fix/mine-team-attribution — { name, folderName } passed to the
+       shared isMineTask predicate everywhere below. folderName prefers
+       the REAL folder_name threaded from GET /api/org/me (session-
+       bridge.js onto AuthMock.currentUser.folder_name); falls back to
+       deriving it from myName when absent (mock/legacy sessions). */
+    var myViewer = { name: myName, folderName: caller.folder_name || null };
 
     /* Default filter: workers and named users see "Mine" first;
        admin/gm sees "All" so they get the full picture. */
@@ -311,7 +329,7 @@
     var rowsEarly  = (state && state.status === 'ok') ? (state.rows || []) : [];
     var todayEarly = (state && state.today) || window.FS.api.todayNZDT();
 
-    var bucketsEarly = computeBuckets(rowsEarly, myName, todayEarly);
+    var bucketsEarly = computeBuckets(rowsEarly, myViewer, todayEarly);
     var countsEarly = {
       all:     bucketsEarly.all.length,
       mine:    bucketsEarly.mine.length,
@@ -664,7 +682,14 @@
               return React.createElement(TaskCard, {
                 key:           row.id,
                 task:          task,
-                isMine:        row.responsible === myName,
+                /* fix/mine-team-attribution — same shared predicate as
+                   computeBuckets' `mine` bucket above (and today-adapter
+                   .js's myTasks/teamTasks split): NOT a strict `===`
+                   check any more. row.folder is set on some row shapes,
+                   row.user_folder on tasks-aggregator.js's — either one
+                   is the row's OWNER folder, used only for the
+                   unassigned-row rule. */
+                isMine:        window.FS.api.isMineTask(row.responsible, row.folder || row.user_folder, myViewer),
                 selected:      selectedId === row.id,
                 /* Row-level check-off (feat/editable-tasks-ui) — only
                    open rows get the round checkbox; a Done row falls

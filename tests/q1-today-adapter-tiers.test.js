@@ -20,6 +20,9 @@
  * window.FS.api.todayAdapter (see tests/date-parse.test.js for the same
  * require-under-Node pattern). Stub the small surface adapt() actually
  * touches: window.FS.api.folderName + window.FS.api.actions.lookupAction.
+ * fix/mine-team-attribution — adapt() now also calls window.FS.api
+ * .isMineTask; load the REAL mine-team.js module (not a fake stub) so
+ * these tests exercise the actual shared predicate, same as production.
  */
 const test = require('node:test');
 const assert = require('node:assert');
@@ -38,6 +41,7 @@ global.window = {
 global.React = {};
 global.document = { addEventListener() {}, removeEventListener() {} };
 
+require('../scripts/api/mine-team.js');
 require('../scripts/api/today-adapter.js');
 const adapt = global.window.FS.api.todayAdapter.adapt;
 

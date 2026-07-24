@@ -99,7 +99,7 @@
   <!-- Sprint 2.8 (Phase H) Meeting Minutes -->
   <script type="text/babel" src="scripts/composites/meeting-topic-card.js?v=2"></script>
   <!-- Sprint 2.9 (Phase I) Auth scaffolding — Login + 403 -->
-  <script type="text/babel" src="scripts/composites/login-screen.js?v=7"></script>
+  <script type="text/babel" src="scripts/composites/login-screen.js?v=8"></script>
   <script type="text/babel" src="scripts/composites/access-denied.js?v=1"></script>
   <!-- Sprint 4.7 — Slide-in drawer used by full-width pages (Programme) -->
   <script type="text/babel" src="scripts/composites/right-drawer.js?v=2"></script>
@@ -208,8 +208,11 @@
   <script src="scripts/api/reports.js?v=1"></script>
   <script src="scripts/api/media.js?v=2"></script>
   <script src="scripts/api/meetings.js?v=1"></script>
+  <!-- fix/mine-team-attribution — shared Mine/Team predicate; loads before
+       today-adapter.js + tasks.js (below), which both call it. -->
+  <script src="scripts/api/mine-team.js?v=1"></script>
   <!--   4. Today adapter (PLAN Phase D sketch — feeds mock-data.js shim) -->
-  <script src="scripts/api/today-adapter.js?v=10"></script>
+  <script src="scripts/api/today-adapter.js?v=11"></script>
   <!-- Sprint 4.2 — Tasks aggregator (cross-day join: timeline + actions) -->
   <script src="scripts/api/tasks-aggregator.js?v=11"></script>
   <!-- Sprint 6.0 — Compliance aggregator (cross-day fan-out for /safety + /quality) -->
@@ -234,12 +237,12 @@
   <!-- Mock data shim (weather only) + page registry + pages -->
   <script type="text/babel" src="scripts/mock-data.js?v=4"></script>
   <script type="text/babel" src="scripts/pages/_page-registry.js?v=1"></script>
-  <script type="text/babel" src="scripts/pages/today.js?v=44"></script>
+  <script type="text/babel" src="scripts/pages/today.js?v=45"></script>
   <script type="text/babel" src="scripts/pages/timeline.js?v=43"></script>
   <script type="text/babel" src="scripts/pages/reports.js?v=5"></script>
   <script type="text/babel" src="scripts/pages/sites.js?v=14"></script>
   <script type="text/babel" src="scripts/pages/activity.js?v=5"></script>
-  <script type="text/babel" src="scripts/pages/tasks.js?v=17"></script>
+  <script type="text/babel" src="scripts/pages/tasks.js?v=18"></script>
   <script type="text/babel" src="scripts/pages/evidence.js?v=13"></script>
   <script type="text/babel" src="scripts/pages/programme.js?v=18"></script>
   <script type="text/babel" src="scripts/pages/safety.js?v=24"></script>
@@ -351,7 +354,7 @@
        ?mocks=0/?mocks=1 bootstrap block above (it reads the fully-resolved
        FS.api.useMocks), and before the mount call so the first paint
        already reflects the real signed-in user when one is restored. -->
-  <script src="scripts/auth/session-bridge.js?v=5"></script>
+  <script src="scripts/auth/session-bridge.js?v=6"></script>
 
   <script>
     (function () {
