@@ -344,6 +344,37 @@
     return { folders: [] };
   }
 
+  // -------- sessions (session picker, feat 5) --------
+  /* GET /api/org/sessions?date=YYYY-MM-DD[&user=<folder>] →
+       { date, user, gap_minutes, sessions:[{session_id, started_at,
+         ended_at, site_name, topic_count, open_action_count,
+         participants, topic_row_ids, label, block}], excluded:{non_work,
+         redacted} }.
+
+     Gated on the SAME predicate as the neighbouring timeline-derived reads
+     (audio.js/media.js/transcripts.js/video.js) — `timelineSource ===
+     'aurora' && orgBaseUrl` — NOT the broader orgLive()/orgWrite() used by
+     the rest of this file: sessions are parsed from recording keys the
+     legacy report gateway never exposed, so there is no legacy fallback to
+     gate against, only the kill switch.
+
+     _accessDenied/_notFound pass straight through (no swallowing) — the
+     caller (timeline.js) decides how to degrade, same posture as
+     getSiteMembers. Mock/pre-gate default is an empty sessions list (the
+     picker simply doesn't render — matches getLiveItems' "nothing until
+     seeded" posture), never a fabricated session. */
+  async function getSessions(opts) {
+    opts = opts || {};
+    if (!api.useMocks && api.timelineSource === 'aurora' && api.orgBaseUrl) {
+      return api.orgRequest('/sessions', { params: { date: opts.date, user: opts.user } });
+    }
+    await api.delay();
+    return {
+      date: opts.date, user: opts.user, gap_minutes: null,
+      sessions: [], excluded: { non_work: 0, redacted: 0 },
+    };
+  }
+
   // -------- strategic rollup (feat 4c) --------
   /* GET /api/org/rollup/portfolio → { sites: [{ site_id (ORG UUID),
      open_safety, open_high_safety, open_actions, total_actions,
@@ -423,6 +454,7 @@
     createObservation: createObservation, getObservations: getObservations,
     updateObservation: updateObservation, archiveObservation: archiveObservation,
     getLiveItems: getLiveItems,
+    getSessions: getSessions,
     getSiteMembers: getSiteMembers,
     getSiteContributors: getSiteContributors,
     getPortfolioRollup: getPortfolioRollup,
