@@ -20,9 +20,18 @@
   if (!window.FS) window.FS = {};
 
   /* Folder name in S3 = display name with spaces → underscores
-     (BACKEND-CONTEXT §6, §4.4). Centralised so call sites don't hand-roll. */
+     (BACKEND-CONTEXT §6, §4.4). Centralised so call sites don't hand-roll.
+
+     TRIM FIRST — this is not cosmetic. The server builds user_name as
+     `first_name || ' ' || last_name`, so an account with an empty last_name
+     (e.g. Ben_UCPK) yields "Ben_UCPK " with a trailing space. Without the
+     trim that becomes the folder "Ben_UCPK_", which matches nothing: it
+     403'd every photo presign (P5) and it silently sent the user's own
+     unassigned tasks to Team instead of Mine, because the derived owner
+     folder never equalled the real one. A real folder never has a leading
+     or trailing underscore, so trimming is strictly more correct. */
   function folderName(displayName) {
-    return (displayName || '').replace(/\s+/g, '_');
+    return String(displayName == null ? '' : displayName).trim().replace(/\s+/g, '_');
   }
 
   /* Small artificial delay so optimistic-UI patterns can be tested. */

@@ -266,3 +266,28 @@ test('anti-drift: today-adapter adapt() and tasks.js computeBuckets() agree — 
   assert.strictEqual(todayOut.myTasks.length, 0);
   assert.strictEqual(tasksOut.mine.length, 0);
 });
+
+/* ---------------------------------------------------------------------
+   Regression: folderName() must TRIM before collapsing whitespace.
+   The server builds user_name as `first_name || ' ' || last_name`, so an
+   empty last_name yields a trailing space ("Ben_UCPK "). Untrimmed that
+   became the folder "Ben_UCPK_", which matched nothing — it 403'd photo
+   presigns (P5) and silently routed the user's own unassigned tasks to
+   Team, because tasks-aggregator derives the owner folder this way
+   (tasks-aggregator.js: folderName(r.user_name)). Caught on dev against
+   real data; the earlier unit tests all used already-clean names.
+   --------------------------------------------------------------------- */
+test('folderName trims before collapsing whitespace', function () {
+  function folderName(d) { return String(d == null ? '' : d).trim().replace(/\s+/g, '_'); }
+  assert.equal(folderName('Ben_UCPK '), 'Ben_UCPK');      // the real prod case
+  assert.equal(folderName(' Ben Lin '), 'Ben_Lin');
+  assert.equal(folderName('Ben  Lin'),  'Ben_Lin');
+  assert.equal(folderName('Ben_UCPK'),  'Ben_UCPK');      // idempotent
+  assert.equal(folderName(null),        '');
+});
+
+test('unassigned task is Mine even when the owner name carries a trailing space', function () {
+  // ownerFolder as tasks-aggregator would derive it from a TRIMMED user_name
+  const viewer = { name: 'Ben_UCPK', folderName: null };  // legacy session, no folder_name
+  assert.equal(isMineTask(null, 'Ben_UCPK', viewer), true);
+});
