@@ -221,6 +221,11 @@
   function buildTodayFromReport(report, actions, caller, date, siteSlugMap, idPrefix, onSiteMembers, siteIdMap) {
     return window.FS.api.todayAdapter.adapt(report, {
       currentUserName: caller && caller.name,
+      /* fix/mine-team-attribution — the viewer's REAL folder_name, when
+         known (session-bridge.js threads it onto AuthMock.currentUser
+         .folder_name from GET /api/org/me); today-adapter.js's isMineTask
+         call falls back to deriving it from currentUserName when absent. */
+      currentUserFolder: caller && caller.folder_name,
       actionState:     actions || {},
       date:            date,
       siteSlugByName:  siteSlugMap || {},

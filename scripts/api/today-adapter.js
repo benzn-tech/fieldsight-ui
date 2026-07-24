@@ -282,6 +282,12 @@
   function adapt(report, ctx) {
     ctx = ctx || {};
     var currentUserName = ctx.currentUserName || (window.AuthMock && window.AuthMock.currentUser && window.AuthMock.currentUser.name) || '';
+    /* fix/mine-team-attribution — the viewer's REAL folder_name, when
+       known (threaded from GET /api/org/me via session-bridge.js onto
+       AuthMock.currentUser.folder_name; today.js passes it through as
+       ctx.currentUserFolder). null/undefined here is fine — isMineTask
+       falls back to deriving it from currentUserName itself. */
+    var currentUserFolder = ctx.currentUserFolder || (window.AuthMock && window.AuthMock.currentUser && window.AuthMock.currentUser.folder_name) || null;
     var actionState     = ctx.actionState     || {}; /* composite/legacy map — read via FS.api.actions.lookupAction only */
     var nowMinutes      = ctx.nowMinutes      != null ? ctx.nowMinutes : (16 * 60); /* 16:00 NZDT */
     var siteSlugByName  = ctx.siteSlugByName  || {};
@@ -487,7 +493,16 @@
           site_name:   siteName,
           site_slug:   siteSlug,
         };
-        if (currentUserName && task.assignee === currentUserName) {
+        /* fix/mine-team-attribution — shared predicate (scripts/api/
+           mine-team.js), NOT a strict `=== currentUserName` string
+           check any more: normalized-exact OR folder-equality match on
+           an assigned name; an unassigned item (task.assignee is the
+           '—' placeholder or the raw text was null/'') is Mine only
+           when THIS report's ownerFolder is the viewer's own folder —
+           see mine-team.js's doc for the full rule set. Tasks page
+           (tasks.js computeBuckets) calls the exact same predicate so
+           the two pages can't drift apart again. */
+        if (window.FS.api.isMineTask(task.assignee, ownerFolder, { name: currentUserName, folderName: currentUserFolder })) {
           myTasks.push(task);
         } else {
           teamTasks.push(task);
