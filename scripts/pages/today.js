@@ -116,6 +116,30 @@
     return (list || []).length;
   }
 
+  /* fix/leftover-discoverability — the user's own words: "even when the
+     assignee is the same person, items get put in different sections."
+     Root cause: myTasks/teamTasks (Mine/Team, by isMineTask) get torn
+     apart AGAIN purely by age (the Recent/Leftover split above/below —
+     myLeftover/myRecent), and Leftover is collapsed by default — so a
+     viewer's own older item silently leaves "Open items" for a closed
+     drawer and reads as MISSING, not filed. This does not change the
+     split, the threshold, or which section anything lands in — it only
+     answers "how many of THIS viewer's own tasks did that split just
+     strand?", so the render can say so where they'd have looked.
+
+     Deliberately takes the viewer's OWN, pre-split myTasks list (never
+     teamTasks) and re-applies the EXACT SAME predicate the Recent/
+     Leftover split above uses (`ageDays > LEFTOVER_THRESHOLD_DAYS`) —
+     so a Team item that also aged into Leftover can never inflate this
+     number; the Leftover section HEADING further down still counts
+     Mine+Team merged (sectionCardCount(leftoverItems), unchanged), this
+     is a different, narrower number used only by the new hint line. */
+  function countOwnStranded(myTasks) {
+    return (myTasks || []).filter(function (t) {
+      return t && t.ageDays > LEFTOVER_THRESHOLD_DAYS;
+    }).length;
+  }
+
   /* fix/today-batch-select-expand — the SAME condition that already
      decides whether TaskCard gets a `checkable` prop (myRecent/teamRecent/
      Leftover call sites below all repeated this inline before this
@@ -1581,6 +1605,15 @@
     }
     var leftoverItems = myLeftover.concat(teamLeftover);
 
+    /* fix/leftover-discoverability — how many of THIS viewer's own
+       tasks the split just above stranded into Leftover. Computed via
+       the pure, exported countOwnStranded() (not read off
+       myLeftover.length) so the render path and
+       tests/leftover-discoverability.test.js exercise the identical
+       function — they cannot independently drift. Same
+       earlyData.myTasks source myLeftover itself was built from. */
+    var ownStrandedCount = countOwnStranded(earlyData && earlyData.myTasks);
+
     /* F2 — leftoverIsMultiProject (and the flattened render order it
        drives) has to be known BEFORE useMultiSelect() below, same
        rules-of-hooks constraint as leftoverItems above. Moved up from
@@ -2052,6 +2085,45 @@
                 onBatchToggle:  multiSelect.onItemClick,
               });
             }),
+          )
+        : null,
+
+      /* fix/leftover-discoverability — quiet pointer from "Open items"
+         to the viewer's OWN tasks that the age split above just carried
+         into the (collapsed-by-default) Leftover section further down.
+         Deliberately OUTSIDE the myRecent.length>0 guard above: a
+         viewer can have ALL of their open items aged into Leftover
+         (myRecent empty, nothing rendered above this line at all) and
+         still needs the pointer — otherwise their tasks look like they
+         vanished rather than moved. ownStrandedCount is the viewer's
+         OWN count only (countOwnStranded, computed above near
+         leftoverItems) — never the merged Mine+Team total the Leftover
+         heading itself shows. Renders nothing at all when
+         ownStrandedCount is 0 — a permanent zero-state line here would
+         just be noise once someone has no stranded items of their own.
+         Reuses the Leftover section's OWN disclosure state
+         (leftoverExpanded/setLeftoverExpanded, declared once near the
+         top of this component) rather than adding a second toggle —
+         clicking always EXPANDS (never re-collapses) and scrolls the
+         already-mounted .fs-today__leftover container into view (that
+         container renders whenever leftoverItems.length > 0, regardless
+         of expanded state, so it's already in the DOM to scroll to). */
+      ownStrandedCount > 0
+        ? React.createElement('button', {
+            type:      'button',
+            className: 'fs-today__stranded-hint',
+            onClick:   function () {
+              setLeftoverExpanded(true);
+              if (typeof document !== 'undefined' && document.querySelector) {
+                var leftoverEl = document.querySelector('.fs-today__leftover');
+                if (leftoverEl && typeof leftoverEl.scrollIntoView === 'function') {
+                  leftoverEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+              }
+            },
+          },
+            ownStrandedCount + (ownStrandedCount === 1 ? ' more of yours is ' : ' more of yours are ')
+              + LEFTOVER_THRESHOLD_DAYS + '+ days old — in Leftover',
           )
         : null,
 
@@ -2777,6 +2849,9 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       sectionCardCount:     sectionCardCount,
+      /* fix/leftover-discoverability — pure own-stranded-count helper,
+         see its doc comment near sectionCardCount above. */
+      countOwnStranded:     countOwnStranded,
       isBatchEligibleTask:  isBatchEligibleTask,
       groupByProject:       groupByProject,
       /* fix/week-kpi — the weekly-closures tile's pure parts. */

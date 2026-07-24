@@ -399,6 +399,35 @@
   padding-top: 8px;
 }
 
+/* fix/leftover-discoverability — quiet pointer rendered near "Open
+   items" (today.js), pointing at the viewer's OWN tasks the Recent/
+   Leftover age split just carried into the section above. Deliberately
+   lighter-weight than .fs-today__leftover-toggle (that's the section's
+   own control; this is just a hint ABOUT it) — text-only, no
+   background/border, tertiary color until hover. */
+.fs-today__stranded-hint {
+  display: block;
+  width: 100%;
+  margin: 2px 0 4px;
+  padding: 4px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+.fs-today__stranded-hint:hover {
+  color: var(--text-secondary);
+  text-decoration: underline;
+}
+.fs-today__stranded-hint:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
 /* feat/leftover-batch-select (T1) — header row wrapping the expand
    toggle. border-top lives here instead of on .fs-today__leftover-
    toggle so the rule reads once per row.
