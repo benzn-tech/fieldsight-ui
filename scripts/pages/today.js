@@ -1243,15 +1243,83 @@
   }
 
   /* =====================================================================
-     Sprint 11 C.2 · WeeklyCompletionKpi
+     WeeklyCompletionKpi (Sprint 11 C.2, rebuilt by fix/week-kpi)
      ─────────────────────────────────────────────────────────────────────
-     Mini KPI tile shown above the Urgent block on /today. Calls
-     `tasks.getCrossDayAudit` for [Mon..today] (Q-S11-1 default) and
-     reports closed/total + a 7-day SparkLine of daily-closed counts.
+     Mini KPI tile above the Urgent block on /today.
 
-     Hidden when both totals are zero (demo dataset edge case + first-
-     boot avoid).
+     WHAT IT MEASURES — action items CLOSED since Monday 00:00 NZ. A count,
+     deliberately with no denominator, plus the SAME window one week earlier
+     for context. Both are flows, so they are comparable.
+
+     Why not the old "N / M actions resolved this week": that tile read
+     `tasks.getCrossDayAudit` → `actions.getActionsRange` → the legacy
+     DynamoDB overlay, which check-off no longer writes at all (it now
+     PATCHes Aurora), on a date axis that was the task's REPORT date rather
+     than its close date, with a denominator that was "rows that ever had an
+     overlay write". Ticking a box moved neither number, and with real
+     Feb–Jun reports the Mon→today report-date window was usually empty, so
+     `total === 0` hid the tile outright. All three are gone: the numbers now
+     come from GET /api/org/action-items/closures, which counts the
+     content_edits status→'done' transitions the check-off PATCH writes, each
+     with a real close timestamp, bucketed on the NZ day it happened.
+
+     No denominator is offered because none is honest here: "open items" is a
+     STOCK (an all-time backlog that includes ~119 tasks the retired overlay
+     closed without ever clearing Aurora's status='open'), so closed/open
+     would be a near-constant that STILL barely moves when you tick something;
+     and "items created this week" is nightly-ingest's flow, not the team's.
+
+     Hidden only when there is genuinely nothing to say — zero closures in
+     BOTH windows — or when the request could not be trusted (denied/failed),
+     which is logged rather than rendered as a fake zero.
      ===================================================================== */
+
+  /* Monday of the ISO date's calendar week. Day-of-week comes from a
+     Date.UTC parse of the ISO string to dodge BUG-19 (NZDT timezone drift). */
+  function mondayOfISO(iso) {
+    var p = String(iso).split('-').map(Number);
+    var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+    var dow = d.getUTCDay();            /* 0 = Sun, 1 = Mon, ... */
+    return window.FS.api.addDaysISO(iso, dow === 0 ? -6 : 1 - dow);
+  }
+
+  /* Pure response → view-model. `status`:
+       'error'  — nothing trustworthy came back; render nothing, log it.
+       'empty'  — a valid answer of "no closures in either window".
+       'ok'     — something happened; render it.
+     Never invents a number: `closed` is the server's total (falling back to
+     the sum of its own day series, which must agree), and the trend is keyed
+     on close date, exactly what the sparkline always implied it was. */
+  function weekKpiModel(res) {
+    if (!res || res._accessDenied || res._notFound || typeof res.closed !== 'number') {
+      return { status: 'error' };
+    }
+    var days = Array.isArray(res.by_day) ? res.by_day : [];
+    var trend = days.map(function (d) {
+      return { date: d.date, value: Number(d.closed) || 0 };
+    });
+    var previous = (res.previous && typeof res.previous.closed === 'number')
+      ? res.previous.closed : 0;
+    var closed = res.closed;
+    if (closed === 0 && previous === 0) return { status: 'empty' };
+    return {
+      status: 'ok', closed: closed, previousClosed: previous, trend: trend,
+      weekStart: res.from, weekEnd: res.to,
+    };
+  }
+
+  /* The label must state EXACTLY what was computed — the old one promised a
+     ratio the numbers never delivered. */
+  function weekKpiHeadline(model) {
+    return model.closed + (model.closed === 1 ? ' action' : ' actions')
+      + ' closed this week';
+  }
+
+  function weekKpiSubline(model) {
+    var dayOfMonth = String(model.weekStart || '').split('-')[2] || '';
+    var prev = model.previousClosed === 0 ? 'none' : String(model.previousClosed);
+    return 'since Mon ' + dayOfMonth + ' · ' + prev + ' in the same period last week';
+  }
 
   function WeeklyCompletionKpi() {
     var fs        = window.FieldSight;
@@ -1262,68 +1330,37 @@
 
     React.useEffect(function () {
       var cancelled = false;
-      var today = window.FS.api.todayNZDT();
-      /* Q-S11-1 default: calendar week Mon→today. Day-of-week
-         is computed from Date.UTC parse of the ISO string to dodge
-         BUG-19 (NZDT timezone drift). */
-      function mondayOf(iso) {
-        var p = iso.split('-').map(Number);
-        var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
-        var dow = d.getUTCDay();          /* 0 = Sun, 1 = Mon, ... */
-        var offset = dow === 0 ? -6 : 1 - dow;
-        return window.FS.api.addDaysISO(iso, offset);
-      }
-      var weekStart = mondayOf(today);
+      var today     = window.FS.api.todayNZDT();
+      var weekStart = mondayOfISO(today);
 
-      window.FS.api.tasks.getCrossDayAudit({
-        from: weekStart, to: today,
-      }).then(function (res) {
-        if (cancelled) return;
-        if (!res || res._accessDenied) {
-          setData({ status: 'hidden' });
-          return;
-        }
-        var entries = res.entries || [];
-        var total   = entries.length;
-        var closed  = entries.filter(function (e) { return e.checked; }).length;
-        if (total === 0) { setData({ status: 'hidden' }); return; }
-
-        /* Daily closed-count for the SparkLine — fill missing days
-           with zero so the curve always shows the full week. */
-        var byDay = {};
-        var d = weekStart;
-        while (d && d <= today) {
-          byDay[d] = 0;
-          d = window.FS.api.addDaysISO(d, 1);
-        }
-        entries.forEach(function (e) {
-          if (e.checked && byDay[e.date] != null) byDay[e.date] += 1;
+      /* ONE call for both windows — the server returns the dense day series
+         and the previous-week total together (no per-day fan-out). */
+      window.FS.api.org.getActionClosures({ from: weekStart, to: today })
+        .then(function (res) {
+          if (cancelled) return;
+          var model = weekKpiModel(res);
+          if (model.status === 'error' && window.console) {
+            console.warn('[today] weekly closures unavailable', res);
+          }
+          setData(model);
+        })
+        .catch(function (e) {
+          if (cancelled) return;
+          if (window.console) console.warn('[today] weekly closures failed', e);
+          setData({ status: 'error' });
         });
-        var trend = Object.keys(byDay).sort().map(function (date) {
-          return { date: date, value: byDay[date] };
-        });
-
-        setData({
-          status: 'ok', total: total, closed: closed, trend: trend,
-          weekStart: weekStart, today: today,
-        });
-      }).catch(function () {
-        if (!cancelled) setData({ status: 'hidden' });
-      });
 
       return function () { cancelled = true; };
     }, []);
 
     if (data.status !== 'ok') return null;
 
-    var pct = data.total > 0 ? Math.round((data.closed / data.total) * 100) : 0;
-
     return React.createElement('div', { className: 'fs-today__week-kpi' },
       React.createElement('div', { className: 'fs-today__week-kpi-text' },
         React.createElement('div', { className: 'fs-today__week-kpi-headline' },
-          data.closed + ' / ' + data.total + ' actions resolved this week'),
+          weekKpiHeadline(data)),
         React.createElement('div', { className: 'fs-today__week-kpi-sub' },
-          pct + '% complete · since Mon ' + (data.weekStart.split('-')[2] || '')),
+          weekKpiSubline(data)),
       ),
       SparkLine ? React.createElement(SparkLine, {
         points: data.trend, tone: 'success', width: 140, height: 32,
@@ -2489,6 +2526,12 @@
       openCount:            openCount,
       isBatchEligibleTask:  isBatchEligibleTask,
       groupByProject:       groupByProject,
+      /* fix/week-kpi — the weekly-closures tile's pure parts. */
+      mondayOfISO:          mondayOfISO,
+      weekKpiModel:         weekKpiModel,
+      weekKpiHeadline:      weekKpiHeadline,
+      weekKpiSubline:       weekKpiSubline,
+      WeeklyCompletionKpi:  WeeklyCompletionKpi,
     };
   }
 
