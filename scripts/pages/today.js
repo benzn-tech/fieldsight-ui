@@ -87,15 +87,33 @@
     return ageDays + 'd ago';
   }
 
-  /* Q1 — tier-aware Today/Tasks. A `work_class === 'non_work'` item is
-     still RENDERED (in myRecent/teamRecent, flagged "Possibly personal"
-     by TaskCard) but must not inflate the section's open-items COUNT.
-     Anything else — 'work', undefined, missing — counts as work; only
-     the literal 'non_work' is excluded, never a `!== 'work'` check
-     (matches the timeline "aurora" shape's existing convention, so a
-     value this page doesn't yet know about still counts as work). */
-  function openCount(list) {
-    return list.filter(function (t) { return t.work_class !== 'non_work'; }).length;
+  /* fix/today-heading-counts — THE counting rule for every section/
+     sub-group heading on this page: a heading's N is always the number
+     of cards actually rendered beneath it, i.e. plain `list.length` on
+     the SAME list `renderMaybeGrouped`/the card map is called with —
+     never a filtered subset. This used to diverge: openCount() (Q1 —
+     tier-aware Today/Tasks) excluded `work_class === 'non_work'` items
+     from "Open items"/"Team" while still RENDERING them (TaskCard's
+     "Possibly personal" badge), so a heading could read "Open items · 3"
+     over 5 cards; "Leftover" meanwhile always used the raw length, a
+     THIRD rule on the same page. Q1's "still render it, just flag it"
+     behaviour is preserved (a non_work item stays in myRecent/teamRecent/
+     leftoverItems, badge and all) — only the count changed, from
+     "exclude non_work" to "count what's on screen". The badge is what
+     tells the possibly-personal story now; the heading number no longer
+     silently disagrees with the cards under it. Project sub-group
+     headers (renderMaybeGrouped's g.rows.length) and "Due within N days"
+     (data.programmeTasks.length) already followed this same
+     count-what-renders rule and needed no change.
+
+     sectionCardCount() below is the ONE named place that rule lives —
+     "Open items"/"Team"/"Leftover" all route their heading number
+     through it (on the exact list they render) instead of three
+     independent `list.length` expressions tied together only by
+     comments, so a future edit to one heading can't silently
+     reintroduce a filter the others don't have. */
+  function sectionCardCount(list) {
+    return (list || []).length;
   }
 
   /* fix/today-batch-select-expand — the SAME condition that already
@@ -1996,10 +2014,12 @@
       myRecent.length > 0
         ? React.createElement(React.Fragment, null,
             React.createElement(SubsectionLabel, null,
-              /* Q1 — "Possibly personal" (non_work) items stay in
-                 myRecent and are still rendered below; they just don't
-                 inflate this count. */
-              'Open items · ' + openCount(myRecent)),
+              /* fix/today-heading-counts — sectionCardCount() (see rule
+                 comment near its definition above). A "Possibly
+                 personal" (non_work) item stays in myRecent, is
+                 rendered below, and now counts too — the TaskCard badge
+                 is what flags it, not a lower number here. */
+              'Open items · ' + sectionCardCount(myRecent)),
             renderMaybeGrouped(myRecent, isMultiProject, function (task) {
               return React.createElement(fs.TaskCard, {
                 key:           task.id,
@@ -2037,8 +2057,9 @@
 
       teamRecent.length > 0 ? React.createElement(React.Fragment, null,
         React.createElement(SubsectionLabel, null,
-          /* Q1 — same non_work-excluded count as "Open items" above. */
-          'Team · ' + openCount(teamRecent)),
+          /* fix/today-heading-counts — sectionCardCount(), same rule as
+             "Open items" above. */
+          'Team · ' + sectionCardCount(teamRecent)),
         renderMaybeGrouped(teamRecent, isMultiProject, function (task) {
           return React.createElement(fs.TaskCard, {
             key:        task.id,
@@ -2111,7 +2132,12 @@
                   'aria-hidden': true,
                 }, '▸'),
                 React.createElement('span', { className: 'fs-today__leftover-label' },
-                  'Leftover · ' + leftoverItems.length),
+                  /* fix/today-heading-counts — sectionCardCount(), same
+                     rule as "Open items"/"Team" above (this heading
+                     already used the raw length; it's Open items/Team
+                     that changed to match it, not the other way
+                     around). */
+                  'Leftover · ' + sectionCardCount(leftoverItems)),
                 React.createElement('span', { className: 'fs-today__leftover-hint' },
                   '(' + LEFTOVER_THRESHOLD_DAYS + '+ days, unresolved)'),
               ),
@@ -2738,14 +2764,19 @@
        Activity / Settings / Evidence keep their 2-panel layout. */
   };
 
-  /* Expose the pure Q1 open-items count helper + (fix/today-batch-select-
-     expand) the batch-eligibility/ordering helpers to Node's test runner
-     only (CommonJS). No-op in the browser (Babel standalone leaves
-     `module` undefined), so the page bundle is unaffected — mirrors
-     timeline.js's identical guard. */
+  /* Expose the pure (fix/today-batch-select-expand) batch-eligibility/
+     ordering helpers to Node's test runner only (CommonJS). No-op in the
+     browser (Babel standalone leaves `module` undefined), so the page
+     bundle is unaffected — mirrors timeline.js's identical guard.
+     fix/today-heading-counts replaced openCount (excluded non_work from
+     the count while still rendering it) with sectionCardCount (always
+     list.length — see the rule comment near its definition); exported
+     here alongside groupByProject so tests/today-heading-counts.test.js
+     can assert the heading-count/rendered-card-count/sub-group-sum
+     invariants directly, not just re-derive them by hand. */
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
-      openCount:            openCount,
+      sectionCardCount:     sectionCardCount,
       isBatchEligibleTask:  isBatchEligibleTask,
       groupByProject:       groupByProject,
       /* fix/week-kpi — the weekly-closures tile's pure parts. */
