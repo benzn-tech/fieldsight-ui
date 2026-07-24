@@ -435,6 +435,18 @@
              task-detail editors must treat null as "not editable", never
              crash. */
           actionItemId: a.id || null,
+          /* feat/today-title-edit — durable topics.id (backend Task 8
+             passthrough, same field OverviewTab reads as topic.topic_row_id
+             in timeline.js), threaded down onto every action item flattened
+             from this topic. Distinct from topic_id just below (that's the
+             per-report SEQUENTIAL int, resets to 0 in every report — not a
+             durable id). Only consumer today: the title editor's optional
+             glossary-correction propagate offer (EditableText's `topicId`
+             prop), which needs the durable id, not the sequential one. Null
+             for a topic the backend hasn't stamped with a row id yet — the
+             editor already treats that as "no propagate offer", same as
+             every other optional-field degrade in this adapter. */
+          topicRowId:  t.topic_row_id || null,
           /* feat/editable-tasks-ui — org SITE UUID for this task's site
              (see ctx.siteIdByName doc above); null on a lookup miss. Feeds
              the assignee picker's FS.api.org.getSiteMembers(task.siteId)

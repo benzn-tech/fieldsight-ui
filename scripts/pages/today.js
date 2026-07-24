@@ -1226,6 +1226,40 @@
     return (label || 'medium').toLowerCase();
   }
 
+  /* feat/today-title-edit — pure gate for the title editor, kept separate
+     from `fieldsEditable` (priority/status/due/assignee, further below)
+     on purpose: those four are PATCH /api/org/action-items/{id} fields,
+     authorised by task:edit/task:assign-or-own-the-task; the title is
+     PATCH /api/org/content/{table}/{id} (a rewrite of the body text),
+     authorised by content:edit-or-own-the-report — a DIFFERENT authority
+     model (timeline.js's canEditContent, mirrored by the caller of this
+     function as canEditContentRow). Two independent, testable conditions:
+     the caller must actually be allowed to edit this row's content, AND
+     the row must carry a durable id to PATCH against at all (a legacy/
+     pre-migration item the shim hasn't stamped an action_items.id onto
+     yet has nothing to edit, permission notwithstanding). */
+  function titleEditable(item, canEditContentRow) {
+    return !!item && item.kind === 'task' && !!canEditContentRow && !!item.actionItemId;
+  }
+
+  /* feat/today-title-edit — local mirror of timeline.js's isSiteManagerPlus
+     (same D7 rule: promoting a correction to a glossary row is
+     site_manager+ only, one tier above plain content:edit). Not exported
+     from timeline.js to reuse — this file already mirrors adminUserFolders()
+     from the aggregators the same way (see that function's own doc), an
+     established convention here rather than adding a new cross-file export
+     for one boolean. Keep in lockstep with timeline.js's copy if the D7
+     rule ever changes. */
+  function isSiteManagerPlusLocal(caller) {
+    if (!caller) return false;
+    if (caller.isAdmin === true) return true;
+    var HR = window.FS && window.FS.HIERARCHY_ROLES;
+    var ROLES = window.FS && window.FS.ROLES;
+    if (!HR || !ROLES || HR.indexOf(caller.role) === -1 || HR.indexOf('site_manager') === -1) return false;
+    return (ROLES[caller.role] && ROLES[caller.role].level || 0)
+        >= (ROLES.site_manager && ROLES.site_manager.level || 0);
+  }
+
   /* =====================================================================
      TodayProvider — owns the page state and exposes it via TodayContext.
      AppShell wraps Middle + Right in this so both columns see the same
@@ -2146,6 +2180,39 @@
     var isOwnTask = item.kind === 'task' && item.assignee && item.assignee !== '—'
                     && item.assignee === (caller && caller.name);
 
+    /* feat/today-title-edit — the title lives on a DIFFERENT authority
+       model than priority/status/due/assignee above: it's a content
+       correction (PATCH /api/org/content/action_items/{id}), gated the
+       same way timeline.js gates every EditableText mount — content:edit
+       OR the caller being the report's own author — never task:edit/
+       task:assign/isOwnTask (those answer "can this caller manage the
+       TASK", not "can this caller correct the TRANSCRIBED TEXT"; a pm
+       with task:edit but who didn't write this report has no standing to
+       rewrite its wording, while the report's own author does even
+       without task:edit). item.folder is the report OWNER's folder
+       (today-adapter.js, never the caller) — same field timeline.js's
+       own isOwnReport compares against via ownerFolder. */
+    var hasContentEditPerm = !!(window.FS && window.FS.can && window.FS.P
+                        && window.FS.can(caller, window.FS.P('content', 'edit')));
+    var isOwnReportRow     = !!(item.kind === 'task' && item.folder && caller && caller.name
+                        && window.FS.api.folderName && window.FS.api.folderName(caller.name) === item.folder);
+    var canEditContentRow  = hasContentEditPerm || isOwnReportRow;
+    /* D7 — glossary PROMOTION is one tier above plain content:edit (see
+       isSiteManagerPlusLocal's doc); the isOwnReportRow OR-branch never
+       widens this, mirroring timeline.js's own canConfirmGlossary
+       (`hasContentEditPerm && isSiteManagerPlus(caller)`, not
+       `canEditContent && ...`). */
+    var canConfirmGlossaryRow = hasContentEditPerm && isSiteManagerPlusLocal(caller);
+
+    /* Pencil-toggle (Pattern B, same as timeline.js's action-item text
+       editor) state for the title — closed by default, reset whenever the
+       selected item changes so a previous item's open editor can't bleed
+       into the next one (same reasoning as the draft reset just below). */
+    var titleEditingRef  = React.useState(false);
+    var titleEditing     = titleEditingRef[0];
+    var setTitleEditing  = titleEditingRef[1];
+    React.useEffect(function () { setTitleEditing(false); }, [item.id]);
+
     /* Optimistic per-field overrides (task-card.js's startCheckOff is the
        precedent for this pattern elsewhere in the file: flip locally on
        change, revert on failure) — keyed by the SAME field names the
@@ -2262,6 +2329,7 @@
     var fieldsEditable   = item.kind === 'task' && (canEditTask || isOwnTask) && !!item.actionItemId;
     var assigneeEditable = item.kind === 'task' && (canAssignTask || isOwnTask) && !!item.actionItemId
                           && !!item.siteId && roster.status === 'ok' && roster.users.length > 0;
+    var isTitleEditable  = titleEditable(item, canEditContentRow);
 
     var rows;
     if (item.kind === 'task') {
@@ -2380,11 +2448,46 @@
             wordBreak: 'break-word',
           },
         }, item.title || item.snippet || '(item)'),
-        React.createElement(IconBtn, {
-          icon: 'x', ariaLabel: 'Close detail', size: 'sm',
-          onClick: function () { if (props.onClose) props.onClose(); },
-        }),
+        React.createElement('div', { style: { display: 'flex', gap: '4px', flexShrink: 0 } },
+          /* feat/today-title-edit — pencil toggle, same Pattern B as
+             timeline.js's per-row content editors: a click swaps the
+             inline EditableText in below (title stays visible above it,
+             matching the action-item-text precedent in OverviewTab —
+             not a hide/replace). */
+          isTitleEditable ? React.createElement(IconBtn, {
+            icon:      titleEditing ? 'x' : 'pencil',
+            ariaLabel: (titleEditing ? 'Cancel editing' : 'Edit') + ' title',
+            size: 'sm', variant: 'ghost',
+            onClick: function () { setTitleEditing(function (v) { return !v; }); },
+          }) : null,
+          React.createElement(IconBtn, {
+            icon: 'x', ariaLabel: 'Close detail', size: 'sm',
+            onClick: function () { if (props.onClose) props.onClose(); },
+          }),
+        ),
       ),
+
+      /* feat/today-title-edit — mounts window.FieldSight.EditableText,
+         the SAME component timeline.js uses for topic summary / action
+         item text / safety flag observation edits (exposed there, not
+         duplicated here — see that file's "Register" section). Editing a
+         task's TITLE always meant going to the Timeline and finding the
+         matching topic; this is the missing mount, not a new endpoint —
+         PATCH /api/org/content/action_items/{id} is already what the
+         Timeline's own action-item text editor calls. */
+      isTitleEditable && titleEditing && fs.EditableText
+        ? React.createElement(fs.EditableText, {
+            editable: true, table: 'action_items', id: item.actionItemId, field: 'text',
+            value: item.title || '', ariaLabel: 'Edit action item title', rows: 2,
+            showGlossaryConfirm: canConfirmGlossaryRow, topicId: item.topicRowId,
+            onSaved: function (res) {
+              var next = res && res.row && res.row.text;
+              if (ctx && ctx.patchTask) ctx.patchTask(item.id, { title: next != null ? next : item.title });
+              setTitleEditing(false);
+            },
+            onExitEdit: function () { setTitleEditing(false); },
+          })
+        : null,
 
       item.kind === 'urgent' ? React.createElement('div', {
         style: { display: 'flex', gap: '6px' },
@@ -2532,6 +2635,8 @@
       weekKpiHeadline:      weekKpiHeadline,
       weekKpiSubline:       weekKpiSubline,
       WeeklyCompletionKpi:  WeeklyCompletionKpi,
+      /* feat/today-title-edit — title editor's pure gate. */
+      titleEditable:        titleEditable,
     };
   }
 
