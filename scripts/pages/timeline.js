@@ -2341,6 +2341,19 @@
     var isOwnReport = !!(ownerFolder && rdCaller && rdCaller.name
         && window.FS.api.folderName(rdCaller.name) === ownerFolder);
 
+    /* Q7 (keyframe delete) — SAME canEditContent formula used elsewhere in
+       this file: TimelineMiddleColumn ~1335 (hasContentEditPerm ||
+       isOwnReport) and OverviewTab ~1894 (identical, via props.isOwnReport).
+       Hoisted here — rather than reusing hasContentEditPermTitle below,
+       which is computed further down (Step 5, title editor) after
+       bodyByTab/PhotoGrid are built — so the PhotoGrid mount has it in
+       scope without reordering that unrelated code. Threaded into
+       PhotoGrid as `canEditContent` so it can gate the delete affordance
+       on auto-generated keyframe photos only. */
+    var hasContentEditPermPhotos = !!(window.FS && window.FS.can && window.FS.P
+        && window.FS.can(rdCaller, window.FS.P('content', 'edit')));
+    var canEditContent = hasContentEditPermPhotos || isOwnReport;
+
     var mediaProps = {
       date:  sel.date,
       user:  sel.user || (sel.user_name && window.FS.api.folderName(sel.user_name)),
@@ -2393,6 +2406,7 @@
              from the route); folderName() is idempotent on it. */
           userDisplayName: ownerFolder || sel.user_name,
           date:            sel.date,
+          canEditContent:  canEditContent,
         }) : null,
         ask:        AskChat        ? React.createElement(AskChat, {
           date:        sel.date,

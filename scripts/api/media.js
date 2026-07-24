@@ -80,10 +80,45 @@
       + '/pictures/' + opts.date + '/' + opts.filename;
   }
 
+  /* Q7 — DELETE /api/org/media/keyframe { s3_key }. Removes an
+     auto-generated video keyframe (backend rejects any key whose basename
+     doesn't match _kf_s\d{6}\.jpg and authorizes via the topic's
+     content-edit tier; 200 on success, also 200 idempotent if already
+     gone). AURORA ORG WRITE — same authority-flip gate as _fetchFresh
+     above / transcripts.js's getTranscripts (mirrored verbatim): only
+     rides orgRequest when timelineSource==='aurora' AND orgBaseUrl is set
+     (kill switch). There is no legacy-gateway equivalent for this
+     endpoint, so outside that gate we deliberately do NOT fall back to
+     window.FS.api.request — we resolve the same _notFound envelope
+     _fetch.js callers already know how to handle, with no network call.
+     On success, evict the key from the presign TTL cache (module-level
+     _urlCache above) so a re-render (or a sibling still holding the same
+     key) can't serve a stale thumbnail for a now-deleted object. */
+  async function deleteKeyframe(s3Key) {
+    var res;
+    if (!window.FS.api.useMocks) {
+      if (window.FS.api.timelineSource === 'aurora' && window.FS.api.orgBaseUrl) {
+        res = await window.FS.api.orgRequest('/media/keyframe', {
+          method: 'DELETE', body: { s3_key: s3Key },
+        });
+      } else {
+        res = { _notFound: true, error: 'Keyframe delete is not available on this backend.' };
+      }
+    } else {
+      await window.FS.api.delay(60);
+      res = { deleted: true, s3_key: s3Key };
+    }
+    if (res && !res._accessDenied && !res._notFound) {
+      _urlCache.delete(s3Key);
+    }
+    return res;
+  }
+
   window.FS.api.media = {
-    presignedUrl: presignedUrl,
-    getUrl:       getUrl,
-    photoKey:     photoKey,
+    presignedUrl:   presignedUrl,
+    getUrl:         getUrl,
+    photoKey:       photoKey,
+    deleteKeyframe: deleteKeyframe,
   };
 
 })();

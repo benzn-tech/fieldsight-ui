@@ -1909,6 +1909,7 @@
 }
 
 .fs-photo-grid__cell {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1917,13 +1918,50 @@
   border-radius: var(--radius-md);
   padding: 6px;
   min-height: 100px;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
   transition: border-color var(--duration-fast) var(--easing-out);
 }
 .fs-photo-grid__cell:hover { border-color: var(--border-default); }
-.fs-photo-grid__cell:focus { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+
+.fs-photo-grid__open {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+.fs-photo-grid__open:focus { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+
+/* Q7 — delete affordance for auto-generated keyframe photos, top-right
+   corner overlay. Only ever rendered when the photo is a keyframe AND
+   the caller may edit content (see photo-grid.js PhotoCell). */
+.fs-photo-grid__delete-wrap {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  z-index: 1;
+}
+.fs-photo-grid__delete {
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-sm);
+}
+.fs-photo-grid__delete-error {
+  font-size: 10px;
+  color: var(--color-danger-600);
+  background: var(--surface-panel);
+  border-radius: var(--radius-sm);
+  padding: 1px 4px;
+  white-space: nowrap;
+}
 
 .fs-photo-grid__thumb {
   width: 100%;
