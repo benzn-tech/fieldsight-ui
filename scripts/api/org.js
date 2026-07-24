@@ -364,6 +364,34 @@
     return { sites: [] };
   }
 
+  /* GET /api/org/action-items/closures?from=&to= →
+       { from, to, timezone, closed,
+         by_day:   [{ date: 'YYYY-MM-DD', closed: n }]   (dense, zero-filled)
+         previous: { from, to, closed } }                (same-length window before)
+
+     Backs the Today weekly KPI. `closed` counts action items whose status
+     actually transitioned to 'done' inside the window, bucketed on the NZ
+     calendar day the CLOSE happened (content_edits.created_at) — not on the
+     report date the task belongs to, which is what the legacy per-day
+     `actions.getActionsRange` overlay fan-out keyed on and why ticking a box
+     never moved the tile. ONE request for both windows: no per-day fan-out.
+
+     ACL is server-side (site reach + tenant, platform_admin spans tenants);
+     an out-of-reach site simply is not counted. Mock returns a well-formed
+     zero — same "nothing until seeded" posture as getPortfolioRollup, so the
+     tile hides in a pure ?mocks=1 preview instead of inventing activity. */
+  async function getActionClosures(opts) {
+    opts = opts || {};
+    if (orgLive()) {
+      return api.orgRequest('/action-items/closures', {
+        params: { from: opts.from, to: opts.to },
+      });
+    }
+    await api.delay();
+    return { from: opts.from, to: opts.to, closed: 0, by_day: [],
+             previous: { from: null, to: null, closed: 0 } };
+  }
+
   async function updateObservation(id, patch) {
     if (orgWrite()) return api.orgRequest('/observations/' + encodeURIComponent(id), { method: 'PATCH', body: patch });
     await api.delay();
@@ -398,6 +426,7 @@
     getSiteMembers: getSiteMembers,
     getSiteContributors: getSiteContributors,
     getPortfolioRollup: getPortfolioRollup,
+    getActionClosures: getActionClosures,
     _folderName: folderName,   /* exported for batch-2b fan-out reuse */
     _toPageMember: _toPageMember, _toPageSite: _toPageSite,   /* page-shape adapters, batch-2b */
   };
