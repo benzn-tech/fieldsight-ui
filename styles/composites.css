@@ -1372,6 +1372,76 @@
   box-shadow: var(--shadow-sm);
 }
 
+/* ---- Session picker (feat 5 — narrow a day's Timeline to one meeting) ---- */
+
+.fs-session-picker-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 4px 4px;
+}
+
+.fs-session-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.fs-session-picker__group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* A block groups sessions that are really ONE meeting split across
+   recording restarts — a light bracket ties them together visually so the
+   grouping reads even before the "Same meeting, restarted" caption. */
+.fs-session-picker__group--block {
+  padding: 4px 6px 4px 8px;
+  border-left: 2px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel-muted);
+}
+
+.fs-session-picker__group-label {
+  width: 100%;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 2px;
+}
+
+.fs-session-picker__row {
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  background: var(--surface-panel);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--easing-out),
+              color var(--duration-fast) var(--easing-out);
+}
+.fs-session-picker__row:hover { color: var(--text-primary); }
+.fs-session-picker__row--active {
+  background: var(--color-info-300);
+  border-color: var(--color-info-300);
+  color: var(--text-on-accent, #fff);
+  font-weight: var(--font-weight-medium);
+}
+.fs-session-picker__row--all { font-weight: var(--font-weight-medium); }
+
+.fs-session-picker__excluded-note {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  padding: 0 2px;
+}
+
 .fs-timeline-page__meeting-title {
   font-size: 14px;
   font-weight: var(--font-weight-semibold);

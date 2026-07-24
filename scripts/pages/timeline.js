@@ -109,6 +109,92 @@
     return next;
   }
 
+  /* ---------- session picker (feat 5) ------------------------------------ */
+  /* Pure helpers over GET /api/org/sessions's { sessions, excluded } shape
+     (unit-tested — tests/session-picker). The picker filters CLIENT-SIDE
+     over the already-fetched report topics (match on topic.session_id) —
+     selecting a session never issues a network request; only the initial
+     getSessions(date, user) fetch does. */
+
+  /* A picker offering a single option is noise — only render once there is
+     an actual choice to make (spec: "renders only when there are >=2
+     sessions"). Zero or one session both mean "nothing to narrow". */
+  function shouldShowSessionPicker(sessions) {
+    return !!(sessions && sessions.length >= 2);
+  }
+
+  /* null/undefined sessionId = "All day" (no filtering) — returns the list
+     unchanged, INCLUDING session_kind:'report' topics (which carry no
+     session_id at all and would otherwise never match anything). A real
+     sessionId keeps only topics whose session_id matches exactly, which
+     also hides report-kind topics under an active filter (spec: they have
+     no session, so they're absent from every single-session view). */
+  function filterTopicsBySession(topics, sessionId) {
+    var list = topics || [];
+    if (sessionId == null) return list;
+    return list.filter(function (t) { return !!t && t.session_id === sessionId; });
+  }
+
+  /* Group sessions that share a `block` (a meeting split across recording
+     restarts — same gap-merged meeting, several press-record events).
+     Preserves first-appearance order of both groups and sessions within a
+     group. A session with no block (undefined/null) gets its own
+     singleton group, keyed by session_id so two blockless sessions never
+     collapse into one group. */
+  function groupSessionsByBlock(sessions) {
+    var order = [];
+    var byKey = {};
+    (sessions || []).forEach(function (s) {
+      if (!s) return;
+      var key = s.block != null ? 'block:' + s.block : 'solo:' + s.session_id;
+      if (!byKey[key]) {
+        byKey[key] = { block: s.block != null ? s.block : null, sessions: [] };
+        order.push(key);
+      }
+      byKey[key].sessions.push(s);
+    });
+    return order.map(function (key) { return byKey[key]; });
+  }
+
+  /* Truncate a long participant list sensibly: up to `max` names verbatim,
+     then "+N more" instead of a wall of text. Falsy names filtered out. */
+  function formatParticipants(participants, max) {
+    var list = (participants || []).filter(Boolean);
+    var limit = max || 2;
+    if (list.length === 0) return '';
+    if (list.length <= limit) return list.join(', ');
+    return list.slice(0, limit).join(', ') + ' +' + (list.length - limit) + ' more';
+  }
+
+  /* One picker row's full summary line, e.g.
+     "15:16 – 15:17 · 1 topic · 2 open · Alex, Unknown Inspector". */
+  function formatSessionSummary(session) {
+    var s = session || {};
+    var topicCount = s.topic_count || 0;
+    var openCount  = s.open_action_count || 0;
+    var parts = [
+      s.label || '',
+      topicCount + (topicCount === 1 ? ' topic' : ' topics'),
+      openCount + ' open',
+    ];
+    var participants = formatParticipants(s.participants);
+    if (participants) parts.push(participants);
+    return parts.join(' · ');
+  }
+
+  /* Surface excluded topics honestly without naming/linking them (spec —
+     "say so quietly", never expose which topic). null when nothing was
+     excluded so the caller can skip rendering the note entirely. */
+  function formatExcludedNote(excluded) {
+    if (!excluded) return null;
+    var parts = [];
+    var redacted = excluded.redacted || 0;
+    var nonWork  = excluded.non_work || 0;
+    if (redacted) parts.push(redacted + ' personal topic' + (redacted === 1 ? '' : 's') + ' hidden');
+    if (nonWork)  parts.push(nonWork + ' non-work topic' + (nonWork === 1 ? '' : 's') + ' hidden');
+    return parts.length ? parts.join(' · ') : null;
+  }
+
   /* ---------- content-correction Phase D: history word diff ------------- */
   /* Whitespace-tokenized LCS word diff. Tokens keep their trailing whitespace
      so joining same+ins reproduces `after` and same+del reproduces `before`.
@@ -972,6 +1058,48 @@
     var overrides    = overridesRef[0];
     var setOverrides = overridesRef[1];
 
+    /* session picker (feat 5) — GET /api/org/sessions is a SEPARATE fetch
+       from getTimeline, keyed on the settled report (state.report only
+       changes once per successful load/retry, never per render), so this
+       effect fires once per (date, user) — narrowing to a session below is
+       pure client-side filtering over topics already in hand and issues no
+       further request of its own. */
+    var refSessions      = React.useState({ status: 'idle', sessions: [], excluded: null });
+    var sessionsState     = refSessions[0];
+    var setSessionsState  = refSessions[1];
+
+    var refSelectedSession    = React.useState(null);   /* null = "All day" */
+    var selectedSessionId     = refSelectedSession[0];
+    var setSelectedSessionId  = refSelectedSession[1];
+
+    React.useEffect(function () {
+      if (state.status !== 'ok') return undefined;
+      var rpt = state.report;
+      var hasReportNow = !!(rpt && !rpt._notFound && !rpt.available_users);
+      if (!hasReportNow) { setSessionsState({ status: 'idle', sessions: [], excluded: null }); return undefined; }
+      /* Same owner-folder resolution as ownerFolder further below (self-view
+         has user===null; report.user_name is always the real owner). */
+      var folder = user || (rpt.user_name && window.FS.api.folderName(rpt.user_name)) || null;
+      if (!folder || !date) { setSessionsState({ status: 'idle', sessions: [], excluded: null }); return undefined; }
+      var cancelled = false;
+      setSessionsState({ status: 'loading', sessions: [], excluded: null });
+      window.FS.api.org.getSessions({ date: date, user: folder }).then(function (res) {
+        if (cancelled) return;
+        if (!res || res._accessDenied || res._notFound) {
+          setSessionsState({ status: 'ok', sessions: [], excluded: null });
+          return;
+        }
+        setSessionsState({ status: 'ok', sessions: res.sessions || [], excluded: res.excluded || null });
+      }).catch(function () {
+        if (!cancelled) setSessionsState({ status: 'ok', sessions: [], excluded: null });
+      });
+      return function () { cancelled = true; };
+    }, [date, user, state.status, state.report]);
+
+    /* A new date/user has entirely different session_ids — drop any active
+       filter rather than silently show zero topics against a stale id. */
+    React.useEffect(function () { setSelectedSessionId(null); }, [date, user]);
+
     /* Sprint 2.8 (Phase H) — when both a daily report and meeting
        minutes exist for the date, the user picks which to view. */
     var refView = React.useState('daily');
@@ -1458,11 +1586,25 @@
       );
     }
 
+    /* session picker (feat 5) — narrow the visible topics to one recording
+       session ("just that meeting") instead of the whole day. Filtering is
+       CLIENT-SIDE over the topics already fetched above (match on
+       topic.session_id); selecting a session never refetches getTimeline.
+       All day (selectedSessionId === null) is a no-op filter, so
+       session_kind:'report' topics (no session_id at all) stay visible —
+       they only drop out once a specific session is chosen. */
+    var daySessions  = sessionsState.sessions || [];
+    var showSessionPicker = shouldShowSessionPicker(daySessions);
+    var excludedNote      = formatExcludedNote(sessionsState.excluded);
+
     /* life-conversation separation (Task 11) — a redacted (confirmed-personal)
        topic is hidden from the default topic list and relocated to a
        collapsed "Removed / personal" section with a revert control, reviewers only
-       (spec §5 "hidden + recoverable"). */
-    var _partition    = partitionTopics(applyTopicOverrides(report.topics, overrides));
+       (spec §5 "hidden + recoverable"). Session filtering runs FIRST so the
+       removed section, like the visible list, stays scoped to whichever
+       session (or All day) is currently selected. */
+    var _partition    = partitionTopics(
+      filterTopicsBySession(applyTopicOverrides(report.topics, overrides), selectedSessionId));
     var visibleTopics = _partition.visible;
     var removedTopics = _partition.removed;
 
@@ -1479,6 +1621,18 @@
       React.createElement(ExecutiveSummaryCard, {
         bullets: report.executive_summary,
       }),
+      (showSessionPicker || excludedNote) ? React.createElement('div', {
+        className: 'fs-session-picker-wrap',
+      },
+        showSessionPicker ? React.createElement(SessionPicker, {
+          sessions:          daySessions,
+          selectedSessionId: selectedSessionId,
+          onSelect:          setSelectedSessionId,
+        }) : null,
+        excludedNote ? React.createElement('div', {
+          className: 'fs-session-picker__excluded-note',
+        }, excludedNote) : null,
+      ) : null,
       React.createElement('div', { className: 'fs-timeline-page__section-label' },
         'Topics'),
       React.createElement('div', { className: 'fs-timeline-page__topics' },
@@ -1563,6 +1717,47 @@
           ],
         }),
       ) : null,
+    );
+  }
+
+  /* session picker (feat 5) — "All day" plus one row per recording session,
+     sessions sharing a `block` (a meeting split across recording restarts)
+     grouped together so the user thinks in meetings, not press-record
+     events. Module-level, same convention as RemovedTopic below: purely a
+     view over props (sessions/selectedSessionId/onSelect), no fetch of its
+     own — TimelineMiddleColumn owns the one getSessions call. */
+  function SessionPicker(props) {
+    var sessions = props.sessions || [];
+    var selected = props.selectedSessionId;
+    var groups   = groupSessionsByBlock(sessions);
+    return React.createElement('div', {
+      className: 'fs-session-picker', role: 'tablist', 'aria-label': 'Filter by session',
+    },
+      React.createElement('button', {
+        type: 'button', role: 'tab', 'aria-selected': selected == null,
+        className: 'fs-session-picker__row fs-session-picker__row--all'
+          + (selected == null ? ' fs-session-picker__row--active' : ''),
+        onClick: function () { props.onSelect(null); },
+      }, 'All day'),
+      groups.map(function (group, gi) {
+        var isBlock = group.sessions.length > 1;
+        return React.createElement('div', {
+          key: 'session-block-' + gi,
+          className: 'fs-session-picker__group' + (isBlock ? ' fs-session-picker__group--block' : ''),
+        },
+          isBlock ? React.createElement('div', { className: 'fs-session-picker__group-label' },
+            'Same meeting, restarted') : null,
+          group.sessions.map(function (s) {
+            return React.createElement('button', {
+              key: s.session_id, type: 'button', role: 'tab',
+              'aria-selected': selected === s.session_id,
+              className: 'fs-session-picker__row'
+                + (selected === s.session_id ? ' fs-session-picker__row--active' : ''),
+              onClick: function () { props.onSelect(s.session_id); },
+            }, formatSessionSummary(s));
+          }),
+        );
+      }),
     );
   }
 
@@ -2760,6 +2955,13 @@
       /* content-propagate (item #3) */
       findCorrectionPair: findCorrectionPair,
       TopicCorrectionPropagate: TopicCorrectionPropagate,
+      /* session picker (feat 5) */
+      shouldShowSessionPicker: shouldShowSessionPicker,
+      filterTopicsBySession: filterTopicsBySession,
+      groupSessionsByBlock: groupSessionsByBlock,
+      formatParticipants: formatParticipants,
+      formatSessionSummary: formatSessionSummary,
+      formatExcludedNote: formatExcludedNote,
     };
   }
 
