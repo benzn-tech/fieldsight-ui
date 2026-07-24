@@ -33,10 +33,14 @@
 
    Sprint 2 task-check-off lands on REAL action items here:
      • TaskCard for an item Jarley owns gets a checkbox
-     • Click → optimistic toggle through FS.api.actions.toggleAction,
-       keyed by the ITEM'S OWN origin date (rolling items carry mixed
-       dates — there is no single page-level "today" to check off
-       against any more)
+     • Click → optimistic toggle through FS.api.actions.resolveActionItem
+       (feat/checkoff-org-api: the AUTHORISED PATCH /api/org/action-items/
+       {id} when the item carries a durable actionItemId, else the legacy
+       unauthenticated toggle), keyed by the ITEM'S OWN origin date
+       (rolling items carry mixed dates — there is no single page-level
+       "today" to check off against any more). Team cards are checkable
+       too now; the server's ACL, not the UI, decides who may resolve
+       someone else's task, and a 403 surfaces as an error toast.
      • Animation: border pulse + line-through + fade-out (CSS, respects
        prefers-reduced-motion via tokens.css media query)
      • On animation end the row drops out of myTasks locally; full
@@ -1547,27 +1551,43 @@
 
       var thunks = items.map(function (it) {
         return function () {
-          return api.actions.toggleAction({
+          /* feat/checkoff-org-api — routed through the shared
+             resolveActionItem so bulk resolve gets the SAME authorised
+             Aurora write (PATCH /api/org/action-items/{id}) as the single
+             check-off circle, and the same never-swallowed denial: a 403
+             RESOLVES as {_accessDenied} out of updateAction, so under the
+             old `.then(() => ok:true)` it counted as a success and the
+             item was dropped from the list without ever being resolved. */
+          return api.actions.resolveActionItem({
+            actionItemId: it.actionItemId,
             date:         it.date,
             topic_id:     it.topic_id,
             action_index: it.actionIndex,
             checked:      true,
             action_text:  it.title,
             user_folder:  it.folder,
-          }).then(function () { return { ok: true, item: it }; })
-            .catch(function (err) {
-              console.error('[Today leftover] bulk resolve failed for', it.id, err);
-              return { ok: false, item: it };
-            });
+          }).then(function (env) {
+            if (env && env.ok) return { ok: true, item: it };
+            console.error('[Today leftover] bulk resolve refused for', it.id, env);
+            return { ok: false, item: it, message: env && env.message };
+          });
         };
       });
 
       window.FS.api.pooledAll(thunks, 6).then(function (results) {
         var okIds = {};
         var okCount = 0, failCount = 0;
+        /* feat/checkoff-org-api — carry the FIRST server reason into the
+           toast. "Could not resolve 3 items — try again" is useless when
+           the real answer is "you are not the assignee and not this
+           site's pm/site_manager"; retrying will never help. */
+        var firstReason = null;
         (results || []).forEach(function (r) {
           if (r && r.ok) { okIds[r.item.id] = true; okCount++; }
-          else { failCount++; }
+          else {
+            failCount++;
+            if (!firstReason && r && r.message) firstReason = r.message;
+          }
         });
 
         Object.keys(okIds).forEach(function (id) { removeMy(id); });
@@ -1593,21 +1613,27 @@
           });
         } else if (okCount === 0) {
           toast.show({
-            message: 'Could not resolve ' + failCount + ' item' + (failCount === 1 ? '' : 's') + ' — try again',
-            tone:    'error',
+            message: 'Could not resolve ' + failCount + ' item' + (failCount === 1 ? '' : 's')
+                     + (firstReason ? ' — ' + firstReason : ' — try again'),
+            tone:     'error',
+            duration: 5000,
           });
         } else {
           toast.show({
-            message: 'Resolved ' + okCount + ', ' + failCount + ' failed — still selected, try again',
-            tone:    'warning',
+            message: 'Resolved ' + okCount + ', ' + failCount + ' failed'
+                     + (firstReason ? ' — ' + firstReason : ' — still selected, try again'),
+            tone:     'warning',
+            duration: 5000,
           });
         }
       });
     }
 
-    /* When the check-off anim finishes, drop the task locally. The
-       optimistic toggle inside TaskCard already persisted via
-       FS.api.actions.toggleAction. */
+    /* When the check-off anim finishes, drop the task locally. TaskCard
+       only reaches onAnimationEnd after FS.api.actions.resolveActionItem
+       resolved {ok:true} (feat/checkoff-org-api) — a refusal aborts the
+       animation there, so this never fires on an unpersisted check-off.
+       removeMyTask scans BOTH buckets, so it serves Team cards too. */
     function onCheckedOff(task) {
       removeMy(task.id);
     }
@@ -1743,6 +1769,22 @@
             onSelect:   onSelect,
             isMine:     false,
             selected:   selectedId === task.id,
+            /* feat/checkoff-org-api — Team cards are checkable on the SAME
+               expression as the Mine branch above. They previously got no
+               `checkable` prop at all, so a pm/site_manager could not
+               resolve a team task from Today — a defensible omission back
+               when check-off was the UNAUTHORISED legacy DynamoDB toggle
+               (there was no server-side check to lean on: any signed-in
+               user could have resolved anyone's task). The server decides
+               now: PATCH /api/org/action-items/{id} allows admin/gm, THIS
+               site's pm/site_manager, or the assignee, and refuses
+               everyone else with 403 — which task-card.js surfaces as an
+               error toast + aborted animation, never a silent no-op.
+               removeMyTask (→ onCheckedOff) already scans BOTH buckets,
+               so the optimistic removal works unchanged here. */
+            checkable:    task.topic_id != null && task.actionIndex != null && !!task.date,
+            date:         task.date,
+            onCheckedOff: onCheckedOff,
             site:       null,   /* #4 — project is a group header, not a card chip */
             ageLabel:   formatAgeLabel(task.ageDays),
             noDeadline: !!task.noDeadline,
@@ -1937,21 +1979,37 @@
       if (!canCheckOff) return;
       var api = window.FS && window.FS.api && window.FS.api.actions;
       if (!api) return;
-      api.toggleAction({
+      /* feat/checkoff-org-api — same routed, always-resolving call as the
+         card + bulk paths. user_folder is the report OWNER's folder
+         (feat/user-dim-audit-key, Task 6 — item.folder, stamped by
+         today-adapter.js), never the caller/currentUser; used only by the
+         legacy fallback leg. */
+      api.resolveActionItem({
+        actionItemId: item.actionItemId,
         date:         item.date,
         topic_id:     item.topic_id,
         action_index: item.actionIndex,
         checked:      true,
         action_text:  item.title,
-        /* feat/user-dim-audit-key (Task 6) — report OWNER's folder
-           (item.folder, stamped by today-adapter.js), never the
-           caller/currentUser. */
         user_folder:  item.folder,
-      }).then(function () {
-        if (ctx && ctx.removeMyTask) ctx.removeMyTask(item.id);
-        if (props.onClose) props.onClose();
-      }).catch(function (err) {
-        console.error('[Today right] markComplete failed', err);
+      }).then(function (env) {
+        if (env && env.ok) {
+          if (ctx && ctx.removeMyTask) ctx.removeMyTask(item.id);
+          if (props.onClose) props.onClose();
+          return;
+        }
+        /* Refused/failed — keep the panel open on the unresolved item and
+           say why. Closing it (the old `.catch` did nothing at all, and a
+           403 never even reached the catch) reads as success. */
+        console.error('[Today right] markComplete refused', env);
+        var toast = window.FS && window.FS.toast;
+        if (toast) {
+          toast.show({
+            message:  (env && env.message) || 'Could not check off this task.',
+            tone:     'error',
+            duration: 5000,
+          });
+        }
       });
     }
 

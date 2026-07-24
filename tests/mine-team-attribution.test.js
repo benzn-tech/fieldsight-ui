@@ -30,6 +30,13 @@ global.window = {
       folderName: function (name) { return String(name || '').replace(/\s+/g, '_'); },
       actions: {
         lookupAction: function () { return undefined; }, // no audit overlay in these tests
+        /* feat/checkoff-org-api — tasks.js's computeBuckets (Group 3 below)
+           now resolves done-ness through the shared union helper. It is a
+           pure predicate; mirror the real one rather than pulling the whole
+           actions.js module into this file's minimal stub. */
+        isActionResolved: function (columnStatus, overlayChecked) {
+          return columnStatus === 'done' || !!overlayChecked;
+        },
       },
     },
   },
@@ -173,6 +180,7 @@ const tasksStubWindow = {
       folderName: function (name) { return String(name || '').replace(/\s+/g, '_'); },
       resolveDeadline: function () { return { absolute: null, display: '—' }; },
       isMineTask: global.window.FS.api.isMineTask, // reuse the already-loaded real predicate
+      actions:    global.window.FS.api.actions,    // feat/checkoff-org-api — isActionResolved
     },
   },
 };

@@ -231,6 +231,179 @@
     return Object.assign({ id: actionItemId }, patch || {});
   }
 
+  /* ======================================================================
+     feat/checkoff-org-api — ONE authorised check-off entry point
+     ----------------------------------------------------------------------
+     WHY: `POST /api/actions/toggle` (the legacy report gateway) has ZERO
+     authorisation — it takes date/topic_id/action_index/checked off the
+     body and writes DynamoDB, so ANY signed-in user could resolve ANY
+     other user's task. `PATCH /api/org/action-items/{id}` already enforces
+     the real ACL (404 cross-company, 403 out-of-reach site, then
+     "admin/gm, THIS site's pm/site_manager, or the assignee only"), which
+     is exactly the desired check-off policy. Every surface that resolves a
+     task now routes through here.
+
+     ROUTING — the Aurora write whenever it can possibly work:
+       durable actionItemId  +  orgCheckoffLive()  →  updateAction(id,
+         { status: checked ? 'done' : 'open' })            [AUTHORISED]
+       otherwise                                    →  toggleAction(...)
+         (legacy DynamoDB overlay; id-less/pre-shim items, the report-source
+          path, mocks). Kept as a fallback ONLY — never the preferred path.
+
+     DONE-NESS IS THE UNION OF BOTH STORES. ~119 action-item check-offs
+     already live in DynamoDB (prod `fieldsight-audit`, PK `ACTIONS#<date>`)
+     whose Aurora rows are still status='open' — action_items.status is
+     `NOT NULL DEFAULT 'open'` and only patch_action_item ever changes it.
+     So NOTHING here deletes or ignores the overlay: readers keep OR-ing
+     `audit.checked` with `status === 'done'` (the precedent already shipped
+     in today.js keep() and action-item-row.js isColumnDone). That is a
+     read-time merge, deliberately chosen over a migration: the overlay key
+     is (date, REPORT topic index, action index) while Aurora is keyed by
+     uuid, so a migration would have to replay the shim's positional
+     ordering — and topic indices shift whenever a report is regenerated
+     (ActionItemRow header, BUG §8.8), i.e. it could silently mis-assign
+     someone else's completion. A merge cannot.
+
+     UNCHECK needs the mirror of that merge: clearing only
+     action_items.status would leave `audit.checked === true` and the item
+     would resurrect as done on the next load (a live bug today on the
+     Timeline row, the one uncheck-capable surface). So a successful
+     org-path UNCHECK also clears the overlay, best-effort. This opens no
+     new hole: it fires only AFTER the authorised PATCH returned 200.
+
+     ALWAYS RESOLVES a normalised envelope, never rejects. org writes
+     RESOLVE 403/404 as {_accessDenied}/{_notFound}, so a bare `.catch()`
+     silently treats a refusal as success — this codebase has repeatedly
+     shipped exactly that bug. Callers get:
+       { ok: true,  row }
+       { ok: false, reason: 'denied'|'not_found'|'error', message, status }
+     ====================================================================== */
+
+  /* True when the authoritative Aurora write path is actually reachable:
+     the same `timelineSource === 'aurora' && orgBaseUrl` kill switch every
+     other org read uses (compliance-aggregator.js:161, timeline.js:31),
+     plus updateAction's own !useMocks && !writeMocks gate — without that
+     last part updateAction returns its merged-patch MOCK and we'd report a
+     phantom success while nothing was persisted. */
+  function orgCheckoffLive() {
+    var api = window.FS && window.FS.api;
+    if (!api) return false;
+    return !api.useMocks && !api.writeMocks
+        && api.timelineSource === 'aurora' && !!api.orgBaseUrl;
+  }
+
+  /* Broadcast server truth so sibling rows keyed on the same
+     (date, user_folder, topic_id, action_index) sync — the legacy
+     toggleAction already does this; the org path must too, or a Timeline
+     row and a Today card showing the same item drift apart. */
+  function emitCheckoff(opts, checked, res) {
+    var bus = window.FS && window.FS.actionsBus;
+    if (!bus) return;
+    bus.emit({
+      date:         opts.date,
+      topic_id:     opts.topic_id,
+      action_index: opts.action_index,
+      checked:      checked,
+      checked_by:   (res && res.checked_by) || null,
+      checked_at:   (res && res.checked_at) || null,
+      user_folder:  opts.user_folder,
+    });
+  }
+
+  async function resolveActionItem(opts) {
+    opts = opts || {};
+    var checked = opts.checked !== undefined ? !!opts.checked : true;
+
+    /* ---- Legacy overlay path (no durable id / org write not live) ------
+       toggleAction already emits the bus event + toasts + reverts on
+       failure, so only normalise its outcome here. */
+    if (!(opts.actionItemId && orgCheckoffLive())) {
+      try {
+        var legacy = await toggleAction({
+          date:         opts.date,
+          topic_id:     opts.topic_id,
+          action_index: opts.action_index,
+          checked:      checked,
+          action_text:  opts.action_text,
+          user_folder:  opts.user_folder,
+        });
+        return { ok: true, row: legacy || null, path: 'legacy' };
+      } catch (err) {
+        return {
+          ok:      false,
+          reason:  'error',
+          status:  (err && err.status) || 0,
+          message: (err && err.message) || 'Could not update this task.',
+          path:    'legacy',
+        };
+      }
+    }
+
+    /* ---- Authorised Aurora path --------------------------------------- */
+    var res;
+    try {
+      res = await updateAction(opts.actionItemId, { status: checked ? 'done' : 'open' });
+    } catch (err) {
+      return {
+        ok:      false,
+        reason:  'error',
+        status:  (err && err.status) || 0,
+        message: (err && err.message) || 'Could not update this task.',
+        path:    'org',
+      };
+    }
+    if (!res || res._accessDenied) {
+      return {
+        ok:      false,
+        reason:  'denied',
+        status:  (res && res.status) || 403,
+        /* patch_action_item's own wording ("admin/gm, this site's
+           pm/site_manager, or the assignee only") is the most useful thing
+           we can show — never replace it with a generic string. */
+        message: (res && res.error)
+                   || 'You do not have permission to check off this task.',
+        path:    'org',
+      };
+    }
+    if (res._notFound) {
+      return {
+        ok:      false,
+        reason:  'not_found',
+        status:  404,
+        message: 'This task no longer exists.',
+        path:    'org',
+      };
+    }
+
+    /* Uncheck must also clear the legacy overlay — see the header note.
+       Best-effort: the authoritative write already succeeded, so a failure
+       here must NOT turn a successful uncheck into a reported failure. */
+    if (!checked && opts.date != null && opts.topic_id != null && opts.action_index != null) {
+      try {
+        await toggleAction({
+          date:         opts.date,
+          topic_id:     opts.topic_id,
+          action_index: opts.action_index,
+          checked:      false,
+          action_text:  opts.action_text,
+          user_folder:  opts.user_folder,
+        });
+      } catch (e) { /* overlay clear is best-effort */ }
+    }
+
+    emitCheckoff(opts, checked, res);
+    return { ok: true, row: res, path: 'org' };
+  }
+
+  /* feat/checkoff-org-api — done-ness for a row that carries BOTH stores:
+     the authoritative action_items.status column and the legacy DynamoDB
+     overlay boolean. Union, never one or the other (see header). Mirrors
+     today.js keep()'s `item.status === 'Done' || auditEntry.checked` and
+     action-item-row.js's `initialChecked || isColumnDone`. */
+  function isActionResolved(columnStatus, overlayChecked) {
+    return columnStatus === 'done' || !!overlayChecked;
+  }
+
   /* editable-content-correction — PATCH one free-text content field
      (topic title/summary, action_items.text/responsible, findings.*,
      safety_observations.observation) by its durable Aurora id. AURORA org
@@ -359,6 +532,11 @@
     toggleAction:    toggleAction,
     createAction:    createAction,
     updateAction:    updateAction,
+    /* feat/checkoff-org-api — the ONE check-off entry point every surface
+       must use; never call toggleAction directly for an action item. */
+    resolveActionItem:  resolveActionItem,
+    isActionResolved:   isActionResolved,
+    orgCheckoffLive:    orgCheckoffLive,
     updateContent:   updateContent,
     getContentHistory: getContentHistory,
     confirmAlias:    confirmAlias,
@@ -368,5 +546,19 @@
     actionKey:       actionKey,
     lookupAction:    lookupAction,
   };
+
+  /* Expose the pure/routing helpers to Node's test runner only (CommonJS).
+     No-op in the browser (this file is a plain <script>, `module` is
+     undefined), so the page bundle is unaffected — same pattern as
+     scripts/pages/timeline.js. */
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      actionKey:         actionKey,
+      lookupAction:      lookupAction,
+      orgCheckoffLive:   orgCheckoffLive,
+      resolveActionItem: resolveActionItem,
+      isActionResolved:  isActionResolved,
+    };
+  }
 
 })();
