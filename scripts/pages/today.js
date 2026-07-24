@@ -83,6 +83,17 @@
     return ageDays + 'd ago';
   }
 
+  /* Q1 — tier-aware Today/Tasks. A `work_class === 'non_work'` item is
+     still RENDERED (in myRecent/teamRecent, flagged "Possibly personal"
+     by TaskCard) but must not inflate the section's open-items COUNT.
+     Anything else — 'work', undefined, missing — counts as work; only
+     the literal 'non_work' is excluded, never a `!== 'work'` check
+     (matches the timeline "aurora" shape's existing convention, so a
+     value this page doesn't yet know about still counts as work). */
+  function openCount(list) {
+    return list.filter(function (t) { return t.work_class !== 'non_work'; }).length;
+  }
+
   /* Today's date in NZDT — see BUG-19. We compute "today" via
      FS.api.todayNZDT() (Pacific/Auckland clock). */
 
@@ -1686,7 +1697,10 @@
       myRecent.length > 0
         ? React.createElement(React.Fragment, null,
             React.createElement(SubsectionLabel, null,
-              'Open items · ' + myRecent.length),
+              /* Q1 — "Possibly personal" (non_work) items stay in
+                 myRecent and are still rendered below; they just don't
+                 inflate this count. */
+              'Open items · ' + openCount(myRecent)),
             renderMaybeGrouped(myRecent, isMultiProject, function (task) {
               return React.createElement(fs.TaskCard, {
                 key:           task.id,
@@ -1715,7 +1729,8 @@
 
       teamRecent.length > 0 ? React.createElement(React.Fragment, null,
         React.createElement(SubsectionLabel, null,
-          'Team · ' + teamRecent.length),
+          /* Q1 — same non_work-excluded count as "Open items" above. */
+          'Team · ' + openCount(teamRecent)),
         renderMaybeGrouped(teamRecent, isMultiProject, function (task) {
           return React.createElement(fs.TaskCard, {
             key:        task.id,
@@ -2330,5 +2345,13 @@
        all want a quiet detail rail rather than a slide-in drawer.
        Activity / Settings / Evidence keep their 2-panel layout. */
   };
+
+  /* Expose the pure Q1 open-items count helper to Node's test runner only
+     (CommonJS). No-op in the browser (Babel standalone leaves `module`
+     undefined), so the page bundle is unaffected — mirrors timeline.js's
+     identical guard. */
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { openCount: openCount };
+  }
 
 })();

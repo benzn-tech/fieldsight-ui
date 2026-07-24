@@ -406,6 +406,12 @@
     var myTasks = [];
     var teamTasks = [];
     (report.topics || []).forEach(function (t) {
+      /* Q1 — tier-aware Today/Tasks: a redacted topic (life-conversation-
+         separation "标为个人+移除") is omitted from Today entirely — not
+         rendered, not counted. Mirrors timeline.js's own redacted/removed
+         handling; unlike Timeline there is no review control here, so a
+         redacted topic's action items simply never surface. */
+      if (t.redacted) return;
       (t.action_items || []).forEach(function (a, idx) {
         var key = t.topic_id + '_' + idx;
         var auditEntry = window.FS.api.actions.lookupAction(actionState, ownerFolder, t.topic_id, idx);
@@ -459,6 +465,13 @@
              muted label on the Today task card (task-card.js) when
              present. */
           timeRange:   t.time_range || null,
+          /* Q1 — tier-aware Today/Tasks: pass the parent topic's
+             work_class through verbatim (undefined/'work'/'non_work' —
+             never normalised here). Missing/other values must fall
+             through to "treat as work" at every consumer via
+             `=== 'non_work'`, never `!== 'work'` — same rule the
+             timeline "aurora" shape already follows elsewhere. */
+          work_class:  t.work_class,
           kind:        'task',
           /* feat/today-rolling-open-items — the report date this item
              was extracted from. today.js's rolling loader fans out
