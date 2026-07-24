@@ -144,10 +144,16 @@
     if (flags.length)     counts.push(pluralise(flags.length,     'safety flag'));
     if (photos.length)    counts.push(pluralise(photos.length,    'photo'));
 
+    /* Q1 — `=== 'non_work'` (never `!== 'work'`) so a missing/
+       other value still counts as work, matching the same guard used
+       for the Tasks-page "Possibly personal" badge (task-card.js). */
+    var nonWork = topic.work_class === 'non_work';
+
     var className = 'fs-topic-card'
       + (open ? ' fs-topic-card--open' : '')
       + (props.selected ? ' fs-topic-card--selected' : '')
-      + (flashing ? ' fs-topic-card--flash' : '');
+      + (flashing ? ' fs-topic-card--flash' : '')
+      + (nonWork ? ' fs-topic-card--non-work' : '');
 
     /* Wrap in a div so we can attach rootRef without depending on the
        Layer 4 Card atom forwarding refs. The wrapper inherits no
@@ -184,6 +190,13 @@
             CategoryBadge ? React.createElement(CategoryBadge, {
               category: topic.category,
             }) : null,
+            /* Q1 — same "Possibly personal" signal as the Tasks
+               page card (task-card.js), so the cue isn't colour-only
+               (colour alone fails for colour-blind users / high-contrast
+               mode). Informational only — no review controls here. */
+            nonWork ? React.createElement(Badge, {
+              tone: 'neutral', variant: 'outline', size: 'sm',
+            }, 'Possibly personal') : null,
             participants.length
               ? React.createElement('span', {
                   className: 'fs-topic-card__participants',
