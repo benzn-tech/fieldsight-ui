@@ -87,15 +87,33 @@
     return ageDays + 'd ago';
   }
 
-  /* Q1 — tier-aware Today/Tasks. A `work_class === 'non_work'` item is
-     still RENDERED (in myRecent/teamRecent, flagged "Possibly personal"
-     by TaskCard) but must not inflate the section's open-items COUNT.
-     Anything else — 'work', undefined, missing — counts as work; only
-     the literal 'non_work' is excluded, never a `!== 'work'` check
-     (matches the timeline "aurora" shape's existing convention, so a
-     value this page doesn't yet know about still counts as work). */
-  function openCount(list) {
-    return list.filter(function (t) { return t.work_class !== 'non_work'; }).length;
+  /* fix/today-heading-counts — THE counting rule for every section/
+     sub-group heading on this page: a heading's N is always the number
+     of cards actually rendered beneath it, i.e. plain `list.length` on
+     the SAME list `renderMaybeGrouped`/the card map is called with —
+     never a filtered subset. This used to diverge: openCount() (Q1 —
+     tier-aware Today/Tasks) excluded `work_class === 'non_work'` items
+     from "Open items"/"Team" while still RENDERING them (TaskCard's
+     "Possibly personal" badge), so a heading could read "Open items · 3"
+     over 5 cards; "Leftover" meanwhile always used the raw length, a
+     THIRD rule on the same page. Q1's "still render it, just flag it"
+     behaviour is preserved (a non_work item stays in myRecent/teamRecent/
+     leftoverItems, badge and all) — only the count changed, from
+     "exclude non_work" to "count what's on screen". The badge is what
+     tells the possibly-personal story now; the heading number no longer
+     silently disagrees with the cards under it. Project sub-group
+     headers (renderMaybeGrouped's g.rows.length) and "Due within N days"
+     (data.programmeTasks.length) already followed this same
+     count-what-renders rule and needed no change.
+
+     sectionCardCount() below is the ONE named place that rule lives —
+     "Open items"/"Team"/"Leftover" all route their heading number
+     through it (on the exact list they render) instead of three
+     independent `list.length` expressions tied together only by
+     comments, so a future edit to one heading can't silently
+     reintroduce a filter the others don't have. */
+  function sectionCardCount(list) {
+    return (list || []).length;
   }
 
   /* fix/today-batch-select-expand — the SAME condition that already
@@ -155,16 +173,27 @@
      own M-2 bootstrap effect self-resolves a dateless visit to the
      latest available date (or an admin project/user picker when
      ambiguous) — see that file's "no date in the URL" effect — so the
-     bare link always lands somewhere useful, never a dead page. */
+     bare link always lands somewhere useful, never a dead page.
+
+     feat/related-popup-context — optional `topic` prop (a report's own
+     sequential topic_id, NOT the durable topics.id) appends `&topic=N`,
+     the SAME deep-link param timeline.js's M-6.6.4 bootstrap effect
+     already knows how to focus-mode on (see that file's targetTopicId).
+     Guard mirrors safety.js's onOpenInTimeline (~:919) verbatim — only a
+     non-negative topic_id is a real one, and it's meaningless without a
+     date (a topic_id is only unique within one report). Every existing
+     call site omits `topic`, so this is purely additive. */
   function TimelineLink(props) {
-    var dateOpt = props.date || null;
-    var userOpt = props.user || null;
-    var label   = props.label || 'Open timeline';
+    var dateOpt  = props.date || null;
+    var userOpt  = props.user || null;
+    var topicOpt = props.topic;
+    var label    = props.label || 'Open timeline';
 
     function onClick() {
       var parts = [];
       if (dateOpt) parts.push('date=' + encodeURIComponent(dateOpt));
       if (dateOpt && userOpt) parts.push('user=' + encodeURIComponent(userOpt));
+      if (dateOpt && topicOpt != null && topicOpt >= 0) parts.push('topic=' + encodeURIComponent(topicOpt));
       parts.push('from=today');
       window.FS.Router.navigate('/timeline?' + parts.join('&'));
     }
@@ -1043,11 +1072,25 @@
 
   /* ---------- In-page lookups (replace old MockData helpers) ----------- */
 
+  /* feat/related-popup-context — `programmeTasks` added to the search
+     pools for completeness (findItemById's own header comment says it
+     "replace[s] old MockData helpers", i.e. it should be a lookup over
+     everything `data` carries, not everything getRelated happens to
+     currently produce ids from). In practice this pool is inert today —
+     ProgrammeTaskCard's onSelect navigates straight to /programme (see
+     the 'Due within N days' section render below) rather than setting
+     AppShell's selectedItem, and its rows carry no `id`/`kind` in the
+     TaskCard/urgent/activity shape anyway (today-programme-adapter.js's
+     `task_id`, not `id`) — so nothing upstream can hand this function a
+     programmeTasks-originated id to resolve yet. Included anyway so a
+     future call site doesn't silently regress into the same "not
+     searched" gap this fixes. */
   function findItemById(data, id) {
     if (!id || !data) return null;
     var pools = [
       data.urgent || [], data.myTasks || [],
       data.teamTasks || [], data.activity || [],
+      data.programmeTasks || [],
     ];
     for (var i = 0; i < pools.length; i++) {
       for (var j = 0; j < pools[i].length; j++) {
@@ -1057,13 +1100,41 @@
     return null;
   }
 
+  /* feat/related-popup-context — "related" for a task used to mean
+     "any other open task with the byte-identical assignee string" — no
+     topic, site, or time relation at all, so two unrelated tasks
+     assigned to the same person looked "related" while two tasks pulled
+     from the SAME transcript conversation but assigned to different
+     people did not. Prefer topic-mates (tasks flattened from the same
+     parent topic — literally the same conversation this task came out
+     of) when any exist; only fall back to the old same-assignee signal
+     when the item has no topic-mates (e.g. the lone action item in its
+     topic), so a related section is never emptied out for something the
+     old rule would still have surfaced.
+
+     "Same topic" needs THREE fields, not just topic_id: topic_id is a
+     per-REPORT sequential int that restarts at 0 in every report (see
+     loadRollingOpenItems' keep() doc above), so two different owners'
+     (or the same owner's two different dates') topic 0 would false-match
+     on topic_id alone. date + folder (the report owner) + topic_id
+     together are exactly what make today-adapter.js's own task.id
+     unique — mirrors that, not a new identity scheme. */
+  function isTopicMate(a, b) {
+    return !!(a.topic_id != null && a.date
+      && a.topic_id === b.topic_id && a.date === b.date && a.folder === b.folder);
+  }
+
   function getRelated(data, item) {
     if (!item || !data) return [];
 
     if (item.kind === 'task') {
       var allTasks = (data.myTasks || []).concat(data.teamTasks || []);
-      return allTasks
-        .filter(function (t) { return t.id !== item.id && t.assignee === item.assignee; })
+      var others = allTasks.filter(function (t) { return t.id !== item.id; });
+      var topicMates = others.filter(function (t) { return isTopicMate(item, t); });
+      var pool = topicMates.length > 0
+        ? topicMates
+        : others.filter(function (t) { return t.assignee === item.assignee; });
+      return pool
         .slice(0, 3)
         .map(function (t) {
           return { id: t.id, title: t.title,
@@ -1132,9 +1203,23 @@
       rows = [
         ['Assignee', item.assignee],
         ['Due',      item.dueTime || 'None set'],
-        ['Status',   item.status],
-        ['Priority', item.priority || 'Medium'],
       ];
+      /* feat/related-popup-context — the Related quick-look popup is this
+         function's ONLY consumer for a task (TodayRightDetail's own main
+         panel builds its editable task rows inline, further down, and
+         never calls buildDetailRows for kind:'task') — so until now a
+         task glimpsed through Related showed Assignee/Due/Status/Priority
+         and NOTHING about which conversation it came from. Time/Site/
+         Report date are exactly the fields the main panel's `item IS the
+         same task object today-adapter.js stamped` doc (near the main
+         panel's own Time row) says are already sitting on the object;
+         this just surfaces them here too. Each is optional/omitted like
+         every other row here. */
+      if (item.timeRange) rows.push(['Time', item.timeRange]);
+      if (item.site_name) rows.push(['Site', item.site_name]);
+      if (item.date)      rows.push(['Report date', item.date]);
+      rows.push(['Status',   item.status]);
+      rows.push(['Priority', item.priority || 'Medium']);
       /* §E — age + no-deadline read-only signals, mirrored here for the
          right-detail view (the card list already surfaces them). */
       if (item.ageDays != null) rows.push(['Open since', formatAgeLabel(item.ageDays)]);
@@ -1185,6 +1270,50 @@
     );
   }
 
+  /* feat/related-popup-context — pure view-model for the Related
+     quick-look popup, replacing the previewCard/previewItem/previewRows/
+     previewTitle quartet TodayRightDetail used to compute inline. Two
+     cases:
+       - `previewId` resolves via findItemById against the CURRENT data
+         snapshot (same snapshot getRelated built `related` from) → full
+         row set via buildDetailRows, plus date/folder/topicId for the
+         "open in Timeline" jump.
+       - it doesn't resolve — the item was checked off / dropped from the
+         page (e.g. the actionsBus removal in useTodayState, or a normal
+         data refresh) WHILE the popup was open; `related` is recomputed
+         fresh every render too, so by the time this runs `related` no
+         longer has a matching card either. This used to render the bare
+         string 'Details unavailable.' with no indication of WHY; now it
+         says plainly that the item is gone, and offers no dead "open in
+         Timeline" link (date/folder/topicId are all null) since there is
+         nothing left to jump to.
+     Never invents rows for a kind buildDetailRows doesn't know about
+     (returns [] as before) — `resolved` distinguishes "found but has no
+     rows" from "not found at all", though nothing currently produces the
+     former for a task/urgent/activity id. */
+  function buildRelatedPreview(data, previewId, related) {
+    if (!previewId) return null;
+    var item = findItemById(data, previewId);
+    if (item) {
+      return {
+        title:    item.title || item.snippet || '(item)',
+        rows:     buildDetailRows(item),
+        resolved: true,
+        date:     item.kind === 'task' ? item.date : null,
+        folder:   item.kind === 'task' ? item.folder : null,
+        topicId:  item.kind === 'task' ? item.topic_id : null,
+      };
+    }
+    var card = (related || []).filter(function (r) { return r.id === previewId; })[0] || null;
+    return {
+      title:    (card && card.title) || '(item)',
+      rows:     [],
+      resolved: false,
+      date:     null, folder: null, topicId: null,
+      message:  'This item is no longer available — it may have been resolved or updated elsewhere.',
+    };
+  }
+
   /* =====================================================================
      feat/editable-tasks-ui — task-detail editors (priority/status/due/
      assignee), wired to PATCH /api/org/action-items/{id}.
@@ -1224,6 +1353,40 @@
   }
   function priorityLabelToValue(label) {
     return (label || 'medium').toLowerCase();
+  }
+
+  /* feat/today-title-edit — pure gate for the title editor, kept separate
+     from `fieldsEditable` (priority/status/due/assignee, further below)
+     on purpose: those four are PATCH /api/org/action-items/{id} fields,
+     authorised by task:edit/task:assign-or-own-the-task; the title is
+     PATCH /api/org/content/{table}/{id} (a rewrite of the body text),
+     authorised by content:edit-or-own-the-report — a DIFFERENT authority
+     model (timeline.js's canEditContent, mirrored by the caller of this
+     function as canEditContentRow). Two independent, testable conditions:
+     the caller must actually be allowed to edit this row's content, AND
+     the row must carry a durable id to PATCH against at all (a legacy/
+     pre-migration item the shim hasn't stamped an action_items.id onto
+     yet has nothing to edit, permission notwithstanding). */
+  function titleEditable(item, canEditContentRow) {
+    return !!item && item.kind === 'task' && !!canEditContentRow && !!item.actionItemId;
+  }
+
+  /* feat/today-title-edit — local mirror of timeline.js's isSiteManagerPlus
+     (same D7 rule: promoting a correction to a glossary row is
+     site_manager+ only, one tier above plain content:edit). Not exported
+     from timeline.js to reuse — this file already mirrors adminUserFolders()
+     from the aggregators the same way (see that function's own doc), an
+     established convention here rather than adding a new cross-file export
+     for one boolean. Keep in lockstep with timeline.js's copy if the D7
+     rule ever changes. */
+  function isSiteManagerPlusLocal(caller) {
+    if (!caller) return false;
+    if (caller.isAdmin === true) return true;
+    var HR = window.FS && window.FS.HIERARCHY_ROLES;
+    var ROLES = window.FS && window.FS.ROLES;
+    if (!HR || !ROLES || HR.indexOf(caller.role) === -1 || HR.indexOf('site_manager') === -1) return false;
+    return (ROLES[caller.role] && ROLES[caller.role].level || 0)
+        >= (ROLES.site_manager && ROLES.site_manager.level || 0);
   }
 
   /* =====================================================================
@@ -1851,10 +2014,12 @@
       myRecent.length > 0
         ? React.createElement(React.Fragment, null,
             React.createElement(SubsectionLabel, null,
-              /* Q1 — "Possibly personal" (non_work) items stay in
-                 myRecent and are still rendered below; they just don't
-                 inflate this count. */
-              'Open items · ' + openCount(myRecent)),
+              /* fix/today-heading-counts — sectionCardCount() (see rule
+                 comment near its definition above). A "Possibly
+                 personal" (non_work) item stays in myRecent, is
+                 rendered below, and now counts too — the TaskCard badge
+                 is what flags it, not a lower number here. */
+              'Open items · ' + sectionCardCount(myRecent)),
             renderMaybeGrouped(myRecent, isMultiProject, function (task) {
               return React.createElement(fs.TaskCard, {
                 key:           task.id,
@@ -1892,8 +2057,9 @@
 
       teamRecent.length > 0 ? React.createElement(React.Fragment, null,
         React.createElement(SubsectionLabel, null,
-          /* Q1 — same non_work-excluded count as "Open items" above. */
-          'Team · ' + openCount(teamRecent)),
+          /* fix/today-heading-counts — sectionCardCount(), same rule as
+             "Open items" above. */
+          'Team · ' + sectionCardCount(teamRecent)),
         renderMaybeGrouped(teamRecent, isMultiProject, function (task) {
           return React.createElement(fs.TaskCard, {
             key:        task.id,
@@ -1966,7 +2132,12 @@
                   'aria-hidden': true,
                 }, '▸'),
                 React.createElement('span', { className: 'fs-today__leftover-label' },
-                  'Leftover · ' + leftoverItems.length),
+                  /* fix/today-heading-counts — sectionCardCount(), same
+                     rule as "Open items"/"Team" above (this heading
+                     already used the raw length; it's Open items/Team
+                     that changed to match it, not the other way
+                     around). */
+                  'Leftover · ' + sectionCardCount(leftoverItems)),
                 React.createElement('span', { className: 'fs-today__leftover-hint' },
                   '(' + LEFTOVER_THRESHOLD_DAYS + '+ days, unresolved)'),
               ),
@@ -2146,6 +2317,39 @@
     var isOwnTask = item.kind === 'task' && item.assignee && item.assignee !== '—'
                     && item.assignee === (caller && caller.name);
 
+    /* feat/today-title-edit — the title lives on a DIFFERENT authority
+       model than priority/status/due/assignee above: it's a content
+       correction (PATCH /api/org/content/action_items/{id}), gated the
+       same way timeline.js gates every EditableText mount — content:edit
+       OR the caller being the report's own author — never task:edit/
+       task:assign/isOwnTask (those answer "can this caller manage the
+       TASK", not "can this caller correct the TRANSCRIBED TEXT"; a pm
+       with task:edit but who didn't write this report has no standing to
+       rewrite its wording, while the report's own author does even
+       without task:edit). item.folder is the report OWNER's folder
+       (today-adapter.js, never the caller) — same field timeline.js's
+       own isOwnReport compares against via ownerFolder. */
+    var hasContentEditPerm = !!(window.FS && window.FS.can && window.FS.P
+                        && window.FS.can(caller, window.FS.P('content', 'edit')));
+    var isOwnReportRow     = !!(item.kind === 'task' && item.folder && caller && caller.name
+                        && window.FS.api.folderName && window.FS.api.folderName(caller.name) === item.folder);
+    var canEditContentRow  = hasContentEditPerm || isOwnReportRow;
+    /* D7 — glossary PROMOTION is one tier above plain content:edit (see
+       isSiteManagerPlusLocal's doc); the isOwnReportRow OR-branch never
+       widens this, mirroring timeline.js's own canConfirmGlossary
+       (`hasContentEditPerm && isSiteManagerPlus(caller)`, not
+       `canEditContent && ...`). */
+    var canConfirmGlossaryRow = hasContentEditPerm && isSiteManagerPlusLocal(caller);
+
+    /* Pencil-toggle (Pattern B, same as timeline.js's action-item text
+       editor) state for the title — closed by default, reset whenever the
+       selected item changes so a previous item's open editor can't bleed
+       into the next one (same reasoning as the draft reset just below). */
+    var titleEditingRef  = React.useState(false);
+    var titleEditing     = titleEditingRef[0];
+    var setTitleEditing  = titleEditingRef[1];
+    React.useEffect(function () { setTitleEditing(false); }, [item.id]);
+
     /* Optimistic per-field overrides (task-card.js's startCheckOff is the
        precedent for this pattern elsewhere in the file: flip locally on
        change, revert on failure) — keyed by the SAME field names the
@@ -2262,6 +2466,7 @@
     var fieldsEditable   = item.kind === 'task' && (canEditTask || isOwnTask) && !!item.actionItemId;
     var assigneeEditable = item.kind === 'task' && (canAssignTask || isOwnTask) && !!item.actionItemId
                           && !!item.siteId && roster.status === 'ok' && roster.users.length > 0;
+    var isTitleEditable  = titleEditable(item, canEditContentRow);
 
     var rows;
     if (item.kind === 'task') {
@@ -2338,21 +2543,14 @@
     function openRelatedPreview(id) { setPreviewId(id); }
     function closeRelatedPreview()  { setPreviewId(null); }
 
-    /* Look up the previewed item's FULL data the same way the main panel
-       itself does — findItemById against the same TodayContext snapshot
-       `related` was built from — so the popup renders the identical row
-       shape (via buildDetailRows/renderDetailRows) as the main detail.
-       Falls back to the Related card's own {title, subtitle} if the item
-       has since dropped out of every pool (e.g. checked off elsewhere
-       while the popup was closed) rather than rendering a blank popup. */
-    var previewCard = previewId
-      ? (related.filter(function (r) { return r.id === previewId; })[0] || null)
-      : null;
-    var previewItem = previewId ? findItemById(data, previewId) : null;
-    var previewRows = previewItem ? buildDetailRows(previewItem) : [];
-    var previewTitle = (previewItem && (previewItem.title || previewItem.snippet))
-      || (previewCard && previewCard.title)
-      || '(item)';
+    /* feat/related-popup-context — pure view-model, see buildRelatedPreview's
+       header doc. Looks up the previewed item's FULL data the same way the
+       main panel itself does — findItemById against the same TodayContext
+       snapshot `related` was built from — so the popup renders the
+       identical row shape (via buildDetailRows/renderDetailRows) as the
+       main detail, now including the topic time window / site / report
+       date context that used to be main-panel-only. */
+    var previewState = buildRelatedPreview(data, previewId, related);
 
     return React.createElement('div', {
       style: {
@@ -2380,11 +2578,46 @@
             wordBreak: 'break-word',
           },
         }, item.title || item.snippet || '(item)'),
-        React.createElement(IconBtn, {
-          icon: 'x', ariaLabel: 'Close detail', size: 'sm',
-          onClick: function () { if (props.onClose) props.onClose(); },
-        }),
+        React.createElement('div', { style: { display: 'flex', gap: '4px', flexShrink: 0 } },
+          /* feat/today-title-edit — pencil toggle, same Pattern B as
+             timeline.js's per-row content editors: a click swaps the
+             inline EditableText in below (title stays visible above it,
+             matching the action-item-text precedent in OverviewTab —
+             not a hide/replace). */
+          isTitleEditable ? React.createElement(IconBtn, {
+            icon:      titleEditing ? 'x' : 'pencil',
+            ariaLabel: (titleEditing ? 'Cancel editing' : 'Edit') + ' title',
+            size: 'sm', variant: 'ghost',
+            onClick: function () { setTitleEditing(function (v) { return !v; }); },
+          }) : null,
+          React.createElement(IconBtn, {
+            icon: 'x', ariaLabel: 'Close detail', size: 'sm',
+            onClick: function () { if (props.onClose) props.onClose(); },
+          }),
+        ),
       ),
+
+      /* feat/today-title-edit — mounts window.FieldSight.EditableText,
+         the SAME component timeline.js uses for topic summary / action
+         item text / safety flag observation edits (exposed there, not
+         duplicated here — see that file's "Register" section). Editing a
+         task's TITLE always meant going to the Timeline and finding the
+         matching topic; this is the missing mount, not a new endpoint —
+         PATCH /api/org/content/action_items/{id} is already what the
+         Timeline's own action-item text editor calls. */
+      isTitleEditable && titleEditing && fs.EditableText
+        ? React.createElement(fs.EditableText, {
+            editable: true, table: 'action_items', id: item.actionItemId, field: 'text',
+            value: item.title || '', ariaLabel: 'Edit action item title', rows: 2,
+            showGlossaryConfirm: canConfirmGlossaryRow, topicId: item.topicRowId,
+            onSaved: function (res) {
+              var next = res && res.row && res.row.text;
+              if (ctx && ctx.patchTask) ctx.patchTask(item.id, { title: next != null ? next : item.title });
+              setTitleEditing(false);
+            },
+            onExitEdit: function () { setTitleEditing(false); },
+          })
+        : null,
 
       item.kind === 'urgent' ? React.createElement('div', {
         style: { display: 'flex', gap: '6px' },
@@ -2487,14 +2720,29 @@
       fs.ModalOverlay ? React.createElement(fs.ModalOverlay, {
         open:    !!previewId,
         onClose: closeRelatedPreview,
-        title:   previewTitle,
+        title:   previewState ? previewState.title : '',
         size:    'sm',
       },
-        (previewItem && previewRows.length > 0)
-          ? renderDetailRows(previewRows)
+        previewState && previewState.rows.length > 0
+          ? renderDetailRows(previewState.rows)
           : React.createElement('div', {
               style: { fontSize: '13px', color: 'var(--text-tertiary)' },
-            }, (previewCard && previewCard.subtitle) || 'Details unavailable.'),
+            }, (previewState && previewState.message) || ''),
+        /* feat/related-popup-context — the "way out": jump straight to
+           the topic this task came from, reusing TimelineLink's OWN route
+           builder (date/user/topic → /timeline?...&from=today) rather
+           than hand-rolling a second query-string constructor here. Only
+           offered when the item actually resolved AND carries a date —
+           an item with no date has nothing to deep-link to. Preview stays
+           read-only otherwise: no edit controls in this popup, ever. */
+        previewState && previewState.resolved && previewState.date
+          ? React.createElement(TimelineLink, {
+              date:  previewState.date,
+              user:  previewState.folder,
+              topic: previewState.topicId,
+              label: 'Open in Timeline',
+            })
+          : null,
       ) : null,
 
     );
@@ -2516,14 +2764,19 @@
        Activity / Settings / Evidence keep their 2-panel layout. */
   };
 
-  /* Expose the pure Q1 open-items count helper + (fix/today-batch-select-
-     expand) the batch-eligibility/ordering helpers to Node's test runner
-     only (CommonJS). No-op in the browser (Babel standalone leaves
-     `module` undefined), so the page bundle is unaffected — mirrors
-     timeline.js's identical guard. */
+  /* Expose the pure (fix/today-batch-select-expand) batch-eligibility/
+     ordering helpers to Node's test runner only (CommonJS). No-op in the
+     browser (Babel standalone leaves `module` undefined), so the page
+     bundle is unaffected — mirrors timeline.js's identical guard.
+     fix/today-heading-counts replaced openCount (excluded non_work from
+     the count while still rendering it) with sectionCardCount (always
+     list.length — see the rule comment near its definition); exported
+     here alongside groupByProject so tests/today-heading-counts.test.js
+     can assert the heading-count/rendered-card-count/sub-group-sum
+     invariants directly, not just re-derive them by hand. */
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
-      openCount:            openCount,
+      sectionCardCount:     sectionCardCount,
       isBatchEligibleTask:  isBatchEligibleTask,
       groupByProject:       groupByProject,
       /* fix/week-kpi — the weekly-closures tile's pure parts. */
@@ -2532,6 +2785,14 @@
       weekKpiHeadline:      weekKpiHeadline,
       weekKpiSubline:       weekKpiSubline,
       WeeklyCompletionKpi:  WeeklyCompletionKpi,
+      /* feat/today-title-edit — title editor's pure gate. */
+      titleEditable:        titleEditable,
+      /* feat/related-popup-context — Related-popup pure helpers. */
+      findItemById:         findItemById,
+      isTopicMate:          isTopicMate,
+      getRelated:           getRelated,
+      buildDetailRows:      buildDetailRows,
+      buildRelatedPreview:  buildRelatedPreview,
     };
   }
 
