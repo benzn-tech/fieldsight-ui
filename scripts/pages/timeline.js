@@ -195,6 +195,209 @@
     return parts.length ? parts.join(' · ') : null;
   }
 
+  /* ---------- meeting-scoped email draft (#10, mailto v1) --------------- */
+  /* One-click hand-off of ONE meeting's OUTSTANDING action items as an
+     editable draft in the sender's own mail client. Everything below is a
+     pure client-side transform over topics ALREADY in hand (the open
+     report's topics, narrowed to the selected session by
+     filterTopicsBySession) — it calls NO endpoint, reads no email address,
+     and resolves no recipient. See docs/superpowers/specs/
+     2026-07-25-meeting-scoped-action-export.md §4 (recommendation: mailto
+     first). Recipient auto-resolution (participant name -> users.email) is
+     the DEFERRED part (§5, an open privacy decision) and is intentionally
+     absent: the mailto `to:` field is ALWAYS empty and no lookup happens.
+
+     NOTHING IS SENT. `mailto:` merely opens the OS default mail client with
+     a pre-filled, unsent draft; FieldSight transmits no mail in any path. */
+
+  /* An action item's "done" signal. The authoritative source is the
+     action_items.status column (feat/editable-tasks-ui). Default here is
+     column-only (status === 'done'); the render site injects a richer
+     predicate that also honours the legacy DynamoDB check-off boolean. */
+  function defaultActionDone(a) {
+    return !!(a && a.status === 'done');
+  }
+
+  /* Resolve an action item's free-text deadline to a display string, reusing
+     the shared today-adapter resolver when present (absolute YYYY-MM-DD when
+     confidently parseable, raw text otherwise, '—' when empty — it NEVER
+     guesses a wrong date). Falls back to the raw text under Node/tests where
+     FS.api isn't loaded. */
+  function resolveDueDisplay(deadline, reportDateISO) {
+    var api = window.FS && window.FS.api;
+    if (api && typeof api.resolveDeadline === 'function') {
+      var r = api.resolveDeadline(deadline, reportDateISO);
+      return (r && r.display) || '—';
+    }
+    var t = deadline == null ? '' : String(deadline).trim();
+    return t || '—';
+  }
+
+  /* Collect a scope's OUTSTANDING (open) action items, grouped by topic and
+     in topic order. Belt-and-suspenders privacy assertion: even though the
+     server already excludes redacted / non_work topics from the rendered
+     timeline, re-assert it here so a personal item can NEVER reach an
+     outbound draft, no matter how the topics list was assembled. `isDone`
+     is called as isDone(action, topic_id, index); items it flags are
+     skipped (an email of a meeting's *outstanding* actions is the useful
+     artefact). Returns [{ topicTitle, items:[action…] }], only for topics
+     that still have >=1 open item. */
+  function collectSessionActionItems(topics, isDone) {
+    var done = isDone || defaultActionDone;
+    var groups = [];
+    (topics || []).forEach(function (t) {
+      if (!t) return;
+      if (t.redacted === true) return;            /* never send a redacted topic */
+      if (t.work_class === 'non_work') return;    /* never send a personal topic */
+      var kept = (t.action_items || []).filter(function (a, idx) {
+        if (!a) return false;
+        return !done(a, t.topic_id, idx);
+      });
+      if (kept.length === 0) return;
+      groups.push({
+        topicTitle: t.topic_title || t.title || 'Untitled topic',
+        items: kept,
+      });
+    });
+    return groups;
+  }
+
+  /* Union of participant NAMES over the (already exclusion-filtered) topics —
+     used only for a body "Discussed with:" line so the sender knows who to
+     add. These are LLM-heard names, never email addresses, and never touch
+     the `to:` field. */
+  function unionSessionParticipants(topics) {
+    var seen = {}, out = [];
+    (topics || []).forEach(function (t) {
+      if (!t || t.redacted === true || t.work_class === 'non_work') return;
+      (t.participants || []).forEach(function (p) {
+        if (p && !seen[p]) { seen[p] = true; out.push(p); }
+      });
+    });
+    return out;
+  }
+
+  /* One item's plain-text line: "- [PRIORITY] <text> — <responsible> (due <date|—>)". */
+  function formatActionLine(action, reportDateISO) {
+    var a = action || {};
+    var text = (a.action != null ? a.action : a.text) || '';
+    var priority = String(a.priority || 'medium').toUpperCase();
+    var who = a.responsible || 'Unassigned';
+    var due = resolveDueDisplay(a.deadline, reportDateISO);
+    return '- [' + priority + '] ' + text + ' — ' + who + ' (due ' + due + ')';
+  }
+
+  /* Assemble the plain-text body from a prefix of the flattened item entries
+     (mailto is plain text — no formatting). Groups by topic (a blank line +
+     the topic title before its first item). When `omitted > 0`, a visible
+     "… +N more items" line is appended — items are NEVER silently dropped.
+     The "Discussed with:" line lists participant NAMES only; the footer's
+     deep link doubles as the overflow escape hatch. */
+  function assembleEmailBody(entries, omitted, ctx) {
+    var lines = [ctx.intro, ''];
+    var lastTopic = null;
+    (entries || []).forEach(function (e) {
+      if (e.topicTitle !== lastTopic) {
+        if (lastTopic !== null) lines.push('');
+        lines.push(e.topicTitle);
+        lastTopic = e.topicTitle;
+      }
+      lines.push(e.line);
+    });
+    if (omitted > 0) {
+      lines.push('');
+      lines.push('… +' + omitted + ' more item' + (omitted === 1 ? '' : 's'));
+    }
+    if (ctx.participants && ctx.participants.length) {
+      lines.push('');
+      lines.push('Discussed with: ' + ctx.participants.join(', '));
+    }
+    lines.push('');
+    lines.push(ctx.footer);
+    return lines.join('\n');
+  }
+
+  /* Build the mailto draft for one meeting's outstanding actions.
+     Returns null when there is nothing outstanding to send (caller then
+     disables/omits the button — never an empty email). Otherwise returns
+     { subject, body, to:'', url, totalItems, includedItems, omittedItems,
+     truncated }. The `to:` is ALWAYS '' (recipient resolution deferred).
+
+     Length ceiling: mailto has a practical ~2000-encoded-char limit; we
+     budget ~1800 to be safe. When the fully-populated URL would exceed the
+     budget we include the largest prefix of items that fits and append a
+     visible "… +N more items" line (+ the footer deep link as the escape
+     hatch). Because the list is a single meeting this rarely triggers. */
+  function buildSessionEmailDraft(opts) {
+    opts = opts || {};
+    var topics    = opts.topics || [];
+    var session   = opts.session || null;
+    var date      = opts.date || '';
+    var reportDate = opts.reportDate || date;
+    var siteName  = opts.siteName || (session && session.site_name) || '';
+    var deepLink  = opts.deepLink || '';
+    var budget    = opts.budget || 1800;
+
+    var groups = collectSessionActionItems(topics, opts.isDone);
+    var totalItems = groups.reduce(function (n, g) { return n + g.items.length; }, 0);
+    if (totalItems === 0) return null;
+
+    var sessionLabel = (session && session.label) || 'All day';
+    var subject = 'Action items — ' + siteName + ' — ' + sessionLabel
+      + (date ? ' (' + date + ')' : '');
+
+    /* Participant NAMES only, for the body — never the recipient field. */
+    var participants = (session && session.participants && session.participants.length)
+      ? session.participants.filter(Boolean)
+      : unionSessionParticipants(topics);
+
+    var ctx = {
+      intro: 'Outstanding action items from ' + (siteName ? siteName + ' — ' : '')
+        + sessionLabel + (date ? ' (' + date + ')' : '') + ':',
+      participants: participants,
+      footer: 'Generated from FieldSight' + (deepLink ? ' — ' + deepLink : ''),
+    };
+
+    /* Flatten to per-item entries, preserving topic grouping. */
+    var entries = [];
+    groups.forEach(function (g) {
+      g.items.forEach(function (a) {
+        entries.push({ topicTitle: g.topicTitle, line: formatActionLine(a, reportDate) });
+      });
+    });
+
+    function urlFor(k) {
+      var body = assembleEmailBody(entries.slice(0, k), totalItems - k, ctx);
+      /* to: is ALWAYS empty — no recipients, no email lookup. */
+      var url = 'mailto:?subject=' + encodeURIComponent(subject)
+        + '&body=' + encodeURIComponent(body);
+      return { body: body, url: url };
+    }
+
+    /* Largest prefix whose encoded URL fits the budget (greedy, tiny N). */
+    var chosen = 0, built = urlFor(totalItems);
+    if (built.url.length <= budget) {
+      chosen = totalItems;
+    } else {
+      for (var k = totalItems - 1; k >= 0; k--) {
+        var cand = urlFor(k);
+        if (cand.url.length <= budget) { chosen = k; built = cand; break; }
+        built = cand;   /* keep the smallest as the honest fallback */
+      }
+    }
+
+    return {
+      subject:       subject,
+      body:          built.body,
+      to:            '',
+      url:           built.url,
+      totalItems:    totalItems,
+      includedItems: chosen,
+      omittedItems:  totalItems - chosen,
+      truncated:     chosen < totalItems,
+    };
+  }
+
   /* ---------- content-correction Phase D: history word diff ------------- */
   /* Whitespace-tokenized LCS word diff. Tokens keep their trailing whitespace
      so joining same+ins reproduces `after` and same+del reproduces `before`.
@@ -1603,10 +1806,39 @@
        (spec §5 "hidden + recoverable"). Session filtering runs FIRST so the
        removed section, like the visible list, stays scoped to whichever
        session (or All day) is currently selected. */
-    var _partition    = partitionTopics(
-      filterTopicsBySession(applyTopicOverrides(report.topics, overrides), selectedSessionId));
+    var _scopedTopics = filterTopicsBySession(
+      applyTopicOverrides(report.topics, overrides), selectedSessionId);
+    var _partition    = partitionTopics(_scopedTopics);
     var visibleTopics = _partition.visible;
     var removedTopics = _partition.removed;
+
+    /* meeting-scoped email draft (#10) — resolve the current scope for the
+       "Draft email" control. When a specific session is selected the draft is
+       that meeting; "All day" (null) drafts the whole day's outstanding items,
+       labelled as such. The report owner's folder feeds the same done-check
+       (status column, else legacy DynamoDB check-off) the topic cards use, so
+       an item ticked here counts as done and is left out of the draft. */
+    var _selectedSession = selectedSessionId
+      ? (daySessions.filter(function (s) { return s.session_id === selectedSessionId; })[0] || null)
+      : null;
+    var _draftUserFolder = report.user_name ? window.FS.api.folderName(report.user_name) : null;
+    function _isActionDone(a, topicId, idx) {
+      if (a && a.status) return a.status === 'done';
+      var st = window.FS.api.actions.lookupAction(actionState, _draftUserFolder, topicId, idx);
+      return !!(st && st.checked);
+    }
+    /* Belt-and-suspenders: the draft builder re-asserts redacted/non_work
+       exclusion itself, but pass the ALREADY-visible (non-removed) topics so a
+       personal item has to slip two independent filters to ever reach it. */
+    var _draftEl = React.createElement(DraftEmailButton, {
+      topics:     visibleTopics,
+      session:    _selectedSession,
+      siteName:   report.site || site || '',
+      date:       date,
+      reportDate: report.report_date || date,
+      deepLink:   (typeof window !== 'undefined' && window.location) ? window.location.href : '',
+      isDone:     _isActionDone,
+    });
 
     /* ---- Daily report view (default) ---- */
     return React.createElement('div', {
@@ -1633,8 +1865,12 @@
           className: 'fs-session-picker__excluded-note',
         }, excludedNote) : null,
       ) : null,
-      React.createElement('div', { className: 'fs-timeline-page__section-label' },
-        'Topics'),
+      React.createElement('div', {
+        className: 'fs-timeline-page__section-label fs-timeline-page__topics-head',
+        style:     { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+      },
+        React.createElement('span', null, 'Topics'),
+        _draftEl),
       React.createElement('div', { className: 'fs-timeline-page__topics' },
         visibleTopics.map(function (topic) {
           /* Sprint 6.6.4 — focus mode + flash. When a deep-link target
@@ -1759,6 +1995,47 @@
         );
       }),
     );
+  }
+
+  /* meeting-scoped email draft (#10) — a one-click "Draft email" control for
+     the currently-scoped meeting's OUTSTANDING action items. Rendered as an
+     <a href="mailto:…"> (a plain user-click navigation — no window.open, so
+     no pop-up blocker can eat it, unlike window.location assignment on some
+     clients). Opens the sender's OWN mail client with an editable, UNSENT
+     draft — FieldSight sends nothing, ever. When the scope has no
+     outstanding items the control renders DISABLED with a reason rather than
+     producing an empty email. All data comes from `topics` already in hand;
+     no endpoint call, no recipient/email resolution (deferred, §5). */
+  function DraftEmailButton(props) {
+    var draft = buildSessionEmailDraft({
+      topics:     props.topics,
+      session:    props.session,
+      siteName:   props.siteName,
+      date:       props.date,
+      reportDate: props.reportDate || props.date,
+      deepLink:   props.deepLink,
+      isDone:     props.isDone,
+    });
+    if (!draft) {
+      return React.createElement('button', {
+        type:      'button',
+        className: 'fs-btn fs-btn--tertiary fs-btn--sm fs-draft-email fs-draft-email--empty',
+        disabled:  true,
+        title:     'No outstanding action items in this view to send',
+      }, 'Draft email');
+    }
+    var tip = draft.truncated
+      ? ('Opens a draft in your mail client — ' + draft.omittedItems
+         + ' item' + (draft.omittedItems === 1 ? '' : 's')
+         + ' trimmed to fit; full list via the link in the email. Nothing is sent until you send it.')
+      : 'Opens a draft in your mail client — nothing is sent until you send it';
+    return React.createElement('a', {
+      className: 'fs-btn fs-btn--secondary fs-btn--sm fs-draft-email',
+      href:      draft.url,
+      title:     tip,
+      /* mailto stays in the same tab handoff to the OS mail client; no
+         target/_blank needed and no rel required for a mailto scheme. */
+    }, 'Draft email');
   }
 
   /* life-conversation separation (Task 11) — one row in TimelineMiddleColumn's
@@ -2976,6 +3253,12 @@
       formatParticipants: formatParticipants,
       formatSessionSummary: formatSessionSummary,
       formatExcludedNote: formatExcludedNote,
+      /* meeting-scoped email draft (#10, mailto v1) */
+      collectSessionActionItems: collectSessionActionItems,
+      unionSessionParticipants: unionSessionParticipants,
+      formatActionLine: formatActionLine,
+      assembleEmailBody: assembleEmailBody,
+      buildSessionEmailDraft: buildSessionEmailDraft,
     };
   }
 
