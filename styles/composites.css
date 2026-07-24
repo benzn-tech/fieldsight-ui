@@ -68,7 +68,10 @@
 
 .fs-task-card__row {
   display: flex;
-  align-items: center;
+  /* fix/task-title-2-line-wrap — top-align now the title can grow to two
+     lines; center-alignment made the meta column look vertically off
+     once the row's height stopped being fixed by the title's single line. */
+  align-items: flex-start;
   gap: 10px;
 }
 
@@ -82,12 +85,15 @@
   font-weight: var(--font-weight-medium);
   color: var(--text-primary);
   line-height: 1.35;
-  /* concise-cards — clamped to a single scannable line (was 2-line
-     -webkit-box clamp); the full title + specific time now live in the
-     right detail panel. */
-  white-space: nowrap;
+  /* fix/task-title-2-line-wrap — reverted the single-line ellipsis clamp
+     from 0aed4cd (concise-cards): users had to open every card to read
+     the full title. Back to a 2-line clamp (same idiom as
+     .fs-ask-chat__cite-snippet above) so most titles are readable
+     in-place; card height isn't fixed anywhere, so it grows naturally. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .fs-task-card__meta {
