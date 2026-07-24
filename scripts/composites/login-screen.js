@@ -161,6 +161,16 @@
             display_name: [me.first_name, me.last_name].filter(Boolean).join(' '),
             sites:        me.site_ids || [],
             orgStatus:    me.archived_at ? 'archived' : 'active',
+            /* fix/mine-team-attribution — GET /api/org/me already returns
+               folder_name (src/lambda_org_api.py, repositories/users.py);
+               previously thrown away here and re-derived everywhere else
+               by string-mangling the display name. Threaded through so
+               session-bridge.js can carry the REAL folder onto
+               AuthMock.currentUser.folder_name, which the shared
+               isMineTask predicate (scripts/api/mine-team.js) prefers
+               over deriving it from display_name. undefined on a mock/
+               legacy /me response — the predicate falls back cleanly. */
+            folder_name:  me.folder_name,
           },
         });
         /* THIS account's avatar for the nav (the bridge just cleared any

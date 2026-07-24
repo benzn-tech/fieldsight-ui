@@ -18,9 +18,12 @@
    Right detail:
      • Action detail (text, owner, deadline, priority, source topic)
      • Audit history (checked_by, checked_at)
-     • Mark complete CTA — wires through FS.api.actions.toggleAction
-       (reuses Sprint 2.4 P-04 optimistic flow; on success removes
-       the row from the page snapshot via TasksContext.removeRow)
+     • Mark complete CTA — wires through FS.api.actions.resolveActionItem
+       (feat/checkoff-org-api: the AUTHORISED PATCH /api/org/action-items/
+       {id} when the row carries a durable actionItemId, else the legacy
+       toggle; reuses Sprint 2.4 P-04 optimistic flow; on success removes
+       the row from the page snapshot via TasksContext.removeRow, on a
+       refusal keeps the panel open and toasts the server's reason)
 
    Architecture:
      • TasksProvider owns state via TasksContext (Sprint 3 P-07
@@ -63,11 +66,62 @@
      date via the shared resolveDeadline helper (today-adapter.js) — the
      same helper Today + Timeline use for absolute due dates. Unparseable
      deadlines (absolute: null) never count as overdue. */
+  /* feat/checkoff-org-api — done-ness is the UNION of the two stores a row
+     carries: the authoritative Aurora column (`row.status`, threaded raw by
+     tasks-aggregator.js) and the legacy DynamoDB overlay boolean
+     (`row.audit.checked`). This page previously read ONLY the overlay for
+     bucketing, badges and the check-off affordance while its own Status
+     editor wrote ONLY the column — so a task set to Done in the editor
+     stayed in the Open bucket with an "Open" badge and a live check-off
+     circle, and the two could contradict each other on screen. The union is
+     the same rule already shipped in today.js's keep() and
+     action-item-row.js's isColumnDone, and it is what makes the move to the
+     authorised PATCH non-regressive: ~119 action-item check-offs still live
+     only in DynamoDB (their Aurora rows are status='open', the NOT NULL
+     DEFAULT), and they keep reading as Done. */
+  function isRowDone(row) {
+    if (!row) return false;
+    return window.FS.api.actions.isActionResolved(row.status, row.audit && row.audit.checked);
+  }
+
   function isOverdue(row, today) {
-    if (!row || row.audit.checked) return false;
+    if (!row || isRowDone(row)) return false;
     var iso = window.FS.api.resolveDeadline(row.deadline, row.date).absolute;
     if (!iso) return false;
     return iso < today;
+  }
+
+  /* Q1 — tier-aware Today/Tasks. Filter-chip buckets, extracted to a pure
+     function so both TasksMiddleColumn (below) and its unit tests can
+     share one implementation. A `work_class === 'non_work'` row stays in
+     `all`/`mine`/`done` (still rendered, still countable there) but is
+     excluded from `open`/`overdue` — those two counts (and filter views)
+     drive the "N unresolved" impression the chip badges give, and a
+     personal item shouldn't inflate that. Redacted rows never reach here
+     at all — tasks-aggregator.js omits them before this function ever
+     sees the row. Only the literal 'non_work' is excluded — missing/other
+     values (undefined, 'work') count as work, matching the `!== 'work'`-
+     avoiding convention the aggregator itself follows.
+
+     fix/mine-team-attribution — the `mine` bucket now goes through the
+     SHARED FS.api.isMineTask predicate (scripts/api/mine-team.js) instead
+     of a strict `r.responsible === myName` check, so an unassigned row
+     (responsible null/''/'—') owned by the viewer's own folder counts as
+     Mine, "Ben_Lin" vs "Ben Lin" matches, and case/whitespace differences
+     match — the exact same rule today-adapter.js's myTasks/teamTasks
+     split applies, so the two pages can never disagree on the same row.
+     `viewer` is { name, folderName } — folderName is the viewer's real
+     folder_name when known, else derived from name (see isMineTask doc).
+     row.folder is set on Today-shaped rows; Tasks rows (tasks-aggregator.js)
+     carry it as `user_folder` — `r.folder || r.user_folder` covers both. */
+  function computeBuckets(rows, viewer, today) {
+    return {
+      all:     rows,
+      mine:    rows.filter(function (r) { return window.FS.api.isMineTask(r.responsible, r.folder || r.user_folder, viewer); }),
+      open:    rows.filter(function (r) { return !isRowDone(r) && r.work_class !== 'non_work'; }),
+      overdue: rows.filter(function (r) { return isOverdue(r, today) && r.work_class !== 'non_work'; }),
+      done:    rows.filter(function (r) { return  isRowDone(r); }),
+    };
   }
 
   /* ---------- TasksContext --------------------------------------------- */
@@ -240,6 +294,12 @@
 
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
     var myName = caller.name || '';
+    /* fix/mine-team-attribution — { name, folderName } passed to the
+       shared isMineTask predicate everywhere below. folderName prefers
+       the REAL folder_name threaded from GET /api/org/me (session-
+       bridge.js onto AuthMock.currentUser.folder_name); falls back to
+       deriving it from myName when absent (mock/legacy sessions). */
+    var myViewer = { name: myName, folderName: caller.folder_name || null };
 
     /* Default filter: workers and named users see "Mine" first;
        admin/gm sees "All" so they get the full picture. */
@@ -290,13 +350,7 @@
     var rowsEarly  = (state && state.status === 'ok') ? (state.rows || []) : [];
     var todayEarly = (state && state.today) || window.FS.api.todayNZDT();
 
-    var bucketsEarly = {
-      all:     rowsEarly,
-      mine:    rowsEarly.filter(function (r) { return r.responsible === myName; }),
-      open:    rowsEarly.filter(function (r) { return !r.audit.checked; }),
-      overdue: rowsEarly.filter(function (r) { return isOverdue(r, todayEarly); }),
-      done:    rowsEarly.filter(function (r) { return  r.audit.checked; }),
-    };
+    var bucketsEarly = computeBuckets(rowsEarly, myViewer, todayEarly);
     var countsEarly = {
       all:     bucketsEarly.all.length,
       mine:    bucketsEarly.mine.length,
@@ -309,7 +363,8 @@
        then done at the bottom — same comparator the post-early-return
        code below used to own exclusively. */
     var visibleEarly = (bucketsEarly[filter] || bucketsEarly.all).slice().sort(function (a, b) {
-      if (a.audit.checked !== b.audit.checked) return a.audit.checked ? 1 : -1;
+      var aDone = isRowDone(a), bDone = isRowDone(b);
+      if (aDone !== bDone) return aDone ? 1 : -1;
       if (a.date !== b.date) return a.date < b.date ? 1 : -1;
       return (a.action || '').localeCompare(b.action || '');
     });
@@ -320,9 +375,9 @@
     /* Batch-eligible = still open — mirrors safety.js excluding
        already-resolved rows from Select all / Resolve N (its F4): a
        Done task has nothing to bulk-resolve, and letting it into the
-       selection would silently no-op on toggleAction (checked: true
-       when it's already true). */
-    var batchEligibleRows = visibleEarly.filter(function (r) { return !r.audit.checked; });
+       selection would silently no-op on the resolve call (status 'done'
+       when it's already 'done'). */
+    var batchEligibleRows = visibleEarly.filter(function (r) { return !isRowDone(r); });
 
     var multiSelect = window.FieldSight.useMultiSelect({
       items: batchEligibleRows,
@@ -423,9 +478,12 @@
       : null;
 
     /* feat/editable-tasks-ui — bulk "Resolve N", piggybacking the SAME
-       actions-toggle endpoint the single-row check-off circle (below,
-       via TaskCard's checkable prop) and TasksRightDetail's Mark
-       complete button both use. Mirrors today.js's bulkResolveLeftover
+       check-off path the single-row circle (below, via TaskCard's
+       checkable prop) and TasksRightDetail's Mark complete button both
+       use — now FS.api.actions.resolveActionItem (feat/checkoff-org-api:
+       the authorised PATCH /api/org/action-items/{id} when the row carries
+       a durable actionItemId, else the legacy DynamoDB toggle).
+       Mirrors today.js's bulkResolveLeftover
        / safety.js's bulkMarkResolved: each selected row carries its OWN
        date/topic_id/action_index (rows span many dates/owners — no
        single "today" to check off against), and user_folder is the
@@ -447,7 +505,13 @@
 
       var thunks = candidates.map(function (row) {
         return function () {
-          return api.actions.toggleAction({
+          return api.actions.resolveActionItem({
+            /* feat/checkoff-org-api — the durable action_items.id the
+               aggregator already stamps on every row (tasks-aggregator.js
+               `actionItemId: a.id || null`); its presence is what routes
+               this write to the AUTHORISED PATCH instead of the legacy
+               unauthenticated toggle. */
+            actionItemId: row.actionItemId,
             date:         row.date,
             topic_id:     row.topic_id,
             action_index: row.action_index,
@@ -459,22 +523,32 @@
                in practice; kept as `row.folder || row.user_folder` to
                mirror Today's exact owner-folder fallback expression,
                in case a future caller ever hands this a Today-shaped
-               row (which DOES carry `.folder`). */
+               row (which DOES carry `.folder`). Legacy-leg only. */
             user_folder:  row.folder || row.user_folder,
-          }).then(function () { return { ok: true, row: row }; })
-            .catch(function (err) {
-              console.error('[Tasks] bulk resolve failed for', row.id, err);
-              return { ok: false, row: row };
-            });
+          }).then(function (env) {
+            if (env && env.ok) return { ok: true, row: row };
+            /* A 403 RESOLVES out of the org write, so the old
+               `.then(() => ok:true)` counted a refusal as a success and
+               dropped the row from the list unresolved. */
+            console.error('[Tasks] bulk resolve refused for', row.id, env);
+            return { ok: false, row: row, message: env && env.message };
+          });
         };
       });
 
       window.FS.api.pooledAll(thunks, 6).then(function (results) {
         var okIds = {};
         var okCount = 0, failCount = 0;
+        /* feat/checkoff-org-api — surface the FIRST server reason in the
+           toast: "try again" is actively misleading when the answer is
+           "admin/gm, this site's pm/site_manager, or the assignee only". */
+        var firstReason = null;
         (results || []).forEach(function (r) {
           if (r && r.ok) { okIds[r.row.id] = true; okCount++; }
-          else { failCount++; }
+          else {
+            failCount++;
+            if (!firstReason && r && r.message) firstReason = r.message;
+          }
         });
 
         Object.keys(okIds).forEach(function (id) { if (ctx.removeRow) ctx.removeRow(id); });
@@ -500,13 +574,17 @@
           });
         } else if (okCount === 0) {
           toast.show({
-            message: 'Could not resolve ' + failCount + ' task' + (failCount === 1 ? '' : 's') + ' — try again',
-            tone:    'error',
+            message: 'Could not resolve ' + failCount + ' task' + (failCount === 1 ? '' : 's')
+                     + (firstReason ? ' — ' + firstReason : ' — try again'),
+            tone:     'error',
+            duration: 5000,
           });
         } else {
           toast.show({
-            message: 'Resolved ' + okCount + ', ' + failCount + ' failed — still selected, try again',
-            tone:    'warning',
+            message: 'Resolved ' + okCount + ', ' + failCount + ' failed'
+                     + (firstReason ? ' — ' + firstReason : ' — still selected, try again'),
+            tone:     'warning',
+            duration: 5000,
           });
         }
       });
@@ -610,14 +688,24 @@
             'No ' + (filter === 'all' ? '' : filter + ' ') + 'tasks in this window.')
         : React.createElement('div', { className: 'fs-tasks__list' },
             visible.map(function (row) {
+              var rowDone = isRowDone(row);
               var task = {
                 id:          row.id,
                 topic_id:    row.topic_id,
                 actionIndex: row.action_index,
+                /* feat/checkoff-org-api — the durable action_items.id
+                   (tasks-aggregator.js `actionItemId: a.id || null`). It
+                   was NEVER threaded onto this task object, so TaskCard's
+                   check-off circle on /tasks always fell through to the
+                   legacy unauthenticated toggle even for rows that had a
+                   perfectly good id — the /today card has passed it since
+                   feat/editable-tasks-ui. Threading it is what actually
+                   moves this page's check-off onto the authorised PATCH. */
+                actionItemId: row.actionItemId,
                 title:       row.action,
                 assignee:    row.responsible || '—',
-                status:      row.audit.checked ? 'Done' : (isOverdue(row, today) ? 'Overdue' : 'Open'),
-                statusTone:  row.audit.checked ? 'success'
+                status:      rowDone ? 'Done' : (isOverdue(row, today) ? 'Overdue' : 'Open'),
+                statusTone:  rowDone ? 'success'
                             : (isOverdue(row, today) ? 'danger' : 'info'),
                 priority:    row.priority
                               ? row.priority.charAt(0).toUpperCase() + row.priority.slice(1)
@@ -632,6 +720,11 @@
                    row.user_folder` mirrors the exact owner-folder
                    fallback used elsewhere in this feature. */
                 folder:      row.folder || row.user_folder,
+                /* Q1 — tier-aware Today/Tasks: threaded straight through so
+                   TaskCard can render the "Possibly personal" badge (same
+                   field today.js's myTasks/teamTasks items already carry
+                   verbatim off today-adapter.js). */
+                work_class:  row.work_class,
               };
               /* feat/editable-tasks-ui — batch-eligible = still open
                  (mirrors batchEligibleRows above / safety.js's per-row
@@ -639,23 +732,35 @@
                  detail panel regardless of Batch Select mode — no fake
                  selection affordance for a row with nothing left to
                  resolve. */
-              var batchEligible = !row.audit.checked;
+              var batchEligible = !rowDone;
               var batchSelected = multiSelect.batchMode && batchEligible && !!multiSelect.selectedIds[row.id];
               return React.createElement(TaskCard, {
                 key:           row.id,
                 task:          task,
-                isMine:        row.responsible === myName,
+                /* fix/mine-team-attribution — same shared predicate as
+                   computeBuckets' `mine` bucket above (and today-adapter
+                   .js's myTasks/teamTasks split): NOT a strict `===`
+                   check any more. row.folder is set on some row shapes,
+                   row.user_folder on tasks-aggregator.js's — either one
+                   is the row's OWNER folder, used only for the
+                   unassigned-row rule. */
+                isMine:        window.FS.api.isMineTask(row.responsible, row.folder || row.user_folder, myViewer),
                 selected:      selectedId === row.id,
                 /* Row-level check-off (feat/editable-tasks-ui) — only
                    open rows get the round checkbox; a Done row falls
-                   back to TaskCard's default avatar. date/topic_id/
-                   actionIndex/folder above are what task-card.js's
+                   back to TaskCard's default avatar. actionItemId/date/
+                   topic_id/actionIndex/folder above are what task-card.js's
                    checkable path needs to call
-                   FS.api.actions.toggleAction in place. On success the
+                   FS.api.actions.resolveActionItem in place. On success the
                    row drops out of TasksProvider's snapshot via
                    ctx.removeRow — mirrors TasksRightDetail's
-                   onMarkComplete. */
-                checkable:     !row.audit.checked,
+                   onMarkComplete. A refusal (403) never reaches
+                   onCheckedOff: TaskCard aborts the animation and toasts.
+                   feat/checkoff-org-api — "Done" is now the union of the
+                   Aurora column and the legacy overlay (isRowDone), so a
+                   row completed through the Status editor no longer keeps
+                   showing a live check-off circle. */
+                checkable:     !rowDone,
                 date:          row.date,
                 onCheckedOff:  function (t) { if (ctx.removeRow) ctx.removeRow(t.id); },
                 /* Batch select (feat/editable-tasks-ui) — the SAME
@@ -918,7 +1023,7 @@
     var statusCell = fieldsEditable ? React.createElement(Select, {
       size: 'sm', fullWidth: true, value: statusValue, options: STATUS_OPTIONS,
       onChange: function (e) { commitRowField('status', e.target.value); },
-    }) : window.FS.api.deriveStatus(row.status, row.audit.checked).status;
+    }) : window.FS.api.deriveStatus(row.status, row.audit && row.audit.checked).status;
 
     var priorityCell = fieldsEditable ? React.createElement(Select, {
       size: 'sm', fullWidth: true, value: priorityValue, options: PRIORITY_OPTIONS,
@@ -926,21 +1031,38 @@
     }) : (row.priority ? row.priority.charAt(0).toUpperCase() + row.priority.slice(1) : 'Medium');
 
     function onMarkComplete() {
-      if (busy || row.audit.checked) return;
+      if (busy || isRowDone(row)) return;
       setBusy(true);
-      window.FS.api.actions.toggleAction({
+      /* feat/checkoff-org-api — same routed, always-resolving call as the
+         list circle and the bulk bar. user_folder feeds the legacy leg
+         only; actionItemId is what routes to the authorised PATCH. */
+      window.FS.api.actions.resolveActionItem({
+        actionItemId: row.actionItemId,
         date:         row.date,
         topic_id:     row.topic_id,
         action_index: row.action_index,
         checked:      true,
         action_text:  row.action,
         user_folder:  row.user_folder,
-      }).then(function () {
-        if (ctx && ctx.removeRow) ctx.removeRow(row.id);
-        if (props.onClose) props.onClose();
-      }).catch(function (err) {
-        console.error('[Tasks right] markComplete failed', err);
+      }).then(function (env) {
+        if (env && env.ok) {
+          if (ctx && ctx.removeRow) ctx.removeRow(row.id);
+          if (props.onClose) props.onClose();
+          return;
+        }
+        /* Refused/failed — keep the panel open on the unresolved row and
+           say why. The old `.catch` never even fired on a 403 (the org
+           write RESOLVES it), and closing the panel reads as success. */
+        console.error('[Tasks right] markComplete refused', env);
         setBusy(false);
+        var toast = window.FS && window.FS.toast;
+        if (toast) {
+          toast.show({
+            message:  (env && env.message) || 'Could not check off this task.',
+            tone:     'error',
+            duration: 5000,
+          });
+        }
       });
     }
 
@@ -951,7 +1073,10 @@
     }
 
     var statusBadge;
-    if (row.audit.checked) {
+    /* feat/checkoff-org-api — union of the Aurora column and the legacy
+       overlay, so this badge can no longer contradict the Status editor
+       three rows below it (which writes/reads the column). */
+    if (isRowDone(row)) {
       statusBadge = React.createElement(Badge, { tone: 'success', size: 'sm', prefixDot: true }, 'Done');
     } else if (overdue) {
       statusBadge = React.createElement(Badge, { tone: 'danger', size: 'sm', prefixDot: true }, 'Overdue');
@@ -1051,7 +1176,7 @@
 
             /* Actions */
             React.createElement('div', { className: 'fs-tasks-detail__actions' },
-              !row.audit.checked
+              !isRowDone(row)
                 ? React.createElement(Button, {
                     size: 'sm', leftIcon: 'check',
                     onClick: onMarkComplete, disabled: busy,
@@ -1171,5 +1296,13 @@
     Right:    TasksRightDetail,
     Provider: TasksProvider,
   };
+
+  /* Expose the pure Q1 bucket helper to Node's test runner only
+     (CommonJS). No-op in the browser (Babel standalone leaves `module`
+     undefined), so the page bundle is unaffected — mirrors timeline.js's
+     identical guard. */
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { computeBuckets: computeBuckets, isOverdue: isOverdue, isRowDone: isRowDone };
+  }
 
 })();

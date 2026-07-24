@@ -37,6 +37,11 @@
        deadline:     string | null,                // free text e.g. "Today 09:00"
        topic_title:  string,
        topic_category: string,
+       work_class:   string | undefined,           // Q1 — parent topic's work_class,
+                     // verbatim ('work'/'non_work'/undefined). A redacted topic's
+                     // rows are omitted entirely before this point — see the
+                     // `if (t.redacted) return;` guard above. Consumers must treat
+                     // anything but the literal 'non_work' as work.
        user_name:    string,                       // owner of the report
        user_folder:  string,                       // folder form
        actionItemId: string | null,
@@ -270,6 +275,11 @@
       var siteName = r.site || '';
       var siteId   = (siteName && siteIdMap[siteName]) || null;
       (r.topics || []).forEach(function (t) {
+        /* Q1 — tier-aware Today/Tasks: a redacted topic is omitted from
+           Tasks entirely — same rule today-adapter.js applies, no review
+           control lives here so a redacted topic's action items simply
+           never surface as rows. */
+        if (t.redacted) return;
         (t.action_items || []).forEach(function (a, idx) {
           var key = window.FS.api.actions.lookupAction(auditByDate[x.date], folder, t.topic_id, idx) || {};
           rows.push({
@@ -286,6 +296,12 @@
             deadline:       a.deadline || null,
             topic_title:    t.topic_title,
             topic_category: t.category,
+            /* Q1 — tier-aware Today/Tasks: the parent topic's work_class,
+               verbatim (undefined/'work'/'non_work'). Consumers must
+               treat anything other than the literal 'non_work' as work
+               (`=== 'non_work'`, never `!== 'work'`) — mirrors the
+               existing timeline "aurora" shape convention. */
+            work_class:     t.work_class,
             user_name:      r.user_name,
             user_folder:    folder,
             /* feat/editable-tasks-ui — see the row-shape doc above. */

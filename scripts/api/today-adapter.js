@@ -282,6 +282,12 @@
   function adapt(report, ctx) {
     ctx = ctx || {};
     var currentUserName = ctx.currentUserName || (window.AuthMock && window.AuthMock.currentUser && window.AuthMock.currentUser.name) || '';
+    /* fix/mine-team-attribution — the viewer's REAL folder_name, when
+       known (threaded from GET /api/org/me via session-bridge.js onto
+       AuthMock.currentUser.folder_name; today.js passes it through as
+       ctx.currentUserFolder). null/undefined here is fine — isMineTask
+       falls back to deriving it from currentUserName itself. */
+    var currentUserFolder = ctx.currentUserFolder || (window.AuthMock && window.AuthMock.currentUser && window.AuthMock.currentUser.folder_name) || null;
     var actionState     = ctx.actionState     || {}; /* composite/legacy map — read via FS.api.actions.lookupAction only */
     var nowMinutes      = ctx.nowMinutes      != null ? ctx.nowMinutes : (16 * 60); /* 16:00 NZDT */
     var siteSlugByName  = ctx.siteSlugByName  || {};
@@ -406,6 +412,12 @@
     var myTasks = [];
     var teamTasks = [];
     (report.topics || []).forEach(function (t) {
+      /* Q1 — tier-aware Today/Tasks: a redacted topic (life-conversation-
+         separation "标为个人+移除") is omitted from Today entirely — not
+         rendered, not counted. Mirrors timeline.js's own redacted/removed
+         handling; unlike Timeline there is no review control here, so a
+         redacted topic's action items simply never surface. */
+      if (t.redacted) return;
       (t.action_items || []).forEach(function (a, idx) {
         var key = t.topic_id + '_' + idx;
         var auditEntry = window.FS.api.actions.lookupAction(actionState, ownerFolder, t.topic_id, idx);
@@ -459,6 +471,13 @@
              muted label on the Today task card (task-card.js) when
              present. */
           timeRange:   t.time_range || null,
+          /* Q1 — tier-aware Today/Tasks: pass the parent topic's
+             work_class through verbatim (undefined/'work'/'non_work' —
+             never normalised here). Missing/other values must fall
+             through to "treat as work" at every consumer via
+             `=== 'non_work'`, never `!== 'work'` — same rule the
+             timeline "aurora" shape already follows elsewhere. */
+          work_class:  t.work_class,
           kind:        'task',
           /* feat/today-rolling-open-items — the report date this item
              was extracted from. today.js's rolling loader fans out
@@ -474,7 +493,16 @@
           site_name:   siteName,
           site_slug:   siteSlug,
         };
-        if (currentUserName && task.assignee === currentUserName) {
+        /* fix/mine-team-attribution — shared predicate (scripts/api/
+           mine-team.js), NOT a strict `=== currentUserName` string
+           check any more: normalized-exact OR folder-equality match on
+           an assigned name; an unassigned item (task.assignee is the
+           '—' placeholder or the raw text was null/'') is Mine only
+           when THIS report's ownerFolder is the viewer's own folder —
+           see mine-team.js's doc for the full rule set. Tasks page
+           (tasks.js computeBuckets) calls the exact same predicate so
+           the two pages can't drift apart again. */
+        if (window.FS.api.isMineTask(task.assignee, ownerFolder, { name: currentUserName, folderName: currentUserFolder })) {
           myTasks.push(task);
         } else {
           teamTasks.push(task);

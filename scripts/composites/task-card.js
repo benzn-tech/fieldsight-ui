@@ -16,26 +16,37 @@
        media query in tokens.css (which neutralises animation duration).
      • onAnimationEnd → onCheckedOff(task) so the parent can drop the
        row from its rendered list.
-     • feat/editable-tasks-ui (Task 3) — the persistence call itself
-       branches on task.actionItemId (durable action_items.id, stamped
-       by today-adapter.js): when present, writes the authoritative
-       status column via FS.api.actions.updateAction(id, {status:
-       'done'}); the legacy FS.api.actions.toggleAction DynamoDB
-       overlay is now only the fallback for id-less items (read shim
-       predates the id surfacing).
+     • feat/checkoff-org-api — the persistence call is now the single
+       shared FS.api.actions.resolveActionItem(), which routes to the
+       AUTHORISED Aurora write (PATCH /api/org/action-items/{id}) when
+       the item carries a durable actionItemId and the aurora gate is
+       on, and falls back to the legacy unauthenticated DynamoDB toggle
+       otherwise. It ALWAYS RESOLVES {ok:true|false, reason, message} —
+       previously this card only had a `.catch()`, so a 403 (which
+       updateAction RESOLVES as {_accessDenied}) played the fade-out
+       animation and dropped the row as if the write had succeeded.
+       A refusal now aborts the animation and toasts the server's own
+       reason.
 
    Props:
      task           { id, title, assignee, status, statusTone, dueTime,
-                      topic_id, actionIndex, folder, ... } — `folder` is
-                      the report OWNER's folder (feat/user-dim-audit-key,
-                      Task 6; stamped by today-adapter.js), sent as
-                      `user_folder` on the toggleAction call below so the
-                      audit check-off is keyed per-user, never the
-                      caller/currentUser.
+                      topic_id, actionIndex, folder, work_class, ... } —
+                      `folder` is the report OWNER's folder (feat/user-dim-
+                      audit-key, Task 6; stamped by today-adapter.js), sent
+                      as `user_folder` on the toggleAction call below so
+                      the audit check-off is keyed per-user, never the
+                      caller/currentUser. `work_class` — Q1 (tier-aware
+                      Today/Tasks) — the parent topic's work_class,
+                      verbatim off today-adapter.js/tasks-aggregator.js;
+                      `=== 'non_work'` renders a "Possibly personal" badge
+                      (missing/other value == treat as work, never a
+                      `!== 'work'` check — same convention those adapters
+                      follow). No review controls here (see timeline.js
+                      for those) — purely informational.
      isMine         boolean — apply --mine accent border
      onSelect       (task) => void — click handler on the row body
      checkable      boolean — show check button instead of avatar
-     date           'YYYY-MM-DD' — passed to FS.api.actions.toggleAction
+     date           'YYYY-MM-DD' — passed to FS.api.actions.resolveActionItem
      onCheckedOff   (task) => void — called once the fade-out finishes
      site           string, optional (feat/today-by-project) — project
                     display name. Renders as a small chip in the meta
@@ -122,34 +133,37 @@
       var api = window.FS && window.FS.api && window.FS.api.actions;
       if (!api) return;
 
-      /* feat/editable-tasks-ui (Task 3) — a check-off is now a status
-         transition on the authoritative action_items.status column,
-         keyed by the durable id (task.actionItemId, stamped by
-         today-adapter.js). This card only ever CHECKS — there is no
-         uncheck path here; the row fades out and onAnimationEnd drops
-         it from the parent's list — so the status write is hard-coded
-         to 'done', mirroring the legacy toggle's hard-coded checked:
-         true below. Legacy items with no actionItemId (read shim
-         predates the id surfacing) still use the DynamoDB toggle. */
-      var persist = task.actionItemId
-        ? api.updateAction(task.actionItemId, { status: 'done' })
-        : api.toggleAction({
-            date:         props.date,
-            topic_id:     task.topic_id,
-            action_index: task.actionIndex,
-            checked:      true,
-            action_text:  task.title,
-            /* feat/user-dim-audit-key (Task 6) — report OWNER's folder
-               (task.folder, stamped by today-adapter.js), never the
-               caller/currentUser. */
-            user_folder:  task.folder,
-          });
-
-      persist.catch(function (err) {
-        /* If the persist call fails, abort the animation and let the
-           user retry. */
-        console.error('[TaskCard] check-off failed', err);
+      /* feat/checkoff-org-api — one routed, always-resolving call. This
+         card only ever CHECKS (the row fades out and onAnimationEnd drops
+         it from the parent's list; there is no uncheck affordance here),
+         so checked is hard-coded true. user_folder is the report OWNER's
+         folder (feat/user-dim-audit-key, Task 6 — task.folder, stamped by
+         today-adapter.js), never the caller/currentUser; it is only used
+         by the legacy fallback leg. */
+      api.resolveActionItem({
+        actionItemId: task.actionItemId,
+        date:         props.date,
+        topic_id:     task.topic_id,
+        action_index: task.actionIndex,
+        checked:      true,
+        action_text:  task.title,
+        user_folder:  task.folder,
+      }).then(function (res) {
+        if (res && res.ok) return;   /* animation continues → onCheckedOff */
+        /* Refused (403 assignee/site-authority gate, 404 gone) or failed —
+           abort the animation, keep the row, and TELL the user why. Never
+           a silent revert: this is the check that decides whether someone
+           else's task may be resolved. */
+        console.error('[TaskCard] check-off refused', res);
         setCheckingOff(false);
+        var toast = window.FS && window.FS.toast;
+        if (toast) {
+          toast.show({
+            message:  (res && res.message) || 'Could not check off this task.',
+            tone:     'error',
+            duration: 5000,
+          });
+        }
       });
     }
 
@@ -233,6 +247,13 @@
             props.noDeadline ? React.createElement(Badge, {
               tone: 'warning', variant: 'outline', size: 'sm',
             }, 'No due date') : null,
+            /* Q1 — tier-aware Today/Tasks: informational only, no review
+               controls (those stay on Timeline). `=== 'non_work'` (never
+               `!== 'work'`) so a missing/other value still counts as
+               work. */
+            task.work_class === 'non_work' ? React.createElement(Badge, {
+              tone: 'neutral', variant: 'outline', size: 'sm',
+            }, 'Possibly personal') : null,
             React.createElement(Badge, { tone: task.statusTone, size: 'sm' },
               task.status),
             React.createElement('span', { className: 'fs-task-card__due' },

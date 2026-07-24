@@ -8,8 +8,16 @@
    (bare `${topic_id}_${action_index}` when userFolder is falsy — legacy
    fallback; BACKEND-CONTEXT §4.10 / §8.8, user-dimension audit key plan
    §1.3). On change we do an OPTIMISTIC update: flip local state
-   immediately, fire FS.api.actions.toggleAction, and revert if the call
-   rejects.
+   immediately, fire FS.api.actions.resolveActionItem, and revert (with a
+   toast carrying the server's own reason) if it comes back not-ok.
+
+   feat/checkoff-org-api — resolveActionItem routes the write to the
+   AUTHORISED PATCH /api/org/action-items/{id} (ACL: admin/gm, THIS site's
+   pm/site_manager, or the assignee) whenever the item carries a durable
+   action_items.id and the aurora gate is on, and only falls back to the
+   legacy UNAUTHENTICATED POST /api/actions/toggle otherwise. The composite
+   key above therefore describes the FALLBACK/read overlay, not the primary
+   write path any more.
 
    Note BUG §8.8: topic_ids may shift if the report is regenerated, which
    can "move" a checkmark. Accepted risk for now; hard audit goes through
@@ -126,40 +134,48 @@
       pendingRef.current = true;
 
       var api = window.FS && window.FS.api && window.FS.api.actions;
-      var p;
-      if (api && api.updateAction && action && action.id) {
-        /* feat/editable-tasks-ui follow-up (F3) — authoritative column
-           path (matches the Today card's task-card.js check-off): PATCH
-           the durable action_items row by its id. Unlike the Today card
-           (check-only, hard-coded 'done'), this row IS uncheck-capable,
-           so a check maps to 'done' and an uncheck maps back to 'open'. */
-        p = api.updateAction(action.id, { status: next ? 'done' : 'open' });
-      } else if (api) {
-        /* Legacy DynamoDB overlay fallback — id-less items (read shim
-           predates the id surfacing, or a non-Aurora report path). */
-        p = api.toggleAction({
-          date:         date,
-          topic_id:     topicId,
-          action_index: actionIndex,
-          checked:      next,
-          action_text:  action.action,
-          user_folder:  userFolder,
-        });
-      } else {
-        p = Promise.resolve();
-      }
+      /* feat/checkoff-org-api — one routed, ALWAYS-RESOLVING call
+         (FS.api.actions.resolveActionItem): the AUTHORISED Aurora write
+         (PATCH /api/org/action-items/{id}) when the item carries a durable
+         action_items.id and the aurora gate is on, else the legacy
+         unauthenticated DynamoDB overlay toggle. Unlike the Today card
+         (check-only) this row IS uncheck-capable, so `checked` is the real
+         next value — and resolveActionItem's org leg additionally clears
+         the legacy overlay on an uncheck, without which an item whose
+         done-ness came from DynamoDB simply re-checked itself on the next
+         load (both readers union the two stores — see isColumnDone above).
+         It also emits the actionsBus event on every successful path, so
+         this handler no longer broadcasts itself. */
+      var p = (api && api.resolveActionItem)
+        ? api.resolveActionItem({
+            actionItemId: action.id,
+            date:         date,
+            topic_id:     topicId,
+            action_index: actionIndex,
+            checked:      next,
+            action_text:  action.action,
+            user_folder:  userFolder,
+          })
+        : Promise.resolve({ ok: true });
 
-      p.then(function (res) {
+      p.then(function (env) {
         pendingRef.current = false;
-        /* feat/editable-tasks-ui follow-up (F3) — updateAction's 403/404
-           RESOLVE to {_accessDenied}/{_notFound} envelopes rather than
-           throwing (mirrors every other org.js write; see today.js's
-           commitTaskField for the same guard). Treat those the same as
-           a rejected promise: revert the optimistic check and bail
-           before announcing/broadcasting/onToggled. */
-        if (res && (res._accessDenied || res._notFound)) {
-          console.error('[ActionItemRow] toggle denied, reverting', res);
+        /* Refused (403 — admin/gm, this site's pm/site_manager, or the
+           assignee only) or failed. Revert the optimistic check and TELL
+           the user why: resolveActionItem RESOLVES these rather than
+           rejecting, precisely so a `.catch()` can't swallow a denial into
+           a silent revert (the recurring bug in this codebase). */
+        if (!env || !env.ok) {
+          console.error('[ActionItemRow] toggle refused, reverting', env);
           setChecked(prev);
+          var toast = window.FS && window.FS.toast;
+          if (toast) {
+            toast.show({
+              message:  (env && env.message) || 'Could not update this action item.',
+              tone:     'error',
+              duration: 5000,
+            });
+          }
           return;
         }
         /* Sprint 8.5.4 — announce to screen readers via the global
@@ -169,29 +185,7 @@
         if (region) {
           region.textContent = next ? 'Marked complete' : 'Marked incomplete';
         }
-        /* Sprint 6.7.1 — broadcast server truth so sibling
-           ActionItemRows + parent state slots can sync.
-           feat/editable-tasks-ui follow-up (F3) — the updateAction
-           response is the action_items row ({id, status, responsible,
-           deadline, ...}); it has no checked_by/checked_at, so these
-           already-guarded reads just fall through to null on that path. */
-        var bus = window.FS && window.FS.actionsBus;
-        if (bus) {
-          bus.emit({
-            date:         date,
-            topic_id:     topicId,
-            action_index: actionIndex,
-            checked:      next,
-            checked_by:   (res && res.checked_by) || null,
-            checked_at:   (res && res.checked_at) || null,
-            user_folder:  userFolder,
-          });
-        }
         if (props.onToggled) props.onToggled({ checked: next });
-      }).catch(function (err) {
-        console.error('[ActionItemRow] toggle failed, reverting', err);
-        pendingRef.current = false;
-        setChecked(prev);
       });
     }
 
@@ -201,7 +195,7 @@
     /* fix/timeline-buttons-and-deadline — resolve the free-text deadline
        to an absolute date relative to THIS topic's own report date (the
        `date` prop, same value TopicCard/OverviewTab pass to
-       FS.api.actions.toggleAction above). Falls back to the raw text
+       FS.api.actions.resolveActionItem above). Falls back to the raw text
        when resolveDeadline can't confidently parse it, or when the
        resolver isn't loaded yet — never shows a wrong date. */
     var deadlineDisplay = action.deadline

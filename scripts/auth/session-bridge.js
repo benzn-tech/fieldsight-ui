@@ -36,12 +36,16 @@
    No-ops entirely when window.FS.api.useMocks !== false.
 
    Field mapping (brief's Interfaces block):
-     name     <- display_name || name || email
-     role     <- role
-     initials <- first letters of first two words of the name, uppercased
-     site     <- sites[0] (only if the real session actually supplies an
-                 array — AuthMock's mock shape only carries a single
-                 `site` string, not a `sites` array)
+     name        <- display_name || name || email
+     role        <- role
+     initials    <- first letters of first two words of the name, uppercased
+     site        <- sites[0] (only if the real session actually supplies an
+                    array — AuthMock's mock shape only carries a single
+                    `site` string, not a `sites` array)
+     folder_name <- folder_name (fix/mine-team-attribution — GET /api/org/me's
+                    real folder, threaded through verbatim; omitted when the
+                    session doesn't carry it, leaving AuthMock's default so
+                    isMineTask's derive-from-name fallback still applies)
    Fields with no real-session equivalent (id, email, avatarUrl, isAdmin,
    avatarColor, ...) are left at their AuthMock defaults — never blanked.
 
@@ -115,6 +119,18 @@
 
     if (sessionUser.email) {
       patch.email = sessionUser.email;
+    }
+
+    /* fix/mine-team-attribution — the REAL folder_name from GET /api/org
+       /me (login-screen.js's hydrateUser() now threads it onto
+       FS.session.user.folder_name instead of throwing it away). Carried
+       onto AuthMock.currentUser.folder_name verbatim so the shared
+       isMineTask predicate (scripts/api/mine-team.js) can use it instead
+       of re-deriving the folder by string-mangling the display name.
+       Left at AuthMock's default (undefined) when the session doesn't
+       carry it — the predicate falls back to deriving it from name. */
+    if (sessionUser.folder_name) {
+      patch.folder_name = sessionUser.folder_name;
     }
 
     var name = sessionUser.display_name || sessionUser.name || sessionUser.email;
