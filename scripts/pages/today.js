@@ -155,16 +155,27 @@
      own M-2 bootstrap effect self-resolves a dateless visit to the
      latest available date (or an admin project/user picker when
      ambiguous) — see that file's "no date in the URL" effect — so the
-     bare link always lands somewhere useful, never a dead page. */
+     bare link always lands somewhere useful, never a dead page.
+
+     feat/related-popup-context — optional `topic` prop (a report's own
+     sequential topic_id, NOT the durable topics.id) appends `&topic=N`,
+     the SAME deep-link param timeline.js's M-6.6.4 bootstrap effect
+     already knows how to focus-mode on (see that file's targetTopicId).
+     Guard mirrors safety.js's onOpenInTimeline (~:919) verbatim — only a
+     non-negative topic_id is a real one, and it's meaningless without a
+     date (a topic_id is only unique within one report). Every existing
+     call site omits `topic`, so this is purely additive. */
   function TimelineLink(props) {
-    var dateOpt = props.date || null;
-    var userOpt = props.user || null;
-    var label   = props.label || 'Open timeline';
+    var dateOpt  = props.date || null;
+    var userOpt  = props.user || null;
+    var topicOpt = props.topic;
+    var label    = props.label || 'Open timeline';
 
     function onClick() {
       var parts = [];
       if (dateOpt) parts.push('date=' + encodeURIComponent(dateOpt));
       if (dateOpt && userOpt) parts.push('user=' + encodeURIComponent(userOpt));
+      if (dateOpt && topicOpt != null && topicOpt >= 0) parts.push('topic=' + encodeURIComponent(topicOpt));
       parts.push('from=today');
       window.FS.Router.navigate('/timeline?' + parts.join('&'));
     }
@@ -1043,11 +1054,25 @@
 
   /* ---------- In-page lookups (replace old MockData helpers) ----------- */
 
+  /* feat/related-popup-context — `programmeTasks` added to the search
+     pools for completeness (findItemById's own header comment says it
+     "replace[s] old MockData helpers", i.e. it should be a lookup over
+     everything `data` carries, not everything getRelated happens to
+     currently produce ids from). In practice this pool is inert today —
+     ProgrammeTaskCard's onSelect navigates straight to /programme (see
+     the 'Due within N days' section render below) rather than setting
+     AppShell's selectedItem, and its rows carry no `id`/`kind` in the
+     TaskCard/urgent/activity shape anyway (today-programme-adapter.js's
+     `task_id`, not `id`) — so nothing upstream can hand this function a
+     programmeTasks-originated id to resolve yet. Included anyway so a
+     future call site doesn't silently regress into the same "not
+     searched" gap this fixes. */
   function findItemById(data, id) {
     if (!id || !data) return null;
     var pools = [
       data.urgent || [], data.myTasks || [],
       data.teamTasks || [], data.activity || [],
+      data.programmeTasks || [],
     ];
     for (var i = 0; i < pools.length; i++) {
       for (var j = 0; j < pools[i].length; j++) {
@@ -1057,13 +1082,41 @@
     return null;
   }
 
+  /* feat/related-popup-context — "related" for a task used to mean
+     "any other open task with the byte-identical assignee string" — no
+     topic, site, or time relation at all, so two unrelated tasks
+     assigned to the same person looked "related" while two tasks pulled
+     from the SAME transcript conversation but assigned to different
+     people did not. Prefer topic-mates (tasks flattened from the same
+     parent topic — literally the same conversation this task came out
+     of) when any exist; only fall back to the old same-assignee signal
+     when the item has no topic-mates (e.g. the lone action item in its
+     topic), so a related section is never emptied out for something the
+     old rule would still have surfaced.
+
+     "Same topic" needs THREE fields, not just topic_id: topic_id is a
+     per-REPORT sequential int that restarts at 0 in every report (see
+     loadRollingOpenItems' keep() doc above), so two different owners'
+     (or the same owner's two different dates') topic 0 would false-match
+     on topic_id alone. date + folder (the report owner) + topic_id
+     together are exactly what make today-adapter.js's own task.id
+     unique — mirrors that, not a new identity scheme. */
+  function isTopicMate(a, b) {
+    return !!(a.topic_id != null && a.date
+      && a.topic_id === b.topic_id && a.date === b.date && a.folder === b.folder);
+  }
+
   function getRelated(data, item) {
     if (!item || !data) return [];
 
     if (item.kind === 'task') {
       var allTasks = (data.myTasks || []).concat(data.teamTasks || []);
-      return allTasks
-        .filter(function (t) { return t.id !== item.id && t.assignee === item.assignee; })
+      var others = allTasks.filter(function (t) { return t.id !== item.id; });
+      var topicMates = others.filter(function (t) { return isTopicMate(item, t); });
+      var pool = topicMates.length > 0
+        ? topicMates
+        : others.filter(function (t) { return t.assignee === item.assignee; });
+      return pool
         .slice(0, 3)
         .map(function (t) {
           return { id: t.id, title: t.title,
@@ -1132,9 +1185,23 @@
       rows = [
         ['Assignee', item.assignee],
         ['Due',      item.dueTime || 'None set'],
-        ['Status',   item.status],
-        ['Priority', item.priority || 'Medium'],
       ];
+      /* feat/related-popup-context — the Related quick-look popup is this
+         function's ONLY consumer for a task (TodayRightDetail's own main
+         panel builds its editable task rows inline, further down, and
+         never calls buildDetailRows for kind:'task') — so until now a
+         task glimpsed through Related showed Assignee/Due/Status/Priority
+         and NOTHING about which conversation it came from. Time/Site/
+         Report date are exactly the fields the main panel's `item IS the
+         same task object today-adapter.js stamped` doc (near the main
+         panel's own Time row) says are already sitting on the object;
+         this just surfaces them here too. Each is optional/omitted like
+         every other row here. */
+      if (item.timeRange) rows.push(['Time', item.timeRange]);
+      if (item.site_name) rows.push(['Site', item.site_name]);
+      if (item.date)      rows.push(['Report date', item.date]);
+      rows.push(['Status',   item.status]);
+      rows.push(['Priority', item.priority || 'Medium']);
       /* §E — age + no-deadline read-only signals, mirrored here for the
          right-detail view (the card list already surfaces them). */
       if (item.ageDays != null) rows.push(['Open since', formatAgeLabel(item.ageDays)]);
@@ -1183,6 +1250,50 @@
         );
       })
     );
+  }
+
+  /* feat/related-popup-context — pure view-model for the Related
+     quick-look popup, replacing the previewCard/previewItem/previewRows/
+     previewTitle quartet TodayRightDetail used to compute inline. Two
+     cases:
+       - `previewId` resolves via findItemById against the CURRENT data
+         snapshot (same snapshot getRelated built `related` from) → full
+         row set via buildDetailRows, plus date/folder/topicId for the
+         "open in Timeline" jump.
+       - it doesn't resolve — the item was checked off / dropped from the
+         page (e.g. the actionsBus removal in useTodayState, or a normal
+         data refresh) WHILE the popup was open; `related` is recomputed
+         fresh every render too, so by the time this runs `related` no
+         longer has a matching card either. This used to render the bare
+         string 'Details unavailable.' with no indication of WHY; now it
+         says plainly that the item is gone, and offers no dead "open in
+         Timeline" link (date/folder/topicId are all null) since there is
+         nothing left to jump to.
+     Never invents rows for a kind buildDetailRows doesn't know about
+     (returns [] as before) — `resolved` distinguishes "found but has no
+     rows" from "not found at all", though nothing currently produces the
+     former for a task/urgent/activity id. */
+  function buildRelatedPreview(data, previewId, related) {
+    if (!previewId) return null;
+    var item = findItemById(data, previewId);
+    if (item) {
+      return {
+        title:    item.title || item.snippet || '(item)',
+        rows:     buildDetailRows(item),
+        resolved: true,
+        date:     item.kind === 'task' ? item.date : null,
+        folder:   item.kind === 'task' ? item.folder : null,
+        topicId:  item.kind === 'task' ? item.topic_id : null,
+      };
+    }
+    var card = (related || []).filter(function (r) { return r.id === previewId; })[0] || null;
+    return {
+      title:    (card && card.title) || '(item)',
+      rows:     [],
+      resolved: false,
+      date:     null, folder: null, topicId: null,
+      message:  'This item is no longer available — it may have been resolved or updated elsewhere.',
+    };
   }
 
   /* =====================================================================
@@ -2406,21 +2517,14 @@
     function openRelatedPreview(id) { setPreviewId(id); }
     function closeRelatedPreview()  { setPreviewId(null); }
 
-    /* Look up the previewed item's FULL data the same way the main panel
-       itself does — findItemById against the same TodayContext snapshot
-       `related` was built from — so the popup renders the identical row
-       shape (via buildDetailRows/renderDetailRows) as the main detail.
-       Falls back to the Related card's own {title, subtitle} if the item
-       has since dropped out of every pool (e.g. checked off elsewhere
-       while the popup was closed) rather than rendering a blank popup. */
-    var previewCard = previewId
-      ? (related.filter(function (r) { return r.id === previewId; })[0] || null)
-      : null;
-    var previewItem = previewId ? findItemById(data, previewId) : null;
-    var previewRows = previewItem ? buildDetailRows(previewItem) : [];
-    var previewTitle = (previewItem && (previewItem.title || previewItem.snippet))
-      || (previewCard && previewCard.title)
-      || '(item)';
+    /* feat/related-popup-context — pure view-model, see buildRelatedPreview's
+       header doc. Looks up the previewed item's FULL data the same way the
+       main panel itself does — findItemById against the same TodayContext
+       snapshot `related` was built from — so the popup renders the
+       identical row shape (via buildDetailRows/renderDetailRows) as the
+       main detail, now including the topic time window / site / report
+       date context that used to be main-panel-only. */
+    var previewState = buildRelatedPreview(data, previewId, related);
 
     return React.createElement('div', {
       style: {
@@ -2590,14 +2694,29 @@
       fs.ModalOverlay ? React.createElement(fs.ModalOverlay, {
         open:    !!previewId,
         onClose: closeRelatedPreview,
-        title:   previewTitle,
+        title:   previewState ? previewState.title : '',
         size:    'sm',
       },
-        (previewItem && previewRows.length > 0)
-          ? renderDetailRows(previewRows)
+        previewState && previewState.rows.length > 0
+          ? renderDetailRows(previewState.rows)
           : React.createElement('div', {
               style: { fontSize: '13px', color: 'var(--text-tertiary)' },
-            }, (previewCard && previewCard.subtitle) || 'Details unavailable.'),
+            }, (previewState && previewState.message) || ''),
+        /* feat/related-popup-context — the "way out": jump straight to
+           the topic this task came from, reusing TimelineLink's OWN route
+           builder (date/user/topic → /timeline?...&from=today) rather
+           than hand-rolling a second query-string constructor here. Only
+           offered when the item actually resolved AND carries a date —
+           an item with no date has nothing to deep-link to. Preview stays
+           read-only otherwise: no edit controls in this popup, ever. */
+        previewState && previewState.resolved && previewState.date
+          ? React.createElement(TimelineLink, {
+              date:  previewState.date,
+              user:  previewState.folder,
+              topic: previewState.topicId,
+              label: 'Open in Timeline',
+            })
+          : null,
       ) : null,
 
     );
@@ -2637,6 +2756,12 @@
       WeeklyCompletionKpi:  WeeklyCompletionKpi,
       /* feat/today-title-edit — title editor's pure gate. */
       titleEditable:        titleEditable,
+      /* feat/related-popup-context — Related-popup pure helpers. */
+      findItemById:         findItemById,
+      isTopicMate:          isTopicMate,
+      getRelated:           getRelated,
+      buildDetailRows:      buildDetailRows,
+      buildRelatedPreview:  buildRelatedPreview,
     };
   }
 
