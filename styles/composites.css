@@ -68,7 +68,10 @@
 
 .fs-task-card__row {
   display: flex;
-  align-items: center;
+  /* fix/task-title-2-line-wrap — top-align now the title can grow to two
+     lines; center-alignment made the meta column look vertically off
+     once the row's height stopped being fixed by the title's single line. */
+  align-items: flex-start;
   gap: 10px;
 }
 
@@ -82,12 +85,15 @@
   font-weight: var(--font-weight-medium);
   color: var(--text-primary);
   line-height: 1.35;
-  /* concise-cards — clamped to a single scannable line (was 2-line
-     -webkit-box clamp); the full title + specific time now live in the
-     right detail panel. */
-  white-space: nowrap;
+  /* fix/task-title-2-line-wrap — reverted the single-line ellipsis clamp
+     from 0aed4cd (concise-cards): users had to open every card to read
+     the full title. Back to a 2-line clamp (same idiom as
+     .fs-ask-chat__cite-snippet above) so most titles are readable
+     in-place; card height isn't fixed anywhere, so it grows naturally. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .fs-task-card__meta {
@@ -194,7 +200,30 @@
    .fs-today__view-report-cta (bg/color/padding/font-size/weight/radius
    + width:50%/min-width:220px block, left-aligned) so "Open timeline"
    and "Back to Today" (.fs-timeline-page__back below) read as one
-   button family, not two different affordances. */
+   button family, not two different affordances.
+
+   fix/today-batch-select-expand — .fs-today__toolbar-row wraps this
+   link plus the page-level Batch Select toggle (today.js) as flex
+   siblings, so Batch Select is reachable at a glance instead of buried
+   inside the (default-collapsed) Leftover section header. The link's
+   row is given flex:1 so its child button's existing width:50% still
+   resolves against a definite width; margin-bottom moves to the
+   wrapping row so spacing is unchanged when nested. */
+.fs-today__toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 10px;
+}
+.fs-today__toolbar-row .fs-today__timeline-link-row {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.fs-today__toolbar-row .fs-multi-select__toggle {
+  flex-shrink: 0;
+  margin: 0;
+}
 .fs-today__timeline-link-row {
   display: flex;
   justify-content: flex-start;
@@ -370,11 +399,14 @@
   padding-top: 8px;
 }
 
-/* feat/leftover-batch-select (T1) — header row wrapping the existing
-   expand toggle + the new "Batch Select" mode toggle as siblings (NOT
-   nested — the expand toggle is already a <button>, and buttons can't
-   nest). border-top lives here now instead of on .fs-today__leftover-
-   toggle so the rule reads once per row. */
+/* feat/leftover-batch-select (T1) — header row wrapping the expand
+   toggle. border-top lives here instead of on .fs-today__leftover-
+   toggle so the rule reads once per row.
+   fix/today-batch-select-expand — this row USED to also carry a
+   sibling "Batch Select" mode toggle <button> here; that control moved
+   to the page-level .fs-today__toolbar-row above (today.js) so it's
+   reachable without expanding Leftover first. The rule below (flex:1 on
+   the lone remaining child) still applies harmlessly. */
 .fs-today__leftover-header {
   display: flex;
   align-items: center;
@@ -994,6 +1026,19 @@
      Yellow (--surface-selected) is reserved for hover only (below). */
   background: var(--surface-topic-selected);
   border-left: 3px solid var(--color-accent-500);
+}
+
+/* Q1 — "worth a look" hint for topics the classifier thinks may
+   be personal (topic.work_class === 'non_work'). Deliberately calm: a
+   soft amber border only, no background fill — this is not an error
+   state, and it's paired with a "Possibly personal" Badge in the
+   metaline (topic-card.js) so the signal isn't colour-only. Confirmed-
+   personal (redacted) topics move to a separate collapsed section
+   instead (timeline.js) and never carry this modifier. Not theme-flipped
+   for dark mode, same convention as the other status/highlight tokens
+   on this file (see T3 note below). */
+.fs-topic-card--non-work {
+  border-left: 3px solid var(--color-warning-300);
 }
 
 /* T3 — yellow highlight only on hover, on any (non-selected) card. */
