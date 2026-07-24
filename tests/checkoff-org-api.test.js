@@ -206,7 +206,12 @@ test('an overlay-clear failure does not turn a successful uncheck into a failure
 
 test('a successful org check-off broadcasts on the actions bus so sibling rows sync', async () => {
   const m = resetEnv();
-  orgResponse = { id: ITEM.actionItemId, status: 'done' };
+  /* fix/closed-by-display — the Aurora row carries no checked_by/checked_at
+     of its own; updated_by_name/updated_at is what the bus emit must be
+     remapped from (see normaliseCheckoff tests below for the mapping
+     itself — this test only asserts resolveActionItem's emit wires it through). */
+  orgResponse = { id: ITEM.actionItemId, status: 'done',
+                  updated_at: '2026-07-24T13:40:00.562587+00:00', updated_by_name: 'Ben_UCPK' };
 
   await m.resolveActionItem(Object.assign({ checked: true }, ITEM));
 
@@ -216,10 +221,65 @@ test('a successful org check-off broadcasts on the actions bus so sibling rows s
     topic_id:     ITEM.topic_id,
     action_index: ITEM.action_index,
     checked:      true,
-    checked_by:   null,   /* the Aurora row carries no checked_by/checked_at */
-    checked_at:   null,
+    checked_by:   'Ben_UCPK',
+    checked_at:   '2026-07-24T13:40:00.562587+00:00',
     user_folder:  ITEM.user_folder,
   });
+});
+
+test('a successful org check-off with a null updated_by_name broadcasts checked_by:null, never the literal string "null"', async () => {
+  const m = resetEnv();
+  orgResponse = { id: ITEM.actionItemId, status: 'done',
+                  updated_at: '2026-07-24T13:40:00.562587+00:00', updated_by_name: null };
+
+  await m.resolveActionItem(Object.assign({ checked: true }, ITEM));
+
+  assert.strictEqual(calls.bus[0].checked_by, null);
+  assert.strictEqual(calls.bus[0].checked_at, '2026-07-24T13:40:00.562587+00:00');
+});
+
+/* ---- normaliseCheckoff: ONE shape for both backends ----------------------
+   fix/closed-by-display — the legacy gateway/mock answer in
+   { checked_by, checked_at }; the Aurora org PATCH answers in
+   { updated_by_name, updated_at } instead. normaliseCheckoff is the single
+   place that tells the two shapes apart and remaps both onto
+   { checked_by, checked_at } so every downstream consumer (the bus
+   payload, eventually the caption) only ever has one shape to read. */
+
+test('normaliseCheckoff maps the legacy gateway shape (checked_by/checked_at) through unchanged', () => {
+  const m = resetEnv();
+  const who = m.normaliseCheckoff({
+    message: 'Updated', checked: true,
+    checked_by: 'David_Barillaro', checked_at: '2026-07-20T09:00:00Z',
+  });
+  assert.deepStrictEqual(who, { checked_by: 'David_Barillaro', checked_at: '2026-07-20T09:00:00Z' });
+});
+
+test('normaliseCheckoff maps the Aurora org shape (updated_by_name/updated_at) onto checked_by/checked_at', () => {
+  const m = resetEnv();
+  const who = m.normaliseCheckoff({
+    id: ITEM.actionItemId, status: 'done',
+    updated_at: '2026-07-24T13:40:00.562587+00:00', updated_by_name: 'Ben_UCPK',
+  });
+  assert.deepStrictEqual(who, { checked_by: 'Ben_UCPK', checked_at: '2026-07-24T13:40:00.562587+00:00' });
+});
+
+test('normaliseCheckoff renders a null updated_by_name (unprovisioned/nameless account) as checked_by:null, never "null"', () => {
+  const m = resetEnv();
+  const who = m.normaliseCheckoff({
+    id: ITEM.actionItemId, status: 'done',
+    updated_at: '2026-07-24T13:40:00.562587+00:00', updated_by_name: null,
+  });
+  assert.strictEqual(who.checked_by, null);
+  assert.notStrictEqual(who.checked_by, 'null');
+  assert.strictEqual(who.checked_at, '2026-07-24T13:40:00.562587+00:00');
+});
+
+test('normaliseCheckoff tolerates a missing/undefined response without throwing', () => {
+  const m = resetEnv();
+  assert.deepStrictEqual(m.normaliseCheckoff(null), { checked_by: null, checked_at: null });
+  assert.deepStrictEqual(m.normaliseCheckoff(undefined), { checked_by: null, checked_at: null });
+  assert.deepStrictEqual(m.normaliseCheckoff({}), { checked_by: null, checked_at: null });
 });
 
 /* ---- isActionResolved: the read-time union ------------------------------- */

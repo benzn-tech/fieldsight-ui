@@ -33,10 +33,18 @@
                    actions from different report owners don't collide.
                    Missing/falsy → legacy bare-key behaviour (tolerated;
                    see docs/superpowers/plans/2026-07-13-user-dimension-audit-key.md).
-     action        { action, responsible, deadline, priority }
+     action        { action, responsible, deadline, priority, status,
+                   updated_by_name, updated_at } — the last two are
+                   fix/closed-by-display's Aurora-column fallback (see
+                   resolveCloser below); may be absent on older payloads.
      initialChecked  boolean
-     checkedBy     string (optional, shown as caption when checked)
-     checkedAt     ISO   (optional)
+     checkedBy     string (optional) — DynamoDB-overlay closer name, shown
+                   as caption when checked. Fed by timeline.js from the
+                   ~119 historical (pre-org-write) check-offs; a check-off
+                   made today has NO overlay entry (feat/checkoff-org-api
+                   never writes it on check), so this is absent for those
+                   and resolveCloser falls back to action.updated_by_name.
+     checkedAt     ISO   (optional) — overlay counterpart to checkedBy.
      onToggled     ({ checked }) => void  — optional listener
 
    Exported to:
@@ -61,6 +69,35 @@
     return !!(props.action && props.action.status === 'done');
   }
 
+  /* fix/closed-by-display — who/when this row was closed, preferring the
+     DynamoDB overlay (props.checkedBy/checkedAt — the ~119 historical
+     check-offs that live ONLY there) and falling back to the Aurora
+     column (action.updated_by_name/updated_at — where every check-off
+     made through the org PATCH path lands, since that path never touches
+     the overlay). The two sources are taken as a WHOLE pair, never mixed
+     field-by-field, so a name from one source is never paired with a
+     timestamp from the other.
+     action.updated_by_name may be null even when the row IS closed — an
+     unprovisioned/nameless Cognito account resolves to no display name
+     server-side. That's still a real closer, so the fallback triggers
+     whenever action.status is 'done', independent of whether a name came
+     back; only the caller decides how to render a null name (never invent
+     one, never fall back to the raw updated_by uuid — this function
+     doesn't even receive that field).
+     Takes `action` as its own parameter (rather than reading props.action
+     internally, the way isColumnDone does) precisely so it stays testable
+     against a bare {status, updated_by_name, updated_at} object without
+     also having to fabricate a matching `props.action`. */
+  function resolveCloser(props, action) {
+    if (props.checkedBy || props.checkedAt) {
+      return { by: props.checkedBy || null, at: props.checkedAt || null };
+    }
+    if (action && action.status === 'done') {
+      return { by: action.updated_by_name || null, at: action.updated_at || null };
+    }
+    return { by: null, at: null };
+  }
+
   /* Format ISO timestamp → "3 May, 2:14 pm" in NZ time. Returns '' on
      missing or unparseable input. Used to show when an action was
      ticked, as a small audit trail next to "Checked by …". */
@@ -80,6 +117,21 @@
     }
   }
 
+  /* fix/closed-by-display — the caption text itself, split out so a null
+     closer.by (unprovisioned/nameless account) still shows the timestamp
+     instead of rendering nothing, and NEVER renders the literal string
+     "null" or falls back to a raw uuid (this function only ever sees the
+     already-resolved display name, never action.updated_by). Returns null
+     when there is nothing to show at all (unchecked, or checked with no
+     name AND no parseable time). */
+  function formatCloserCaption(closer) {
+    var when = fmtCheckedAt(closer.at);
+    if (closer.by && when) return 'Checked by ' + closer.by + ' · ' + when;
+    if (closer.by) return 'Checked by ' + closer.by;
+    if (when) return 'Checked ' + when;
+    return null;
+  }
+
   function ActionItemRow(props) {
     var Badge   = window.FieldSight.Badge;
     var date          = props.date;
@@ -87,8 +139,9 @@
     var actionIndex   = props.actionIndex;
     var userFolder    = props.userFolder;  /* report OWNER's folder — never the caller */
     var action        = props.action || {};
-    var checkedBy     = props.checkedBy;
-    var checkedAt     = props.checkedAt;
+    /* fix/closed-by-display — overlay-first, Aurora-column fallback; see
+       resolveCloser's header note. */
+    var closer        = resolveCloser(props, action);
 
     var ref = React.useState(!!props.initialChecked || isColumnDone(props));
     var checked    = ref[0];
@@ -205,6 +258,7 @@
       : null;
 
     var className = 'fs-action-item-row' + (checked ? ' fs-action-item-row--checked' : '');
+    var closerCaption = checked ? formatCloserCaption(closer) : null;
 
     return React.createElement('label', { className: className },
       React.createElement('input', {
@@ -226,13 +280,11 @@
             ? React.createElement('span', { className: 'fs-action-item-row__meta-item' },
                 'Due ' + deadlineDisplay)
             : null,
-          checked && checkedBy
+          closerCaption
             ? React.createElement('span', {
                 className: 'fs-action-item-row__meta-item fs-action-item-row__meta-item--audit',
-                title:     checkedAt ? new Date(checkedAt).toString() : undefined,
-              },
-                'Checked by ' + checkedBy
-                  + (fmtCheckedAt(checkedAt) ? ' · ' + fmtCheckedAt(checkedAt) : ''))
+                title:     closer.at ? new Date(closer.at).toString() : undefined,
+              }, closerCaption)
             : null,
         ),
       ),
@@ -249,4 +301,15 @@
 
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.ActionItemRow = ActionItemRow;
+
+  /* Expose the pure helpers to Node's test runner only (CommonJS). No-op in
+     the browser (this file is a plain <script>, `module` is undefined) —
+     mirrors photo-grid.js / date-picker.js / timeline.js's own guard. */
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      resolveCloser:        resolveCloser,
+      formatCloserCaption:  formatCloserCaption,
+      isColumnDone:         isColumnDone,
+    };
+  }
 })();

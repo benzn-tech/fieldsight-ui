@@ -91,6 +91,18 @@
     return iso < today;
   }
 
+  /* fix/closed-by-display — mount props for this row's OWN content_edits
+     history (status/priority/deadline/responsible), reusing timeline.js's
+     ContentHistoryPanel (window.FieldSight.ContentHistoryPanel). null when
+     there is no durable id to fetch against (older, pre-shim rows). Pulled
+     out as its own pure function so the mount contract — table must be
+     'action_items', id must be THIS row's actionItemId, never the topic's
+     id — is unit-testable without rendering the whole detail panel. */
+  function actionItemHistoryProps(row) {
+    if (!row || !row.actionItemId) return null;
+    return { table: 'action_items', id: row.actionItemId };
+  }
+
   /* Q1 — tier-aware Today/Tasks. Filter-chip buckets, extracted to a pure
      function so both TasksMiddleColumn (below) and its unit tests can
      share one implementation. A `work_class === 'non_work'` row stays in
@@ -1124,7 +1136,20 @@
       }) : null,
 
       activeTab === 'history'
-        ? (
+        ? React.createElement(React.Fragment, null,
+            /* fix/closed-by-display — this row's OWN content_edits trail
+               (status/priority/deadline/responsible), reusing timeline.js's
+               ContentHistoryPanel (already generic over content.EDITABLE,
+               which includes action_items) rather than inventing a second
+               history component. Append-only, so a mistaken close shows up
+               as "status: open -> done | by X" followed by a later
+               "done -> open" row once reopened — this is what makes a
+               mistaken close recoverable/auditable. Gated on actionItemId:
+               older, id-less rows (pre-shim) have nothing to fetch. */
+            actionItemHistoryProps(row) && window.FieldSight.ContentHistoryPanel
+              ? React.createElement(window.FieldSight.ContentHistoryPanel, actionItemHistoryProps(row))
+              : null,
+
             /* Sprint 11 C.3 — Cross-day history drawer.
                Pulls every audit entry (any date) for the same logical
                action (matched by topic_id + action_index) so the drawer
@@ -1132,7 +1157,7 @@
                opened 6 May…". Q-S11-3 default: role-aware visibility —
                admin/gm see all check events; regular users see only
                their own resolutions. */
-            React.createElement(ActionHistoryPanel, { row: row })
+            React.createElement(ActionHistoryPanel, { row: row }),
           )
         : React.createElement(React.Fragment, null,
 
@@ -1302,7 +1327,10 @@
      undefined), so the page bundle is unaffected — mirrors timeline.js's
      identical guard. */
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { computeBuckets: computeBuckets, isOverdue: isOverdue, isRowDone: isRowDone };
+    module.exports = {
+      computeBuckets: computeBuckets, isOverdue: isOverdue, isRowDone: isRowDone,
+      actionItemHistoryProps: actionItemHistoryProps,
+    };
   }
 
 })();

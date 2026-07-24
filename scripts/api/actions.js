@@ -30,7 +30,13 @@
           body { priority?, status?, deadline?, responsible? } (partial)
           → the FULL updated row: { id, topic_id, site_id, text, responsible,
             deadline, deadline_text, priority, status, created_at,
-            updated_at, updated_by }
+            updated_at, updated_by, updated_by_name }
+          updated_by_name = fix/closed-by-display (2026-07-24) — resolved
+          display name for updated_by, MAY BE NULL (unprovisioned/nameless
+          account); this row carries no checked_by/checked_at at all, so
+          emitCheckoff/normaliseCheckoff below read updated_by_name/
+          updated_at instead and remap them onto the same checked_by/
+          checked_at shape the legacy leg already used.
           400 (bad enum / non-member / empty), 403 (no authority),
           404 (missing/cross-company).
 
@@ -114,16 +120,21 @@
         body:   { date: date, topic_id: topic_id, action_index: action_index, checked: checked, action_text: action_text, user_folder: user_folder },
       }).then(function (res) {
         /* Emit confirmed bus event so any sibling row with the same key
-           updates to the server-truth value. */
+           updates to the server-truth value. fix/closed-by-display —
+           routed through normaliseCheckoff so this legacy leg and the
+           org-write leg (emitCheckoff below) settle on the same shape,
+           even though this backend already answers in checked_by/
+           checked_at natively. */
         var bus = window.FS && window.FS.actionsBus;
         if (bus) {
+          var who = normaliseCheckoff(res);
           bus.emit({
             date:         date,
             topic_id:     topic_id,
             action_index: action_index,
             checked:      checked,
-            checked_by:   (res && res.checked_by) || null,
-            checked_at:   (res && res.checked_at) || null,
+            checked_by:   who.checked_by,
+            checked_at:   who.checked_at,
             user_folder:  user_folder,
           });
         }
@@ -292,6 +303,34 @@
         && api.timelineSource === 'aurora' && !!api.orgBaseUrl;
   }
 
+  /* fix/closed-by-display — ONE internal "who/when closed this" shape,
+     regardless of which backend answered. The legacy report gateway
+     (POST /api/actions/toggle, and the mock path that mirrors it) returns
+     { checked_by, checked_at }. The Aurora org write (PATCH
+     /api/org/action-items/{id}) returns NEITHER of those — it returns the
+     full action_items row, whose closer is `updated_by_name` (a resolved
+     display name, may be null for an unprovisioned/nameless account) plus
+     `updated_at`. Without this, emitCheckoff read res.checked_by off the
+     org response, which is always undefined there, so every org check-off
+     broadcast a null closer — and that null then OVERWROTE the
+     DynamoDB-overlay caption timeline.js's own bus subscription had cached
+     for that key (see timeline.js's actionsBus subscription, ~line 518).
+     Every consumer (the bus payload below, action-item-row.js's caption)
+     reads ONLY checked_by/checked_at — never updated_by_name/updated_at
+     directly — so this is the single place that shape decision lives. */
+  function normaliseCheckoff(res) {
+    if (res && (res.updated_by_name !== undefined || res.updated_at !== undefined)) {
+      return {
+        checked_by: res.updated_by_name || null,
+        checked_at: res.updated_at || null,
+      };
+    }
+    return {
+      checked_by: (res && res.checked_by) || null,
+      checked_at: (res && res.checked_at) || null,
+    };
+  }
+
   /* Broadcast server truth so sibling rows keyed on the same
      (date, user_folder, topic_id, action_index) sync — the legacy
      toggleAction already does this; the org path must too, or a Timeline
@@ -299,13 +338,14 @@
   function emitCheckoff(opts, checked, res) {
     var bus = window.FS && window.FS.actionsBus;
     if (!bus) return;
+    var who = normaliseCheckoff(res);
     bus.emit({
       date:         opts.date,
       topic_id:     opts.topic_id,
       action_index: opts.action_index,
       checked:      checked,
-      checked_by:   (res && res.checked_by) || null,
-      checked_at:   (res && res.checked_at) || null,
+      checked_by:   who.checked_by,
+      checked_at:   who.checked_at,
       user_folder:  opts.user_folder,
     });
   }
@@ -591,6 +631,10 @@
     resolveActionItem:  resolveActionItem,
     isActionResolved:   isActionResolved,
     orgCheckoffLive:    orgCheckoffLive,
+    /* fix/closed-by-display — exposed so other read paths (not just the
+       bus emit above) can remap an org-shaped row onto the same
+       checked_by/checked_at pair without duplicating the shape logic. */
+    normaliseCheckoff:  normaliseCheckoff,
     updateContent:   updateContent,
     /* content-propagate (item #3) */
     previewTopicCorrection: previewTopicCorrection,
@@ -616,6 +660,7 @@
       orgCheckoffLive:   orgCheckoffLive,
       resolveActionItem: resolveActionItem,
       isActionResolved:  isActionResolved,
+      normaliseCheckoff: normaliseCheckoff,
       propagateLive:            propagateLive,
       previewTopicCorrection:   previewTopicCorrection,
       applyTopicCorrection:     applyTopicCorrection,

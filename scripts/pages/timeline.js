@@ -2737,6 +2737,15 @@
     Right:  TimelineRightDetail,
   };
 
+  /* fix/closed-by-display — ContentHistoryPanel is generic over
+     content.EDITABLE (which includes action_items), but was only ever
+     mounted here with table:'topics'. Exposed on window.FieldSight so
+     tasks.js's TasksRightDetail (loaded AFTER this file — see
+     app-shell-preview.html script order) can mount the SAME panel for one
+     action item's own row (table:'action_items', id: row.actionItemId),
+     rather than duplicating the fetch-on-mount component. */
+  window.FieldSight.ContentHistoryPanel = ContentHistoryPanel;
+
   /* Expose the pure life-sep override helpers to Node's test runner only
      (CommonJS). No-op in the browser (Babel standalone leaves `module`
      undefined), so the page bundle is unaffected. */
