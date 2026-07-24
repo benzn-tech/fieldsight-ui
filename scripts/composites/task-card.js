@@ -26,12 +26,19 @@
 
    Props:
      task           { id, title, assignee, status, statusTone, dueTime,
-                      topic_id, actionIndex, folder, ... } — `folder` is
-                      the report OWNER's folder (feat/user-dim-audit-key,
-                      Task 6; stamped by today-adapter.js), sent as
-                      `user_folder` on the toggleAction call below so the
-                      audit check-off is keyed per-user, never the
-                      caller/currentUser.
+                      topic_id, actionIndex, folder, work_class, ... } —
+                      `folder` is the report OWNER's folder (feat/user-dim-
+                      audit-key, Task 6; stamped by today-adapter.js), sent
+                      as `user_folder` on the toggleAction call below so
+                      the audit check-off is keyed per-user, never the
+                      caller/currentUser. `work_class` — Q1 (tier-aware
+                      Today/Tasks) — the parent topic's work_class,
+                      verbatim off today-adapter.js/tasks-aggregator.js;
+                      `=== 'non_work'` renders a "Possibly personal" badge
+                      (missing/other value == treat as work, never a
+                      `!== 'work'` check — same convention those adapters
+                      follow). No review controls here (see timeline.js
+                      for those) — purely informational.
      isMine         boolean — apply --mine accent border
      onSelect       (task) => void — click handler on the row body
      checkable      boolean — show check button instead of avatar
@@ -233,6 +240,13 @@
             props.noDeadline ? React.createElement(Badge, {
               tone: 'warning', variant: 'outline', size: 'sm',
             }, 'No due date') : null,
+            /* Q1 — tier-aware Today/Tasks: informational only, no review
+               controls (those stay on Timeline). `=== 'non_work'` (never
+               `!== 'work'`) so a missing/other value still counts as
+               work. */
+            task.work_class === 'non_work' ? React.createElement(Badge, {
+              tone: 'neutral', variant: 'outline', size: 'sm',
+            }, 'Possibly personal') : null,
             React.createElement(Badge, { tone: task.statusTone, size: 'sm' },
               task.status),
             React.createElement('span', { className: 'fs-task-card__due' },

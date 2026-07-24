@@ -70,6 +70,27 @@
     return iso < today;
   }
 
+  /* Q1 — tier-aware Today/Tasks. Filter-chip buckets, extracted to a pure
+     function so both TasksMiddleColumn (below) and its unit tests can
+     share one implementation. A `work_class === 'non_work'` row stays in
+     `all`/`mine`/`done` (still rendered, still countable there) but is
+     excluded from `open`/`overdue` — those two counts (and filter views)
+     drive the "N unresolved" impression the chip badges give, and a
+     personal item shouldn't inflate that. Redacted rows never reach here
+     at all — tasks-aggregator.js omits them before this function ever
+     sees the row. Only the literal 'non_work' is excluded — missing/other
+     values (undefined, 'work') count as work, matching the `!== 'work'`-
+     avoiding convention the aggregator itself follows. */
+  function computeBuckets(rows, myName, today) {
+    return {
+      all:     rows,
+      mine:    rows.filter(function (r) { return r.responsible === myName; }),
+      open:    rows.filter(function (r) { return !r.audit.checked && r.work_class !== 'non_work'; }),
+      overdue: rows.filter(function (r) { return isOverdue(r, today) && r.work_class !== 'non_work'; }),
+      done:    rows.filter(function (r) { return  r.audit.checked; }),
+    };
+  }
+
   /* ---------- TasksContext --------------------------------------------- */
 
   var TasksContext = React.createContext(null);
@@ -290,13 +311,7 @@
     var rowsEarly  = (state && state.status === 'ok') ? (state.rows || []) : [];
     var todayEarly = (state && state.today) || window.FS.api.todayNZDT();
 
-    var bucketsEarly = {
-      all:     rowsEarly,
-      mine:    rowsEarly.filter(function (r) { return r.responsible === myName; }),
-      open:    rowsEarly.filter(function (r) { return !r.audit.checked; }),
-      overdue: rowsEarly.filter(function (r) { return isOverdue(r, todayEarly); }),
-      done:    rowsEarly.filter(function (r) { return  r.audit.checked; }),
-    };
+    var bucketsEarly = computeBuckets(rowsEarly, myName, todayEarly);
     var countsEarly = {
       all:     bucketsEarly.all.length,
       mine:    bucketsEarly.mine.length,
@@ -632,6 +647,11 @@
                    row.user_folder` mirrors the exact owner-folder
                    fallback used elsewhere in this feature. */
                 folder:      row.folder || row.user_folder,
+                /* Q1 — tier-aware Today/Tasks: threaded straight through so
+                   TaskCard can render the "Possibly personal" badge (same
+                   field today.js's myTasks/teamTasks items already carry
+                   verbatim off today-adapter.js). */
+                work_class:  row.work_class,
               };
               /* feat/editable-tasks-ui — batch-eligible = still open
                  (mirrors batchEligibleRows above / safety.js's per-row
@@ -1171,5 +1191,13 @@
     Right:    TasksRightDetail,
     Provider: TasksProvider,
   };
+
+  /* Expose the pure Q1 bucket helper to Node's test runner only
+     (CommonJS). No-op in the browser (Babel standalone leaves `module`
+     undefined), so the page bundle is unaffected — mirrors timeline.js's
+     identical guard. */
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { computeBuckets: computeBuckets, isOverdue: isOverdue };
+  }
 
 })();
