@@ -17,6 +17,12 @@
  * stub) so these tests exercise the actual shared predicate, and
  * computeBuckets' second param is now a `viewer` object ({ name,
  * folderName }), not a bare name string.
+ *
+ * feat/checkoff-org-api — done-ness is now the UNION of the authoritative
+ * Aurora column (row.status) and the legacy DynamoDB overlay
+ * (row.audit.checked), via the shared FS.api.actions.isActionResolved. Load
+ * the REAL actions.js module (same posture as mine-team.js above) so these
+ * tests exercise it rather than a fake.
  */
 const test = require('node:test');
 const assert = require('node:assert');
@@ -35,6 +41,7 @@ global.window = {
   },
 };
 require('../scripts/api/mine-team.js');
+require('../scripts/api/actions.js');
 global.React = {
   useState: function (v) { return [v, function () {}]; },
   useContext: function () { return null; },
