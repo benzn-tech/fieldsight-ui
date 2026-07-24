@@ -2941,6 +2941,20 @@
      rather than duplicating the fetch-on-mount component. */
   window.FieldSight.ContentHistoryPanel = ContentHistoryPanel;
 
+  /* feat/today-title-edit — same rationale/pattern as ContentHistoryPanel
+     just above: EditableText is generic over content.EDITABLE (table/id/
+     field are all props, not hardcoded here), was previously only ever
+     mounted from inside this file (topic summary / action item text /
+     safety flag observation), and is now also mounted by today.js's
+     TodayRightDetail (loaded BEFORE this file in app-shell-preview.html,
+     but that's fine — the reference is read at RENDER time, well after
+     every page script has finished its top-level, synchronous
+     window.FieldSight.* assignment) for the action-item title editor on
+     /today, behind the same content:edit-or-own-report gate this file
+     uses. Reuse, not a duplicate copy of the textarea/save/cancel/
+     glossary-confirm logic. */
+  window.FieldSight.EditableText = EditableText;
+
   /* Expose the pure life-sep override helpers to Node's test runner only
      (CommonJS). No-op in the browser (Babel standalone leaves `module`
      undefined), so the page bundle is unaffected. */
