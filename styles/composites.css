@@ -996,6 +996,19 @@
   border-left: 3px solid var(--color-accent-500);
 }
 
+/* Q1 — "worth a look" hint for topics the classifier thinks may
+   be personal (topic.work_class === 'non_work'). Deliberately calm: a
+   soft amber border only, no background fill — this is not an error
+   state, and it's paired with a "Possibly personal" Badge in the
+   metaline (topic-card.js) so the signal isn't colour-only. Confirmed-
+   personal (redacted) topics move to a separate collapsed section
+   instead (timeline.js) and never carry this modifier. Not theme-flipped
+   for dark mode, same convention as the other status/highlight tokens
+   on this file (see T3 note below). */
+.fs-topic-card--non-work {
+  border-left: 3px solid var(--color-warning-300);
+}
+
 /* T3 — yellow highlight only on hover, on any (non-selected) card. */
 .fs-topic-card:hover {
   background: var(--surface-selected);
