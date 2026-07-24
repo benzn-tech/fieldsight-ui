@@ -2385,7 +2385,13 @@
         video:      VideoPlayer    ? React.createElement(VideoPlayer,    mediaProps) : null,
         photos:     PhotoGrid      ? React.createElement(PhotoGrid, {
           photos:          topic.related_photos || [],
-          userDisplayName: sel.user_name,
+          /* P5: use the resolved folder, not sel.user_name. render_report_shape
+             builds user_name as `first_name || ' ' || last_name`; an empty
+             last_name yields a trailing space ("Ben_UCPK ") which folderName
+             collapses to "Ben_UCPK_", a wrong S3 prefix -> the presign 403s and
+             the photo never renders. ownerFolder is sel.user (the real folder
+             from the route); folderName() is idempotent on it. */
+          userDisplayName: ownerFolder || sel.user_name,
           date:            sel.date,
         }) : null,
         ask:        AskChat        ? React.createElement(AskChat, {
