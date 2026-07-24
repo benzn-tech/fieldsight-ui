@@ -420,6 +420,60 @@
     return { row: Object.assign({ id: id }, patch || {}), candidates: [] };
   }
 
+  /* content-propagate (item #3) — same-term correction fan-out across ONE
+     topic's rows. patch_content forbids batching ("exactly one editable
+     field required" — one field, one row, one edit), so fixing a name in
+     topics.summary leaves the same wrong name sitting in every
+     action_items.responsible cell etc. Verified live on test: one topic had
+     "Sean" in topics.summary AND in 5 action_items.responsible cells — 6
+     places, one edit fixed 1. These two calls close that gap.
+
+     Both are AURORA org endpoints with NO legacy fallback (there is no
+     report-gateway equivalent), gated by the SAME kill switch orgCheckoffLive()
+     uses above — aurora timeline source + a live orgBaseUrl + real writes
+     (mocks/writeMocks both off). When the gate is off, both resolve an inert
+     mock (field_count/changed_count 0) rather than silently hitting nothing,
+     matching updateAction's mock branch.
+
+     preview (POST .../propagate/preview) is READ-ONLY — writes nothing, safe
+     to call automatically. apply (POST .../propagate) WRITES and is
+     all-or-nothing: a 409 means a row changed mid-apply and NOTHING was
+     written.
+
+     Both RESOLVE {_accessDenied}/{_notFound} on 403/404 (mirrors every other
+     org write above) and REJECT (the org request() plumbing throws on any
+     non-401/403/404 non-ok status, so 400/409/5xx all throw) — callers must
+     catch, never bare `.then()`. Never swallow either shape: this codebase
+     has repeatedly shipped exactly that bug (see orgCheckoffLive's own
+     header note). */
+  function propagateLive() {
+    var api = window.FS && window.FS.api;
+    if (!api) return false;
+    return !api.useMocks && !api.writeMocks
+        && api.timelineSource === 'aurora' && !!api.orgBaseUrl;
+  }
+
+  async function previewTopicCorrection(topicId, before, after) {
+    if (propagateLive()) {
+      return window.FS.api.orgRequest(
+        '/topics/' + encodeURIComponent(topicId) + '/propagate/preview',
+        { method: 'POST', body: { before: before, after: after } });
+    }
+    await window.FS.api.delay(40);
+    return { topic_id: topicId, before: before, after: after,
+             field_count: 0, occurrence_count: 0, matches: [] };
+  }
+
+  async function applyTopicCorrection(topicId, before, after) {
+    if (propagateLive()) {
+      return window.FS.api.orgRequest(
+        '/topics/' + encodeURIComponent(topicId) + '/propagate',
+        { method: 'POST', body: { before: before, after: after } });
+    }
+    await window.FS.api.delay(60);
+    return { topic_id: topicId, changed_count: 0, changed: [], reindex_enqueued: false };
+  }
+
   /* editable-content-correction — content_edits trail for one row. */
   async function getContentHistory(table, id) {
     if (!window.FS.api.useMocks) {
@@ -538,6 +592,10 @@
     isActionResolved:   isActionResolved,
     orgCheckoffLive:    orgCheckoffLive,
     updateContent:   updateContent,
+    /* content-propagate (item #3) */
+    previewTopicCorrection: previewTopicCorrection,
+    applyTopicCorrection:   applyTopicCorrection,
+    propagateLive:          propagateLive,
     getContentHistory: getContentHistory,
     confirmAlias:    confirmAlias,
     createRedaction: createRedaction,
@@ -558,6 +616,9 @@
       orgCheckoffLive:   orgCheckoffLive,
       resolveActionItem: resolveActionItem,
       isActionResolved:  isActionResolved,
+      propagateLive:            propagateLive,
+      previewTopicCorrection:   previewTopicCorrection,
+      applyTopicCorrection:     applyTopicCorrection,
     };
   }
 

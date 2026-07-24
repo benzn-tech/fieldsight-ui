@@ -1821,6 +1821,49 @@
   color: var(--text-secondary);
 }
 
+/* content-propagate (item #3) — "Also fix N other places?" offer, sibling
+   of the glossary-confirm block above. */
+.fs-topic-detail__propagate {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md, 6px);
+  background: var(--surface-secondary, rgba(127, 127, 127, 0.06));
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fs-topic-detail__propagate--error { color: var(--color-danger, #d64545); }
+.fs-topic-detail__propagate-question {
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+.fs-topic-detail__propagate-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fs-topic-detail__propagate-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fs-topic-detail__propagate-item {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.fs-topic-detail__propagate-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
 .fs-content-history {
   list-style: none;
   margin: 0;
