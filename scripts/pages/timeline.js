@@ -140,6 +140,40 @@
     return segs;
   }
 
+  /* content-propagate (item #3) — derive the single before/after TERM an
+     EditableText commit just made, reusing diffWords rather than adding a
+     second diff implementation. diff_candidates() (the D2 helper behind
+     GlossaryConfirm) only flags the "after" side (new proper-noun-like
+     tokens present in the saved text but not the prior text) — it never
+     pairs a candidate with the surface form it replaced, precisely so that
+     side isn't guessed (see GlossaryConfirm's own header note). This walks
+     the word diff between the field's old and new full text looking for an
+     adjacent del/ins pair (either order — diffWords can emit either side
+     first on a tie) whose ins side matches one of the flagged candidates;
+     that adjacency is what "replaced" means here. Only ever returns the
+     FIRST such pair — a single edit touching two distinct proper nouns in
+     one commit is not handled (rare; the user can re-trigger per name by
+     editing again). Null when no candidate lines up with a clean
+     substitution (e.g. the candidate was purely inserted, not a
+     replacement) — correctly means "nothing to propagate". */
+  function findCorrectionPair(beforeText, afterText, candidateTerms) {
+    var segs = diffWords(beforeText || '', afterText || '');
+    var terms = candidateTerms || [];
+    for (var i = 0; i < segs.length - 1; i++) {
+      var x = segs[i], y = segs[i + 1];
+      if (x.type === y.type) continue;
+      var delSeg = x.type === 'del' ? x : (y.type === 'del' ? y : null);
+      var insSeg = x.type === 'ins' ? x : (y.type === 'ins' ? y : null);
+      if (!delSeg || !insSeg) continue;
+      var before = delSeg.text.trim();
+      var after  = insSeg.text.trim();
+      if (before && after && terms.indexOf(after) !== -1) {
+        return { before: before, after: after };
+      }
+    }
+    return null;
+  }
+
   /* A UTC content_edits.created_at → NZ local "YYYY/MM/DD HH:MM". Intl with an
      explicit IANA zone is DST-correct and is NOT the BUG-19 naive-parse pattern
      (the input carries a +00:00 offset, so it is unambiguous). */
@@ -1668,6 +1702,167 @@
     );
   }
 
+  /* content-propagate (item #3) — sibling of GlossaryConfirm, same trigger
+     (a commit that produced a D2 candidate + a clean before/after
+     substitution, see findCorrectionPair above), different question: does
+     this SAME correction also need making elsewhere in the topic?
+     patch_content forbids batching a fix across rows ("exactly one editable
+     field required"), so without this the user has to hunt down every other
+     occurrence by hand — verified live on test: one topic had "Sean" in
+     topics.summary AND in 5 action_items.responsible cells, one edit fixed 1
+     of the 6.
+
+     preview-then-confirm, never auto-apply — a substring match can corrupt
+     an unrelated sentence, which is the whole reason this is preview-then-
+     confirm rather than fire-and-forget. Confirmation is the same two-click
+     arm/commit pattern used elsewhere in this codebase (programme-task-
+     editor.js's delete button, photo-grid.js's keyframe delete) — never
+     window.confirm.
+
+     Mounts already armed with a preview fetch (preview is read-only, safe to
+     call automatically); renders NOTHING while loading and NOTHING once
+     resolved with field_count 0 — silence is correct, there's nothing else
+     to fix. */
+  function TopicCorrectionPropagate(props) {
+    var Button = window.FieldSight.Button;
+    var Badge  = window.FieldSight.Badge;
+
+    var stRef = React.useState({ phase: 'loading', preview: null, message: null });
+    var st = stRef[0], setSt = stRef[1];
+    var confirmRef = React.useState(false);
+    var confirmArmed = confirmRef[0], setConfirmArmed = confirmRef[1];
+    var busyRef = React.useState(false);
+    var busy = busyRef[0], setBusy = busyRef[1];
+
+    function runPreview() {
+      setConfirmArmed(false);
+      setSt({ phase: 'loading', preview: null, message: null });
+      window.FS.api.actions.previewTopicCorrection(props.topicId, props.before, props.after)
+        .then(function (res) {
+          if (!res || res._accessDenied || res._notFound) {
+            setSt({ phase: 'error', preview: null,
+                    message: (res && res.error) || 'Could not check for other occurrences.' });
+            return;
+          }
+          setSt({ phase: 'ready', preview: res, message: null });
+        })
+        .catch(function (err) {
+          setSt({ phase: 'error', preview: null,
+                  message: (err && err.message) || 'Could not check for other occurrences.' });
+        });
+    }
+
+    React.useEffect(function () { runPreview(); }, [props.topicId, props.before, props.after]);
+
+    if (st.phase === 'loading') return null;   // silent while checking, no "0 matches" flash
+
+    if (st.phase === 'error') {
+      return React.createElement('div', { className: 'fs-topic-detail__propagate fs-topic-detail__propagate--error' },
+        React.createElement('span', null, st.message),
+        Button ? React.createElement(Button, {
+          size: 'sm', variant: 'tertiary', onClick: runPreview,
+        }, 'Try again') : null,
+      );
+    }
+
+    var preview = st.preview;
+    if (!preview || !preview.field_count) return null;   // nothing else needs fixing
+
+    function apply() {
+      setBusy(true);
+      window.FS.api.actions.applyTopicCorrection(props.topicId, props.before, props.after)
+        .then(function (res) {
+          setBusy(false);
+          if (!res || res._accessDenied || res._notFound) {
+            setConfirmArmed(false);
+            setSt({ phase: 'error', preview: null,
+                    message: (res && res.error) || 'Could not apply the correction.' });
+            return;
+          }
+          var toast = window.FS && window.FS.toast;
+          if (toast) {
+            toast.show({
+              message: 'Fixed ' + res.changed_count + ' other place' + (res.changed_count === 1 ? '' : 's'),
+              tone: 'success', duration: 3000,
+            });
+          }
+          /* Detail-less dispatch — the read precedent in this file (see the
+             onRefresh listeners above) treats a detail-less event as "refetch,
+             don't optimistically patch": propagate rewrites fields across
+             MULTIPLE rows (summary + N action_items/findings), which a single
+             {topicRowId, patch} override can't represent, so a full refetch is
+             the only way the rewritten fields actually render. */
+          window.dispatchEvent(new CustomEvent('fs:timeline-refresh'));
+          if (props.onApplied) props.onApplied();
+        })
+        .catch(function (err) {
+          setBusy(false);
+          var status = err && err.status;
+          if (status === 409) {
+            /* Apply is all-or-nothing — a 409 means NOTHING was written, not
+               a partial write. Say so explicitly and re-preview (the matches
+               that raced us may have changed) rather than implying it's safe
+               to just retry the same apply. */
+            setConfirmArmed(false);
+            runPreview();
+            var toast409 = window.FS && window.FS.toast;
+            if (toast409) {
+              toast409.show({
+                message: 'Something else changed first — nothing was written. Re-checking…',
+                tone: 'error', duration: 5000,
+              });
+            }
+            return;
+          }
+          setConfirmArmed(false);
+          setSt({ phase: 'error', preview: null,
+                  message: (err && err.message) || 'Could not apply the correction.' });
+        });
+    }
+
+    var matches = preview.matches || [];
+    var byTable = {};
+    var tableOrder = [];
+    matches.forEach(function (m) {
+      var t = m.table || 'other';
+      if (!byTable[t]) { byTable[t] = []; tableOrder.push(t); }
+      byTable[t].push(m);
+    });
+
+    return React.createElement('div', { className: 'fs-topic-detail__propagate' },
+      React.createElement('div', { className: 'fs-topic-detail__propagate-question' },
+        'Also fix ' + preview.field_count + ' other place' + (preview.field_count === 1 ? '' : 's') + ' in this topic?'),
+      tableOrder.map(function (table) {
+        return React.createElement('div', { key: table, className: 'fs-topic-detail__propagate-group' },
+          Badge ? React.createElement(Badge, { size: 'sm', tone: 'neutral', variant: 'outline' }, table)
+                : React.createElement('span', null, table),
+          React.createElement('ul', { className: 'fs-topic-detail__propagate-list' },
+            byTable[table].map(function (m, i) {
+              return React.createElement('li', { key: table + '-' + i, className: 'fs-topic-detail__propagate-item' },
+                (m.before_snippet || '') + ' → ' + (m.after_snippet || ''));
+            }),
+          ),
+        );
+      }),
+      React.createElement('div', { className: 'fs-topic-detail__propagate-actions' },
+        !confirmArmed
+          ? (Button ? React.createElement(Button, {
+              size: 'sm', variant: 'secondary', disabled: busy,
+              onClick: function () { setConfirmArmed(true); },
+            }, 'Fix these too') : null)
+          : React.createElement(React.Fragment, null,
+              Button ? React.createElement(Button, {
+                size: 'sm', variant: 'primary', disabled: busy, onClick: apply,
+              }, busy ? 'Applying…' : 'Confirm — apply to all ' + preview.field_count) : null,
+              Button ? React.createElement(Button, {
+                size: 'sm', variant: 'ghost', disabled: busy,
+                onClick: function () { setConfirmArmed(false); },
+              }, 'Cancel') : null,
+            ),
+      ),
+    );
+  }
+
   /* life-conversation separation (Task 11) — one confirm+remove action writes
      BOTH the redaction (createRedaction) and the human verdict
      (submitClassificationFeedback). Placed beside GlossaryConfirm since both
@@ -1750,6 +1945,11 @@
     var busy = busyRef[0], setBusy = busyRef[1];
     var candidatesRef = React.useState([]);
     var candidates = candidatesRef[0], setCandidates = candidatesRef[1];
+    /* content-propagate (item #3) — the before/after TERM derived from this
+       commit, when one lines up with a flagged D2 candidate (see
+       findCorrectionPair above). Null = nothing to offer propagating. */
+    var correctionPairRef = React.useState(null);
+    var correctionPair = correctionPairRef[0], setCorrectionPair = correctionPairRef[1];
 
     if (!editable) {
       return React.createElement(props.tag || 'span',
@@ -1777,6 +1977,14 @@
         }
         if (props.showGlossaryConfirm && res.candidates && res.candidates.length) {
           setCandidates(res.candidates);
+          /* content-propagate (item #3) — a sibling offer to GlossaryConfirm,
+             not gated by the same site_manager+ glossary-promotion authority:
+             any editor who just made this correction may want it fanned out
+             across the topic. Only set (and only then does
+             TopicCorrectionPropagate mount + auto-preview) when the word diff
+             actually finds a clean substitution behind the candidate — see
+             findCorrectionPair's header note on why a null here is correct. */
+          setCorrectionPair(findCorrectionPair(props.value || '', next, res.candidates));
           if (props.onSaved) props.onSaved(res);
           return;   // keep the editor open so the user can confirm glossary terms
         }
@@ -1795,6 +2003,7 @@
     function cancel() {
       setValue(props.value || '');
       setCandidates([]);
+      setCorrectionPair(null);
       if (props.onExitEdit) props.onExitEdit();
     }
     var IconBtn = window.FieldSight.IconButton;
@@ -1824,6 +2033,18 @@
         onConfirmed: function (term) {
           setCandidates(function (cur) { return cur.filter(function (c) { return c !== term; }); });
         },
+      }) : null,
+      /* content-propagate (item #3) — sibling of GlossaryConfirm above.
+         Requires a durable topicId (threaded in by every call site that
+         also sets showGlossaryConfirm); no topicId, no offer. Keyed on the
+         pair so a second edit producing a different pair remounts fresh
+         (fresh preview) rather than reusing stale internal state. */
+      correctionPair && props.topicId ? React.createElement(TopicCorrectionPropagate, {
+        key:      props.topicId + '|' + correctionPair.before + '|' + correctionPair.after,
+        topicId:  props.topicId,
+        before:   correctionPair.before,
+        after:    correctionPair.after,
+        onApplied: function () { setCorrectionPair(null); },
       }) : null,
     );
   }
@@ -1959,6 +2180,7 @@
         field: 'summary', value: topic.summary || '', display: topic.summary,
         tag: 'p', className: 'fs-topic-detail__summary', rows: 3,
         ariaLabel: 'Edit topic summary', showGlossaryConfirm: canConfirmGlossary,
+        topicId: topicRowId,
       }),
 
       deciss.length > 0
@@ -2036,7 +2258,7 @@
                   editable: true, table: 'action_items', id: a.id, field: 'text',
                   value: override !== undefined ? override : (a.action || ''),
                   ariaLabel: 'Edit action item text', rows: 2,
-                  showGlossaryConfirm: canConfirmGlossary,
+                  showGlossaryConfirm: canConfirmGlossary, topicId: topicRowId,
                   onSaved: function (res) {
                     var next = res && res.row && res.row.text;
                     setOverrides(function (cur) {
@@ -2076,7 +2298,7 @@
                   editable: true, table: f.source_table, id: f.id, field: 'observation',
                   value: override !== undefined ? override : (f.observation || ''),
                   ariaLabel: 'Edit safety flag observation', rows: 2,
-                  showGlossaryConfirm: canConfirmGlossary,
+                  showGlossaryConfirm: canConfirmGlossary, topicId: topicRowId,
                   onSaved: function (res) {
                     var next = res && res.row && res.row.observation;
                     setOverrides(function (cur) {
@@ -2116,12 +2338,14 @@
                   value: f.observation || '', display: f.observation,
                   tag: 'div', className: 'fs-topic-detail__finding-observation', rows: 2,
                   ariaLabel: 'Edit finding observation', showGlossaryConfirm: canConfirmGlossary,
+                  topicId: topicRowId,
                 }),
                 (rowEditable || f.recommended_action) ? React.createElement(EditableText, {
                   editable: rowEditable, table: 'findings', id: f.id, field: 'recommended_action',
                   value: f.recommended_action || '', display: f.recommended_action,
                   tag: 'div', className: 'fs-topic-detail__finding-action', rows: 2,
                   ariaLabel: 'Edit finding recommended action', showGlossaryConfirm: canConfirmGlossary,
+                  topicId: topicRowId,
                 }) : null,
               );
             }),
@@ -2459,6 +2683,7 @@
             field: 'title', value: topic.topic_title || '', display: topic.topic_title || '(untitled)',
             tag: 'h2', className: 'fs-topic-detail__title', rows: 1,
             ariaLabel: 'Edit topic title', showGlossaryConfirm: canConfirmGlossaryTitle,
+            topicId: titleRowId,
           }),
           React.createElement('div', { className: 'fs-topic-detail__metaline' },
             CategoryBadge ? React.createElement(CategoryBadge, {
@@ -2523,6 +2748,9 @@
       diffWords: diffWords,
       formatEditTime: formatEditTime,
       formatContentEdit: formatContentEdit,
+      /* content-propagate (item #3) */
+      findCorrectionPair: findCorrectionPair,
+      TopicCorrectionPropagate: TopicCorrectionPropagate,
     };
   }
 
