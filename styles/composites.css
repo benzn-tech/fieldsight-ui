@@ -194,7 +194,30 @@
    .fs-today__view-report-cta (bg/color/padding/font-size/weight/radius
    + width:50%/min-width:220px block, left-aligned) so "Open timeline"
    and "Back to Today" (.fs-timeline-page__back below) read as one
-   button family, not two different affordances. */
+   button family, not two different affordances.
+
+   fix/today-batch-select-expand — .fs-today__toolbar-row wraps this
+   link plus the page-level Batch Select toggle (today.js) as flex
+   siblings, so Batch Select is reachable at a glance instead of buried
+   inside the (default-collapsed) Leftover section header. The link's
+   row is given flex:1 so its child button's existing width:50% still
+   resolves against a definite width; margin-bottom moves to the
+   wrapping row so spacing is unchanged when nested. */
+.fs-today__toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 10px;
+}
+.fs-today__toolbar-row .fs-today__timeline-link-row {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.fs-today__toolbar-row .fs-multi-select__toggle {
+  flex-shrink: 0;
+  margin: 0;
+}
 .fs-today__timeline-link-row {
   display: flex;
   justify-content: flex-start;
@@ -370,11 +393,14 @@
   padding-top: 8px;
 }
 
-/* feat/leftover-batch-select (T1) — header row wrapping the existing
-   expand toggle + the new "Batch Select" mode toggle as siblings (NOT
-   nested — the expand toggle is already a <button>, and buttons can't
-   nest). border-top lives here now instead of on .fs-today__leftover-
-   toggle so the rule reads once per row. */
+/* feat/leftover-batch-select (T1) — header row wrapping the expand
+   toggle. border-top lives here instead of on .fs-today__leftover-
+   toggle so the rule reads once per row.
+   fix/today-batch-select-expand — this row USED to also carry a
+   sibling "Batch Select" mode toggle <button> here; that control moved
+   to the page-level .fs-today__toolbar-row above (today.js) so it's
+   reachable without expanding Leftover first. The rule below (flex:1 on
+   the lone remaining child) still applies harmlessly. */
 .fs-today__leftover-header {
   display: flex;
   align-items: center;

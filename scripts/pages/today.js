@@ -98,6 +98,18 @@
     return list.filter(function (t) { return t.work_class !== 'non_work'; }).length;
   }
 
+  /* fix/today-batch-select-expand — the SAME condition that already
+     decides whether TaskCard gets a `checkable` prop (myRecent/teamRecent/
+     Leftover call sites below all repeated this inline before this
+     extraction). Only a checkable row grows a round check button at all
+     (task-card.js `checkable`), so this doubles as "is this row eligible
+     for the Batch Select round-button-becomes-a-toggle behavior" — an
+     item with no topic_id/actionIndex/date has nothing for
+     FS.api.actions.resolveActionItem to resolve, batched or not. */
+  function isBatchEligibleTask(t) {
+    return !!t && t.topic_id != null && t.actionIndex != null && !!t.date;
+  }
+
   /* Today's date in NZDT — see BUG-19. We compute "today" via
      FS.api.todayNZDT() (Pacific/Auckland clock). */
 
@@ -1395,18 +1407,45 @@
     var leftoverRenderItems = groupByProject(leftoverItems)
       .reduce(function (acc, g) { return acc.concat(g.rows); }, []);
 
+    /* fix/today-batch-select-expand — Batch Select used to cover ONLY
+       the Leftover section; it now spans Recent Mine + Recent Team too,
+       same as Tasks-page parity. Order matches on-screen order exactly
+       (myRecent's project groups, then teamRecent's, then leftover's —
+       same left-to-right/top-to-bottom reading order the three sections
+       render in below) so Shift-range selection can never jump into a
+       visually-unrelated row. Only isBatchEligibleTask() rows are
+       included — same condition each section already uses for the
+       TaskCard `checkable` prop, since a non-checkable row has no round
+       button to become a multi-select toggle in the first place.
+       ProgrammeTaskCard / UrgentCard rows are never TaskCards and are
+       never in myRecent/teamRecent/leftoverItems to begin with, so they
+       can't enter this list. */
+    var myRecentRenderItems = groupByProject(myRecent)
+      .reduce(function (acc, g) { return acc.concat(g.rows); }, []);
+    var teamRecentRenderItems = groupByProject(teamRecent)
+      .reduce(function (acc, g) { return acc.concat(g.rows); }, []);
+    var batchEligibleItems = myRecentRenderItems
+      .concat(teamRecentRenderItems)
+      .concat(leftoverRenderItems)
+      .filter(isBatchEligibleTask);
+
     /* T4 — batchMode/anchor/Shift-Ctrl selection state + dispatch, now
        the ONE shared implementation (scripts/composites/multi-select-
        list.js) also consumed by /safety and /quality. Behavior is
        byte-identical to the T1 inline version it replaces: batchMode
-       OFF (default) leaves each Leftover TaskCard's round selector on
-       the single-resolve path (task-card.js startCheckOff, unchanged);
-       ON, the SAME round selectors become multi-select toggles
+       OFF (default) leaves each TaskCard's round selector on the
+       single-resolve path (task-card.js startCheckOff, unchanged); ON,
+       the SAME round selectors become multi-select toggles
        (multiSelect.onItemClick, wired below) and nothing resolves until
-       "Resolve N" is pressed (bulkResolveLeftover(), unchanged, still
-       the sole audited write). */
+       "Resolve N" is pressed (bulkResolveSelected(), renamed from
+       bulkResolveLeftover — it now resolves across all three sections,
+       not leftovers only — still the sole audited write).
+       fix/today-batch-select-expand — `items` widened from
+       leftoverRenderItems to batchEligibleItems (above) so the toggle
+       reachable from the page-level toolbar (below) can select rows in
+       any of the three sections, not just Leftover. */
     var multiSelect = window.FieldSight.useMultiSelect({
-      items: leftoverRenderItems,
+      items: batchEligibleItems,
       getId: function (t) { return t.id; },
     });
 
@@ -1514,24 +1553,26 @@
        useMultiSelect comment near the top of this component); reused
        verbatim here, not recomputed. */
 
-    /* T4 — selectedLeftoverItems/selectedCount now come straight off
+    /* T4 — selectedBatchItems/selectedCount now come straight off
        multiSelect.selectedItems, which does the exact same
        selectedIds-intersect-items derivation the old inline code did
        here: a stale id — e.g. an item someone else resolved via the
        actionsBus subscription above, or one that aged back under the
        threshold on a refresh — silently drops out instead of over-
-       counting or crashing a lookup. Only LEFTOVER items are ever
-       selectable (leftoverRenderItems — leftoverItems, or its flattened
-       project-grouped order when multi-project — is what was passed as
-       `items` to useMultiSelect above), so this is still the single
-       source of truth "N selected" reads from. */
-    var selectedLeftoverItems = multiSelect.selectedItems;
-    var selectedCount         = selectedLeftoverItems.length;
+       counting or crashing a lookup.
+       fix/today-batch-select-expand — renamed from selectedLeftoverItems:
+       selectable items now span Recent Mine + Recent Team + Leftover
+       (batchEligibleItems, above), not Leftover alone, so this is still
+       the single source of truth "N selected" reads from but the name
+       no longer implies Leftover-only. */
+    var selectedBatchItems = multiSelect.selectedItems;
+    var selectedCount      = selectedBatchItems.length;
 
     /* Bulk resolve — pooled-toggle every selected item, EACH carrying
-       ITS OWN date/folder/topic_id/actionIndex (leftover items span
-       many dates and owners; there is no single "today" to check off
-       against — same reasoning as the per-item checkable path above).
+       ITS OWN date/folder/topic_id/actionIndex (selected items can span
+       many dates and owners across all three sections; there is no
+       single "today" to check off against — same reasoning as the
+       per-item checkable path above).
        user_folder: it.folder is the report OWNER's folder
        (feat/user-dim-audit-key, Task 6) — never the caller/currentUser,
        or the audit write lands on the legacy bare key and silently
@@ -1540,10 +1581,16 @@
        the user can just hit Resolve again) and is reported via toast;
        successes are dropped from both the rendered list (removeMy,
        reusing the SAME optimistic-removal path the single check-off
-       circle uses) and the selection. */
-    function bulkResolveLeftover() {
+       circle uses) and the selection.
+       fix/today-batch-select-expand — renamed from bulkResolveLeftover:
+       it now resolves selections drawn from Recent Mine/Team too, not
+       leftovers only. Still routes through the SAME authorised
+       FS.api.actions.resolveActionItem path check-off uses, and a
+       refusal (env.ok falsy) is still counted as a failure below, never
+       silently as a success. */
+    function bulkResolveSelected() {
       if (bulkResolving || selectedCount === 0) return;
-      var items = selectedLeftoverItems;
+      var items = selectedBatchItems;
       var api   = window.FS && window.FS.api;
       if (!api || !api.actions || !api.pooledAll) return;
 
@@ -1568,7 +1615,7 @@
             user_folder:  it.folder,
           }).then(function (env) {
             if (env && env.ok) return { ok: true, item: it };
-            console.error('[Today leftover] bulk resolve refused for', it.id, env);
+            console.error('[Today] bulk resolve refused for', it.id, env);
             return { ok: false, item: it, message: env && env.message };
           });
         };
@@ -1650,8 +1697,47 @@
          that used to sit here navigated to the SAME
          /timeline?date=<today>&from=today as this button, so it was a
          duplicate affordance stacked right below "Open timeline". Removed;
-         "Open timeline" (TimelineLink) is the single canonical entry point. */
-      React.createElement(TimelineLink, null),
+         "Open timeline" (TimelineLink) is the single canonical entry point.
+         fix/today-batch-select-expand — the Batch Select toggle now sits
+         in this SAME always-visible top row (mirrors tasks.js's page
+         header, :624-632), not buried inside the Leftover section header
+         any more — it used to be reachable only when there were 90+ day
+         leftover items AND that section was expanded (default collapsed).
+         Gated on batchEligibleItems.length, same "is there anything to
+         select" gate tasks.js uses for its own toggle. */
+      React.createElement('div', { className: 'fs-today__toolbar-row' },
+        React.createElement(TimelineLink, null),
+        batchEligibleItems.length > 0
+          ? React.createElement('button', {
+              type:            'button',
+              className:       'fs-multi-select__toggle'
+                + (multiSelect.batchMode ? ' fs-multi-select__toggle--active' : ''),
+              onClick:         function () { multiSelect.setBatchMode(function (prev) { return !prev; }); },
+              'aria-pressed':  multiSelect.batchMode,
+            }, multiSelect.batchMode ? 'Batch Select: On' : 'Batch Select')
+          : null,
+      ),
+
+      /* fix/today-batch-select-expand — bulk action bar, shared
+         MultiSelectBulkBar composite (same one /tasks + /safety +
+         /quality use), shown whenever Batch Select is on. Lives here at
+         the top level (not nested in any collapsible section) so
+         "Resolve N" stays reachable no matter which of the three
+         sections below the selection actually came from, and survives
+         collapsing Leftover (selection state lives in useMultiSelect,
+         untouched by leftoverExpanded). */
+      multiSelect.batchMode
+        ? React.createElement(fs.MultiSelectBulkBar, {
+            count:   selectedCount,
+            actions: [
+              { key: 'select-all', label: 'Select all', onClick: multiSelect.selectAll, disabled: bulkResolving },
+              { key: 'resolve', primary: true, onClick: bulkResolveSelected,
+                disabled: bulkResolving || selectedCount === 0,
+                label: bulkResolving ? 'Resolving…' : 'Resolve ' + selectedCount },
+              { key: 'clear', label: 'Clear', onClick: multiSelect.clear, disabled: bulkResolving },
+            ],
+          })
+        : null,
 
       /* MORNING BRIEF — §B: today-scoped, only when TODAY itself has a
          report (effectiveDate truthy). Otherwise simply absent, rather
@@ -1739,7 +1825,7 @@
                 onSelect:      onSelect,
                 isMine:        true,
                 selected:      selectedId === task.id,
-                checkable:     task.topic_id != null && task.actionIndex != null && !!task.date,
+                checkable:     isBatchEligibleTask(task),
                 date:          task.date,
                 onCheckedOff:  onCheckedOff,
                 /* #4 — no per-card project chip. Project is a HIGH-LEVEL
@@ -1753,6 +1839,15 @@
                 noDeadline:    !!task.noDeadline,
                 /* §E-time — parent topic's time_range, when present. */
                 timeRange:     task.timeRange,
+                /* fix/today-batch-select-expand — Recent Mine cards now
+                   participate in Batch Select too (previously only
+                   Leftover cards got these three props — see the old
+                   comment that used to live at the Leftover TaskCard
+                   below). multiSelect.onItemClick is the shared hook's
+                   Shift/Ctrl/plain dispatcher, unchanged. */
+                batchMode:      multiSelect.batchMode,
+                batchSelected:  !!multiSelect.selectedIds[task.id],
+                onBatchToggle:  multiSelect.onItemClick,
               });
             }),
           )
@@ -1782,13 +1877,19 @@
                error toast + aborted animation, never a silent no-op.
                removeMyTask (→ onCheckedOff) already scans BOTH buckets,
                so the optimistic removal works unchanged here. */
-            checkable:    task.topic_id != null && task.actionIndex != null && !!task.date,
+            checkable:    isBatchEligibleTask(task),
             date:         task.date,
             onCheckedOff: onCheckedOff,
             site:       null,   /* #4 — project is a group header, not a card chip */
             ageLabel:   formatAgeLabel(task.ageDays),
             noDeadline: !!task.noDeadline,
             timeRange:  task.timeRange,
+            /* fix/today-batch-select-expand — Recent Team cards now
+               participate in Batch Select too, same as the Mine branch
+               above. */
+            batchMode:      multiSelect.batchMode,
+            batchSelected:  !!multiSelect.selectedIds[task.id],
+            onBatchToggle:  multiSelect.onItemClick,
           });
         }),
       ) : null,
@@ -1804,7 +1905,15 @@
          >1 leftover project → grouped, else flat). Neutral/warning tone
          — never safety-red / blocked-magenta (CLAUDE.md status-color
          rule) — leftover age is informational, not a blocked/overdue
-         signal. */
+         signal.
+         fix/today-batch-select-expand — the section-local Batch Select
+         toggle + bulk bar that used to live in this header moved to the
+         page-level toolbar row above (that was the whole bug: they were
+         only reachable when there were 90+ day leftover items AND this
+         section was expanded). One shared multiSelect now spans Recent
+         Mine/Team + Leftover, so a second, section-scoped toggle here
+         would just be a confusing second control over the SAME
+         selection — removed rather than duplicated. */
       leftoverItems.length > 0
         ? React.createElement('div', { className: 'fs-today__leftover' },
             React.createElement('div', { className: 'fs-today__leftover-header' },
@@ -1824,47 +1933,7 @@
                 React.createElement('span', { className: 'fs-today__leftover-hint' },
                   '(' + LEFTOVER_THRESHOLD_DAYS + '+ days, unresolved)'),
               ),
-              /* feat/leftover-batch-select (T1), extracted T4 — OFF
-                 (default): round selectors resolve single items. ON:
-                 round selectors become multi-select toggles and the
-                 bulk bar below is reachable (including "Select all"
-                 from a clean, nothing-selected state). Sibling
-                 <button>, not nested, since the expand toggle above is
-                 already a <button>. Shared .fs-multi-select__toggle
-                 classes (composites.css), same ones /safety + /quality
-                 (T4) use for their own Multi-Select toggle. */
-              React.createElement('button', {
-                type:            'button',
-                className:       'fs-multi-select__toggle'
-                  + (multiSelect.batchMode ? ' fs-multi-select__toggle--active' : ''),
-                onClick:         function () { multiSelect.setBatchMode(function (prev) { return !prev; }); },
-                'aria-pressed':  multiSelect.batchMode,
-              }, multiSelect.batchMode ? 'Batch Select: On' : 'Batch Select'),
             ),
-
-            /* feat/leftover-batch-select (T1), extracted T4 — bulk
-               action bar (shared MultiSelectBulkBar composite), shown
-               whenever batchMode is on (not gated on selectedCount > 0
-               any more, so "Select all" is reachable immediately after
-               turning batch mode on). Lives in the section "header
-               area" (between the toggle and the collapsible body) so
-               it's visible whether or not the body itself is expanded
-               — selection intentionally survives a collapse (the
-               underlying selection state lives in the useMultiSelect
-               hook now, still not tied to leftoverExpanded), so
-               Resolve N stays reachable without re-expanding. */
-            multiSelect.batchMode
-              ? React.createElement(fs.MultiSelectBulkBar, {
-                  count:   selectedCount,
-                  actions: [
-                    { key: 'select-all', label: 'Select all', onClick: multiSelect.selectAll, disabled: bulkResolving },
-                    { key: 'resolve', primary: true, onClick: bulkResolveLeftover,
-                      disabled: bulkResolving || selectedCount === 0,
-                      label: bulkResolving ? 'Resolving…' : 'Resolve ' + selectedCount },
-                    { key: 'clear', label: 'Clear', onClick: multiSelect.clear, disabled: bulkResolving },
-                  ],
-                })
-              : null,
 
             leftoverExpanded
               ? React.createElement('div', { className: 'fs-today__leftover-body' },
@@ -1875,23 +1944,24 @@
                       onSelect:       onSelect,
                       isMine:         !!myIds[task.id],
                       selected:       selectedId === task.id,
-                      checkable:      task.topic_id != null && task.actionIndex != null && !!task.date,
+                      checkable:      isBatchEligibleTask(task),
                       date:           task.date,
                       onCheckedOff:   onCheckedOff,
                       site:           null,   /* #4 — leftover already groups by project; no card chip */
                       ageLabel:       formatAgeLabel(task.ageDays),
                       noDeadline:     !!task.noDeadline,
                       timeRange:      task.timeRange,
-                      /* feat/leftover-batch-select (T1), extracted T4 —
-                         only Leftover cards pass these; Recent/
-                         programme/timeline TaskCard call sites omit
-                         them, so their round check button keeps the
+                      /* feat/leftover-batch-select (T1), extracted T4,
+                         widened fix/today-batch-select-expand — Leftover
+                         cards keep passing these three (unchanged);
+                         Recent Mine/Team now pass the SAME three above;
+                         only programme/timeline TaskCard call sites still
+                         omit them, so their round check button keeps the
                          original single-resolve behavior (checkable
-                         without batchMode/onBatchToggle =>
-                         startCheckOff, unchanged). multiSelect.onItemClick
-                         is the shared hook's dispatcher — same
-                         Shift/Ctrl/plain semantics the old inline
-                         onBatchToggle had. */
+                         without batchMode/onBatchToggle => startCheckOff,
+                         unchanged). multiSelect.onItemClick is the shared
+                         hook's dispatcher — same Shift/Ctrl/plain
+                         semantics the old inline onBatchToggle had. */
                       batchMode:      multiSelect.batchMode,
                       batchSelected:  !!multiSelect.selectedIds[task.id],
                       onBatchToggle:  multiSelect.onItemClick,
@@ -2409,12 +2479,17 @@
        Activity / Settings / Evidence keep their 2-panel layout. */
   };
 
-  /* Expose the pure Q1 open-items count helper to Node's test runner only
-     (CommonJS). No-op in the browser (Babel standalone leaves `module`
-     undefined), so the page bundle is unaffected — mirrors timeline.js's
-     identical guard. */
+  /* Expose the pure Q1 open-items count helper + (fix/today-batch-select-
+     expand) the batch-eligibility/ordering helpers to Node's test runner
+     only (CommonJS). No-op in the browser (Babel standalone leaves
+     `module` undefined), so the page bundle is unaffected — mirrors
+     timeline.js's identical guard. */
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { openCount: openCount };
+    module.exports = {
+      openCount:            openCount,
+      isBatchEligibleTask:  isBatchEligibleTask,
+      groupByProject:       groupByProject,
+    };
   }
 
 })();
