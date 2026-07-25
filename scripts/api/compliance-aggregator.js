@@ -214,6 +214,94 @@
      batch A2 Task 3 — `site` (4th param) is an EXPLICIT argument passed
      down from getSafetyRange/getQualityRange; this function must NEVER
      read window.FS.siteContext itself. */
+  /* ─── Durable resolved-state union (compliance_resolutions) ────────────
+     Retires the UNAUTHENTICATED legacy DynamoDB check-off overlay
+     (lookupAction on the getActions checkedMap, _AUDIT-2) for the three
+     report-sourced compliance rows — safety observations, safety topic
+     flags, and quality topics — onto the durable, re-extraction-stable
+     compliance_resolutions table (backend migration 0025).
+
+     The natural key is site_id|report_date|domain|user_folder|content_hash,
+     where content_hash = the JS twin of src/content_hash.py
+     (window.FS.api.complianceHash) applied to the SAME displayed text the
+     row renders. site_id is the org UUID the timeline shim now stamps on the
+     report (r.site_id, additive field) — NOT the display name (r.site), which
+     the backend key never uses. A per-ROW site_id is what we key on (never
+     opts.site/siteContext), so the global/Insights/admin fan-out — where rows
+     span many sites with no single anchored site — resolves correctly too.
+
+     Union during the DynamoDB→Aurora transition (spec §4):
+       * Aurora-first: if the resolutions map has this row (by hash, or by the
+         content_sample de-risk path on a hash miss), use it WHOLESALE — even
+         resolved:false. A reopen is a durable false and MUST win over a stale
+         overlay true, so we never fall back once Aurora has spoken.
+       * Overlay-fallback: only when Aurora has no row at all, read the legacy
+         checkedMap so historical DynamoDB marks still show until they age out. */
+  function buildResolutionIndex(rows) {
+    var byHash = {}, bySample = {};
+    (rows || []).forEach(function (rr) {
+      if (!rr || !rr.site_id) return;
+      var base = rr.site_id + '|' + rr.report_date + '|' + rr.domain + '|' + rr.user_folder;
+      byHash[base + '|' + rr.content_hash] = rr;
+      /* content_sample is the server's normalize(text); index it for the
+         de-risk fallback (a hash miss whose normalized text still matches). */
+      if (rr.content_sample != null) {
+        if (!bySample[base]) bySample[base] = {};
+        bySample[base][rr.content_sample] = rr;
+      }
+    });
+    return { byHash: byHash, bySample: bySample };
+  }
+
+  /* Aurora lookup for one row's (site_id, date, domain, folder, text). Returns
+     the resolution row (carrying resolved/resolved_by/resolved_at) or null.
+     Hash-first; on a miss, the content_sample de-risk path (the server's own
+     fallback) matches on normalize(text). */
+  function auroraResolution(resolutions, siteId, date, domain, folder, text) {
+    if (!resolutions || !siteId) return null;
+    var base = siteId + '|' + date + '|' + domain + '|' + folder;
+    var hash = window.FS.api.complianceHash.contentHash(text);
+    var hit = resolutions.byHash[base + '|' + hash];
+    if (hit) return hit;
+    var samples = resolutions.bySample[base];
+    if (samples) {
+      var norm = window.FS.api.complianceHash.normalize(text);
+      if (samples[norm]) return samples[norm];
+    }
+    return null;
+  }
+
+  /* The union decision for ONE row. Aurora-first (auroraResolution), else the
+     legacy overlay (lookupAction on checkedMap). Returns a normalized
+     { resolved, resolved_by, resolved_at, source } the three call sites map
+     onto their status/resolved_by/resolved_at fields. */
+  function deriveResolved(resolutions, checkedMap, o) {
+    var aur = auroraResolution(resolutions, o.site_id, o.date, o.domain, o.folder, o.text);
+    if (aur) {
+      return { resolved: !!aur.resolved,
+               resolved_by: aur.resolved_by || null,
+               resolved_at: aur.resolved_at || null,
+               source: 'aurora' };
+    }
+    var legacy = window.FS.api.actions.lookupAction(checkedMap, o.folder, o.topic_id, o.action_index);
+    var resolved = !!(legacy && legacy.checked);
+    return { resolved: resolved,
+             resolved_by: resolved ? (legacy.checked_by || null) : null,
+             resolved_at: resolved ? (legacy.checked_at || null) : null,
+             source: resolved ? 'overlay' : 'none' };
+  }
+
+  /* One range-wide read of the durable resolutions (both domains — the GET's
+     domain param is omitted so safety+quality come back in one call, since
+     fanoutDates serves both pages). Aurora-gated inside org.js; mock / kill
+     switch / _accessDenied all degrade to an empty index, so the union simply
+     falls back to the legacy overlay (mock behaviour unchanged). */
+  function fetchResolutions(from, to, site) {
+    return window.FS.api.org.getComplianceResolutions({ from: from, to: to, site: site })
+      .then(function (res) { return buildResolutionIndex(res && res.resolutions); })
+      .catch(function () { return buildResolutionIndex(null); });
+  }
+
   async function fanoutDates(from, to, user, site) {
     var monthsLookback = (window.FS.api.window && window.FS.api.window.MONTHS_LOOKBACK) || 24;
     var datesRes = await window.FS.api.dates.getDates({ months: monthsLookback });
@@ -226,8 +314,12 @@
       .sort();
 
     if (datesInRange.length === 0) {
-      return { perDay: [], dates: [], actionsByDate: {} };
+      return { perDay: [], dates: [], actionsByDate: {}, resolutions: buildResolutionIndex(null) };
     }
+
+    /* Durable resolved-state map for the whole range (both domains), fetched
+       in parallel with the timeline + actions fan-out below. */
+    var resolutionsPromise = fetchResolutions(from, to, site);
 
     /* Task 2 (live-data fixes) — fetch the checked-actions map for every
        date in the range, in parallel with the timeline fanout below, so
@@ -283,6 +375,7 @@
         throw new Error('Could not load data — all requests failed. Please retry.');
       }
       var actionsByDateAdmin = await actionsByDatePromise;
+      var resolutionsAdmin = await resolutionsPromise;
       /* IB-1 fix — drop individual denied (date,folder) reports and keep
          whatever came back accessible; only surface _accessDenied if
          NOTHING accessible came back at all. */
@@ -297,7 +390,8 @@
           return { _accessDenied: true, error: deniedAdminItems[0].report.error };
         }
       }
-      return { perDay: perDayAdmin, dates: datesInRange, actionsByDate: actionsByDateAdmin };
+      return { perDay: perDayAdmin, dates: datesInRange, actionsByDate: actionsByDateAdmin,
+               resolutions: resolutionsAdmin };
     }
 
     var perDay = await Promise.all(datesInRange.map(function (d) {
@@ -305,6 +399,7 @@
         .then(function (r) { return { date: d, report: r }; });
     }));
     var actionsByDate = await actionsByDatePromise;
+    var resolutions = await resolutionsPromise;
 
     /* IB-1 fix — drop individual denied (date,folder) reports and keep
        whatever came back accessible; only surface _accessDenied if
@@ -321,7 +416,8 @@
       }
     }
 
-    return { perDay: perDay, dates: datesInRange, actionsByDate: actionsByDate };
+    return { perDay: perDay, dates: datesInRange, actionsByDate: actionsByDate,
+             resolutions: resolutions };
   }
 
   /* ─── Dedup helpers (_AUDIT-5) ───────────────────────────────────────── */
@@ -586,6 +682,7 @@
       if (!r || r._notFound || r.available_users) return;
       var folder = r.user_name ? window.FS.api.folderName(r.user_name) : null;
       var checkedMap = (fanout.actionsByDate && fanout.actionsByDate[x.date]) || {};
+      var resolutions = fanout.resolutions;   /* durable resolved-state map, Aurora-first */
 
       /* b) Topic-level safety_flags — built FIRST (but appended after
          the observations below, preserving the original row order) so
@@ -599,12 +696,17 @@
       var topicFlagRows = [];
       (r.topics || []).forEach(function (t) {
         (t.safety_flags || []).forEach(function (f, idx) {
-          var entry = window.FS.api.actions.lookupAction(checkedMap, folder, t.topic_id, 'flag_' + idx);
-          var resolved = !!(entry && entry.checked);
+          /* Durable resolved state (Aurora-first, overlay-fallback). Keyed on
+             r.site_id (org UUID) + this flag's rendered observation text. */
+          var rr = deriveResolved(resolutions, checkedMap, {
+            site_id: r.site_id, date: x.date, domain: 'safety', folder: folder,
+            text: f.observation, topic_id: t.topic_id, action_index: 'flag_' + idx,
+          });
           topicFlagRows.push({
             id:                 x.date + '_' + (folder || '') + '_' + t.topic_id + '_flag_' + idx,
             date:               x.date,
             site:               r.site || null,
+            site_id:            r.site_id || null,   /* org UUID — the compliance write/read key */
             user_name:          r.user_name || null,
             user_folder:        folder,
             topic_id:           t.topic_id,
@@ -616,9 +718,9 @@
             recommended_action: f.recommended_action || null,
             location:           null,
             who_raised:         null,
-            status:             resolved ? 'resolved' : 'open',  /* see _AUDIT-2 */
-            resolved_by:        resolved ? (entry.checked_by || null) : null,
-            resolved_at:        resolved ? (entry.checked_at || null) : null,
+            status:             rr.resolved ? 'resolved' : 'open',  /* see _AUDIT-2 */
+            resolved_by:        rr.resolved_by,
+            resolved_at:        rr.resolved_at,
             related_photos:     (t.related_photos || []).slice(),
           });
         });
@@ -640,12 +742,18 @@
         });
         if (isDup) return;
 
-        var entry = window.FS.api.actions.lookupAction(checkedMap, folder, -1, 'obs_' + idx);
-        var resolved = !!(entry && entry.checked);
+        /* Durable resolved state (Aurora-first, overlay-fallback). Report-level
+           observations key under the same site_id + their observation text;
+           the legacy overlay stays under topic_id -1 / 'obs_<idx>'. */
+        var rr = deriveResolved(resolutions, checkedMap, {
+          site_id: r.site_id, date: x.date, domain: 'safety', folder: folder,
+          text: o.observation, topic_id: -1, action_index: 'obs_' + idx,
+        });
         rows.push({
           id:                 x.date + '_' + (folder || '') + '_obs_' + idx,
           date:               x.date,
           site:               r.site || null,
+          site_id:            r.site_id || null,   /* org UUID — the compliance write/read key */
           user_name:          r.user_name || null,
           user_folder:        folder,
           topic_id:           -1,
@@ -657,9 +765,9 @@
           recommended_action: o.recommended_action || null,
           location:           o.location || null,
           who_raised:         o.who_raised || null,
-          status:             resolved ? 'resolved' : 'open',  /* see _AUDIT-2 */
-          resolved_by:        resolved ? (entry.checked_by || null) : null,
-          resolved_at:        resolved ? (entry.checked_at || null) : null,
+          status:             rr.resolved ? 'resolved' : 'open',  /* see _AUDIT-2 */
+          resolved_by:        rr.resolved_by,
+          resolved_at:        rr.resolved_at,
         });
       });
 
@@ -779,6 +887,7 @@
       if (!r || r._notFound || r.available_users) return;
       var folder = r.user_name ? window.FS.api.folderName(r.user_name) : null;
       var checkedMap = (fanout.actionsByDate && fanout.actionsByDate[x.date]) || {};
+      var resolutions = fanout.resolutions;   /* durable resolved-state map, Aurora-first */
 
       /* a) Report-level quality_and_compliance items. These carry a
          REAL backend status (q.status — 'completed'/'concern'/etc, not
@@ -813,12 +922,18 @@
          topic's own topic_id (one row per topic, no idx needed). */
       (r.topics || []).forEach(function (t) {
         if (t.category !== 'quality') return;
-        var entry = window.FS.api.actions.lookupAction(checkedMap, folder, t.topic_id, 'quality');
-        var resolved = !!(entry && entry.checked);
+        /* Durable resolved state (Aurora-first, overlay-fallback). The quality
+           row hashes the TOPIC TITLE (the backend re-key maps topics.title →
+           domain 'quality'); the legacy overlay stays under topic_id/'quality'. */
+        var rr = deriveResolved(resolutions, checkedMap, {
+          site_id: r.site_id, date: x.date, domain: 'quality', folder: folder,
+          text: t.topic_title, topic_id: t.topic_id, action_index: 'quality',
+        });
         rows.push({
           id:               x.date + '_' + (folder || '') + '_' + t.topic_id + '_topic',
           date:             x.date,
           site:             r.site || null,
+          site_id:          r.site_id || null,   /* org UUID — the compliance write/read key */
           user_name:        r.user_name || null,
           user_folder:      folder,
           topic_id:         t.topic_id,
@@ -826,9 +941,9 @@
           topic_category:   t.category,
           source:           'topic_quality',
           item:             t.topic_title,
-          status:           resolved ? 'resolved' : 'observed',
-          resolved_by:      resolved ? (entry.checked_by || null) : null,
-          resolved_at:      resolved ? (entry.checked_at || null) : null,
+          status:           rr.resolved ? 'resolved' : 'observed',
+          resolved_by:      rr.resolved_by,
+          resolved_at:      rr.resolved_at,
           details:          t.summary || null,
           follow_up_needed: false,
           who_raised:       (t.participants && t.participants[0]) || null,
@@ -905,6 +1020,23 @@
       tokenJaccard:             tokenJaccard,
       isDuplicateObservation:   isDuplicateObservation,
     },
+    /* compliance-resolutions — exposed for unit testing the durable
+       resolved-state union (Aurora-first, content_sample de-risk,
+       overlay-fallback, and the site_id-keying regression guard). */
+    _resolution: {
+      buildResolutionIndex: buildResolutionIndex,
+      auroraResolution:     auroraResolution,
+      deriveResolved:       deriveResolved,
+    },
   };
+
+  /* Node test runner (CommonJS). No-op in the browser (module is undefined). */
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      buildResolutionIndex: buildResolutionIndex,
+      auroraResolution:     auroraResolution,
+      deriveResolved:       deriveResolved,
+    };
+  }
 
 })();

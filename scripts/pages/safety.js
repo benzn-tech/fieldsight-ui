@@ -405,29 +405,35 @@
       var candidates = multiSelect.selectedItems.filter(function (r) { return !isResolved(r); });
       if (bulkResolving || candidates.length === 0) return;
       var api = window.FS && window.FS.api;
-      if (!api || !api.actions || !api.pooledAll) return;
+      if (!api || !api.org || !api.org.setComplianceResolution || !api.pooledAll) return;
 
       setBulkResolving(true);
 
       var thunks = candidates.map(function (row) {
         return function () {
-          var idxMatch = String(row.id || '').match(
-            row.source === 'topic_flag' ? /_flag_(\d+)$/ : /_obs_(\d+)$/
-          );
-          if (!idxMatch) return Promise.resolve({ ok: false, row: row });
-          var actionIndex = (row.source === 'topic_flag' ? 'flag_' : 'obs_') + idxMatch[1];
-          return api.actions.toggleAction({
-            date:         row.date,
-            topic_id:     row.topic_id,
-            action_index: actionIndex,
-            checked:      true,
-            action_text:  row.observation,
-            user_folder:  row.user_folder,
+          /* Durable compliance resolution — retires the UNAUTHENTICATED
+             toggle_action overlay. Keyed server-side on row.site_id (the org
+             UUID the timeline shim stamps, NOT the display name) + the
+             rendered observation text, which the server hashes identically to
+             the aggregator's read-side JS twin. */
+          if (!row.site_id) return Promise.resolve({ ok: false, row: row });
+          return api.org.setComplianceResolution({
+            domain:     'safety',
+            site:       row.site_id,
+            reportDate: row.date,
+            userFolder: row.user_folder,
+            text:       row.observation,
+            resolved:   true,
           }).then(function (res) {
+              /* A refused resolve (_accessDenied/_notFound) must surface as a
+                 failure — never a silent success. */
+              if (res && (res._accessDenied || res._notFound)) {
+                return { ok: false, row: row };
+              }
               return {
                 ok: true, row: row,
-                checkedBy: (res && res.checked_by) || null,
-                checkedAt: (res && res.checked_at) || null,
+                resolvedBy: (res && res.resolved_by) || null,
+                resolvedAt: (res && res.resolved_at) || null,
               };
             })
             .catch(function (err) {
@@ -447,7 +453,7 @@
         (results || []).forEach(function (r) {
           if (r && r.ok) {
             okIds[r.row.id] = true;
-            resolverById[r.row.id] = { checkedBy: r.checkedBy, checkedAt: r.checkedAt };
+            resolverById[r.row.id] = { resolvedBy: r.resolvedBy, resolvedAt: r.resolvedAt };
             okCount++;
           } else {
             failCount++;
@@ -462,8 +468,8 @@
               var resolver = resolverById[r.id] || {};
               return Object.assign({}, r, {
                 status:      'resolved',
-                resolved_by: resolver.checkedBy || null,
-                resolved_at: resolver.checkedAt || null,
+                resolved_by: resolver.resolvedBy || null,
+                resolved_at: resolver.resolvedAt || null,
               });
             });
             return Object.assign({}, s, {
@@ -673,11 +679,10 @@
 
     function toggleResolve() {
       if (!sel || togglePending) return;
-      var idxMatch = String(sel.id || '').match(
-        sel.source === 'topic_flag' ? /_flag_(\d+)$/ : /_obs_(\d+)$/
-      );
-      if (!idxMatch) return;  /* unexpected id shape — no-op, guard only */
-      var actionIndex = (sel.source === 'topic_flag' ? 'flag_' : 'obs_') + idxMatch[1];
+      /* Durable compliance resolution needs the org UUID (sel.site_id, the
+         timeline-shim field) — without it the write can't be keyed, so no-op.
+         Report-sourced rows carry it; manual/live rows never reach here. */
+      if (!sel.site_id) return;  /* no site_id — guard only, no-op */
       var prevSel   = sel;
       var nextStatus = prevSel.status === 'resolved' ? 'open' : 'resolved';
       var nextSel   = Object.assign({}, prevSel, { status: nextStatus });
@@ -741,14 +746,27 @@
       if (ctx.setSelected) ctx.setSelected(nextSel);
       applyStatus(prevSel.id, nextStatus);
 
-      window.FS.api.actions.toggleAction({
-        date:         sel.date,
-        topic_id:     sel.topic_id,
-        action_index: actionIndex,
-        checked:      nextStatus === 'resolved',
-        action_text:  sel.observation,
-        user_folder:  sel.user_folder,
+      window.FS.api.org.setComplianceResolution({
+        domain:     'safety',
+        site:       sel.site_id,          /* org UUID — never the display name */
+        reportDate: sel.date,
+        userFolder: sel.user_folder,
+        text:       sel.observation,      /* server hashes this identically to the read twin */
+        resolved:   nextStatus === 'resolved',
       }).then(function (res) {
+        /* A refused resolve (_accessDenied/_notFound) must surface as an
+           error — revert the optimistic flip, never silently keep it. */
+        if (res && (res._accessDenied || res._notFound)) {
+          setTogglePending(false);
+          if (ctx.setSelected) ctx.setSelected(prevSel);
+          applyStatus(prevSel.id, prevSel.status);
+          var toast = window.FS && window.FS.toast;
+          if (toast) toast.show({
+            message: (res && res.error) || 'You do not have permission to resolve this.',
+            tone:    'error',
+          });
+          return;
+        }
         setTogglePending(false);
         /* T6 — capture the resolver from the API response ONLY (never
            AuthMock/session — owner ≠ caller). Functional update + id
@@ -756,8 +774,8 @@
            selection. Reopen already cleared these above; skip the
            write there so we don't resurrect them from a slow response. */
         if (nextStatus === 'resolved') {
-          var resolvedBy = (res && res.checked_by) || null;
-          var resolvedAt = (res && res.checked_at) || null;
+          var resolvedBy = (res && res.resolved_by) || null;
+          var resolvedAt = (res && res.resolved_at) || null;
           if (ctx.setSelected) {
             ctx.setSelected(function (cur) {
               if (!cur || cur.id !== prevSel.id) return cur;
