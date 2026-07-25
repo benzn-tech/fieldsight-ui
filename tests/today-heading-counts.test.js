@@ -61,25 +61,24 @@ test('sectionCardCount: empty list is 0, null/undefined list is 0 (never throws)
   assert.strictEqual(sectionCardCount(undefined), 0);
 });
 
-/* ---------- Leftover uses the SAME rule as Open items/Team --------------- */
+/* ---------- "Open items" and "Team" share the SAME rule ----------------- */
 
-test('sectionCardCount: "Leftover" and "Open items"/"Team" agree on the same mixed list — one rule, not three', () => {
+test('sectionCardCount: "Open items" and "Team" agree on the same mixed list — one rule, not two', () => {
   const mixedList = [
     { id: 'a', work_class: 'non_work' },
     { id: 'b', work_class: 'work' },
     { id: 'c', work_class: 'non_work' },
     { id: 'd' },
   ];
-  // Whichever heading this list is rendered under (myRecent/teamRecent for
-  // "Open items"/"Team", or leftoverItems for "Leftover"), the SAME helper
-  // computes its number — there is no longer a second, stricter rule for
-  // the first two headings that Leftover doesn't share.
+  // Whichever heading this list is rendered under (myVisible for "Open
+  // items", teamVisible for "Team" — feat/leftover-inline-filter retired
+  // the separate "Leftover" heading), the SAME helper computes its number:
+  // there is no second, stricter rule for one heading the other doesn't
+  // share.
   const openItemsHeadingCount = sectionCardCount(mixedList);
   const teamHeadingCount      = sectionCardCount(mixedList);
-  const leftoverHeadingCount  = sectionCardCount(mixedList);
   assert.strictEqual(openItemsHeadingCount, 4);
   assert.strictEqual(teamHeadingCount, 4);
-  assert.strictEqual(leftoverHeadingCount, 4);
 });
 
 /* ---------- Project sub-group counts sum to the section count ------------ */

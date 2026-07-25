@@ -69,6 +69,13 @@
      noDeadline     boolean, optional (feat/today-rolling-open-items) —
                     renders a subtle "No due date" chip (warning tone,
                     never safety-red/blocked-magenta per CLAUDE.md).
+     aged           boolean, optional (feat/leftover-inline-filter) — the
+                    Today page now renders 90+-day-old open items INLINE in
+                    their Mine/Team section (no separate Leftover drawer);
+                    this flag renders a subtle "90+ days" chip (neutral
+                    outline, the SAME quiet style as "Possibly personal")
+                    so aged items stay distinguishable at a glance.
+                    Omitted/falsy on every other caller → no chip rendered.
      batchMode      boolean, optional (feat/leftover-batch-select, T1) —
                     when true AND `checkable` is true, the SAME round
                     check-off button doubles as a multi-select toggle
@@ -247,6 +254,13 @@
             props.noDeadline ? React.createElement(Badge, {
               tone: 'warning', variant: 'outline', size: 'sm',
             }, 'No due date') : null,
+            /* feat/leftover-inline-filter — subtle "90+ days" marker on
+               aged Today items now that they render inline rather than in
+               a separate drawer. Neutral outline, same quiet weight as the
+               "Possibly personal" chip below — never a loud/red one. */
+            props.aged ? React.createElement(Badge, {
+              tone: 'neutral', variant: 'outline', size: 'sm',
+            }, '90+ days') : null,
             /* Q1 — tier-aware Today/Tasks: informational only, no review
                controls (those stay on Timeline). `=== 'non_work'` (never
                `!== 'work'`) so a missing/other value still counts as
