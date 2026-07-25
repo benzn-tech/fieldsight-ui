@@ -87,43 +87,45 @@ test('isBatchEligibleTask: a programme-task-shaped object (no topic_id/actionInd
   }), false);
 });
 
-test('batchEligibleItems merge order: myRecent groups, then teamRecent groups, then leftover groups', () => {
+test('batchEligibleItems merge order: Mine groups, then Team groups (feat/leftover-inline-filter — no separate Leftover section any more; aged items fold into Mine/Team)', () => {
   // Mirrors the exact composition today.js builds: groupByProject(list)
-  // flattened per section, concatenated Mine -> Team -> Leftover, then
-  // filtered to eligible rows. Shift-range selection depends on this
-  // matching the visual top-to-bottom section order.
+  // flattened per section, concatenated Mine -> Team, then filtered to
+  // eligible rows. Shift-range selection depends on this matching the
+  // visual top-to-bottom section order. Aged (90+ day) items now live
+  // INLINE in Mine/Team (m-aged below) rather than a third "Leftover"
+  // group, so they remain batch-eligible via the same two sections.
   function flatten(list) {
     return groupByProject(list).reduce(function (acc, g) { return acc.concat(g.rows); }, []);
   }
-  const myRecent = [
-    { id: 'm1', site_slug: 'siteB', topic_id: 't', actionIndex: 0, date: 'd' },
-    { id: 'm2', site_slug: 'siteA', topic_id: 't', actionIndex: 1, date: 'd' },
+  const myVisible = [
+    { id: 'm1', site_slug: 'siteB', topic_id: 't', actionIndex: 0, date: 'd', ageDays: 3 },
+    { id: 'm2', site_slug: 'siteA', topic_id: 't', actionIndex: 1, date: 'd', ageDays: 5 },
+    { id: 'm-aged', site_slug: 'siteC', topic_id: 't', actionIndex: 2, date: 'd', ageDays: 200 }, // aged, inline, still eligible
   ];
-  const teamRecent = [
-    { id: 'tm1', site_slug: 'siteA', topic_id: 't', actionIndex: 0, date: 'd' },
-  ];
-  const leftover = [
-    { id: 'l1', site_slug: 'siteC', topic_id: 't', actionIndex: 0, date: 'd' },
+  const teamVisible = [
+    { id: 'tm1', site_slug: 'siteA', topic_id: 't', actionIndex: 0, date: 'd', ageDays: 10 },
   ];
 
-  const merged = flatten(myRecent).concat(flatten(teamRecent)).concat(flatten(leftover))
+  const merged = flatten(myVisible).concat(flatten(teamVisible))
     .filter(isBatchEligibleTask);
 
-  assert.deepStrictEqual(merged.map((t) => t.id), ['m1', 'm2', 'tm1', 'l1']);
+  // groupByProject preserves first-seen project order within each section:
+  // Mine = siteB(m1), siteA(m2), siteC(m-aged); then Team = siteA(tm1).
+  assert.deepStrictEqual(merged.map((t) => t.id), ['m1', 'm2', 'm-aged', 'tm1']);
 });
 
 test('batchEligibleItems merge: a non-eligible row (no date) is dropped from the merged list but stays renderable', () => {
   function flatten(list) {
     return groupByProject(list).reduce(function (acc, g) { return acc.concat(g.rows); }, []);
   }
-  const myRecent = [
+  const myVisible = [
     { id: 'm1', site_slug: 'siteA', topic_id: 't', actionIndex: 0, date: 'd' },
     { id: 'm2', site_slug: 'siteA' },   // no topic_id/actionIndex/date — not batch-eligible
   ];
-  const merged = flatten(myRecent).filter(isBatchEligibleTask);
+  const merged = flatten(myVisible).filter(isBatchEligibleTask);
   assert.deepStrictEqual(merged.map((t) => t.id), ['m1']);
   // m2 is still part of the raw list (still rendered as a card, just
   // without a round check button at all) — this test only asserts it's
   // excluded from the SELECTABLE set, not that it vanishes from the page.
-  assert.strictEqual(myRecent.length, 2);
+  assert.strictEqual(myVisible.length, 2);
 });

@@ -327,125 +327,57 @@
 }
 
 
-/* feat/today-leftover-grouping — collapsible section for rolling open
-   items aged past LEFTOVER_THRESHOLD_DAYS (90d). Default collapsed; a
-   real <button> toggle with aria-expanded + a rotating chevron. The
-   chevron uses a plain `transform` transition (no @keyframes), so the
-   global prefers-reduced-motion transition-duration:0.01ms belt in
-   tokens.css (~line 757) already neutralises it — same pattern as
-   .fs-gantt-tree__chev / .fs-prog-kanban__group-chev above, no separate
-   override needed here (see file-header animation registry note: that
-   registry only tracks @keyframes, whose forwards-fill end-states need
-   an explicit static override; transitions don't have that problem).
-   Label uses --text-warning (theme-flipped semantic token, NOT the raw
-   --color-warning-700 palette value) — neutral/warning tone per
-   CLAUDE.md status-color rule, never safety-red / blocked-magenta. */
-.fs-today__leftover {
-  margin-top: 14px;
-}
-.fs-today__leftover-toggle {
+/* feat/leftover-inline-filter — the "Hide older (90+ days)" filter chip
+   that sits at the top of the Tasks area (today.js). Replaces the old
+   collapsible "Leftover" drawer entirely: aged (90+ day) open items now
+   render INLINE in their Mine/Team section by default, each with a "90+
+   days" chip (task-card.js `aged` prop); this control hides them on
+   demand. Default OFF (shown). Chip styling mirrors the RangeToolbar
+   filter chips (rounded, --surface-selected + --color-accent-400 when
+   active) for cross-page consistency — neutral, never safety-red /
+   blocked-magenta per CLAUDE.md status-color rule. */
+.fs-today__age-filter-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 8px 4px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-secondary);
-  background: transparent;
-  border: none;
-  border-top: 1px solid var(--border-subtle);
-  cursor: pointer;
-  text-align: left;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 4px 0 8px;
+  padding: 0 4px;
 }
-.fs-today__leftover-toggle:hover {
-  color: var(--text-primary);
-}
-.fs-today__leftover-toggle:focus-visible {
-  outline: 2px solid var(--border-focus);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
-}
-.fs-today__leftover-chev {
-  flex-shrink: 0;
-  width: 12px;
+.fs-today__age-filter {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  color: var(--text-tertiary);
-  /* NOTE: --ease-out is the real token (tokens.css ~line 280); several
-     existing call sites in this file (.fs-today__view-report-cta,
-     .fs-today__timeline-link-arrow, .fs-gantt-tree__chev,
-     .fs-prog-kanban__group-chev) reference a nonexistent --easing-out
-     instead — an existing typo, out of scope to fix here, but new code
-     shouldn't propagate it. */
-  transition: transform var(--duration-fast) var(--ease-out);
-}
-.fs-today__leftover-chev--open {
-  transform: rotate(90deg);
-}
-.fs-today__leftover-label {
-  color: var(--text-warning);
-}
-.fs-today__leftover-hint {
-  font-weight: var(--font-weight-regular);
-  color: var(--text-tertiary);
-  text-transform: none;
-  letter-spacing: normal;
-}
-.fs-today__leftover-body {
-  padding-top: 8px;
-}
-
-/* fix/leftover-discoverability — quiet pointer rendered near "Open
-   items" (today.js), pointing at the viewer's OWN tasks the Recent/
-   Leftover age split just carried into the section above. Deliberately
-   lighter-weight than .fs-today__leftover-toggle (that's the section's
-   own control; this is just a hint ABOUT it) — text-only, no
-   background/border, tertiary color until hover. */
-.fs-today__stranded-hint {
-  display: block;
-  width: 100%;
-  margin: 2px 0 4px;
-  padding: 4px;
+  padding: 5px 10px;
   font: inherit;
   font-size: 12px;
-  color: var(--text-tertiary);
-  background: transparent;
-  border: none;
-  text-align: left;
-  cursor: pointer;
-}
-.fs-today__stranded-hint:hover {
   color: var(--text-secondary);
-  text-decoration: underline;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  /* NOTE: --ease-out is the real token (tokens.css); some existing call
+     sites reference a nonexistent --easing-out — an existing typo, not
+     propagated here. */
+  transition: background var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out);
 }
-.fs-today__stranded-hint:focus-visible {
+.fs-today__age-filter:hover {
+  color: var(--text-primary);
+  background: var(--surface-panel-muted);
+}
+.fs-today__age-filter--active {
+  color: var(--text-primary);
+  background: var(--surface-selected);
+  border-color: var(--color-accent-400);
+}
+.fs-today__age-filter:focus-visible {
   outline: 2px solid var(--border-focus);
   outline-offset: 2px;
-  border-radius: var(--radius-sm);
 }
-
-/* feat/leftover-batch-select (T1) — header row wrapping the expand
-   toggle. border-top lives here instead of on .fs-today__leftover-
-   toggle so the rule reads once per row.
-   fix/today-batch-select-expand — this row USED to also carry a
-   sibling "Batch Select" mode toggle <button> here; that control moved
-   to the page-level .fs-today__toolbar-row above (today.js) so it's
-   reachable without expanding Leftover first. The rule below (flex:1 on
-   the lone remaining child) still applies harmlessly. */
-.fs-today__leftover-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  border-top: 1px solid var(--border-subtle);
-}
-.fs-today__leftover-header .fs-today__leftover-toggle {
-  border-top: none;
-  flex: 1;
-  min-width: 0;
+.fs-today__age-hidden-count {
+  font-size: 12px;
+  color: var(--text-tertiary);
 }
 /* feat/leftover-batch-select (T1), generalized T4 — was
    .fs-today__leftover-batch-toggle / .fs-today__bulk-bar*, Today-only.

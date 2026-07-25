@@ -15,12 +15,14 @@
         30d floor showed nothing) that is NOT yet checked off, mine +
         team, tagged with age + a no-deadline flag. An item keeps
         showing until it's resolved, instead of vanishing when the
-        calendar day changes. At render time the merged list is split
-        into a Recent group (ageDays <= LEFTOVER_THRESHOLD_DAYS, front-
-        and-center, existing My/Team/Programme treatment) and a
-        collapsible Leftover group (ageDays > LEFTOVER_THRESHOLD_DAYS,
-        default collapsed, grouped by project). Checking one off drops
-        it (existing optimistic removeMyTask, now scans both buckets).
+        calendar day changes. Every item renders INLINE in its correct
+        Mine ("Open items") / Team section regardless of age
+        (feat/leftover-inline-filter); an aged item (ageDays >
+        LEFTOVER_THRESHOLD_DAYS) carries a subtle "90+ days" chip and can
+        be hidden on demand via a per-viewer filter toggle (default OFF —
+        shown). There is no separate collapsed "Leftover" drawer any more.
+        Checking one off drops it (existing optimistic removeMyTask, now
+        scans both buckets).
      3. Near-deadline programme — programme tasks whose deadline (end)
         falls within the next PROGRAMME_DEADLINE_DAYS days.
 
@@ -62,10 +64,12 @@
      (see loadRollingOpenItems' use of FS.api.window.getSpan()). */
   var PROGRAMME_DEADLINE_DAYS = 7;
 
-  /* feat/today-leftover-grouping — an open item is "Recent" (front-and-
-     center, existing My/Team treatment) when its ageDays is at most
-     this; older items are "Leftover" (collapsible, grouped by project,
-     collapsed by default). Tunable. */
+  /* feat/today-leftover-grouping / feat/leftover-inline-filter — an open
+     item is "aged" when its ageDays EXCEEDS this. Aged items still render
+     inline in their Mine/Team section (no separate drawer any more); they
+     carry a subtle "90+ days" chip (isAgedTask below) and are the exact
+     set the optional "Hide older" filter removes. Tunable — the value
+     (90) is a "do not change" constant per the redesign spec. */
   var LEFTOVER_THRESHOLD_DAYS = 90;
 
   /* UTC-safe day diff — mirrors today-programme-adapter.js:diffDays.
@@ -95,10 +99,9 @@
      tier-aware Today/Tasks) excluded `work_class === 'non_work'` items
      from "Open items"/"Team" while still RENDERING them (TaskCard's
      "Possibly personal" badge), so a heading could read "Open items · 3"
-     over 5 cards; "Leftover" meanwhile always used the raw length, a
-     THIRD rule on the same page. Q1's "still render it, just flag it"
-     behaviour is preserved (a non_work item stays in myRecent/teamRecent/
-     leftoverItems, badge and all) — only the count changed, from
+     over 5 cards. Q1's "still render it, just flag it" behaviour is
+     preserved (a non_work item stays in the Mine/Team render list,
+     myVisible/teamVisible, badge and all) — only the count changed, from
      "exclude non_work" to "count what's on screen". The badge is what
      tells the possibly-personal story now; the heading number no longer
      silently disagrees with the cards under it. Project sub-group
@@ -107,43 +110,79 @@
      count-what-renders rule and needed no change.
 
      sectionCardCount() below is the ONE named place that rule lives —
-     "Open items"/"Team"/"Leftover" all route their heading number
-     through it (on the exact list they render) instead of three
-     independent `list.length` expressions tied together only by
-     comments, so a future edit to one heading can't silently
-     reintroduce a filter the others don't have. */
+     "Open items"/"Team" both route their heading number through it (on
+     the exact list they render — myVisible/teamVisible, aged items and
+     all when shown) instead of independent `list.length` expressions,
+     so a future edit to one heading can't silently reintroduce a filter
+     the other doesn't have. feat/leftover-inline-filter: the number is
+     honest in BOTH filter states — aged items shown → counted; hidden →
+     absent from both the count and the cards. */
   function sectionCardCount(list) {
     return (list || []).length;
   }
 
-  /* fix/leftover-discoverability — the user's own words: "even when the
-     assignee is the same person, items get put in different sections."
-     Root cause: myTasks/teamTasks (Mine/Team, by isMineTask) get torn
-     apart AGAIN purely by age (the Recent/Leftover split above/below —
-     myLeftover/myRecent), and Leftover is collapsed by default — so a
-     viewer's own older item silently leaves "Open items" for a closed
-     drawer and reads as MISSING, not filed. This does not change the
-     split, the threshold, or which section anything lands in — it only
-     answers "how many of THIS viewer's own tasks did that split just
-     strand?", so the render can say so where they'd have looked.
+  /* feat/leftover-inline-filter — the aged-item MARKER predicate and the
+     single source of truth for "is this open item 90+ days old". Replaces
+     the old Recent/Leftover age SPLIT (which tore Mine/Team apart a second
+     time and hid the older half in a default-collapsed, Mine+Team-merged
+     "Leftover" drawer — a viewer's own older task read as MISSING). Aged
+     items now render INLINE in their correct Mine/Team section by default,
+     each carrying a subtle "90+ days" chip (TaskCard `aged` prop) driven by
+     THIS predicate; an optional filter (default OFF — see hideAged state in
+     TodayMiddleColumn) hides them. Strict `>` mirrors the exact threshold
+     comparison the old split used (never `>=`). */
+  function isAgedTask(t) {
+    return !!t && t.ageDays > LEFTOVER_THRESHOLD_DAYS;
+  }
 
-     Deliberately takes the viewer's OWN, pre-split myTasks list (never
-     teamTasks) and re-applies the EXACT SAME predicate the Recent/
-     Leftover split above uses (`ageDays > LEFTOVER_THRESHOLD_DAYS`) —
-     so a Team item that also aged into Leftover can never inflate this
-     number; the Leftover section HEADING further down still counts
-     Mine+Team merged (sectionCardCount(leftoverItems), unchanged), this
-     is a different, narrower number used only by the new hint line. */
-  function countOwnStranded(myTasks) {
-    return (myTasks || []).filter(function (t) {
-      return t && t.ageDays > LEFTOVER_THRESHOLD_DAYS;
-    }).length;
+  /* feat/leftover-inline-filter — a section's RENDER list under the aged
+     filter: when hideAged is on, aged (90+ day) items are dropped;
+     otherwise the list is returned unchanged (aged items shown inline —
+     the default). Applied independently to the Mine list and the Team
+     list, so Mine/Team is NEVER merged (the old Leftover bug) — each
+     section still filters its own bucket by the same isMineTask-derived
+     membership it always had. */
+  function visibleTasks(list, hideAged) {
+    return (list || []).filter(function (t) {
+      return !hideAged || !isAgedTask(t);
+    });
+  }
+
+  /* feat/leftover-inline-filter — how many aged items a list holds. Used
+     for the quiet "N older items hidden" count the filter shows when on,
+     and to gate the filter control's visibility (no aged items → no
+     control). Counts across whatever list it's given; the render sums the
+     Mine and Team totals for the page-level hidden count — it is NOT
+     Mine-only (the old countOwnStranded was, for a hint that no longer
+     exists). */
+  function countAged(list) {
+    return (list || []).filter(isAgedTask).length;
+  }
+
+  /* feat/leftover-inline-filter — the aged filter is a persisted Today
+     preference, stored the same way tasks.js persists fs.settings.tasksView:
+     a localStorage key under the fs.settings.* namespace (there is no
+     central fs.settings object — each pref is its own key; RangeToolbar's
+     storageKey does exactly this). Default OFF (aged items shown). Any
+     storage error collapses to the default — never blocks the page. */
+  var HIDE_AGED_PREF_KEY = 'fs.settings.todayHideAged';
+  function readHideAgedPref() {
+    try {
+      return window.localStorage.getItem(HIDE_AGED_PREF_KEY) === '1';
+    } catch (_) {
+      return false;
+    }
+  }
+  function writeHideAgedPref(hideAged) {
+    try {
+      window.localStorage.setItem(HIDE_AGED_PREF_KEY, hideAged ? '1' : '0');
+    } catch (_) { /* ignore — the in-memory state still drives this session */ }
   }
 
   /* fix/today-batch-select-expand — the SAME condition that already
-     decides whether TaskCard gets a `checkable` prop (myRecent/teamRecent/
-     Leftover call sites below all repeated this inline before this
-     extraction). Only a checkable row grows a round check button at all
+     decides whether TaskCard gets a `checkable` prop (the Mine and Team
+     call sites below both use it). Only a checkable row grows a round
+     check button at all
      (task-card.js `checkable`), so this doubles as "is this row eligible
      for the Batch Select round-button-becomes-a-toggle behavior" — an
      item with no topic_id/actionIndex/date has nothing for
@@ -1566,13 +1605,23 @@
        and passes it through; we only read the id for matching. */
     var selectedId = props.selectedItem && props.selectedItem.id;
 
-    /* feat/today-leftover-grouping — collapsible Leftover section expand
-       state, declared unconditionally (before any early return below)
-       per rules-of-hooks. Default collapsed — the substance triage
-       happens on demand, not shoved in the user's face every visit. */
-    var leftoverRef          = React.useState(false);
-    var leftoverExpanded     = leftoverRef[0];
-    var setLeftoverExpanded  = leftoverRef[1];
+    /* feat/leftover-inline-filter — the "Hide older (90+ days)" filter,
+       declared unconditionally (before any early return below) per
+       rules-of-hooks. ONE piece of state, default OFF (aged items shown
+       inline) — lazy-initialised from the persisted per-viewer preference
+       (fs.settings.todayHideAged, see readHideAgedPref above), the same
+       way tasks.js seeds its RangeToolbar view from fs.settings.tasksView.
+       toggleHideAged flips it AND persists the new value. */
+    var hideAgedRef  = React.useState(readHideAgedPref);
+    var hideAged     = hideAgedRef[0];
+    var setHideAged  = hideAgedRef[1];
+    function toggleHideAged() {
+      setHideAged(function (prev) {
+        var next = !prev;
+        writeHideAgedPref(next);
+        return next;
+      });
+    }
 
     /* Guards the "Resolve N" button against double-submit while the
        pooled toggleAction batch is in flight. */
@@ -1584,82 +1633,51 @@
     var state    = ctx && ctx.state;
     var removeMy = ctx && ctx.removeMyTask;
 
-    /* feat/leftover-batch-select (T1) / T4 DRY extraction — leftoverItems
-       has to be known BEFORE the useMultiSelect() hook call just below
-       (its `items` param drives Shift-range selection), and hook calls
-       must stay unconditional per rules-of-hooks — so this is computed
+    /* feat/leftover-inline-filter — the Mine / Team render lists have to
+       be known BEFORE the useMultiSelect() hook call just below (its
+       `items` param drives Shift-range selection), and hook calls must
+       stay unconditional per rules-of-hooks — so they are computed
        defensively here (state may not be 'ok' yet, e.g. still loading)
-       rather than after the status early-returns further down, which is
-       where the equivalent myRecent/teamRecent split used to live.
-       Reused verbatim below once state.status === 'ok' is confirmed —
-       not recomputed. */
-    var earlyData = (state && state.status === 'ok') ? state.data : null;
-    var myRecent = [], myLeftover = [], teamRecent = [], teamLeftover = [];
-    if (earlyData) {
-      (earlyData.myTasks || []).forEach(function (t) {
-        (t.ageDays > LEFTOVER_THRESHOLD_DAYS ? myLeftover : myRecent).push(t);
-      });
-      (earlyData.teamTasks || []).forEach(function (t) {
-        (t.ageDays > LEFTOVER_THRESHOLD_DAYS ? teamLeftover : teamRecent).push(t);
-      });
-    }
-    var leftoverItems = myLeftover.concat(teamLeftover);
+       rather than after the status early-returns further down. Reused
+       verbatim below once state.status === 'ok' is confirmed — not
+       recomputed.
 
-    /* fix/leftover-discoverability — how many of THIS viewer's own
-       tasks the split just above stranded into Leftover. Computed via
-       the pure, exported countOwnStranded() (not read off
-       myLeftover.length) so the render path and
-       tests/leftover-discoverability.test.js exercise the identical
-       function — they cannot independently drift. Same
-       earlyData.myTasks source myLeftover itself was built from. */
-    var ownStrandedCount = countOwnStranded(earlyData && earlyData.myTasks);
+       No Recent/Leftover age SPLIT any more: myTasks stays Mine, teamTasks
+       stays Team (isMineTask, unchanged), and the age filter is applied to
+       EACH bucket independently (visibleTasks) — Mine and Team are never
+       merged. myVisible/teamVisible are what each section renders; aged
+       items are only absent from them when hideAged is on. */
+    var earlyData   = (state && state.status === 'ok') ? state.data : null;
+    var myAll       = (earlyData && earlyData.myTasks)   || [];
+    var teamAll     = (earlyData && earlyData.teamTasks) || [];
+    var myVisible   = visibleTasks(myAll, hideAged);
+    var teamVisible = visibleTasks(teamAll, hideAged);
 
-    /* F2 — leftoverIsMultiProject (and the flattened render order it
-       drives) has to be known BEFORE useMultiSelect() below, same
-       rules-of-hooks constraint as leftoverItems above. Moved up from
-       further down the component (see the old comment near the
-       state.status early-returns) since it only depends on leftoverItems,
-       already computed just above. Leftover section computes its OWN
-       multi-project flag off just the leftover items (reusing
-       distinctProjects' pool-scanning shape) — it can legitimately
-       differ from the page-level isMultiProject computed later (e.g.
-       recent items are all one project but leftovers span three). */
-    var leftoverProjects       = distinctProjects({ myTasks: leftoverItems, teamTasks: [], urgent: [], programmeTasks: [] });
-    var leftoverIsMultiProject = leftoverProjects.length > 1;
+    /* feat/leftover-inline-filter — how many aged items exist across both
+       buckets (gates whether the filter control shows at all — nothing
+       aged, no control) and, when the filter is on, how many are currently
+       hidden (the quiet "N older items hidden" count). agedTotal is off
+       the FULL lists so the control stays visible even while its own
+       filter is hiding the very items it counts. */
+    var agedTotal   = countAged(myAll) + countAged(teamAll);
+    var hiddenCount = hideAged ? agedTotal : 0;
 
-    /* F2 — when multi-project, the middle column renders leftovers
-       grouped by project (renderMaybeGrouped → groupByProject below),
-       NOT in leftoverItems' raw myLeftover-then-teamLeftover concat
-       order. Shift-range selection has to walk the SAME order the user
-       sees, so flatten groupByProject's own output here and pass THAT
-       to useMultiSelect — not leftoverItems — so a Shift+Click between
-       two visually-adjacent cards can't reach into a different group. */
-    /* #4 — the Leftover body now ALWAYS renders project-grouped (see
-       renderMaybeGrouped), so Shift-range selection must walk the grouped
-       order unconditionally — not just when multi-project. */
-    var leftoverRenderItems = groupByProject(leftoverItems)
+    /* fix/today-batch-select-expand — Batch Select spans Mine + Team
+       (Tasks-page parity). Order matches on-screen order exactly (Mine's
+       project groups, then Team's — same top-to-bottom reading order the
+       two sections render in below) so Shift-range selection can never
+       jump into a visually-unrelated row. Only isBatchEligibleTask() rows
+       are included — same condition each section uses for the TaskCard
+       `checkable` prop. Built from myVisible/teamVisible, so items hidden
+       by the age filter are correctly not batch-selectable while hidden.
+       ProgrammeTaskCard / UrgentCard rows are never TaskCards and never in
+       these lists, so they can't enter it. */
+    var myRenderItems = groupByProject(myVisible)
       .reduce(function (acc, g) { return acc.concat(g.rows); }, []);
-
-    /* fix/today-batch-select-expand — Batch Select used to cover ONLY
-       the Leftover section; it now spans Recent Mine + Recent Team too,
-       same as Tasks-page parity. Order matches on-screen order exactly
-       (myRecent's project groups, then teamRecent's, then leftover's —
-       same left-to-right/top-to-bottom reading order the three sections
-       render in below) so Shift-range selection can never jump into a
-       visually-unrelated row. Only isBatchEligibleTask() rows are
-       included — same condition each section already uses for the
-       TaskCard `checkable` prop, since a non-checkable row has no round
-       button to become a multi-select toggle in the first place.
-       ProgrammeTaskCard / UrgentCard rows are never TaskCards and are
-       never in myRecent/teamRecent/leftoverItems to begin with, so they
-       can't enter this list. */
-    var myRecentRenderItems = groupByProject(myRecent)
+    var teamRenderItems = groupByProject(teamVisible)
       .reduce(function (acc, g) { return acc.concat(g.rows); }, []);
-    var teamRecentRenderItems = groupByProject(teamRecent)
-      .reduce(function (acc, g) { return acc.concat(g.rows); }, []);
-    var batchEligibleItems = myRecentRenderItems
-      .concat(teamRecentRenderItems)
-      .concat(leftoverRenderItems)
+    var batchEligibleItems = myRenderItems
+      .concat(teamRenderItems)
       .filter(isBatchEligibleTask);
 
     /* T4 — batchMode/anchor/Shift-Ctrl selection state + dispatch, now
@@ -1670,13 +1688,11 @@
        single-resolve path (task-card.js startCheckOff, unchanged); ON,
        the SAME round selectors become multi-select toggles
        (multiSelect.onItemClick, wired below) and nothing resolves until
-       "Resolve N" is pressed (bulkResolveSelected(), renamed from
-       bulkResolveLeftover — it now resolves across all three sections,
-       not leftovers only — still the sole audited write).
-       fix/today-batch-select-expand — `items` widened from
-       leftoverRenderItems to batchEligibleItems (above) so the toggle
-       reachable from the page-level toolbar (below) can select rows in
-       any of the three sections, not just Leftover. */
+       "Resolve N" is pressed (bulkResolveSelected() — the sole audited
+       write). `items` is batchEligibleItems (above): Mine + Team, in
+       on-screen order, minus any aged items the "Hide older" filter is
+       currently hiding, so the toggle reachable from the page-level
+       toolbar (below) selects exactly the rows the user can see. */
     var multiSelect = window.FieldSight.useMultiSelect({
       items: batchEligibleItems,
       getId: function (t) { return t.id; },
@@ -1761,30 +1777,14 @@
     var projects       = distinctProjects(data);
     var isMultiProject = projects.length > 1;
 
-    /* feat/today-leftover-grouping — Recent vs Leftover split, computed
-       at render time from the full data.myTasks/data.teamTasks (the
-       loader/state never splits — see loadRollingOpenItems), so
-       removeMyTask (id-based, both buckets) and findItemById keep
-       working unchanged no matter which group an item is currently
-       rendered in. Recent = ageDays <= LEFTOVER_THRESHOLD_DAYS (existing
-       My/Team treatment); Leftover = older, combined across My + Team
-       into one collapsible, project-grouped list (ownership matters
-       less for old-item triage). myIds is used only to paint the
-       existing `isMine` accent border on leftover cards that originated
-       from myTasks.
-
-       T4 DRY extraction — myRecent/myLeftover/teamRecent/teamLeftover/
-       leftoverItems themselves were already computed EARLIER in this
-       component (before the useMultiSelect() hook call near the top —
-       see that T4 comment), since useMultiSelect's `items` param must be
-       known before any early return per rules-of-hooks. Reused verbatim
-       here, not recomputed. */
-    var myIds = {};
-    (data.myTasks || []).forEach(function (t) { myIds[t.id] = true; });
-
-    /* F2 — leftoverProjects/leftoverIsMultiProject moved up (see the T4
-       useMultiSelect comment near the top of this component); reused
-       verbatim here, not recomputed. */
+    /* feat/leftover-inline-filter — myVisible/teamVisible (the per-bucket,
+       age-filtered render lists) and agedTotal/hiddenCount were computed
+       EARLIER in this component (before the useMultiSelect() hook call
+       near the top), since useMultiSelect's `items` param must be known
+       before any early return per rules-of-hooks. Reused verbatim here,
+       not recomputed. The loader/state never splits by age (see
+       loadRollingOpenItems), so removeMyTask (id-based, both buckets) and
+       findItemById keep working unchanged no matter the filter state. */
 
     /* T4 — selectedBatchItems/selectedCount now come straight off
        multiSelect.selectedItems, which does the exact same
@@ -1954,11 +1954,11 @@
       /* fix/today-batch-select-expand — bulk action bar, shared
          MultiSelectBulkBar composite (same one /tasks + /safety +
          /quality use), shown whenever Batch Select is on. Lives here at
-         the top level (not nested in any collapsible section) so
-         "Resolve N" stays reachable no matter which of the three
-         sections below the selection actually came from, and survives
-         collapsing Leftover (selection state lives in useMultiSelect,
-         untouched by leftoverExpanded). */
+         the top level so "Resolve N" stays reachable no matter which of
+         the Mine/Team sections below the selection actually came from,
+         and survives toggling the "Hide older" filter (selection state
+         lives in useMultiSelect; a hidden item simply drops out of the
+         eligible set — see batchEligibleItems). */
       multiSelect.batchMode
         ? React.createElement(fs.MultiSelectBulkBar, {
             count:   selectedCount,
@@ -2009,6 +2009,32 @@
          the user reads them as ONE list with provenance, not two lists. */
       React.createElement(SectionLabel, null, 'Tasks'),
 
+      /* feat/leftover-inline-filter — the "Hide older (90+ days)" filter,
+         sitting at the top of the tasks area (consistent with the Tasks
+         page's filter chips). Default OFF: aged items render inline in
+         their Mine/Team section, each with a "90+ days" chip. Only shown
+         when there ARE aged items to act on (agedTotal > 0) — otherwise
+         the control is pure noise. Toggling on hides every aged item from
+         both sections and surfaces a quiet "N older items hidden" count;
+         toggling off (aria-pressed reflects state) brings them straight
+         back. One control, one piece of state (hideAged) — no second
+         drawer, no per-section toggle. */
+      agedTotal > 0
+        ? React.createElement('div', { className: 'fs-today__age-filter-row' },
+            React.createElement('button', {
+              type:           'button',
+              className:      'fs-today__age-filter'
+                + (hideAged ? ' fs-today__age-filter--active' : ''),
+              onClick:        toggleHideAged,
+              'aria-pressed': hideAged,
+            }, 'Hide older (' + LEFTOVER_THRESHOLD_DAYS + '+ days)'),
+            hideAged
+              ? React.createElement('span', { className: 'fs-today__age-hidden-count' },
+                  hiddenCount + (hiddenCount === 1 ? ' older item hidden' : ' older items hidden'))
+              : null,
+          )
+        : null,
+
       /* Sub-group 1 — Programme tasks (rendered FIRST since the
          programme work is the structural context for the day; action
          items are reactive details inside it). */
@@ -2037,23 +2063,27 @@
           )
         : null,
 
-      /* Sub-group 2 — rolling unresolved action items, RECENT only
-         (ageDays <= LEFTOVER_THRESHOLD_DAYS; older items live in the
-         collapsible Leftover section below). §C — per-item check-off:
-         each task carries its OWN origin date (stamped by
-         today-adapter.js / loadRollingOpenItems) since the list mixes
-         dates — there is no single page-level effectiveDate to check
-         off against any more. */
-      myRecent.length > 0
+      /* Sub-group 2 — the viewer's own rolling unresolved action items
+         ("Open items"). feat/leftover-inline-filter: this is myVisible —
+         the FULL Mine bucket, aged items included INLINE (each flagged
+         with a "90+ days" chip via the `aged` prop below), minus only
+         what the "Hide older" filter is actively hiding. There is no
+         separate Leftover drawer. §C — per-item check-off: each task
+         carries its OWN origin date (stamped by today-adapter.js /
+         loadRollingOpenItems) since the list mixes dates — there is no
+         single page-level effectiveDate to check off against any more. */
+      myVisible.length > 0
         ? React.createElement(React.Fragment, null,
             React.createElement(SubsectionLabel, null,
-              /* fix/today-heading-counts — sectionCardCount() (see rule
-                 comment near its definition above). A "Possibly
-                 personal" (non_work) item stays in myRecent, is
-                 rendered below, and now counts too — the TaskCard badge
-                 is what flags it, not a lower number here. */
-              'Open items · ' + sectionCardCount(myRecent)),
-            renderMaybeGrouped(myRecent, isMultiProject, function (task) {
+              /* fix/today-heading-counts — sectionCardCount() on the SAME
+                 list rendered below (myVisible), so the heading number
+                 equals the cards beneath it in BOTH filter states: aged
+                 items shown → they count; hidden → they don't, and neither
+                 the number nor the cards include them. A "Possibly
+                 personal" (non_work) item likewise stays and counts — the
+                 TaskCard badge flags it, not a lower number here. */
+              'Open items · ' + sectionCardCount(myVisible)),
+            renderMaybeGrouped(myVisible, isMultiProject, function (task) {
               return React.createElement(fs.TaskCard, {
                 key:           task.id,
                 task:          task,
@@ -2072,14 +2102,15 @@
                 /* §E — age + no-deadline read-only signals. */
                 ageLabel:      formatAgeLabel(task.ageDays),
                 noDeadline:    !!task.noDeadline,
+                /* feat/leftover-inline-filter — subtle "90+ days" chip on
+                   aged items so they stay distinguishable at a glance now
+                   that they render inline rather than in their own drawer. */
+                aged:          isAgedTask(task),
                 /* §E-time — parent topic's time_range, when present. */
                 timeRange:     task.timeRange,
-                /* fix/today-batch-select-expand — Recent Mine cards now
-                   participate in Batch Select too (previously only
-                   Leftover cards got these three props — see the old
-                   comment that used to live at the Leftover TaskCard
-                   below). multiSelect.onItemClick is the shared hook's
-                   Shift/Ctrl/plain dispatcher, unchanged. */
+                /* fix/today-batch-select-expand — Mine cards participate
+                   in Batch Select (multiSelect.onItemClick is the shared
+                   hook's Shift/Ctrl/plain dispatcher, unchanged). */
                 batchMode:      multiSelect.batchMode,
                 batchSelected:  !!multiSelect.selectedIds[task.id],
                 onBatchToggle:  multiSelect.onItemClick,
@@ -2088,51 +2119,26 @@
           )
         : null,
 
-      /* fix/leftover-discoverability — quiet pointer from "Open items"
-         to the viewer's OWN tasks that the age split above just carried
-         into the (collapsed-by-default) Leftover section further down.
-         Deliberately OUTSIDE the myRecent.length>0 guard above: a
-         viewer can have ALL of their open items aged into Leftover
-         (myRecent empty, nothing rendered above this line at all) and
-         still needs the pointer — otherwise their tasks look like they
-         vanished rather than moved. ownStrandedCount is the viewer's
-         OWN count only (countOwnStranded, computed above near
-         leftoverItems) — never the merged Mine+Team total the Leftover
-         heading itself shows. Renders nothing at all when
-         ownStrandedCount is 0 — a permanent zero-state line here would
-         just be noise once someone has no stranded items of their own.
-         Reuses the Leftover section's OWN disclosure state
-         (leftoverExpanded/setLeftoverExpanded, declared once near the
-         top of this component) rather than adding a second toggle —
-         clicking always EXPANDS (never re-collapses) and scrolls the
-         already-mounted .fs-today__leftover container into view (that
-         container renders whenever leftoverItems.length > 0, regardless
-         of expanded state, so it's already in the DOM to scroll to). */
-      ownStrandedCount > 0
-        ? React.createElement('button', {
-            type:      'button',
-            className: 'fs-today__stranded-hint',
-            onClick:   function () {
-              setLeftoverExpanded(true);
-              if (typeof document !== 'undefined' && document.querySelector) {
-                var leftoverEl = document.querySelector('.fs-today__leftover');
-                if (leftoverEl && typeof leftoverEl.scrollIntoView === 'function') {
-                  leftoverEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }
-              }
-            },
-          },
-            ownStrandedCount + (ownStrandedCount === 1 ? ' more of yours is ' : ' more of yours are ')
-              + LEFTOVER_THRESHOLD_DAYS + '+ days old — in Leftover',
-          )
-        : null,
+      /* feat/leftover-inline-filter — the old "N more of yours are 90+
+         days old — in Leftover" pointer line (fix/leftover-discoverability)
+         is GONE: it pointed at a collapsed drawer that no longer exists.
+         Aged Mine items now render right here in "Open items" (above), so
+         there is nothing to point at — the "90+ days" chip on each aged
+         card and the "Hide older" filter at the top of Tasks are the whole
+         story. */
 
-      teamRecent.length > 0 ? React.createElement(React.Fragment, null,
+      /* TEAM — feat/leftover-inline-filter: teamVisible is the FULL Team
+         bucket (isMineTask=false), aged items included inline with their
+         "90+ days" chip, minus only what the "Hide older" filter is
+         hiding. Mine (above) and Team (here) are filtered independently
+         and never merged — the old Leftover drawer's Mine+Team merge (the
+         assignee-blind bug) is gone. */
+      teamVisible.length > 0 ? React.createElement(React.Fragment, null,
         React.createElement(SubsectionLabel, null,
-          /* fix/today-heading-counts — sectionCardCount(), same rule as
-             "Open items" above. */
-          'Team · ' + sectionCardCount(teamRecent)),
-        renderMaybeGrouped(teamRecent, isMultiProject, function (task) {
+          /* fix/today-heading-counts — sectionCardCount() on teamVisible,
+             the SAME list rendered below, honest in both filter states. */
+          'Team · ' + sectionCardCount(teamVisible)),
+        renderMaybeGrouped(teamVisible, isMultiProject, function (task) {
           return React.createElement(fs.TaskCard, {
             key:        task.id,
             task:       task,
@@ -2140,14 +2146,9 @@
             isMine:     false,
             selected:   selectedId === task.id,
             /* feat/checkoff-org-api — Team cards are checkable on the SAME
-               expression as the Mine branch above. They previously got no
-               `checkable` prop at all, so a pm/site_manager could not
-               resolve a team task from Today — a defensible omission back
-               when check-off was the UNAUTHORISED legacy DynamoDB toggle
-               (there was no server-side check to lean on: any signed-in
-               user could have resolved anyone's task). The server decides
-               now: PATCH /api/org/action-items/{id} allows admin/gm, THIS
-               site's pm/site_manager, or the assignee, and refuses
+               expression as the Mine branch above. The server decides who
+               may resolve: PATCH /api/org/action-items/{id} allows admin/gm,
+               THIS site's pm/site_manager, or the assignee, and refuses
                everyone else with 403 — which task-card.js surfaces as an
                error toast + aborted animation, never a silent no-op.
                removeMyTask (→ onCheckedOff) already scans BOTH buckets,
@@ -2158,99 +2159,18 @@
             site:       null,   /* #4 — project is a group header, not a card chip */
             ageLabel:   formatAgeLabel(task.ageDays),
             noDeadline: !!task.noDeadline,
+            /* feat/leftover-inline-filter — same "90+ days" chip on aged
+               Team items as on aged Mine items. */
+            aged:       isAgedTask(task),
             timeRange:  task.timeRange,
-            /* fix/today-batch-select-expand — Recent Team cards now
-               participate in Batch Select too, same as the Mine branch
-               above. */
+            /* fix/today-batch-select-expand — Team cards participate in
+               Batch Select too, same as the Mine branch above. */
             batchMode:      multiSelect.batchMode,
             batchSelected:  !!multiSelect.selectedIds[task.id],
             onBatchToggle:  multiSelect.onItemClick,
           });
         }),
       ) : null,
-
-      /* LEFTOVER — feat/today-leftover-grouping. Combined My + Team
-         open items older than LEFTOVER_THRESHOLD_DAYS, collapsed by
-         default behind a real <button> toggle (aria-expanded + rotating
-         chevron, tokens-only, transition-based so the global
-         prefers-reduced-motion transition-duration:0.01ms belt in
-         tokens.css already neutralises it — same pattern as
-         .fs-gantt-tree__chev / .fs-prog-kanban__group-chev). Grouped by
-         project when expanded (groupByProject / renderMaybeGrouped,
-         >1 leftover project → grouped, else flat). Neutral/warning tone
-         — never safety-red / blocked-magenta (CLAUDE.md status-color
-         rule) — leftover age is informational, not a blocked/overdue
-         signal.
-         fix/today-batch-select-expand — the section-local Batch Select
-         toggle + bulk bar that used to live in this header moved to the
-         page-level toolbar row above (that was the whole bug: they were
-         only reachable when there were 90+ day leftover items AND this
-         section was expanded). One shared multiSelect now spans Recent
-         Mine/Team + Leftover, so a second, section-scoped toggle here
-         would just be a confusing second control over the SAME
-         selection — removed rather than duplicated. */
-      leftoverItems.length > 0
-        ? React.createElement('div', { className: 'fs-today__leftover' },
-            React.createElement('div', { className: 'fs-today__leftover-header' },
-              React.createElement('button', {
-                type:            'button',
-                className:       'fs-today__leftover-toggle',
-                onClick:         function () { setLeftoverExpanded(function (v) { return !v; }); },
-                'aria-expanded': leftoverExpanded,
-              },
-                React.createElement('span', {
-                  className: 'fs-today__leftover-chev'
-                    + (leftoverExpanded ? ' fs-today__leftover-chev--open' : ''),
-                  'aria-hidden': true,
-                }, '▸'),
-                React.createElement('span', { className: 'fs-today__leftover-label' },
-                  /* fix/today-heading-counts — sectionCardCount(), same
-                     rule as "Open items"/"Team" above (this heading
-                     already used the raw length; it's Open items/Team
-                     that changed to match it, not the other way
-                     around). */
-                  'Leftover · ' + sectionCardCount(leftoverItems)),
-                React.createElement('span', { className: 'fs-today__leftover-hint' },
-                  '(' + LEFTOVER_THRESHOLD_DAYS + '+ days, unresolved)'),
-              ),
-            ),
-
-            leftoverExpanded
-              ? React.createElement('div', { className: 'fs-today__leftover-body' },
-                  renderMaybeGrouped(leftoverItems, leftoverIsMultiProject, function (task) {
-                    return React.createElement(fs.TaskCard, {
-                      key:            task.id,
-                      task:           task,
-                      onSelect:       onSelect,
-                      isMine:         !!myIds[task.id],
-                      selected:       selectedId === task.id,
-                      checkable:      isBatchEligibleTask(task),
-                      date:           task.date,
-                      onCheckedOff:   onCheckedOff,
-                      site:           null,   /* #4 — leftover already groups by project; no card chip */
-                      ageLabel:       formatAgeLabel(task.ageDays),
-                      noDeadline:     !!task.noDeadline,
-                      timeRange:      task.timeRange,
-                      /* feat/leftover-batch-select (T1), extracted T4,
-                         widened fix/today-batch-select-expand — Leftover
-                         cards keep passing these three (unchanged);
-                         Recent Mine/Team now pass the SAME three above;
-                         only programme/timeline TaskCard call sites still
-                         omit them, so their round check button keeps the
-                         original single-resolve behavior (checkable
-                         without batchMode/onBatchToggle => startCheckOff,
-                         unchanged). multiSelect.onItemClick is the shared
-                         hook's dispatcher — same Shift/Ctrl/plain
-                         semantics the old inline onBatchToggle had. */
-                      batchMode:      multiSelect.batchMode,
-                      batchSelected:  !!multiSelect.selectedIds[task.id],
-                      onBatchToggle:  multiSelect.onItemClick,
-                    });
-                  }),
-                )
-              : null,
-          )
-        : null,
 
       /* (Sprint 3, P-02) Recent activity removed — the same topics are
          now reachable on /timeline as the canonical surface. Today
@@ -2849,9 +2769,15 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       sectionCardCount:     sectionCardCount,
-      /* fix/leftover-discoverability — pure own-stranded-count helper,
-         see its doc comment near sectionCardCount above. */
-      countOwnStranded:     countOwnStranded,
+      /* feat/leftover-inline-filter — pure aged-filter helpers: the aged
+         marker predicate, the per-bucket visible-list filter, and the
+         aged counter. See their doc comments near LEFTOVER_THRESHOLD_DAYS
+         above; exercised by tests/leftover-inline-filter.test.js. */
+      isAgedTask:           isAgedTask,
+      visibleTasks:         visibleTasks,
+      countAged:            countAged,
+      readHideAgedPref:     readHideAgedPref,
+      writeHideAgedPref:    writeHideAgedPref,
       isBatchEligibleTask:  isBatchEligibleTask,
       groupByProject:       groupByProject,
       /* fix/week-kpi — the weekly-closures tile's pure parts. */
