@@ -423,6 +423,63 @@
              previous: { from: null, to: null, closed: 0 } };
   }
 
+  // -------- compliance resolutions (durable safety/quality resolved state) --------
+  /* Retires the UNAUTHENTICATED legacy check-off overlay
+     (POST /api/actions/toggle) for safety/quality rows onto the durable,
+     re-extraction-stable compliance_resolutions table (backend migration
+     0025). The natural key is (company_id, site_id, report_date, domain,
+     user_folder, content_hash); the server computes content_hash from `text`
+     (src/content_hash.py), so the client NEVER sends a hash — it sends the
+     displayed text and the server hashes it identically to the JS twin
+     (api/content-hash.js) the read path uses to rebuild the lookup.
+
+     Gated on the SAME predicate as the neighbouring timeline-derived reads
+     (getSessions above; audio.js/media.js/transcripts.js) —
+     `timelineSource === 'aurora' && orgBaseUrl` — NOT orgWrite(): these rows
+     come from the Aurora-shimmed timeline, there is no legacy write to gate
+     against, only the kill switch. `site` MUST be the org UUID (row.site_id,
+     additive field on the timeline shim), NOT the display name — the write
+     endpoint accepts uuid/slug and 404s on the name.
+
+     _accessDenied/_notFound pass straight through, never swallowed (the caller
+     surfaces a refused resolve as an error rather than silently reverting). */
+  function complianceLive() {
+    return !api.useMocks && api.timelineSource === 'aurora' && !!api.orgBaseUrl;
+  }
+
+  async function setComplianceResolution(opts) {
+    opts = opts || {};
+    if (complianceLive()) {
+      return api.orgRequest('/compliance/resolution', {
+        method: 'PATCH',
+        body: {
+          domain:      opts.domain,
+          site:        opts.site,          // org UUID (row.site_id) or slug — never the display name
+          report_date: opts.reportDate,
+          user_folder: opts.userFolder,
+          text:        opts.text,          // server hashes this; client never sends the hash
+          resolved:    !!opts.resolved,
+        },
+      });
+    }
+    /* Mock / kill-switch: benign echo so the optimistic UI in a ?mocks=1
+       preview reads a resolved shape (resolver unknown offline). */
+    await api.delay();
+    return { resolved: !!opts.resolved, resolved_by: null, resolved_at: null,
+             content_hash: null, content_sample: null };
+  }
+
+  async function getComplianceResolutions(opts) {
+    opts = opts || {};
+    if (complianceLive()) {
+      return api.orgRequest('/compliance/resolutions', { params: {
+        from: opts.from, to: opts.to, site: opts.site, domain: opts.domain,
+      } });
+    }
+    await api.delay();
+    return { resolutions: [] };
+  }
+
   async function updateObservation(id, patch) {
     if (orgWrite()) return api.orgRequest('/observations/' + encodeURIComponent(id), { method: 'PATCH', body: patch });
     await api.delay();
@@ -453,6 +510,8 @@
     uploadImage: uploadImage, resolveAssetUrl: resolveAssetUrl,
     createObservation: createObservation, getObservations: getObservations,
     updateObservation: updateObservation, archiveObservation: archiveObservation,
+    setComplianceResolution: setComplianceResolution,
+    getComplianceResolutions: getComplianceResolutions,
     getLiveItems: getLiveItems,
     getSessions: getSessions,
     getSiteMembers: getSiteMembers,
