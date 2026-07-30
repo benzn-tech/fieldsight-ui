@@ -498,6 +498,60 @@
     return Object.assign({}, row);
   }
 
+  // -------- Delivery-C session report (Tier-2 T3/T4, review modal §5/§11) --------
+  /* Gated on the SAME predicate as getSessions / compliance
+     (timelineSource==='aurora' && orgBaseUrl && !useMocks): these are
+     session-derived, there is no legacy report-gateway fallback, only the kill
+     switch. The GENERATE flow is ASYNC — generateSessionReport enqueues on the
+     backend (202 -> {requestId, resultKey}) and the modal polls
+     getSessionReportStatus until status is 'done' (docUrl) or 'error'. Off the
+     live gate, every method returns a benign NON-success shape (never a fake
+     'queued'/'done'), so a ?mocks=1 preview shows "unavailable offline" rather
+     than a doc that will never exist. */
+  function sessionReportLive() {
+    return !api.useMocks && api.timelineSource === 'aurora' && !!api.orgBaseUrl;
+  }
+
+  async function getSessionReportPreview(opts) {
+    opts = opts || {};
+    if (sessionReportLive()) {
+      return api.orgRequest('/sessions/' + encodeURIComponent(opts.sessionId) + '/report/preview',
+        { method: 'POST', params: { date: opts.date, user: opts.user } });
+    }
+    await api.delay();
+    return { sessionId: opts.sessionId, title: null, topics: [], fieldDefaults: {} };
+  }
+
+  async function generateSessionReport(opts) {
+    opts = opts || {};
+    if (sessionReportLive()) {
+      return api.orgRequest('/sessions/' + encodeURIComponent(opts.sessionId) + '/report', {
+        method: 'POST',
+        params: { date: opts.date, user: opts.user },
+        body: {
+          templateId: opts.templateId,
+          title:      opts.title,
+          attendees:  opts.attendees,
+          fields:     opts.fields || {},
+          deliver:    opts.deliver || 'download',
+          recipients: opts.recipients || [],
+        },
+      });
+    }
+    await api.delay();
+    return { status: 'unavailable', _notAvailable: true };
+  }
+
+  async function getSessionReportStatus(opts) {
+    opts = opts || {};
+    if (sessionReportLive()) {
+      return api.orgRequest('/sessions/' + encodeURIComponent(opts.sessionId) + '/report/status',
+        { params: { date: opts.date, user: opts.user, requestId: opts.requestId } });
+    }
+    await api.delay();
+    return { status: 'unavailable' };
+  }
+
   window.FS.api.org = {
     getMe: getMe,
     updateProfile: updateProfile,
@@ -514,6 +568,9 @@
     getComplianceResolutions: getComplianceResolutions,
     getLiveItems: getLiveItems,
     getSessions: getSessions,
+    getSessionReportPreview: getSessionReportPreview,
+    generateSessionReport: generateSessionReport,
+    getSessionReportStatus: getSessionReportStatus,
     getSiteMembers: getSiteMembers,
     getSiteContributors: getSiteContributors,
     getPortfolioRollup: getPortfolioRollup,
