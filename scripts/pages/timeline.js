@@ -1839,6 +1839,15 @@
       deepLink:   (typeof window !== 'undefined' && window.location) ? window.location.href : '',
       isDone:     _isActionDone,
     });
+    /* Delivery-C Tier-2 generate control — sits beside the mailto draft, active
+       only when a specific meeting is selected (the modal is per-session). */
+    var _genReportEl = React.createElement(GenerateReportButton, {
+      session:    _selectedSession,
+      date:       date,
+      userFolder: _draftUserFolder,
+      siteName:   report.site || site || '',
+      topics:     visibleTopics,
+    });
 
     /* ---- Daily report view (default) ---- */
     return React.createElement('div', {
@@ -1870,7 +1879,10 @@
         style:     { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
       },
         React.createElement('span', null, 'Topics'),
-        _draftEl),
+        React.createElement('div', {
+          className: 'fs-timeline-page__topics-actions',
+          style:     { display: 'flex', alignItems: 'center', gap: '8px' },
+        }, _genReportEl, _draftEl)),
       React.createElement('div', { className: 'fs-timeline-page__topics' },
         visibleTopics.map(function (topic) {
           /* Sprint 6.6.4 — focus mode + flash. When a deep-link target
@@ -2036,6 +2048,36 @@
       /* mailto stays in the same tab handoff to the OS mail client; no
          target/_blank needed and no rel required for a mailto scheme. */
     }, 'Draft email');
+  }
+
+  /* Delivery-C Tier-2 — a per-session "Generate report" control beside the mailto
+     "Draft email". Opens SessionReportModal (review the company template, fill the
+     confirmed fields, generate a Word/PDF, download or server-email it). Shown only
+     when a specific session is selected (Tier-2 is per-session) AND the caller may
+     create reports; self-contained modal-open state so the picker render is
+     unchanged. Renders nothing if the composite isn't loaded (defensive). */
+  function GenerateReportButton(props) {
+    var s_open = React.useState(false); var open = s_open[0], setOpen = s_open[1];
+    var Modal   = (window.FieldSight || {}).SessionReportModal;
+    var caller  = (window.AuthMock && window.AuthMock.currentUser) || {};
+    var canCreate = !!(window.FS && window.FS.can && window.FS.can(caller, window.FS.P('report', 'create')));
+    if (!props.session || !Modal || !canCreate) return null;
+    return React.createElement(React.Fragment, null,
+      React.createElement('button', {
+        type:      'button',
+        className: 'fs-btn fs-btn--primary fs-btn--sm fs-generate-report',
+        onClick:   function () { setOpen(true); },
+        title:     'Generate a report for this meeting',
+      }, 'Generate report'),
+      React.createElement(Modal, {
+        open:       open,
+        onClose:    function () { setOpen(false); },
+        session:    props.session,
+        date:       props.date,
+        userFolder: props.userFolder,
+        siteName:   props.siteName,
+        topics:     props.topics,
+      }));
   }
 
   /* life-conversation separation (Task 11) — one row in TimelineMiddleColumn's
