@@ -10,7 +10,7 @@ const assert = require('node:assert');
 global.window = global.window || {};
 if (!global.window.FieldSight) global.window.FieldSight = {};
 
-const { buildGeneratePayload, interpretReportStatus, previewFieldDefaults } = require('../scripts/composites/session-report-modal.js');
+const { buildGeneratePayload, interpretReportStatus, previewFieldDefaults, parseAttendees } = require('../scripts/composites/session-report-modal.js');
 
 
 // ---- buildGeneratePayload (the F1 generateSessionReport body) -----------
@@ -95,4 +95,17 @@ test('previewFieldDefaults falls back to top-level title/participants', () => {
 test('previewFieldDefaults is safe on empty/null', () => {
   assert.deepEqual(previewFieldDefaults(null), { title: '', attendees: [] });
   assert.deepEqual(previewFieldDefaults({}), { title: '', attendees: [] });
+});
+
+
+// ---- parseAttendees (fill-step textarea -> attendees array) --------------
+
+test('parseAttendees splits on newlines and commas, trims, drops empties', () => {
+  assert.deepEqual(parseAttendees('Neil\nAda Lovelace\n\n , Bob '), ['Neil', 'Ada Lovelace', 'Bob']);
+});
+
+test('parseAttendees is safe on blank/null', () => {
+  assert.deepEqual(parseAttendees('   '), []);
+  assert.deepEqual(parseAttendees(null), []);
+  assert.deepEqual(parseAttendees(''), []);
 });

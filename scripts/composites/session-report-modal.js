@@ -81,7 +81,55 @@
     };
   }
 
+  function parseAttendees(text) {
+    // Fill-step textarea (one name per line, or comma-separated) -> trimmed,
+    // de-blanked array (the F1 generate body's `attendees`).
+    return String(text == null ? '' : text).split(/[\n,]/)
+      .map(function (s) { return s.trim(); })
+      .filter(function (s) { return !!s; });
+  }
+
   // ---- React shell (browser only; not exercised by node tests) ----------
+
+  function FillStep(props) {
+    var h = React.createElement;
+    var form = props.form || {}, setForm = props.setForm || function () {};
+    var s_att = React.useState((form.attendees || []).join('\n'));
+    var attText = s_att[0], setAttText = s_att[1];
+    var fields = form.fields || {};
+    function setTitle(v) { setForm(function (f) { return Object.assign({}, f, { title: v }); }); }
+    function onAtt(v) {
+      setAttText(v);
+      setForm(function (f) { return Object.assign({}, f, { attendees: parseAttendees(v) }); });
+    }
+    function setField(key, v) {
+      setForm(function (f) {
+        var nf = Object.assign({}, f.fields); nf[key] = v;
+        return Object.assign({}, f, { fields: nf });
+      });
+    }
+    function field(label, node) {
+      return h('label', { className: 'fs-field' },
+        h('span', { className: 'fs-field__label' }, label), node);
+    }
+    return h('div', { className: 'fs-srm__step fs-srm__fill' },
+      field('Report title', h('input', {
+        type: 'text', className: 'fs-input', value: form.title || '',
+        onChange: function (e) { setTitle(e.target.value); },
+      })),
+      field('Attendees (one per line)', h('textarea', {
+        className: 'fs-input', rows: 3, value: attText,
+        onChange: function (e) { onAtt(e.target.value); },
+      })),
+      field('Weather', h('input', {
+        type: 'text', className: 'fs-input', value: fields.weather || '',
+        onChange: function (e) { setField('weather', e.target.value); },
+      })),
+      field('Sign-off', h('input', {
+        type: 'text', className: 'fs-input', value: fields.sign_off || '',
+        onChange: function (e) { setField('sign_off', e.target.value); },
+      })));
+  }
 
   function SessionReportModal(props) {
     var h = React.createElement;
@@ -203,8 +251,7 @@
             })));
       }
     } else if (step === 'fill') {
-      body = h('div', { className: 'fs-srm__step' },
-        h('p', { className: 'fs-srm__hint' }, 'Confirm attendees, weather and sign-off (F4).'));
+      body = h(FillStep, { form: form, setForm: setForm });
     } else if (step === 'review') {
       body = h('div', { className: 'fs-srm__step' },
         h('p', { className: 'fs-srm__hint' }, 'Review, then generate the report.'));
@@ -244,6 +291,6 @@
 
   // Pure-helper export for node --test (browser ignores this).
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { buildGeneratePayload: buildGeneratePayload, interpretReportStatus: interpretReportStatus, previewFieldDefaults: previewFieldDefaults, STEPS: STEPS };
+    module.exports = { buildGeneratePayload: buildGeneratePayload, interpretReportStatus: interpretReportStatus, previewFieldDefaults: previewFieldDefaults, parseAttendees: parseAttendees, STEPS: STEPS };
   }
 })();
