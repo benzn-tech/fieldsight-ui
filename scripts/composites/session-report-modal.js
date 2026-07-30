@@ -83,10 +83,17 @@
 
   function parseAttendees(text) {
     // Fill-step textarea (one name per line, or comma-separated) -> trimmed,
-    // de-blanked array (the F1 generate body's `attendees`).
+    // de-blanked array (the F1 generate body's `attendees`). Also parses the
+    // email-recipients textarea (same shape).
     return String(text == null ? '' : text).split(/[\n,]/)
       .map(function (s) { return s.trim(); })
       .filter(function (s) { return !!s; });
+  }
+
+  function canGenerate(deliver, recipients) {
+    // Email delivery needs at least one recipient (the backend rejects email with
+    // none); download is always allowed. Gates the review step's Generate button.
+    return deliver !== 'email' || (Array.isArray(recipients) && recipients.length > 0);
   }
 
   // ---- React shell (browser only; not exercised by node tests) ----------
@@ -131,6 +138,27 @@
       })));
   }
 
+  function DeliveryChooser(props) {
+    var h = React.createElement;
+    function mode(value, label) {
+      return h('label', { className: 'fs-srm__delivery-mode' },
+        h('input', {
+          type: 'radio', name: 'fs-srm-deliver', checked: props.deliver === value,
+          onChange: function () { props.onDeliver(value); },
+        }), ' ' + label);
+    }
+    return h('div', { className: 'fs-srm__delivery' },
+      h('div', { className: 'fs-srm__delivery-modes' }, mode('download', 'Download'), mode('email', 'Email')),
+      props.deliver === 'email'
+        ? h('label', { className: 'fs-field' },
+            h('span', { className: 'fs-field__label' }, 'Recipients (one per line)'),
+            h('textarea', {
+              className: 'fs-input', rows: 2, value: props.recipientsText, placeholder: 'name@company.com',
+              onChange: function (e) { props.onRecipients(e.target.value); },
+            }))
+        : null);
+  }
+
   function SessionReportModal(props) {
     var h = React.createElement;
     var ModalOverlay = (window.FieldSight || {}).ModalOverlay;
@@ -141,8 +169,9 @@
     var form = s_form[0], setForm = s_form[1];   // setForm seeds defaults (F3) + F4's FillStep
     var s_preview = React.useState(null); var preview = s_preview[0], setPreview = s_preview[1];
     var s_pverr = React.useState(null); var previewErr = s_pverr[0], setPreviewErr = s_pverr[1];
-    var s_deliver = React.useState('download'); var deliver = s_deliver[0];
-    var s_recip = React.useState([]); var recipients = s_recip[0];
+    var s_deliver = React.useState('download'); var deliver = s_deliver[0], setDeliver = s_deliver[1];
+    var s_recip = React.useState([]); var recipients = s_recip[0], setRecip = s_recip[1];
+    var s_recipText = React.useState(''); var recipText = s_recipText[0], setRecipText = s_recipText[1];
     var s_req = React.useState(null); var reqId = s_req[0], setReqId = s_req[1];
     var s_result = React.useState(null); var result = s_result[0], setResult = s_result[1];
     var s_error = React.useState(null); var error = s_error[0], setError = s_error[1];
@@ -154,6 +183,7 @@
       if (props.open) {
         setStep('preview'); setReqId(null); setResult(null); setError(null);
         setPreview(null); setPreviewErr(null);
+        setDeliver('download'); setRecip([]); setRecipText('');
       }
     }, [props.open]);
 
@@ -253,14 +283,28 @@
     } else if (step === 'fill') {
       body = h(FillStep, { form: form, setForm: setForm });
     } else if (step === 'review') {
-      body = h('div', { className: 'fs-srm__step' },
-        h('p', { className: 'fs-srm__hint' }, 'Review, then generate the report.'));
+      body = h('div', { className: 'fs-srm__step fs-srm__review' },
+        h('p', { className: 'fs-srm__hint' }, 'Review, choose how to deliver, then generate.'),
+        h('ul', { className: 'fs-srm__review-summary' },
+          h('li', null, 'Title: ' + (form.title || '—')),
+          h('li', null, 'Attendees: ' + ((form.attendees || []).length))),
+        h(DeliveryChooser, {
+          deliver: deliver, onDeliver: setDeliver,
+          recipientsText: recipText,
+          onRecipients: function (v) { setRecipText(v); setRecip(parseAttendees(v)); },
+        }));
     } else if (step === 'generating') {
       body = h('div', { className: 'fs-srm__step' }, h('p', null, 'Generating your report…'));
     } else if (step === 'done') {
-      body = h('div', { className: 'fs-srm__step' },
-        h('p', null, (result && result.emailed) ? 'Report emailed.' : 'Report ready.'),
-        (result && result.docUrl) ? h('a', { href: result.docUrl, className: 'fs-btn fs-btn--primary' }, 'Download') : null);
+      body = h('div', { className: 'fs-srm__step fs-srm__done' },
+        h('p', { className: 'fs-srm__done-msg' },
+          (result && result.emailed) ? 'Your report has been emailed.' : 'Your report is ready.'),
+        (result && result.docUrl)
+          ? h('a', {
+              className: 'fs-btn fs-btn--primary', href: result.docUrl,
+              target: '_blank', rel: 'noopener', download: '',
+            }, 'Download report')
+          : null);
     } else {  // error
       body = h('div', { className: 'fs-srm__step fs-srm__step--error' },
         h('p', null, error || 'Something went wrong.'));
@@ -272,7 +316,13 @@
     else if (step === 'fill') footer = h('footer', { className: 'fs-srm__footer' },
       btn('Back', function () { setStep('preview'); }), btn('Next', function () { setStep('review'); }, 'primary'));
     else if (step === 'review') footer = h('footer', { className: 'fs-srm__footer' },
-      btn('Back', function () { setStep('fill'); }), btn('Generate report', onGenerate, 'primary'));
+      btn('Back', function () { setStep('fill'); }),
+      h('button', {
+        type: 'button', className: 'fs-btn fs-btn--primary',
+        disabled: !canGenerate(deliver, recipients),
+        title: canGenerate(deliver, recipients) ? undefined : 'Add at least one recipient to email the report',
+        onClick: onGenerate,
+      }, 'Generate report'));
     else if (step === 'generating') footer = h('footer', { className: 'fs-srm__footer' },
       btn('Cancel', props.onClose));
     else if (step === 'done') footer = h('footer', { className: 'fs-srm__footer' },
@@ -291,6 +341,6 @@
 
   // Pure-helper export for node --test (browser ignores this).
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { buildGeneratePayload: buildGeneratePayload, interpretReportStatus: interpretReportStatus, previewFieldDefaults: previewFieldDefaults, parseAttendees: parseAttendees, STEPS: STEPS };
+    module.exports = { buildGeneratePayload: buildGeneratePayload, interpretReportStatus: interpretReportStatus, previewFieldDefaults: previewFieldDefaults, parseAttendees: parseAttendees, canGenerate: canGenerate, STEPS: STEPS };
   }
 })();

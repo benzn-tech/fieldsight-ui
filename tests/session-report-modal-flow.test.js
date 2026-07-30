@@ -10,7 +10,7 @@ const assert = require('node:assert');
 global.window = global.window || {};
 if (!global.window.FieldSight) global.window.FieldSight = {};
 
-const { buildGeneratePayload, interpretReportStatus, previewFieldDefaults, parseAttendees } = require('../scripts/composites/session-report-modal.js');
+const { buildGeneratePayload, interpretReportStatus, previewFieldDefaults, parseAttendees, canGenerate } = require('../scripts/composites/session-report-modal.js');
 
 
 // ---- buildGeneratePayload (the F1 generateSessionReport body) -----------
@@ -108,4 +108,14 @@ test('parseAttendees is safe on blank/null', () => {
   assert.deepEqual(parseAttendees('   '), []);
   assert.deepEqual(parseAttendees(null), []);
   assert.deepEqual(parseAttendees(''), []);
+});
+
+
+// ---- canGenerate (gate: email delivery needs recipients) ----------------
+
+test('canGenerate: download always ok; email needs at least one recipient', () => {
+  assert.equal(canGenerate('download', []), true);
+  assert.equal(canGenerate('download', ['a@b.com']), true);
+  assert.equal(canGenerate('email', []), false);
+  assert.equal(canGenerate('email', ['a@b.com']), true);
 });
