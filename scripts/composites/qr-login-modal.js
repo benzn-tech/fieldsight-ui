@@ -43,7 +43,10 @@
     function refresh() {
       setState({ loading: true, error: null, dataUrl: null, expiresAt: 0 });
       window.FS.api.qrLogin.create().then(function (res) {
-        if (res && res._accessDenied) { setState({ loading: false, error: res.error, dataUrl: null, expiresAt: 0 }); return; }
+        if (!res || res._accessDenied || res._notFound || !res.code) {
+          setState({ loading: false, error: (res && res.error) || 'Could not create a login code', dataUrl: null, expiresAt: 0 });
+          return;
+        }
         var payload = { v: 1, u: email, c: res.code, env: envString() };
         setState({ loading: false, error: null, dataUrl: buildQrDataUrl(payload), expiresAt: res.expiresAt });
       }).catch(function (err) {

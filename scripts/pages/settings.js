@@ -410,7 +410,7 @@
          h2 + hint + Done button, so ModalOverlay's own header is skipped to
          avoid a double title. */
       (qrOpen && Modal && window.FieldSight.QrLoginModal) ? React.createElement(Modal, {
-        open: true, size: 'sm', onClose: function () { setQrOpen(false); },
+        open: true, size: 'sm', ariaLabel: 'Log in a terminal', onClose: function () { setQrOpen(false); },
       },
         React.createElement(window.FieldSight.QrLoginModal, { onClose: function () { setQrOpen(false); } })
       ) : null
