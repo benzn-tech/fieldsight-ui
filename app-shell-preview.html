@@ -14,7 +14,7 @@
   <!-- Design tokens + AppShell CSS -->
   <link rel="stylesheet" href="styles/tokens.css?v=5" />
   <link rel="stylesheet" href="styles/app-shell.css?v=11" />
-  <link rel="stylesheet" href="styles/components.css?v=10" />
+  <link rel="stylesheet" href="styles/components.css?v=11" />
   <link rel="stylesheet" href="styles/composites.css?v=91" />
 
   <style>
@@ -238,6 +238,14 @@
   <!-- Sprint 10 B.0 — Template store (LocalStorage-backed template API) -->
   <script src="scripts/api/template-store.js?v=2"></script>
 
+  <!-- Web Task 1/2/3 (2026-07-30) — QR terminal login: vendored generator
+       (plain UMD, not Babel-transpiled) + api call + Layer-5 modal. Must
+       load after _fetch.js (orgRequest) and before settings.js (Task 4),
+       which opens QrLoginModal from Settings → Security. -->
+  <script src="scripts/vendor/qrcode-generator.js?v=1"></script>
+  <script src="scripts/api/qr-login.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/qr-login-modal.js?v=1"></script>
+
   <!-- Mock data shim (weather only) + page registry + pages -->
   <script type="text/babel" src="scripts/mock-data.js?v=4"></script>
   <script type="text/babel" src="scripts/pages/_page-registry.js?v=1"></script>
@@ -254,7 +262,7 @@
   <!-- Sprint 7.1+7.2 — /team page -->
   <script type="text/babel" src="scripts/pages/team.js?v=13"></script>
   <!-- Sprint 7.3 + 7.6 — /settings page (density toggle added in 7.6) -->
-  <script type="text/babel" src="scripts/pages/settings.js?v=12"></script>
+  <script type="text/babel" src="scripts/pages/settings.js?v=13"></script>
   <!-- Sprint 10 B.2 — Template upload modal composite -->
   <script type="text/babel" src="scripts/composites/template-upload-modal.js?v=2"></script>
   <!-- Sprint 10 B.1+B.3 — /library page (template library + skip-edit preview) -->
