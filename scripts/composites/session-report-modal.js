@@ -70,6 +70,17 @@
     return { phase: 'pending' };   // queued / pending / anything not yet terminal
   }
 
+  function previewFieldDefaults(preview) {
+    // The editable defaults the modal pre-fills from the preview response
+    // (session_report_preview.fieldDefaults), with top-level fallbacks.
+    var d = (preview && preview.fieldDefaults) || {};
+    return {
+      title: d.title || (preview && preview.title) || '',
+      attendees: Array.isArray(d.attendees) ? d.attendees
+               : (Array.isArray(preview && preview.participants) ? preview.participants : []),
+    };
+  }
+
   // ---- React shell (browser only; not exercised by node tests) ----------
 
   function SessionReportModal(props) {
@@ -79,7 +90,9 @@
 
     var s_step = React.useState('preview'); var step = s_step[0], setStep = s_step[1];
     var s_form = React.useState({ templateId: null, title: '', attendees: [], fields: {} });
-    var form = s_form[0];   // setForm is used by F4's FillStep
+    var form = s_form[0], setForm = s_form[1];   // setForm seeds defaults (F3) + F4's FillStep
+    var s_preview = React.useState(null); var preview = s_preview[0], setPreview = s_preview[1];
+    var s_pverr = React.useState(null); var previewErr = s_pverr[0], setPreviewErr = s_pverr[1];
     var s_deliver = React.useState('download'); var deliver = s_deliver[0];
     var s_recip = React.useState([]); var recipients = s_recip[0];
     var s_req = React.useState(null); var reqId = s_req[0], setReqId = s_req[1];
@@ -90,7 +103,33 @@
 
     // Reset the wizard whenever it (re)opens.
     React.useEffect(function () {
-      if (props.open) { setStep('preview'); setReqId(null); setResult(null); setError(null); }
+      if (props.open) {
+        setStep('preview'); setReqId(null); setResult(null); setError(null);
+        setPreview(null); setPreviewErr(null);
+      }
+    }, [props.open]);
+
+    // F3 — on open, fetch the assembled preview (the backend renders the session's
+    // content into the report shape) and seed the editable field defaults. The
+    // client returns the content or a benign {_accessDenied}/{_notFound}/
+    // {status:'unavailable'} envelope (never throws) — surface those as an error.
+    React.useEffect(function () {
+      if (!props.open || !org.getSessionReportPreview) return undefined;
+      var alive = true;
+      Promise.resolve(org.getSessionReportPreview({
+        sessionId: sid(), date: props.date, user: props.userFolder,
+      })).then(function (res) {
+        if (!alive) return;
+        if (!res || res._accessDenied || res._notFound || res.status === 'unavailable') {
+          setPreviewErr((res && res.error) || 'Preview is unavailable here.'); return;
+        }
+        setPreview(res);
+        var d = previewFieldDefaults(res);
+        setForm(function (f) {
+          return { templateId: f.templateId, title: d.title, attendees: d.attendees, fields: f.fields };
+        });
+      }).catch(function () { if (alive) setPreviewErr('Could not load the preview.'); });
+      return function () { alive = false; };
     }, [props.open]);
 
     // F5 — poll the async status while generating, until a terminal phase.
@@ -139,8 +178,30 @@
     // Step bodies — placeholders for F3 (preview) / F4 (fill) / F6 (done UI).
     var body;
     if (step === 'preview') {
-      body = h('div', { className: 'fs-srm__step' },
-        h('p', { className: 'fs-srm__hint' }, 'Template preview renders here (F3).'));
+      if (previewErr) {
+        body = h('div', { className: 'fs-srm__step fs-srm__step--error' }, h('p', null, previewErr));
+      } else if (!preview) {
+        body = h('div', { className: 'fs-srm__step' }, h('p', { className: 'fs-srm__hint' }, 'Loading preview…'));
+      } else {
+        body = h('div', { className: 'fs-srm__step fs-srm__preview' },
+          h('h3', { className: 'fs-srm__preview-title' }, preview.title || 'Session report'),
+          h('p', { className: 'fs-srm__preview-meta' }, [preview.siteName, preview.date].filter(Boolean).join(' · ')),
+          (preview.participants && preview.participants.length)
+            ? h('p', { className: 'fs-srm__preview-attendees' }, 'Attendees: ' + preview.participants.join(', ')) : null,
+          h('div', { className: 'fs-srm__preview-topics' },
+            (preview.topics || []).map(function (t, i) {
+              return h('div', { key: i, className: 'fs-srm__preview-topic' },
+                h('h4', null, t.topic_title || t.title || ('Topic ' + (i + 1))),
+                t.summary ? h('p', null, t.summary) : null,
+                (t.action_items && t.action_items.length)
+                  ? h('ul', { className: 'fs-srm__preview-actions' },
+                      t.action_items.map(function (a, j) {
+                        return h('li', { key: j },
+                          (a.action || a.text || '') + (a.responsible ? ' — ' + a.responsible : ''));
+                      }))
+                  : null);
+            })));
+      }
     } else if (step === 'fill') {
       body = h('div', { className: 'fs-srm__step' },
         h('p', { className: 'fs-srm__hint' }, 'Confirm attendees, weather and sign-off (F4).'));
@@ -183,6 +244,6 @@
 
   // Pure-helper export for node --test (browser ignores this).
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { buildGeneratePayload: buildGeneratePayload, interpretReportStatus: interpretReportStatus, STEPS: STEPS };
+    module.exports = { buildGeneratePayload: buildGeneratePayload, interpretReportStatus: interpretReportStatus, previewFieldDefaults: previewFieldDefaults, STEPS: STEPS };
   }
 })();

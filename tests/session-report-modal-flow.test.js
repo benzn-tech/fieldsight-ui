@@ -10,7 +10,7 @@ const assert = require('node:assert');
 global.window = global.window || {};
 if (!global.window.FieldSight) global.window.FieldSight = {};
 
-const { buildGeneratePayload, interpretReportStatus } = require('../scripts/composites/session-report-modal.js');
+const { buildGeneratePayload, interpretReportStatus, previewFieldDefaults } = require('../scripts/composites/session-report-modal.js');
 
 
 // ---- buildGeneratePayload (the F1 generateSessionReport body) -----------
@@ -75,4 +75,24 @@ test('interpretReportStatus surfaces access/not-found/empty envelopes as errors'
   assert.equal(interpretReportStatus({ _accessDenied: true }).phase, 'error');
   assert.equal(interpretReportStatus({ _notFound: true }).phase, 'error');
   assert.equal(interpretReportStatus(null).phase, 'error');
+});
+
+
+// ---- previewFieldDefaults (seed the editable fields from the preview) ----
+
+test('previewFieldDefaults pulls title + attendees from fieldDefaults', () => {
+  assert.deepEqual(
+    previewFieldDefaults({ fieldDefaults: { title: 'Slab pour', attendees: ['Neil', 'Ada'] } }),
+    { title: 'Slab pour', attendees: ['Neil', 'Ada'] });
+});
+
+test('previewFieldDefaults falls back to top-level title/participants', () => {
+  const d = previewFieldDefaults({ title: 'T', participants: ['P'] });
+  assert.equal(d.title, 'T');
+  assert.deepEqual(d.attendees, ['P']);
+});
+
+test('previewFieldDefaults is safe on empty/null', () => {
+  assert.deepEqual(previewFieldDefaults(null), { title: '', attendees: [] });
+  assert.deepEqual(previewFieldDefaults({}), { title: '', attendees: [] });
 });
