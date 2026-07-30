@@ -79,7 +79,7 @@
             expired ? 'Expired' : ('Expires in ' + left + 's'))
         ),
       e('div', { className: 'fs-qr-login__actions' },
-        e('button', { className: 'fs-btn fs-btn--secondary', onClick: refresh }, 'Regenerate'),
+        e('button', { className: 'fs-btn fs-btn--secondary', onClick: refresh, disabled: state.loading }, 'Regenerate'),
         e('button', { className: 'fs-btn', onClick: props.onClose }, 'Done')
       )
     );
