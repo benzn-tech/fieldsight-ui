@@ -28,7 +28,8 @@
       var now = Math.floor(Date.now() / 1000);
       return { code: 'MOCK-' + uuidish(), expiresAt: now + 90, ttlSeconds: 90 };
     }
-    return window.FS.api.orgRequest('/auth/qr/create', { method: 'POST', body: {} });
+    var rt = (window.FS.session && window.FS.session.refreshToken) || null;
+    return window.FS.api.orgRequest('/auth/qr/create', { method: 'POST', body: { refreshToken: rt } });
   }
 
   function uuidish() {
