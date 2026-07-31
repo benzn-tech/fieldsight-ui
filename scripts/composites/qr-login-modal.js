@@ -5,11 +5,10 @@
    a Regenerate action. Consumes:
      - window.FS.api.qrLogin.create()  → { code, expiresAt, ttlSeconds }
                                           or { _accessDenied: true, error }
-     - window.FS.session.user.email    → embedded in the QR payload
      - window.qrcode(typeNumber, ecc)  → vendored qrcode-generator.js
 
-   The QR payload is JSON `{ v, u, c, env }` — v=schema version, u=user
-   email, c=one-time code, env=environment name. The code is never persisted
+   The QR payload is JSON `{ v, c, env }` — v=schema version (2), c=one-time
+   code, env=environment name. The code is never persisted
    (no localStorage) and never logged; it lives only in component state for
    the lifetime of the modal.
 
@@ -34,7 +33,6 @@
   }
 
   function QrLoginModal(props) {
-    var email = (window.FS.session && window.FS.session.user && window.FS.session.user.email) || '';
     var st = React.useState({ loading: true, error: null, dataUrl: null, expiresAt: 0 });
     var state = st[0], setState = st[1];
     var remaining = React.useState(0);
@@ -47,7 +45,7 @@
           setState({ loading: false, error: (res && res.error) || 'Could not create a login code', dataUrl: null, expiresAt: 0 });
           return;
         }
-        var payload = { v: 1, u: email, c: res.code, env: envString() };
+        var payload = { v: 2, c: res.code, env: envString() };
         setState({ loading: false, error: null, dataUrl: buildQrDataUrl(payload), expiresAt: res.expiresAt });
       }).catch(function (err) {
         setState({ loading: false, error: (err && err.message) || 'Could not create a login code', dataUrl: null, expiresAt: 0 });
