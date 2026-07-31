@@ -29,6 +29,9 @@
       return { code: 'MOCK-' + uuidish(), expiresAt: now + 90, ttlSeconds: 90 };
     }
     var rt = (window.FS.session && window.FS.session.refreshToken) || null;
+    if (!rt) {
+      return Promise.resolve({ _accessDenied: true, error: 'Please sign in again to generate a login code' });
+    }
     return window.FS.api.orgRequest('/auth/qr/create', { method: 'POST', body: { refreshToken: rt } });
   }
 

@@ -21,7 +21,7 @@
   var e = React.createElement;
 
   function envString() {
-    /* v1 web = prod. If a single build ever serves both, derive from the API base. */
+    /* Web currently serves prod. If a single build ever serves both, derive from the API base. */
     return (window.FS_ENV && window.FS_ENV.name) || 'prod';
   }
 
