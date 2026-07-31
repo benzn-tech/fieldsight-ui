@@ -499,7 +499,7 @@
            #FFD966 yellow is invisible on the light theme's white card). */
         React.createElement('div', { className: 'fs-login__brand' },
           'Field',
-          React.createElement('span', { className: 'fs-login__brand-accent' }, 'sight')
+          React.createElement('span', { className: 'fs-login__brand-accent' }, 'Sight')
         ),
         React.createElement('div', { className: 'fs-login__caption' }, caption),
         body,
