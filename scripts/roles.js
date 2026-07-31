@@ -135,6 +135,7 @@ export const ROLES = {
       P('hazard',    'create',  SCOPES.SELF),
       P('evidence',  'view',    SCOPES.SELF),
       P('report',    'view',    SCOPES.SELF),
+      P('report',    'create',  SCOPES.SELF),   /* generate a report/email from own meeting (backend site-scopes it) */
       P('dashboard', 'view',    SCOPES.SELF),
       P('settings',  'view',    SCOPES.SELF),
       P('template',  'manage',  SCOPES.SELF),   /* Sprint 10 B.0 — personal library */
