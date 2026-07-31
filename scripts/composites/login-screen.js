@@ -494,7 +494,13 @@
           className: 'fs-login__logo',
           style: { width: '76px', height: 'auto', display: 'block', margin: '0 auto 14px' },
         }),
-        React.createElement('div', { className: 'fs-login__brand' }, 'FieldSight'),
+        /* "Field" in the primary wordmark colour, "sight" in the brand accent
+           (see .fs-login__brand-accent — the accent is theme-aware because a
+           #FFD966 yellow is invisible on the light theme's white card). */
+        React.createElement('div', { className: 'fs-login__brand' },
+          'Field',
+          React.createElement('span', { className: 'fs-login__brand-accent' }, 'sight')
+        ),
         React.createElement('div', { className: 'fs-login__caption' }, caption),
         body,
       ),
