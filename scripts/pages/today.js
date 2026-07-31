@@ -273,6 +273,93 @@
     );
   }
 
+  /* ---------- Generated today (today's recording sessions, newest first) ----
+     A quick "what got produced today" list — distinct from the task/to-do
+     sections above it. One row per recording SESSION (meeting) of the
+     caller's OWN day, from org.getSessions (default-to-self, server-side
+     ACL-scoped; non_work/redacted already excluded), newest first. Each row
+     deep-links into the day's timeline where the session picker + the
+     Generate-report button live. SELF-CONTAINED fetch, so it never touches
+     the existing task/on-site data flow (buildTodayFromReport / the fan-out).
+     Empty / loading / error all degrade to nothing — Today is a glance
+     dashboard, a bare "0 generated" would read as noise. */
+  function _sessionTimeRange(sess) {
+    function hm(iso) {
+      var m = iso ? String(iso).match(/T(\d{2}:\d{2})/) : null;
+      return m ? m[1] : null;
+    }
+    var a = hm(sess.started_at), b = hm(sess.ended_at);
+    return (a && b) ? (a + '–' + b) : (a || '');
+  }
+
+  function GeneratedTodayRow(props) {
+    var sess = props.session || {};
+    var title = sess.label || sess.site_name || 'Meeting';
+    var time = _sessionTimeRange(sess);
+    var topics = sess.topic_count || 0;
+    var people = (sess.participants || []).length;
+    var bits = [];
+    if (time) bits.push(time);
+    bits.push(topics + (topics === 1 ? ' topic' : ' topics'));
+    if (people) bits.push(people + (people === 1 ? ' person' : ' people'));
+
+    return React.createElement('div', {
+      className: 'fs-today__generated-row',
+      style: {
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: '12px', padding: '10px 0',
+        borderBottom: '1px solid var(--border-subtle, #e6e8eb)',
+      },
+    },
+      React.createElement('div', { style: { minWidth: 0 } },
+        React.createElement('div', {
+          style: {
+            fontWeight: 600, color: 'var(--text-primary, #102A43)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          },
+        }, title),
+        React.createElement('div', {
+          style: { fontSize: '0.8125rem', color: 'var(--text-secondary, #627d98)' },
+        }, bits.join(' · ')),
+      ),
+      React.createElement(TimelineLink, { date: props.date, label: 'Open' }),
+    );
+  }
+
+  function GeneratedTodaySection(props) {
+    var date = props.date || null;
+    var s = React.useState({ status: 'loading', sessions: [] });
+    var state = s[0], setState = s[1];
+
+    React.useEffect(function () {
+      if (!date) { setState({ status: 'ready', sessions: [] }); return; }
+      var cancelled = false;
+      window.FS.api.org.getSessions({ date: date }).then(function (res) {
+        if (cancelled) return;
+        var list = ((res && res.sessions) || []).slice().sort(function (a, b) {
+          return String(b.started_at || '').localeCompare(String(a.started_at || ''));
+        });
+        setState({ status: 'ready', sessions: list });
+      }).catch(function () {
+        if (!cancelled) setState({ status: 'error', sessions: [] });
+      });
+      return function () { cancelled = true; };
+    }, [date]);
+
+    if (state.status !== 'ready' || !state.sessions.length) return null;
+
+    return React.createElement(React.Fragment, null,
+      React.createElement(SectionLabel, null, 'Generated today'),
+      React.createElement('div', { className: 'fs-today__generated-list' },
+        state.sessions.map(function (sess) {
+          return React.createElement(GeneratedTodayRow, {
+            key: sess.session_id, session: sess, date: date,
+          });
+        }),
+      ),
+    );
+  }
+
   /* ---------- Helper: derive Today from a backend report --------------- */
 
   /* fix/today-onsite-live — the caller's own accessible/membership site,
@@ -2175,6 +2262,11 @@
       /* (Sprint 3, P-02) Recent activity removed — the same topics are
          now reachable on /timeline as the canonical surface. Today
          stays a quick dashboard: brief → urgent → tasks → on-site. */
+
+      /* GENERATED TODAY — the day's own recording sessions (meetings),
+         newest first, below the task lists. Self-contained + ACL-scoped;
+         renders nothing when the caller has no sessions today. */
+      effectiveDate ? React.createElement(GeneratedTodaySection, { date: effectiveDate }) : null,
 
       /* ON SITE — §B: today-scoped, only when TODAY itself has a report.
          Derived from the report's own site, so with no report there's
