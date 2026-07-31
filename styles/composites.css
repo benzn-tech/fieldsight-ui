@@ -1527,6 +1527,12 @@
   color: var(--color-primary-900);
   letter-spacing: -0.02em;
 }
+/* Palette-scale tokens are NOT theme-flipped: --color-primary-900 (#102A43)
+   sat on --surface-app (#0A1018) in dark mode at ~1.15:1 contrast — the
+   wordmark was effectively invisible. Pin a light brand tint for dark. */
+[data-theme="dark"] .fs-login__brand {
+  color: var(--color-primary-100);
+}
 .fs-login__caption {
   font-size: 13px;
   color: var(--text-tertiary);
@@ -1590,6 +1596,12 @@
   border-radius: var(--radius-md);
   padding: 8px 10px;
   line-height: 1.4;
+}
+/* --text-success DOES flip in dark (-> --color-success-400, a light green) but
+   --color-success-50 (#F0FDF4) does NOT, leaving light-green-on-near-white.
+   Pin the dark-mode foreground back to the readable pairing for that pale bg. */
+[data-theme="dark"] .fs-login__success {
+  color: var(--color-success-700);
 }
 
 /* Show/hide password toggle — sits inside the input's own row. */
