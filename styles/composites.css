@@ -1533,6 +1533,17 @@
 [data-theme="dark"] .fs-login__brand {
   color: var(--color-primary-100);
 }
+/* "sight" in the brand accent. Theme-aware by necessity: the primary accent
+   --color-accent-500 (#FFD966) is ~1.4:1 on the light theme's white card
+   (tokens.css warns "yellow fails contrast with #fff"), so light mode steps
+   down the same ramp to accent-800, which clears the 3:1 large-text bar at
+   this 22px bold size. Dark mode gets the real brand yellow (~11:1). */
+.fs-login__brand-accent {
+  color: var(--color-accent-800);
+}
+[data-theme="dark"] .fs-login__brand-accent {
+  color: var(--color-accent-500);
+}
 .fs-login__caption {
   font-size: 13px;
   color: var(--text-tertiary);
