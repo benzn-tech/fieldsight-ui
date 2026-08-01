@@ -90,6 +90,16 @@
       return window.FS.api.orgRequest('/programme', { params: { site: orgSiteId } });
     }
     await window.FS.api.delay();
+
+    /* Perf harness (render-performance plan, Task 7). Opt-in via
+       ?bigprogramme=1 and only inside the mock branch, so a real backend
+       response is never intercepted. */
+    if (window.location
+        && window.location.search.indexOf('bigprogramme=1') !== -1
+        && window.FieldSight.PROGRAMME_LARGE_FIXTURE) {
+      return { programme: window.FieldSight.PROGRAMME_LARGE_FIXTURE };
+    }
+
     var p = fixtures().programme;
     if (!p || (orgSiteId && p.site_id && p.site_id !== orgSiteId)) {
       return { programme: null };
