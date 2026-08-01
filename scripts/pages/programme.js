@@ -815,32 +815,67 @@
     var OVERSCAN = 200;
     var DO_VIRT  = rows.length > 50;
 
-    var scrollRef  = React.useRef(null);
-    var refSTop    = React.useState(0);
-    var sTop       = refSTop[0]; var setSTop = refSTop[1];
-    var refVpH     = React.useState(600);
-    var vpH        = refVpH[0];  var setVpH  = refVpH[1];
+    var scrollRef = React.useRef(null);
+
+    /* The mounted window, as row indices. Scrolling only sets state when the
+       window actually moves: a scroll event that shifts the viewport by a few
+       pixels usually leaves `first`/`last` unchanged, and re-rendering for it
+       is pure cost. Combined with the rAF gate below, a fast flick produces at
+       most one render per frame, and often far fewer. */
+    /* Lazily seeded with a real slice for a 600px viewport at scrollTop 0, so
+       the first paint already has rows. Seeding with an empty slice instead
+       would blank the list for one frame before the effect below measures. */
+    var sliceHook = React.useState(function () {
+      return window.FS.api.programmeRows.visibleSlice(0, 600, rows.length, ROW_H, OVERSCAN);
+    });
+    var slice     = sliceHook[0];
+    var setSlice  = sliceHook[1];
+
+    /* Read inside the scroll handler without re-subscribing on every change. */
+    var rowCountRef = React.useRef(rows.length);
+    rowCountRef.current = rows.length;
 
     React.useEffect(function () {
-      if (!DO_VIRT) return;
       var el = scrollRef.current;
       if (!el) return;
-      setVpH(el.clientHeight || 600);
-      function onScroll() { setSTop(el.scrollTop); }
-      function onResize() { setVpH(el.clientHeight || 600); }
-      el.addEventListener('scroll', onScroll, { passive: true });
-      window.addEventListener('resize', onResize);
-      return function () {
-        el.removeEventListener('scroll', onScroll);
-        window.removeEventListener('resize', onResize);
-      };
-    }, [DO_VIRT]);
 
-    var first   = DO_VIRT ? Math.max(0, Math.floor((sTop - OVERSCAN) / ROW_H)) : 0;
-    var last    = DO_VIRT ? Math.min(rows.length - 1, Math.ceil((sTop + vpH + OVERSCAN) / ROW_H)) : rows.length - 1;
-    var vRows   = DO_VIRT ? rows.slice(first, last + 1) : rows;
-    var topSpc  = DO_VIRT ? first * ROW_H : 0;
-    var botSpc  = DO_VIRT ? Math.max(0, (rows.length - 1 - last) * ROW_H) : 0;
+      var frame = 0;
+
+      function measure() {
+        frame = 0;
+        var node = scrollRef.current;
+        if (!node) return;
+        var next = window.FS.api.programmeRows.visibleSlice(
+          node.scrollTop, node.clientHeight || 600,
+          rowCountRef.current, ROW_H, OVERSCAN,
+        );
+        setSlice(function (prev) {
+          return (prev.first === next.first && prev.last === next.last) ? prev : next;
+        });
+      }
+
+      /* One measurement per animation frame, no matter how many scroll
+         events the browser delivers in between. */
+      function schedule() {
+        if (frame) return;
+        frame = window.requestAnimationFrame(measure);
+      }
+
+      measure();
+      el.addEventListener('scroll', schedule, { passive: true });
+      window.addEventListener('resize', schedule);
+      return function () {
+        if (frame) window.cancelAnimationFrame(frame);
+        el.removeEventListener('scroll', schedule);
+        window.removeEventListener('resize', schedule);
+      };
+    }, [rows]);
+
+    var first  = DO_VIRT ? slice.first : 0;
+    var last   = DO_VIRT ? Math.min(slice.last, rows.length - 1) : rows.length - 1;
+    var vRows  = DO_VIRT ? rows.slice(first, last + 1) : rows;
+    var topSpc = DO_VIRT ? slice.topSpc : 0;
+    var botSpc = DO_VIRT ? Math.max(0, (rows.length - 1 - last) * ROW_H) : 0;
 
     /* ---- Sprint 4.9 — drag controller --------------------------------
        We hold one in-flight drag at a time. The active drag lives in
