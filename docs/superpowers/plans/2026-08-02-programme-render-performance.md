@@ -31,7 +31,7 @@
 | `scripts/composites/task-tree-cell.js` (**modify**) | `React.memo`; `onToggle` receives the task id so the page can pass one stable handler. |
 | `scripts/composites/gantt-row.js` (**modify**) | `React.memo`. |
 | `scripts/composites/gantt-strip.js` (**modify**) | `React.memo` + marker list computed via `useMemo`. |
-| `styles/app-shell.css` (**modify**) | Pin `.fs-gantt-tree__cell` / `.fs-gantt-row` height to the 44 px the virtualizer assumes. |
+| `styles/composites.css` (**modify**) | Tie `.fs-gantt-tree__cell` / `.fs-gantt-row` and the virtualizer's `ROW_H` to the same number. **Corrected during implementation** — see Task 6. |
 | `app-shell-preview.html` (**modify**) | Load the new module before `scripts/pages/programme.js`. |
 
 Why a separate module rather than helpers inside `programme.js`: `programme.js` is 1,733 lines and the row arithmetic is the part that must be provably O(n) and provably memo-stable. Pulling it out is what makes it testable under Node at all — the page file is a Babel-transformed browser IIFE that cannot be `require`d.
@@ -830,7 +830,30 @@ time-window view in Plan B is what bounds that span."
 ## Task 6: Pin the row height the virtualizer assumes
 
 **Files:**
-- Modify: `styles/app-shell.css`
+- Modify: `styles/composites.css`
+
+> **Corrected during implementation — this task was written backwards.**
+>
+> The plan assumed the rows rendered at 44 px and the risk was a wrapped task
+> name making one taller. In fact `.fs-gantt-tree__cell` and `.fs-gantt-row`
+> have **always** been `36px` (in `styles/composites.css`, not
+> `app-shell.css`, and `box-sizing: border-box` is global so the 1px border is
+> inside it), while the virtualizer hard-codes `ROW_H = 44`.
+>
+> Every spacer was therefore **8px per row too tall** — about 40,000px of
+> drift over a 5,000-row programme — so the scrollbar never matched the
+> content and scrolling jumped and overshot. This is a **pre-existing defect**
+> and very likely the real cause of the scroll misbehaviour this plan set out
+> to fix.
+>
+> The fix is the reverse of what is written below: set `ROW_H = 36` to match
+> the CSS, not the CSS to match `ROW_H`. Also add `flex-shrink: 0` to both
+> rules — `.fs-gantt__tree` is a flex column, so without it rows compress once
+> content exceeds the container, at exactly the scale where the drift hurts
+> most. The task name already truncates with ellipsis, so no wrapping fix is
+> needed.
+>
+> Steps 1–4 below are kept as written for the record.
 
 The virtualizer hard-codes `ROW_H = 44` (`scripts/pages/programme.js:834`) and derives every spacer height from it. If a long task name wraps to two lines, that row renders taller than 44 px, the spacers no longer match the real content height, and the scroll position drifts — which reads as jumpy scrolling on top of the lag. Pinning the height in CSS is the smaller and more predictable fix; measuring every row would mean a `ResizeObserver` per row.
 

@@ -385,7 +385,10 @@ Acceptance: 5,000-row programme, sustained scroll, no frame over 50 ms.
 | POST | `/api/org/programme/tasks/{id}/delay-flag` | Scenario D (§10). |
 
 `?site=` remains the **org site UUID**, not the report slug — passing the
-slug 403s (`fieldsight-ui/scripts/api/programme.js:11-16`).
+slug **also** resolves: `_resolve_site_param` accepts either and ACL-checks the
+resolved id either way, so a slug cannot be used to bypass scoping. The comment
+at `fieldsight-ui/scripts/api/programme.js:11-16` still says a slug 403s and is
+stale — see §15.
 
 The window query replaces `today-programme-adapter.js:111`, which currently
 fans out across every org site with `pooledAll` and downloads each whole
@@ -452,9 +455,16 @@ from S3 and `POST /suggestions/{id}/confirm` writes it back
 path (PATCH, import commit, suggestion confirm) regenerates the S3 snapshot
 in the legacy `{parents, leaves}` shape:
 
-- `leaves` — all leaf nodes not soft-deleted, `task_id` = `source_task_id`
-  when present else the UUID
-- `parents` — their nearest group ancestors
+- `leaves` — every not-soft-deleted task **that carries dates**, `task_id` =
+  `source_task_id` when present else the UUID
+- `parents` — every not-soft-deleted task with **no dates**: the WBS headers
+
+**Dates decide the split, not whether a task has children** — see §15. The
+children rule is the intuitive one and is wrong in a way that fails silently:
+a contract task would drop out of `leaves` the moment a PM broke it down, and
+stop being matchable. Under the dates rule a broken-down task appears
+alongside its own subtasks and both stay matchable, which is what you want —
+general speech lands on the parent, specific speech on the subtask.
 
 The matcher needs **no change**. Its `candidate_tasks()` only consumes
 schedulable leaves.
@@ -578,7 +588,65 @@ prompt tuning or threshold changes:
 
 ---
 
-## 15. Risks
+## 15. Corrections from implementation
+
+Recorded after Plans A, B and D's backend, and Plan C's pure modules, were
+built. Each of these contradicts something stated earlier in this document or
+in a plan; the code is right and the earlier text was wrong.
+
+**§12 — the snapshot's `parents`/`leaves` split is decided by DATES, not by
+having children.** The obvious rule (a task is a parent iff something points
+at it) passed all eleven shape tests and was wrong in a way that fails
+silently: once a PM breaks a contract task down, "Pour slab" acquires local
+subtasks, becomes a parent, drops out of `leaves`, and **stops being a match
+candidate** — so "we poured the slab today" no longer lands on it, with
+nothing raised anywhere. In the legacy document `parents` were WBS headers,
+which carry no dates. A task with dates is schedulable work whether or not
+anything hangs off it. Caught by
+`tests/unit/test_programme_snapshot_matcher_contract.py`, which feeds a real
+snapshot into the matcher's own `candidate_tasks()` instead of asserting the
+document matches how the matcher was *read* to work.
+
+**§9 — `?site=` accepts a slug as well as a UUID.** The spec repeated a
+comment at `fieldsight-ui/scripts/api/programme.js:11-16` saying a slug 403s.
+`_resolve_site_param` was extended server-side to accept either, ACL-checking
+the resolved id either way. That frontend comment is now stale and should be
+corrected when the file is next touched.
+
+**Plan B — the caller row's key is `caller["id"]`, not `user_id`.** `caller`
+is a `users` row.
+
+**Plan A §8 — `ROW_H` was 44 while the rows have always rendered at 36px.**
+The plan said to pin the CSS to 44; the correct fix was the reverse. The
+8px-per-row drift was ~40,000px over a 5,000-row programme, and is the most
+likely cause of the scroll jumping that the performance work was chasing. The
+rules also live in `styles/composites.css`, not `styles/app-shell.css`.
+
+**A gap no plan accounted for: one user action produces N task writes.**
+`applyTaskMutation` runs a cascade — dragging a bar shifts every downstream
+dependent and recomputes the critical path. Plan B assumed "one edit = one
+PATCH". Options and a recommendation are recorded on
+`fieldsight-ui` PR #152; the page wiring is blocked until it is settled.
+Sending N independent PATCHes is the option to avoid: it is not atomic, and
+its failure mode is "the Gantt looks right and the database is wrong".
+
+**`programme_rebase.rebase_children` is written and tested but not wired.**
+Its call site needs the re-plan UI, which belongs to Project 3. A half-wired
+rebase that shifts dates with no way to see or undo the invalidation is worse
+than none, so it stays uncalled deliberately rather than by omission.
+
+**Verification method worth reusing.** `scripts/verify_programme_schema.py`
+runs the migration and the window CTE against the real test cluster inside a
+transaction that is rolled back — nothing persists. It proved the recursive
+CTE terminates on a `parent_id` cycle, which no unit test against a fake
+cursor could. One trap: in Postgres a constraint violation aborts the whole
+transaction (SQLSTATE 25P02), so each expected-failure probe needs its own
+`SAVEPOINT` — without them, every check after the first dies with
+"transaction is aborted" while appearing to pass through.
+
+---
+
+## 16. Risks
 
 | Risk | Mitigation |
 |---|---|
