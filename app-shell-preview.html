@@ -228,7 +228,11 @@
   <!-- Sprint 9 Track C.1 — Strategic aggregator (per-site / per-region / org rollups) -->
   <script src="scripts/api/strategic-aggregator.js?v=2"></script>
   <!-- Sprint 4.4 / 8.2.1 — Programme api + write operations -->
-  <script src="scripts/api/programme.js?v=5"></script>
+  <!-- Programme time window (spec §7) — presets + overlap arithmetic.
+       Loaded before programme.js, whose getTasksInWindow mock branch filters
+       through it. -->
+  <script src="scripts/api/programme-window.js?v=1"></script>
+  <script src="scripts/api/programme.js?v=6"></script>
   <!-- Sprint 5.6 / 8.3.1–8.3.2 — Cascade + CPM + floats + over-alloc engine -->
   <script src="scripts/api/programme-schedule.js?v=2"></script>
   <!-- Sprint 5.4 / 8.2.2 — CSV + XML + XLSX programme importer -->
