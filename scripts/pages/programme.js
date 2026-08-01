@@ -119,20 +119,8 @@
     );
   }
 
-  /* Roll up child date range + progress for a group row. Used to
-     render summary bars in the Gantt without backend support. */
-  function rollupGroup(parent, leaves) {
-    var children = leaves.filter(function (t) { return t.parent_id === parent.task_id; });
-    if (!children.length) return { start: null, end: null, progress: 0 };
-    var start = children.reduce(function (m, t) { return !m || t.start < m ? t.start : m; }, null);
-    var end   = children.reduce(function (m, t) { return !m || t.end   > m ? t.end   : m; }, null);
-    var totalDays = children.reduce(function (s, t) { return s + (t.duration_days || 0); }, 0);
-    var doneDays  = children.reduce(function (s, t) {
-      return s + ((t.duration_days || 0) * (t.progress_pct || 0) / 100);
-    }, 0);
-    var progress = totalDays > 0 ? Math.round(doneDays / totalDays * 100) : 0;
-    return { start: start, end: end, progress: progress };
-  }
+  /* Group rollup moved to scripts/api/programme-rows.js — it is part of the
+     row model now, and had to leave this file to be testable under Node. */
 
   /* ---------- ProgrammeContext ---------------------------------------- */
 
@@ -798,23 +786,15 @@
     }, [ctx.baselineData]);
 
     /* Build the visible rows in WBS order: each parent followed by its
-       leaves (unless collapsed). */
-    var rows = [];
-    s.parents.forEach(function (parent) {
-      var roll = rollupGroup(parent, s.leaves);
-      var groupTask = Object.assign({}, parent, {
-        start: roll.start, end: roll.end, duration_days: 0,
-        progress_pct: roll.progress, status: 'group',
-      });
-      rows.push({ kind: 'group', task: groupTask, parent: parent, indent: 0 });
-      if (!ctx.collapsed.has(parent.task_id)) {
-        s.leaves
-          .filter(function (t) { return t.parent_id === parent.task_id; })
-          .forEach(function (leaf) {
-            rows.push({ kind: 'leaf', task: leaf, indent: 1 });
-          });
-      }
-    });
+       leaves (unless collapsed).
+
+       Memoized because this used to run on every render — including every
+       scroll event — at O(parents x leaves). See scripts/api/programme-rows.js.
+       The identity stability also matters downstream: the virtual slice
+       (below) and the memoized row composites both key off it. */
+    var rows = React.useMemo(function () {
+      return window.FS.api.programmeRows.buildRows(s.parents, s.leaves, ctx.collapsed);
+    }, [s.parents, s.leaves, ctx.collapsed]);
 
     var ppd        = TIER_PIXELS[ctx.tier] || 24;
     var totalDays  = diffDays(prog.start_date, prog.end_date) + 1;
