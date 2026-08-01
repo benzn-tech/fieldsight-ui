@@ -218,6 +218,9 @@
        today-adapter.js + tasks.js (below), which both call it. -->
   <script src="scripts/api/mine-team.js?v=1"></script>
   <!--   4. Today adapter (PLAN Phase D sketch — feeds mock-data.js shim) -->
+  <!-- Today's section model (spec §14) — overdue / today / next 3 days.
+       Pure; loaded before today-adapter.js and pages/today.js. -->
+  <script src="scripts/api/today-sections.js?v=1"></script>
   <script src="scripts/api/today-adapter.js?v=12"></script>
   <!-- Sprint 4.2 — Tasks aggregator (cross-day join: timeline + actions) -->
   <script src="scripts/api/tasks-aggregator.js?v=11"></script>
