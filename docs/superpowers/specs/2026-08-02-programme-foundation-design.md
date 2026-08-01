@@ -499,8 +499,8 @@ bucket's 2-task stub is discarded.
 ## 14. Out of scope
 
 Deferred to Project 2: critical-path highlight, overview modal, lateness
-computation, dependency-less degradation UX, dependency authoring for
-CSV/XLSX imports.
+computation, dependency-less degradation UX (predicted design in §14.1),
+dependency authoring for CSV/XLSX imports.
 
 Deferred to Project 3: AI breakdown, breakdown re-planning on invalidation,
 zone split, allocation UX, and the two-way visibility work below.
@@ -508,6 +508,44 @@ zone split, allocation UX, and the two-way visibility work below.
 Deferred beyond: `.xer` and `.mpp` import (MPXJ on a JVM Lambda would cover
 xer / mpp / P6 XML / Asta at once — revisit if XML export proves a real
 obstacle for clients).
+
+### 14.1 Predicted design — programmes without dependency data
+
+**Assumption, not observation.** No real client Excel programme has been
+examined yet. This section records the intended behaviour so Project 2 is
+not blocked; it must be checked against a real sample before implementation,
+and the sample may change the tier-2 signal below.
+
+What is assumed about a typical Excel/CSV construction programme: activity
+name, start, finish, sometimes duration and % complete, sometimes an
+indent or dotted WBS numbering, occasionally a responsible party — and **no
+predecessor column**. Dependencies are the thing spreadsheets do not carry.
+
+Three tiers, selected per programme from what the data actually supports:
+
+| Tier | Condition | Behaviour |
+|---|---|---|
+| **1 — Critical path** | Dependency coverage sufficient (see threshold below) | Real CPM. Red highlighted path along the timeline, float, lateness against baseline. |
+| **2 — Deadline pressure** | No usable dependencies | **No critical path is shown.** Instead: tasks ranked by deadline pressure — end date near or past with progress short of where elapsed time implies. Rendered in amber and labelled "At risk", never red and never "critical". A persistent banner states that this programme carries no dependency data, so critical path cannot be calculated, and offers the two remedies (import an MS Project XML, or link tasks here). |
+| **3 — Author dependencies here** | User links tasks in-app | Links are written to `programme_task_deps` between our UUIDs, so they **survive re-import** — a direct payoff of the identity/matching key split (§4.1). Once coverage crosses the threshold, the programme promotes itself to tier 1. |
+
+Coverage threshold for tier 1: at least 60% of schedulable leaf tasks
+participate in a dependency, and the dependency graph is acyclic. Below
+that, a CPM run would find a "path" through the small connected subset and
+present it with the same visual weight as a real one. Partial coverage is
+reported explicitly ("dependencies cover 34% of tasks — not enough to
+calculate a critical path") rather than silently degraded.
+
+**Explicitly rejected: inferring finish-to-start chains from row order.**
+Spreadsheet programmes are usually written top-to-bottom in rough sequence,
+which makes this tempting and cheap. It would produce a critical path that
+looks entirely plausible and is frequently wrong — parallel trades on
+different levels appear as a chain, and a PM would make sequencing decisions
+on it. A missing critical path is a visible gap; a fabricated one is a
+silent error with worse consequences. The same reasoning rules out shipping
+LLM-inferred dependencies as if they were data; if Project 3 explores AI
+dependency suggestion, each link must arrive as a **proposal a human accepts**
+and be stored as user-authored, never applied automatically.
 
 ### Recorded for Project 3 — matcher visibility
 
