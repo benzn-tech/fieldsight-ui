@@ -12,7 +12,7 @@
      isGroup      boolean
      expanded     boolean — only used when isGroup
      indent       number — depth-2 max for this prototype
-     onToggle     () => void — chevron click (only when isGroup)
+     onToggle     (taskId) => void — chevron click (only when isGroup)
      onSelect     (task) => void — row click
      selected     boolean
      critical     boolean — schedule-driving task highlight
@@ -53,7 +53,7 @@
             'aria-label': expanded ? 'Collapse' : 'Expand',
             onClick:   function (e) {
               e.stopPropagation();
-              if (props.onToggle) props.onToggle();
+              if (props.onToggle) props.onToggle(t.task_id);
             },
           }, '▸')
         : React.createElement('span', { className: 'fs-gantt-tree__chev-spacer' }),
@@ -72,5 +72,9 @@
   }
 
   if (!window.FieldSight) window.FieldSight = {};
-  window.FieldSight.TaskTreeCell = TaskTreeCell;
+  /* Memoized: the Gantt mounts one of these per visible row and used to
+     re-reconcile all of them on every scroll frame. Shallow comparison is
+     correct here — every prop is a primitive, a task object from state, or a
+     callback the page holds stable via useCallback. */
+  window.FieldSight.TaskTreeCell = React.memo(TaskTreeCell);
 })();

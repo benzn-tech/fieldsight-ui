@@ -890,7 +890,12 @@
     var dragRef     = React.useRef(dragState);
     dragRef.current = dragState;
 
-    function dragStart(task, mode, clientX) {
+    /* The three drag callbacks are useCallback'd for the same reason as the
+       row callbacks below: they are props on every leaf GanttRow, and a fresh
+       identity each render would defeat React.memo on all of them. They read
+       live drag state through dragRef, not through the closure, so their
+       dependency lists stay small. */
+    var dragStart = React.useCallback(function (task, mode, clientX) {
       var next = {
         taskId:    task.task_id,
         mode:      mode,
@@ -903,9 +908,9 @@
       setDragState(next);
       document.body.classList.add('fs-gantt-dragging');
       document.body.classList.add('fs-gantt-dragging--' + mode);
-    }
+    }, []);
 
-    function dragMove(clientX) {
+    var dragMove = React.useCallback(function (clientX) {
       var d = dragRef.current;
       if (!d.taskId) return;
       var deltaPx   = clientX - d.originX;
@@ -930,9 +935,9 @@
 
       if (nextStart === d.start && nextEnd === d.end) return;
       setDragState(Object.assign({}, d, { start: nextStart, end: nextEnd }));
-    }
+    }, [ppd, prog.start_date, prog.end_date]);
 
-    function dragEnd() {
+    var dragEnd = React.useCallback(function () {
       var d = dragRef.current;
       document.body.classList.remove('fs-gantt-dragging');
       document.body.classList.remove('fs-gantt-dragging--move');
@@ -946,7 +951,31 @@
       }
       setDragState({ taskId: null, mode: null, originX: 0,
                      origStart: '', origEnd: '', start: '', end: '' });
-    }
+    }, [ctx.updateTask]);
+
+    /* Stable across renders so React.memo on the row composites can actually
+       short-circuit. Each row previously got a freshly-created closure, which
+       made every memo comparison fail. */
+    var handleToggle = React.useCallback(function (taskId) {
+      ctx.toggleGroup(taskId);
+    }, [ctx.toggleGroup]);
+
+    var handleSelect = React.useCallback(function (task) {
+      /* Group rows are not selectable. buildRows stamps status:'group' on
+         every derived group task, so this is exactly the r.kind === 'group'
+         guard that used to live at the call site. */
+      if (task.status === 'group') return;
+      props.onSelect({
+        kind:    'programme_task',
+        id:      'task_' + task.task_id,
+        task_id: task.task_id,
+        task:    task,
+      });
+    }, [props.onSelect]);
+
+    var handleKeyboardMove = React.useCallback(function (opts) {
+      ctx.updateTask(opts);
+    }, [ctx.updateTask]);
 
     var showOverAllocBanner = ctx.canWrite
       && !ctx.overAllocDismissed
@@ -986,16 +1015,8 @@
               indent:     r.indent,
               critical:   r.kind === 'leaf' && s.critical.has(r.task.task_id),
               selected:   selectedId === r.task.task_id,
-              onToggle:   function () { ctx.toggleGroup(r.task.task_id); },
-              onSelect:   function () {
-                if (r.kind === 'group') return;
-                props.onSelect({
-                  kind:     'programme_task',
-                  id:       'task_' + r.task.task_id,
-                  task_id:  r.task.task_id,
-                  task:     r.task,
-                });
-              },
+              onToggle:   handleToggle,
+              onSelect:   handleSelect,
             });
           }),
           DO_VIRT && botSpc > 0
@@ -1034,7 +1055,7 @@
                 onDragMove:     r.kind === 'leaf' ? dragMove  : null,
                 onDragEnd:      r.kind === 'leaf' ? dragEnd   : null,
                 /* Sprint 8.5.5 — keyboard move commits directly via updateTask */
-                onKeyboardMove: r.kind === 'leaf' ? function (opts) { ctx.updateTask(opts); } : null,
+                onKeyboardMove: r.kind === 'leaf' ? handleKeyboardMove : null,
                 programmeDurationDays: diffDays(prog.start_date, prog.end_date) + 1,
                 /* Sprint 8.3.1 — float */
                 showFloat:  ctx.showFloat && r.kind === 'leaf',
@@ -1045,15 +1066,7 @@
                 showBaseline:  ctx.showBaseline && !!bLine,
                 baselineStart: bLine ? bLine.start : null,
                 baselineEnd:   bLine ? bLine.end   : null,
-                onSelect:      function () {
-                  if (r.kind === 'group') return;
-                  props.onSelect({
-                    kind:     'programme_task',
-                    id:       'task_' + r.task.task_id,
-                    task_id:  r.task.task_id,
-                    task:     r.task,
-                  });
-                },
+                onSelect:      handleSelect,
               });
             }),
 

@@ -275,5 +275,10 @@
   }
 
   if (!window.FieldSight) window.FieldSight = {};
-  window.FieldSight.GanttRow = GanttRow;
+  /* Memoized: one per visible row, previously re-reconciled on every scroll
+     frame. Shallow comparison is correct — every prop is a primitive, null, a
+     task object from state, or a callback the page holds stable via
+     useCallback. During a drag only the dragged row's dragPreview changes, so
+     the rest still short-circuit. */
+  window.FieldSight.GanttRow = React.memo(GanttRow);
 })();
