@@ -612,6 +612,21 @@
 
   /* ---------- KpiStrip wired from report metadata ---------------------- */
 
+  /* Total time recorded across the day, for the KPI card. Deliberately NOT the
+     mm:ss the audio player uses: "9:29" in a stat tile reads as a clock time,
+     and this number is a duration that can exceed an hour. Returns the em dash
+     when the metric is absent, so the caller can pass a missing value straight
+     through. */
+  function fmtRecordedTime(seconds) {
+    if (seconds == null) return '—';
+    var s = Math.max(0, Math.round(seconds));
+    if (s < 60) return s + 's';
+    var h = Math.floor(s / 3600);
+    var m = Math.floor((s % 3600) / 60);
+    if (h > 0) return m > 0 ? h + 'h ' + m + 'm' : h + 'h';
+    return m + 'm ' + (s % 60) + 's';
+  }
+
   function ReportKpis(props) {
     var KpiStrip = window.FieldSight.KpiStrip;
     var StatCard = window.FieldSight.StatCard;
@@ -622,14 +637,18 @@
       var tagged = (t.category === 'safety') || ((t.safety_flags || []).length > 0);
       return acc + (tagged ? 1 : 0);
     }, 0);
-    // `_report_metadata` (recordings_processed / total_words) only exists on the legacy
-    // daily-report JSON — the mock fixtures carry it, but the live Aurora/extraction path
-    // never populates it. So `meta` is {} on every real timeline, and these two KPIs used
-    // to read a hard 0 even when the day has recordings (e.g. UCPK2: 24 recordings in the
-    // DB, "Recordings 0" shown). Show an em dash (metric unavailable) instead of a
-    // misleading 0 when the metadata block is absent; a real live count is a backend
-    // follow-up. Topics + Safety are derived from the live report, so they stay accurate.
-    var hasReportMeta = report._report_metadata != null;
+    // These two KPIs read `_report_metadata`, which the legacy nightly daily-report
+    // generator populates but the live Aurora/extraction path did not — so every real
+    // timeline rendered a hard 0 (Ben_UCPK2 on 2026-07-31: 21 recording rows in the DB
+    // behind a "0"). org-api now counts them live off the `recordings` table and emits
+    // recordings_processed + duration_seconds.
+    //
+    // Gate on the FIELD, never on the metadata block: the live path always emits a
+    // block ({source, version}), so a block-level check is true on exactly the days
+    // this is meant to fix and the misleading 0 comes straight back. An absent field
+    // shows "—" (metric unavailable), which is what a day served by an older org-api,
+    // or by the reindex builder, still gets. A present 0 renders as 0 — that is a fact
+    // ("nothing recorded today"), not a missing metric.
     var meta = report._report_metadata || {};
 
     return React.createElement(KpiStrip, null,
@@ -640,13 +659,12 @@
         value: safetyCount, label: 'Safety', tone: safetyCount > 0 ? 'danger' : 'neutral',
       }),
       React.createElement(StatCard, {
-        value: hasReportMeta ? (meta.recordings_processed || 0) : '—', label: 'Recordings',
+        value: meta.recordings_processed != null ? meta.recordings_processed : '—',
+        label: 'Recordings',
       }),
       React.createElement(StatCard, {
-        value: hasReportMeta
-          ? (meta.total_words ? meta.total_words.toLocaleString() : 0)
-          : '—',
-        label: 'Words',
+        value: fmtRecordedTime(meta.duration_seconds),
+        label: 'Recorded',
       }),
     );
   }
@@ -3360,6 +3378,8 @@
       diffWords: diffWords,
       formatEditTime: formatEditTime,
       formatContentEdit: formatContentEdit,
+      /* live recording KPIs */
+      fmtRecordedTime: fmtRecordedTime,
       /* content-propagate (item #3) */
       findCorrectionPair: findCorrectionPair,
       TopicCorrectionPropagate: TopicCorrectionPropagate,

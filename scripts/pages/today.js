@@ -294,8 +294,17 @@
      deep-links into the day's timeline where the session picker + the
      Generate-report button live. SELF-CONTAINED fetch, so it never touches
      the existing task/on-site data flow (buildTodayFromReport / the fan-out).
-     Empty / loading / error all degrade to nothing — Today is a glance
-     dashboard, a bare "0 generated" would read as noise. */
+     Loading / error degrade to nothing — Today is a glance dashboard, and a
+     bare "0 generated" would read as noise.
+
+     It shows the most recent day that HAS sessions, not strictly today. The
+     first cut was today-only and gated on `effectiveDate` (today having its
+     own report), which made the whole section — heading included — vanish on
+     any day without a recording. That is most days, so there was no way to
+     tell "nothing recorded" apart from "the feature is broken", and no way to
+     eyeball it without recording something first. Falling back keeps the
+     section useful and self-evidently working; the heading names the day
+     whenever it is not today. */
   function _sessionTimeRange(sess) {
     function hm(iso) {
       var m = iso ? String(iso).match(/T(\d{2}:\d{2})/) : null;
@@ -339,34 +348,92 @@
     );
   }
 
+  /* "Thu 31 Jul", for the heading on a fallback day. Built from the ISO parts
+     via Date.UTC and read back with UTC getters — BUG-19: new Date('2026-07-31')
+     parses as UTC and drifts a day when read in NZ local time. */
+  function _generatedDayLabel(iso) {
+    var DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    var p = String(iso || '').split('-').map(Number);
+    if (p.length !== 3 || p.some(isNaN)) return String(iso || '');
+    var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+    return DAYS[d.getUTCDay()] + ' ' + p[2] + ' ' + MONTHS[p[1] - 1];
+  }
+
+  /* Days to try before giving up, once today itself has no sessions. The date
+     index is site-scoped while getSessions is default-to-self, so a listed day
+     is a CANDIDATE, not a guarantee — a few probes covers "the last time this
+     person recorded" without turning a glance dashboard into a crawl. */
+  var GENERATED_FALLBACK_PROBES = 5;
+
+  function _sessionsFor(date) {
+    return window.FS.api.org.getSessions({ date: date }).then(function (res) {
+      return ((res && res.sessions) || []).slice().sort(function (a, b) {
+        return String(b.started_at || '').localeCompare(String(a.started_at || ''));
+      });
+    });
+  }
+
+  /* Most recent days with content, strictly before `today`, newest first. */
+  function _fallbackCandidates(today) {
+    return window.FS.api.dates.getDates({ months: 1 }).then(function (res) {
+      return Object.keys((res && res.dates) || {})
+        .filter(function (d) { return d < today; })
+        .sort().reverse()
+        .slice(0, GENERATED_FALLBACK_PROBES);
+    }).catch(function () { return []; });
+  }
+
   function GeneratedTodaySection(props) {
-    var date = props.date || null;
-    var s = React.useState({ status: 'loading', sessions: [] });
+    var today = props.today || null;
+    var s = React.useState({ status: 'loading', sessions: [], date: null });
     var state = s[0], setState = s[1];
 
     React.useEffect(function () {
-      if (!date) { setState({ status: 'ready', sessions: [] }); return; }
+      if (!today) { setState({ status: 'ready', sessions: [], date: null }); return; }
       var cancelled = false;
-      window.FS.api.org.getSessions({ date: date }).then(function (res) {
-        if (cancelled) return;
-        var list = ((res && res.sessions) || []).slice().sort(function (a, b) {
-          return String(b.started_at || '').localeCompare(String(a.started_at || ''));
+
+      /* Today first; only when it is empty do we look back. Walking the
+         candidates in sequence (not in parallel) means the common case —
+         someone who recorded today, or yesterday — costs one or two calls,
+         and we stop at the first day that actually has sessions. */
+      _sessionsFor(today).then(function (list) {
+        if (list.length) return { sessions: list, date: today };
+        return _fallbackCandidates(today).then(function (days) {
+          return days.reduce(function (chain, day) {
+            return chain.then(function (found) {
+              if (found || cancelled) return found;
+              return _sessionsFor(day).then(function (l) {
+                return l.length ? { sessions: l, date: day } : null;
+              }).catch(function () { return null; });
+            });
+          }, Promise.resolve(null));
         });
-        setState({ status: 'ready', sessions: list });
+      }).then(function (hit) {
+        if (cancelled) return;
+        setState({
+          status: 'ready',
+          sessions: (hit && hit.sessions) || [],
+          date: (hit && hit.date) || null,
+        });
       }).catch(function () {
-        if (!cancelled) setState({ status: 'error', sessions: [] });
+        if (!cancelled) setState({ status: 'error', sessions: [], date: null });
       });
+
       return function () { cancelled = true; };
-    }, [date]);
+    }, [today]);
 
     if (state.status !== 'ready' || !state.sessions.length) return null;
 
+    var isToday = state.date === today;
     return React.createElement(React.Fragment, null,
-      React.createElement(SectionLabel, null, 'Generated today'),
+      React.createElement(SectionLabel, null,
+        isToday ? 'Generated today' : 'Generated · ' + _generatedDayLabel(state.date)),
       React.createElement('div', { className: 'fs-today__generated-list' },
         state.sessions.map(function (sess) {
           return React.createElement(GeneratedTodayRow, {
-            key: sess.session_id, session: sess, date: date,
+            key: sess.session_id, session: sess, date: state.date,
           });
         }),
       ),
@@ -2303,10 +2370,13 @@
          now reachable on /timeline as the canonical surface. Today
          stays a quick dashboard: brief → urgent → tasks → on-site. */
 
-      /* GENERATED TODAY — the day's own recording sessions (meetings),
-         newest first, below the task lists. Self-contained + ACL-scoped;
-         renders nothing when the caller has no sessions today. */
-      effectiveDate ? React.createElement(GeneratedTodaySection, { date: effectiveDate }) : null,
+      /* GENERATED — the most recent day's recording sessions (meetings),
+         newest first, below the task lists. Self-contained + ACL-scoped.
+         NOT gated on effectiveDate: that is "today has its own report", and
+         requiring it hid the section on every day without a recording, which
+         is most of them. The section decides for itself, falling back to the
+         last day that has sessions and naming it in the heading. */
+      React.createElement(GeneratedTodaySection, { today: state.today }),
 
       /* ON SITE — §B: today-scoped, only when TODAY itself has a report.
          Derived from the report's own site, so with no report there's
@@ -2901,6 +2971,11 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       sectionCardCount:     sectionCardCount,
+      /* "Generated" section — the day label and the fallback-day picker.
+         See tests/generated-section-fallback.test.js. */
+      _generatedDayLabel:   _generatedDayLabel,
+      _fallbackCandidates:  _fallbackCandidates,
+      GeneratedTodaySection: GeneratedTodaySection,
       /* feat/leftover-inline-filter — pure aged-filter helpers: the aged
          marker predicate, the per-bucket visible-list filter, and the
          aged counter. See their doc comments near LEFTOVER_THRESHOLD_DAYS
