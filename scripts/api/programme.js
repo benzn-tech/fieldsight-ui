@@ -229,6 +229,22 @@
     return { ok: true, task_id: taskId };
   }
 
+  /* One request for a whole cascade — dragging a bar shifts every downstream
+     dependent, and those writes have to be atomic. The server checks every
+     row_version before writing any of them; on 409 the body carries
+     `conflicts: [task_id, ...]` naming the rows that moved, so the caller
+     refreshes exactly those (see programme-autosave.applyBatchConflict)
+     rather than reloading and discarding the user's other pending edits. */
+  async function updateTasksBatch(orgSiteId, tasks) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest('/programme/tasks:batch', {
+        method: 'PATCH', params: { site: orgSiteId }, body: { tasks: tasks },
+      });
+    }
+    await window.FS.api.delay();
+    return { ok: true, count: (tasks || []).length };
+  }
+
   async function createTask(orgSiteId, payload) {
     if (orgLive()) {
       return window.FS.api.orgRequest('/programme/tasks', {
@@ -364,6 +380,7 @@
     getProgrammeTasksForRange:  getProgrammeTasksForRange,
     getTasksInWindow:           getTasksInWindow,
     updateTask:                 updateTask,
+    updateTasksBatch:           updateTasksBatch,
     createTask:                 createTask,
     deleteTask:                 deleteTask,
     importTasks:                importTasks,

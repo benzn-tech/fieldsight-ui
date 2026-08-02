@@ -63,10 +63,69 @@
     return Object.assign({}, pending || {}, next || {});
   }
 
+  /* Fields a drag or an edit can move. Everything else on a row is either
+     ours to derive (day counts, critical flags) or the file's. */
+  var BATCH_FIELDS = ['start', 'end', 'duration_days', 'progress_pct',
+                      'status', 'name', 'zone', 'sort_order'];
+
+  /* Server column names differ from the legacy document's. The batch endpoint
+     speaks Aurora, so translate on the way out rather than making every call
+     site remember which shape it is holding. */
+  var TO_COLUMN = { start: 'start_date', end: 'end_date' };
+
+  /* One request for a whole cascade.
+
+     Dragging one bar shifts every downstream dependent, so a single user
+     action changes N rows. They must travel together: N independent PATCHes
+     are not atomic, and a lost optimistic lock halfway through leaves the
+     Gantt looking right while the database is wrong — with nothing raised.
+
+     Returns null when nothing actually moved, so a drag that lands where it
+     started writes nothing at all. */
+  function planBatchAutosave(before, after) {
+    var prev = {};
+    (before || []).forEach(function (t) { prev[t.task_id] = t; });
+
+    var tasks = [];
+    (after || []).forEach(function (t) {
+      var was = prev[t.task_id];
+      /* A row that did not exist before is a creation, and creation goes
+         through POST. Folding it in here would send it with a row_version it
+         never had. */
+      if (!was) return;
+
+      var entry = null;
+      BATCH_FIELDS.forEach(function (f) {
+        if (t[f] === was[f]) return;
+        if (!entry) entry = { id: t.task_id, row_version: was.row_version };
+        entry[TO_COLUMN[f] || f] = t[f];
+      });
+      if (entry) tasks.push(entry);
+    });
+
+    if (!tasks.length) return null;
+    return { method: 'PATCH', body: { tasks: tasks } };
+  }
+
+  /* A batch 409 comes back naming the rows that moved. Replace exactly those
+     and leave every other pending edit alone — reloading the programme would
+     discard work the user has not been told about. */
+  function applyBatchConflict(tasks, freshRows) {
+    if (!freshRows || !freshRows.length) return tasks;
+    var byId = {};
+    freshRows.forEach(function (r) { byId[r.task_id] = r; });
+    return (tasks || []).map(function (t) {
+      return byId[t.task_id] || t;
+    });
+  }
+
   var api = {
-    planAutosave:   planAutosave,
-    applyConflict:  applyConflict,
-    mergeQueued:    mergeQueued,
+    planAutosave:        planAutosave,
+    applyConflict:       applyConflict,
+    mergeQueued:         mergeQueued,
+    planBatchAutosave:   planBatchAutosave,
+    applyBatchConflict:  applyBatchConflict,
+    BATCH_FIELDS:        BATCH_FIELDS,
   };
 
   if (typeof window !== 'undefined') {

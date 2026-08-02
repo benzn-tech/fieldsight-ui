@@ -101,3 +101,81 @@ test('mergeQueued does not mutate either input', () => {
   assert.strictEqual(pending.progress_pct, 10);
   assert.strictEqual(next.progress_pct, 60);
 });
+
+/* ---- batch planning (the cascade) ---------------------------------------
+   Dragging one bar shifts every downstream dependent, so one user action
+   produces N changed rows. They go in ONE request: N independent PATCHes are
+   not atomic, and a lost lock halfway through leaves the Gantt looking right
+   while the database is wrong. */
+
+const { planBatchAutosave, applyBatchConflict } = require('../scripts/api/programme-autosave.js');
+
+test('a cascade produces one request carrying every changed row', () => {
+  const before = [
+    { task_id: 'A', row_version: 3, start: '2026-04-01', end: '2026-04-10' },
+    { task_id: 'B', row_version: 1, start: '2026-04-11', end: '2026-04-20' },
+    { task_id: 'C', row_version: 7, start: '2026-05-01', end: '2026-05-05' },
+  ];
+  const after = [
+    { task_id: 'A', row_version: 3, start: '2026-04-04', end: '2026-04-13' },
+    { task_id: 'B', row_version: 1, start: '2026-04-14', end: '2026-04-23' },
+    { task_id: 'C', row_version: 7, start: '2026-05-01', end: '2026-05-05' },
+  ];
+  const plan = planBatchAutosave(before, after);
+  assert.strictEqual(plan.method, 'PATCH');
+  assert.deepStrictEqual(plan.body.tasks.map((t) => t.id), ['A', 'B']);
+  assert.strictEqual(plan.body.tasks[0].row_version, 3);
+  assert.strictEqual(plan.body.tasks[1].row_version, 1);
+});
+
+test('unchanged rows are left out of the batch entirely', () => {
+  const rows = [{ task_id: 'A', row_version: 1, start: '2026-04-01', end: '2026-04-10' }];
+  assert.strictEqual(planBatchAutosave(rows, rows), null,
+    'a drag that lands where it started must not write anything');
+});
+
+test('only the fields that moved are sent, under their server column names', () => {
+  /* The document calls them start/end; the batch endpoint's updatable
+     allow-list calls them start_date/end_date. Translating here means no
+     call site has to remember which shape it is holding — and sending `end`
+     would be silently dropped by the server's allow-list. */
+  const before = [{ task_id: 'A', row_version: 1, start: '2026-04-01', end: '2026-04-10', progress_pct: 20 }];
+  const after  = [{ task_id: 'A', row_version: 1, start: '2026-04-01', end: '2026-04-12', progress_pct: 20 }];
+  const plan = planBatchAutosave(before, after);
+  assert.deepStrictEqual(Object.keys(plan.body.tasks[0]).sort(),
+    ['end_date', 'id', 'row_version']);
+  assert.strictEqual(plan.body.tasks[0].end_date, '2026-04-12');
+});
+
+test('a row that appeared after the drag is not treated as an edit', () => {
+  /* Creation goes through POST. Silently folding a new row into the batch
+     would send it with a row_version it never had. */
+  const before = [{ task_id: 'A', row_version: 1, start: '2026-04-01', end: '2026-04-10' }];
+  const after = before.concat([{ task_id: 'NEW', row_version: 1, start: '2026-05-01', end: '2026-05-02' }]);
+  assert.strictEqual(planBatchAutosave(before, after), null);
+});
+
+test('a batch 409 refreshes only the rows the server named', () => {
+  const tasks = [
+    { task_id: 'A', row_version: 3, progress_pct: 10 },
+    { task_id: 'B', row_version: 1, progress_pct: 20 },
+    { task_id: 'C', row_version: 7, progress_pct: 30 },
+  ];
+  const fresh = [{ task_id: 'B', row_version: 9, progress_pct: 55 }];
+  const next = applyBatchConflict(tasks, fresh);
+  assert.deepStrictEqual(next[1], fresh[0]);
+  assert.deepStrictEqual(next[0], tasks[0], 'A keeps the user\'s pending edit');
+  assert.deepStrictEqual(next[2], tasks[2], 'C keeps the user\'s pending edit');
+});
+
+test('applyBatchConflict does not mutate the array it was given', () => {
+  const tasks = [{ task_id: 'A', row_version: 3 }];
+  applyBatchConflict(tasks, [{ task_id: 'A', row_version: 9 }]);
+  assert.strictEqual(tasks[0].row_version, 3);
+});
+
+test('applyBatchConflict tolerates an empty refresh set', () => {
+  const tasks = [{ task_id: 'A', row_version: 3 }];
+  assert.deepStrictEqual(applyBatchConflict(tasks, []), tasks);
+  assert.deepStrictEqual(applyBatchConflict(tasks, undefined), tasks);
+});
