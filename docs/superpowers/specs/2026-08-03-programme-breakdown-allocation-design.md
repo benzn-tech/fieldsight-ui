@@ -105,14 +105,39 @@ rebar, inspection, pour, cure. Those are what actually get assigned.
 
 ### Shape
 
-- Trigger: explicit, per task. **Never automatic.** A PM asks for it on a task
-  they choose.
-- Output: **~4 steps, coarse** (the user's instruction: *"稍微粗糙一点"*).
-  Names, rough sequence, rough durations summing to the parent's span.
+- Trigger: explicit. **Never automatic.** The user's later refinement: a PM
+  frames a *range* — a WBS branch, a zone, a date window — and generates for
+  everything in it, rather than one task at a time.
+- Output: **~4 steps per task, coarse** (the user's instruction:
+  *"稍微粗糙一点"*). Names, rough sequence, rough durations summing to the
+  parent's span.
 - Every generated row is `origin='local'` under the imported parent — so it is
   ours, it survives re-import, and Project 1's rules already govern it.
-- **Nothing is written until the PM accepts.** The proposal is shown, edited
-  if wanted, then committed.
+- **Nothing is written until a human accepts.** The proposal is reviewed,
+  edited if wanted, then committed. See §3.5.
+
+### 3.5 The review gate
+
+The user asked for this explicitly: *"框定一个范围，生成对应的 breakdown 的内容，
+我的人先 review，像是 report review 一样，说 OK，这个大概符合我的想法，再点生成。"*
+
+Scope → generate → a person reads it → commit. Batch, not per task, which
+is the only way it is worth anyone's time when a range covers thirty tasks.
+
+**Do not build a second review queue.** There is already one — the matcher's
+suggestion queue — and this project's first act was fixing the discovery that
+its decisions never reached the table the Gantt renders from (§2). A separate
+breakdown queue would be a second surface with the same failure modes, the
+same ACL questions, and the same chance of going quietly stale. The two
+should converge on one review surface: *here is something the system
+proposes about your programme; accept, edit, or reject.*
+
+That convergence is a design constraint on this work, not a later tidy-up.
+The two differ in one respect worth keeping: a suggestion is about **one
+existing task**, a breakdown proposal **creates rows**. So a rejected
+suggestion changes nothing, while a rejected breakdown must leave no trace —
+which is what "nothing is written until accepted" already guarantees, and
+what §5.5 extends to the index.
 
 ### What it must not do
 
@@ -203,6 +228,78 @@ should stay deferred — *"field-test programme UX first; UX not validated"*.
 
 ---
 
+## 5.5 Reaching Ask
+
+The user's requirement: *"生成的 todo list 我们也需要进入 rag 呀…我希望我们 ask
+agent 是可以搜索到过相关的 project knowledge，或者 personal project knowledge。"*
+
+The goal is right — an allocated task is project knowledge, and Ask should be
+able to answer from it. The mechanism should not be "embed every task row".
+
+### Why not
+
+Ask is retrieval-only today: embed the question → `rag-search` → cited
+synthesis. There is no tool-calling path. So "into RAG" means literally
+inserting task rows into `report_chunks` as text, and vector recall answers
+*what was said about X* — never *all of X*.
+
+Almost every question about a to-do list is enumerative or temporal:
+
+- *"What am I supposed to do this week?"* needs **completeness**. `rag-search`
+  defaults to k=8 and clamps to 32. Twenty tasks and a top-8 recall silently
+  drops twelve — and the answer reads exactly as confident as a correct one.
+- *"What's overdue on Level 3?"* is a date comparison. Embeddings do not do
+  date arithmetic.
+
+This is the same conclusion the voice-timeliness spec already reached for
+checklists — structured lookup, not RAG — and it is being restated here
+because the pull toward "put it all in RAG" is strong and the failure is
+invisible.
+
+There is also a concrete schema obstacle, not only a philosophical one:
+
+- `report_chunks.report_date` is `NOT NULL` and `chunks.insert_chunk` takes it
+  positionally. A programme task has no report date, so indexing one means
+  inventing a value — into the exact column the search filters date ranges on.
+- Deletion is keyed by `source_s3_key` or `topic_id`
+  (`delete_chunks_for_source` / `delete_chunks_for_topic`). A task has
+  neither, so there is no way to withdraw a task's chunk when the task is
+  removed. Indexing without a deletion key is how an index starts lying.
+- ACL is adequate but the fit is loose: `search_chunks` accepts `author_ids`
+  and chunks carry `user_id`, so per-person scoping works — but `author_ids`
+  currently means *who wrote the report*. Reusing it for *who the work is
+  assigned to* merges two ideas into one column.
+
+### What to do instead — two mechanisms
+
+**Structured, for the tasks themselves.** A second retrieval branch in Ask,
+beside `rag-search`: when a question is programme-shaped, query
+`programme_tasks` directly (assignee, window, zone, status) and put the real
+list into the prompt. Not tool-calling — a deterministic branch, which is
+what the current architecture can carry. This is the one that answers "what
+am I doing this week" correctly, completely, and with dates.
+
+**RAG, for the narrative only.** Index the *rationale*: why a task was broken
+down this way, and whatever the reviewer wrote when accepting it (§3.5).
+Small volume, genuinely retrieval-shaped — *"why did we split the slab pour
+like that?"* is a question vector recall is good at and a table query is not.
+
+Task rows themselves do not go into `report_chunks`.
+
+### When it enters the store
+
+**On accept, never on generate.** For the database this falls straight out of
+§3.5. For the index it matters more: **never index a proposal.** A rejected
+breakdown that was already embedded would go on answering questions as if it
+were the plan, and nothing in the system would ever correct it — strictly
+worse than not indexing at all.
+
+Order: accept → write `programme_tasks` → index the narrative. Removal is
+symmetric: deleting a task withdraws its chunk, which requires giving those
+chunks a deletion key they do not currently have (above).
+
+---
+
 ## 6. Order
 
 | # | Piece | Why this order |
@@ -211,7 +308,8 @@ should stay deferred — *"field-test programme UX first; UX not validated"*.
 | 1 | Matcher visibility | No new model, no new table, immediate value. Also the fastest way to learn whether the matcher is actually any good, which everything else assumes. |
 | 2 | Zone split + allocation | No schema change. Turns the programme into assignable work — the point of Projects 1–2. |
 | 3 | Breakdown → to-do rollup | Small, and completes the loop that makes allocation worth doing. |
-| 4 | AI breakdown | Last on purpose. It is the only piece that needs a model, a prompt tuned against real programmes, and field validation to know whether the output is worth accepting. |
+| 4 | AI breakdown + review gate | Last on purpose. It is the only piece that needs a model, a prompt tuned against real programmes, and field validation to know whether the output is worth accepting. |
+| 5 | Ask reaches the programme (§5.5) | The structured branch is useful the moment step 2 exists — tasks are allocated and someone wants to ask what theirs are. The narrative index has nothing to index until step 4 produces rationales, so it follows. |
 
 Doing 4 first would be building the most speculative thing on the least
 evidence.
@@ -232,6 +330,18 @@ evidence.
 4. **Should a zone split copy the breakdown, or breakdown each zone
    separately?** Copying is cheaper and probably right; per-zone breakdown
    would let Level 1 differ from Level 5, which is sometimes real.
+5. **§5.5 splits the user's request rather than implementing it as asked.**
+   The ask was "put the to-do list into RAG"; the recommendation is
+   structured retrieval for the tasks and RAG for the narrative only, on the
+   grounds that top-k recall silently drops tasks. That reasoning is in the
+   section. If the completeness argument is not persuasive, the whole-thing-
+   into-RAG version is a smaller change and this decision should be revisited
+   before step 5 is planned.
+6. **How is a programme-shaped question detected?** §5.5's structured branch
+   needs a router, and a bad one fails in both directions — sending
+   "why is the slab late" to a table query, or "what do I do this week" to
+   vector recall. Left open deliberately; it is the real design work in step
+   5 and it deserves its own examples rather than a guess here.
 
 ---
 
@@ -244,4 +354,7 @@ evidence.
 | A re-import silently re-plans allocated work | `programme_rebase` flags invalidation above 20%; the PM decides |
 | Building the AI piece on invented examples | Ordered last, and the prompt is explicitly not written until there are real programmes to try |
 | Matcher turns out to be poor | Surfaced by §2 before §3 is built, which is why §2 is first |
+| A rejected breakdown gets indexed and answers questions as if it were the plan | Nothing is indexed before acceptance (§5.5); the index follows the table, never leads it |
+| Task chunks cannot be withdrawn when the task is removed | `delete_chunks_for_source`/`_for_topic` are the only deletion keys and a task has neither — so task rows are not indexed at all, and the narrative chunks need a key before step 5 |
+| Ask answers "what am I doing this week" from a top-8 recall and silently omits work | The structured branch, not RAG, answers enumerative questions (§5.5) |
 | Another Project 1 write path was left on the S3 document | The confirm path was found by checking one spec claim; nothing has audited the rest. `programme.write_programme` should have exactly one caller (`_write_snapshot`) — worth asserting in a test rather than trusting |
