@@ -4401,7 +4401,15 @@
 }
 
 .fs-gantt-tree__cell {
+  /* MUST match ROW_H in scripts/pages/programme.js — the Gantt virtualizer
+     derives every spacer height from it, so a mismatch drifts the scroll
+     position by (real - assumed) px per row. box-sizing is border-box
+     globally (app-shell.css), so the 1px border is inside this 36px. */
   height: 36px;
+  /* The tree column is a flex column; without this, rows compress once the
+     content exceeds the container and the row height stops being 36px —
+     which reintroduces the drift at exactly the scale where it hurts. */
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -4507,7 +4515,10 @@
 
 .fs-gantt-row {
   position: relative;
+  /* MUST match ROW_H in scripts/pages/programme.js and
+     .fs-gantt-tree__cell above — the two panes scroll together. */
   height: 36px;
+  flex-shrink: 0;
   border-bottom: 1px solid var(--border-subtle);
 }
 
