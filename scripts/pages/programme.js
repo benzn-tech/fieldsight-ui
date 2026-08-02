@@ -831,7 +831,12 @@
       : null;
 
     /* Sprint 8.8.3 — virtual list (only engaged when rows > 50) */
-    var ROW_H    = 44;
+    /* MUST match .fs-gantt-tree__cell / .fs-gantt-row in styles/composites.css.
+       This read 44 while the rows have always rendered at 36px, so every
+       virtual spacer was 8px per row too tall — measured at 41,600px of drift
+       over a 5,000-row programme, which is why the scrollbar never matched
+       the content and scrolling jumped and overshot. */
+    var ROW_H    = 36;
     var OVERSCAN = 200;
     var DO_VIRT  = rows.length > 50;
 
