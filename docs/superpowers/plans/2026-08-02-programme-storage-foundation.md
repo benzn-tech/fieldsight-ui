@@ -17,7 +17,8 @@
 - Next migration number is **0027** (`src/migrations/0026_meeting_session.sql` is the highest). Migrations are applied idempotently against `schema_migrations`, per database — prod runs `fieldsight`, test runs `fieldsight_test`.
 - Repository style: module-level SQL strings, `conn.cursor(row_factory=dict_row).execute(...).fetchone()/.fetchall()`, `Jsonb()` for jsonb params. Mirror `src/repositories/programme_suggestions.py`.
 - Tests: `pytest` from the repo root (`pythonpath = ["src"]`). Use the `FakeConn`/`FakeCursor` doubles from `tests/unit/test_programme_suggestions_repo.py` — they record every `execute()` call's SQL and params so behaviour is asserted without a live Postgres. Mark anything needing a real database `@pytest.mark.integration`.
-- `?site=` is the **org site UUID**, never the report-side slug. Passing a slug 403s (`fieldsight-ui/scripts/api/programme.js:11-16`).
+- `?site=` takes the **org site UUID** or the site slug — `_resolve_site_param` accepts either and ACL-checks the resolved id either way. (The comment at `fieldsight-ui/scripts/api/programme.js:11-16` still claims a slug 403s; it is stale.)
+- The caller row's primary key is `caller["id"]`, **not** `caller["user_id"]` — `caller` is a `users` row. Task 4 and Task 5's code below says `user_id` in places; use `caller["id"]`.
 - **Permission empty-list trap:** an empty list means "deny everything", never "no restriction". Unrestricted is `None`. Getting this backwards has already caused a production over-permission incident in this codebase.
 - `fieldsight-ui`'s `main` is production and auto-deploys on merge. Feature branches only.
 - The pipeline working tree may be checked out on another session's branch. Verify with `git branch --show-current` before starting, and use a separate worktree rather than switching it.
@@ -803,10 +804,23 @@ the whole change can be reverted by pointing the frontend back at
 GET/PUT /programme. Phase B of the cutover (a separate plan) points the
 matcher at Aurora and deletes this module.
 
-The old document had exactly two levels — `parents` and `leaves`. The Aurora
-tree has arbitrary depth, so "group" is derived here: a task is a parent iff
-something points at it. Deeper structure is flattened, which is fine because
-the matcher only ever looks at leaves.
+The old document had exactly two levels — `parents` and `leaves` — and the
+Aurora tree has arbitrary depth, so the split has to be derived. **Dates
+decide it, not children.**
+
+CORRECTION: this plan originally said "a task is a parent iff something points
+at it". That rule passed all eleven shape tests and is wrong in a way that
+fails silently — once a PM breaks a contract task down, "Pour slab" acquires
+local subtasks, becomes a parent, drops out of `leaves`, and stops being a
+match candidate, so "we poured the slab today" no longer lands on it. Nothing
+raises; the task just goes quiet. In the legacy document `parents` were WBS
+headers, which carry no dates; a task with dates is schedulable work whether
+or not anything hangs off it.
+
+Under the dates rule a broken-down task appears alongside its own subtasks and
+both stay matchable — general speech lands on the parent, specific speech on
+the subtask. Deeper structure is flattened, which is fine because the matcher
+only ever looks at leaves.
 """
 
 
@@ -1324,6 +1338,25 @@ before."
 ---
 
 ## Task 6: Frontend switches to per-task writes and autosaves
+
+> **Blocked, and the plan is wrong about why it is simple.**
+>
+> This task assumes "one edit = one PATCH". `applyTaskMutation`
+> (`fieldsight-ui/scripts/pages/programme.js:436`) runs a cascade engine:
+> dragging a bar shifts **every downstream dependent** and recomputes the
+> critical path. One user action therefore produces N task writes.
+>
+> Three options, recorded with a recommendation on `fieldsight-ui` PR #152:
+> send N PATCHes (**avoid** — not atomic, and its failure mode is "the Gantt
+> looks right and the database is wrong"); add a batch endpoint that checks
+> every `row_version` in one transaction (recommended now); or move the
+> cascade server-side so the scheduling logic exists once instead of being
+> duplicated in JS and Python (the right direction, largest job, and worth
+> deciding alongside whether server-side CPM is warranted at all — see §14.1,
+> since CSV/XLSX imports carry no dependencies either way).
+>
+> Steps 1–5 below (the pure module and the API functions) are done and
+> shipped. Step 6, the page wiring, waits on that decision.
 
 **Files:**
 - Modify: `fieldsight-ui/scripts/api/programme.js:158-198`

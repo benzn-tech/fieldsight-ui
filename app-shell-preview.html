@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="styles/tokens.css?v=5" />
   <link rel="stylesheet" href="styles/app-shell.css?v=11" />
   <link rel="stylesheet" href="styles/components.css?v=11" />
-  <link rel="stylesheet" href="styles/composites.css?v=93" />
+  <link rel="stylesheet" href="styles/composites.css?v=94" />
 
   <style>
     /* Ensure full-bleed with no scroll */
@@ -221,6 +221,9 @@
        today-adapter.js + tasks.js (below), which both call it. -->
   <script src="scripts/api/mine-team.js?v=1"></script>
   <!--   4. Today adapter (PLAN Phase D sketch — feeds mock-data.js shim) -->
+  <!-- Today's section model (spec §14) — overdue / today / next 3 days.
+       Pure; loaded before today-adapter.js and pages/today.js. -->
+  <script src="scripts/api/today-sections.js?v=1"></script>
   <script src="scripts/api/today-adapter.js?v=12"></script>
   <!-- Sprint 4.2 — Tasks aggregator (cross-day join: timeline + actions) -->
   <script src="scripts/api/tasks-aggregator.js?v=11"></script>
@@ -231,7 +234,11 @@
   <!-- Sprint 9 Track C.1 — Strategic aggregator (per-site / per-region / org rollups) -->
   <script src="scripts/api/strategic-aggregator.js?v=2"></script>
   <!-- Sprint 4.4 / 8.2.1 — Programme api + write operations -->
-  <script src="scripts/api/programme.js?v=5"></script>
+  <!-- Programme time window (spec §7) — presets + overlap arithmetic.
+       Loaded before programme.js, whose getTasksInWindow mock branch filters
+       through it. -->
+  <script src="scripts/api/programme-window.js?v=1"></script>
+  <script src="scripts/api/programme.js?v=6"></script>
   <!-- Sprint 5.6 / 8.3.1–8.3.2 — Cascade + CPM + floats + over-alloc engine -->
   <script src="scripts/api/programme-schedule.js?v=2"></script>
   <!-- Programme foundation (Plan A) — pure row model behind the Gantt -->
@@ -263,7 +270,7 @@
   <script type="text/babel" src="scripts/pages/activity.js?v=5"></script>
   <script type="text/babel" src="scripts/pages/tasks.js?v=20"></script>
   <script type="text/babel" src="scripts/pages/evidence.js?v=13"></script>
-  <script type="text/babel" src="scripts/pages/programme.js?v=18"></script>
+  <script type="text/babel" src="scripts/pages/programme.js?v=19"></script>
   <script type="text/babel" src="scripts/pages/safety.js?v=25"></script>
   <script type="text/babel" src="scripts/pages/quality.js?v=21"></script>
   <!-- Sprint 7.1+7.2 — /team page -->

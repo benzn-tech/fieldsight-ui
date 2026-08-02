@@ -622,6 +622,14 @@
       var tagged = (t.category === 'safety') || ((t.safety_flags || []).length > 0);
       return acc + (tagged ? 1 : 0);
     }, 0);
+    // `_report_metadata` (recordings_processed / total_words) only exists on the legacy
+    // daily-report JSON — the mock fixtures carry it, but the live Aurora/extraction path
+    // never populates it. So `meta` is {} on every real timeline, and these two KPIs used
+    // to read a hard 0 even when the day has recordings (e.g. UCPK2: 24 recordings in the
+    // DB, "Recordings 0" shown). Show an em dash (metric unavailable) instead of a
+    // misleading 0 when the metadata block is absent; a real live count is a backend
+    // follow-up. Topics + Safety are derived from the live report, so they stay accurate.
+    var hasReportMeta = report._report_metadata != null;
     var meta = report._report_metadata || {};
 
     return React.createElement(KpiStrip, null,
@@ -632,10 +640,12 @@
         value: safetyCount, label: 'Safety', tone: safetyCount > 0 ? 'danger' : 'neutral',
       }),
       React.createElement(StatCard, {
-        value: meta.recordings_processed || 0, label: 'Recordings',
+        value: hasReportMeta ? (meta.recordings_processed || 0) : '—', label: 'Recordings',
       }),
       React.createElement(StatCard, {
-        value: meta.total_words ? meta.total_words.toLocaleString() : 0,
+        value: hasReportMeta
+          ? (meta.total_words ? meta.total_words.toLocaleString() : 0)
+          : '—',
         label: 'Words',
       }),
     );
