@@ -1,0 +1,162 @@
+'use strict';
+
+/*
+ * Contract test: the real fixtures must flow through programme-mentions.
+ *
+ * tests/programme-mentions.test.js asserts the module's behaviour against
+ * task and suggestion objects this file's author invented. That is exactly
+ * the kind of test that passed while the module could not read either of the
+ * shapes it will actually be given.
+ *
+ * This file removes the invention. It loads the SHIPPED fixtures — the same
+ * ones the existing suggestion review queue renders from, whose headers state
+ * they mirror the live backend contract — and asserts that mentions actually
+ * land on tasks.
+ *
+ * Two real defects were caught here and nowhere else:
+ *
+ *   - the programme fixture is DOCUMENT shaped (`task_id`, `start`), while
+ *     the window endpoint returns ROW shape (`id`/`source_task_id`,
+ *     `start_date`). A docIdOf that handled only rows worked against the live
+ *     window endpoint and silently matched nothing in every mock and demo.
+ *   - the suggestions fixture carries no `topic_id`, though the backend
+ *     selects it and confirm_suggestion depends on it. Without it the
+ *     report-topic placement renders nothing in mock mode and looks unbuilt.
+ */
+const test = require('node:test');
+const assert = require('node:assert');
+const path = require('node:path');
+const vm = require('node:vm');
+const fs = require('node:fs');
+
+const {
+  docIdOf, indexByTask, indexByTopic, mentionSummary, startOf, mentionsForTopic,
+} = require('../scripts/api/programme-mentions.js');
+
+/* The fixtures are browser IIFEs that publish onto window.FieldSight, so they
+   are evaluated in a sandbox with just enough of a window to land on. */
+function loadFixtures() {
+  const sandbox = { window: { FieldSight: { fixtures: {} } } };
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  for (const f of ['programme.fixture.js', 'programme-suggestions.fixture.js']) {
+    const src = fs.readFileSync(
+      path.join(__dirname, '..', 'scripts', 'mock', f), 'utf8');
+    vm.runInContext(src, sandbox, { filename: f });
+  }
+  return sandbox.window.FieldSight.fixtures;
+}
+
+const FIX = loadFixtures();
+const PROGRAMME = FIX.programme;
+const SUGGESTIONS = FIX.programmeSuggestions;
+
+test('the fixtures loaded at all', () => {
+  /* If this fails the rest of the file is asserting on undefined and would
+     otherwise pass vacuously. */
+  assert.ok(PROGRAMME && PROGRAMME.tasks && PROGRAMME.tasks.length,
+            'programme fixture has tasks');
+  assert.ok(Array.isArray(SUGGESTIONS) && SUGGESTIONS.length,
+            'suggestions fixture has rows');
+});
+
+test('every fixture task yields a document id', () => {
+  for (const t of PROGRAMME.tasks) {
+    assert.ok(docIdOf(t), `no document id for ${JSON.stringify(t).slice(0, 80)}`);
+  }
+});
+
+test('the only undated fixture tasks are the WBS group headers', () => {
+  /* silentTasks filters on the start date, and reading the wrong key would
+     silently drop every task out of the result rather than erroring — so the
+     shape has to be pinned. Undated rows are legitimate: a task with no dates
+     is a structural header, which is the same rule programme_snapshot uses to
+     split parents from leaves.
+
+     Asserting "every task has a start" was the first version of this test.
+     It failed, and the code was right — the five group rows are supposed to
+     be undated. */
+  const undated = PROGRAMME.tasks.filter(t => !startOf(t));
+  /* Array.from pulls the result into THIS realm: the fixtures are evaluated
+     in a vm context, so their arrays have that context's Array prototype and
+     deepStrictEqual rejects them as "same structure, not reference-equal". */
+  assert.deepStrictEqual(Array.from(undated, docIdOf),
+                         ['T-100', 'T-200', 'T-300', 'T-400', 'T-500']);
+  for (const t of undated) {
+    assert.strictEqual(t.parent_id, null, `${docIdOf(t)} is a root header`);
+  }
+  for (const t of PROGRAMME.tasks.filter(t => t.parent_id)) {
+    assert.ok(startOf(t), `leaf ${docIdOf(t)} must be dated`);
+  }
+});
+
+test('undated group headers are never surfaced as silent', () => {
+  /* They have nothing to say and nobody would mention them by name. */
+  const { silentTasks } = require('../scripts/api/programme-mentions.js');
+  const got = silentTasks(PROGRAMME.tasks, {},
+                          { today: '2026-04-30', coverage: { states: 'all' } });
+  assert.strictEqual(got.filter(t => !t.parent_id).length, 0);
+});
+
+test('THE contract assertion: fixture suggestions land on fixture tasks', () => {
+  /* An empty intersection is how this whole feature fails in production: no
+     error, no warning, just a Gantt with no mentions on it ever. */
+  const byTask = indexByTask(SUGGESTIONS);
+  const matched = PROGRAMME.tasks.filter(t => byTask[docIdOf(t)]);
+
+  assert.ok(matched.length > 0,
+            'no fixture suggestion matched any fixture task — the document id '
+            + 'rule does not agree with the shapes actually shipped. '
+            + `suggestion task_ids: ${SUGGESTIONS.map(s => s.task_id)}; `
+            + `task doc ids: ${PROGRAMME.tasks.map(docIdOf).slice(0, 8)}`);
+  assert.strictEqual(matched.length, new Set(SUGGESTIONS.map(s => s.task_id)).size,
+                     'some suggestion points at a task the programme lacks');
+});
+
+test('a matched task reports its mention through the summary', () => {
+  const byTask = indexByTask(SUGGESTIONS);
+  const task = PROGRAMME.tasks.find(t => byTask[docIdOf(t)]);
+  const r = mentionSummary(task, byTask,
+                           { today: '2026-04-30', coverage: { states: 'all' } });
+  assert.strictEqual(r.status, 'mentioned');
+  assert.ok(r.latest.report_date, 'the mention carries a date to render');
+  assert.strictEqual(typeof r.daysSinceLastMention, 'number');
+});
+
+test('every fixture suggestion carries the fields the summary renders', () => {
+  for (const s of SUGGESTIONS) {
+    assert.ok(s.id, 'id');
+    assert.ok(s.task_id, `task_id on ${s.id}`);
+    assert.ok(s.report_date, `report_date on ${s.id}`);
+    assert.match(s.report_date, /^\d{4}-\d{2}-\d{2}$/,
+                 `report_date on ${s.id} must be a plain date string — the `
+                 + 'backend serialises with json.dumps(default=str) and this '
+                 + 'module compares dates as strings');
+  }
+});
+
+test('the report-topic placement cannot be demoed on the current fixtures',
+  { skip: 'documents a real gap; see the comment' }, () => {
+  /* Not a failing assertion, because nothing here is broken code — the
+     fixtures simply cannot express this link yet, and fabricating demo data
+     to make a test green would hide that.
+
+     Two halves are missing, and BOTH are needed:
+
+       scripts/mock/programme-suggestions.fixture.js has no `topic_id`,
+       though the backend selects it (programme_suggestions._COLS) and
+       confirm_suggestion depends on it.
+
+       scripts/mock/daily-report.fixture.js has no `topic_row_id` at all —
+       the durable topics.id that a suggestion's topic_id actually points at.
+       Its topics carry only the per-report sequential topic_id (0, 1, 2…).
+
+     So in mock mode the report-topic placement renders nothing, and reads as
+     "not built" rather than "fixture incomplete". Adding both — with values
+     that agree — is a prerequisite for demoing §2, and is deliberately left
+     to whoever builds the placement, with real topic ids rather than
+     invented ones.
+
+     The task-side link above needs none of this and works on the fixtures
+     as shipped. */
+});
