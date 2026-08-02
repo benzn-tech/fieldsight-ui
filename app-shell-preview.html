@@ -38,7 +38,7 @@
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 
   <!-- FieldSight globals: tokens + roles (load order matters) -->
-  <script src="scripts/fs-globals.js?v=9"></script>
+  <script src="scripts/fs-globals.js?v=10"></script>
   <!-- Sprint 7.0 — theme module (must load after fs-globals, before app-shell) -->
   <script src="scripts/theme.js?v=1"></script>
   <!-- Sprint 7.6 — density module (must load after fs-globals, before app-shell) -->
@@ -115,8 +115,6 @@
   <script src="scripts/composites/programme-import-diff.js?v=1"></script>
   <!-- Time-range control (spec §7) — changing it RE-FETCHES, it is not a filter -->
   <script type="text/babel" src="scripts/composites/programme-window-picker.js?v=1"></script>
-  <!-- My Work (spec §14) — the caller's own programme work beyond Today's 3 days -->
-  <script src="scripts/pages/my-work-grouping.js?v=1"></script>
   <!-- Sprint 8.6 — SearchPalette (global search overlay, ⌘K / Ctrl+K) -->
   <script type="text/babel" src="scripts/composites/search-palette.js?v=8"></script>
   <!-- Sprint 8.0.3 — ErrorBanner (used by all page providers on fetch failure) -->
@@ -227,6 +225,10 @@
   <!-- Today's section model (spec §14) — overdue / today / next 3 days.
        Pure; loaded before today-adapter.js and pages/today.js. -->
   <script src="scripts/api/today-sections.js?v=1"></script>
+  <!-- My Work grouping (spec §14). MUST load after api/index.js: that file
+       assigns window.FS.api wholesale, so anything registering earlier is
+       silently wiped. -->
+  <script src="scripts/api/my-work-grouping.js?v=1"></script>
   <script src="scripts/api/today-adapter.js?v=12"></script>
   <!-- Sprint 4.2 — Tasks aggregator (cross-day join: timeline + actions) -->
   <script src="scripts/api/tasks-aggregator.js?v=11"></script>

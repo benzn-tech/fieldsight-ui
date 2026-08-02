@@ -15,7 +15,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
-const { groupMyWork } = require('../scripts/pages/my-work-grouping.js');
+const { groupMyWork } = require('../scripts/api/my-work-grouping.js');
 
 const TODAY = '2026-05-13';   // a Wednesday
 
