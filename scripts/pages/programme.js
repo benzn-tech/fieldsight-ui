@@ -339,6 +339,37 @@
     var saving    = refSaving[0];
     var setSaving = refSaving[1];
 
+    /* Time window (spec 7). The window is the LOAD BOUNDARY, not a filter:
+       changing it refetches. `overview` loads the whole programme instead,
+       deliberately coarse, so the full shape stays reachable without giving
+       up the working view. */
+    var pw = window.FS.api.programmeWindow;
+    var pref = window.FieldSight.programmeWindowPref;
+    var refPreset = React.useState(pw.presetByKey(pw.DEFAULT_PRESET_KEY));
+    var preset = refPreset[0]; var setPreset = refPreset[1];
+    var refMode = React.useState('window');
+    var viewMode = refMode[0]; var setViewMode = refMode[1];
+
+    /* Seed from the stored preference before the first fetch, so the page does
+       not load one window and immediately reload another. */
+    React.useEffect(function () {
+      var cancelled = false;
+      window.FS.api.org.getMe()
+        .then(function (me) { if (!cancelled) setPreset(pref.readWindowPref(me)); })
+        .catch(function () { /* keep the default */ });
+      return function () { cancelled = true; };
+    }, []);
+
+    function changePreset(next) {
+      setPreset(next);
+      /* Fire and forget — a failed preference write must not block the range
+         change the user just made; it re-reads on the next visit. */
+      if (window.FS.api.org.updateMe) {
+        Promise.resolve(window.FS.api.org.updateMe(pref.windowPrefPatch(next)))
+          .catch(function () {});
+      }
+    }
+
     React.useEffect(function () {
       if (!orgSiteId) {
         setState({ status: 'no_site' });
@@ -348,7 +379,26 @@
       setState({ status: 'loading' });
       setDirty(false);
 
-      window.FS.api.programme.getProgramme(orgSiteId).then(function (res) {
+      /* Window mode fetches ONLY the selected range (plus the ancestors
+         needed to render the tree). Overview, and mock mode, load the whole
+         document. Filtering a fully-loaded programme client-side would look
+         identical here and discard the entire point — a ten-week window is a
+         few hundred rows whatever the programme's size. */
+      var api = window.FS.api.programme;
+      var useWindow = viewMode === 'window' && !window.FS.api.useMocks
+                      && !!window.FS.api.orgBaseUrl;
+      var win = pw.resolveWindow(preset, window.FS.api.todayNZDT());
+      var load = useWindow
+        ? api.getTasksInWindow(orgSiteId, { from: win.from, to: win.to })
+            .then(function (r) {
+              if (r && (r._accessDenied || r._notFound)) return r;
+              return { programme: Object.assign(
+                window.FS.api.programmeWindowDoc.windowRowsToDoc(r && r.tasks),
+                { name: 'Programme', windowed: true }) };
+            })
+        : api.getProgramme(orgSiteId);
+
+      load.then(function (res) {
         if (cancelled) return;
         if (res && res._accessDenied) {
           setState({ status: 'access_denied', message: res.error });
@@ -400,7 +450,9 @@
       });
 
       return function () { cancelled = true; };
-    }, [depKey, retryCount, orgSiteId]);
+    /* preset/viewMode are dependencies because the window is the load
+       boundary: changing the range must REFETCH, not re-filter. */
+    }, [depKey, retryCount, orgSiteId, preset, viewMode]);
 
     function toggleGroup(groupId) {
       setCollapsed(function (prev) {
@@ -741,6 +793,11 @@
       /* Sprint 8.3.2 */
       overAllocDismissed:    overAllocDismissed,
       setOverAllocDismissed: setOverAllocDismissed,
+      /* Time window (spec 7) */
+      preset:         preset,
+      changePreset:   changePreset,
+      viewMode:       viewMode,
+      setViewMode:    setViewMode,
       /* Sprint 8.3.3 */
       showBaseline:   showBaseline,
       setShowBaseline: setShowBaseline,
@@ -1306,6 +1363,37 @@
                   }, k.charAt(0).toUpperCase() + k.slice(1));
                 }),
               )
+            : null,
+
+          /* Time range (spec 7). Changing it REFETCHES — the window is what
+             gets loaded, not a filter over what was loaded. Hidden in
+             Overview, where the whole programme is deliberately in view. */
+          ctx.view === 'gantt' && ctx.viewMode === 'window' && fs.ProgrammeWindowPicker
+            ? React.createElement(fs.ProgrammeWindowPicker, {
+                preset:   ctx.preset,
+                today:    window.FS.api.todayNZDT(),
+                disabled: ctx.state.status === 'loading',
+                onChange: ctx.changePreset,
+              })
+            : null,
+
+          /* Overview loads the whole programme, coarsely — month tier,
+             collapsed, no drag. Its coarseness is what keeps it affordable at
+             30,000 tasks; it is not a second Gantt. */
+          ctx.view === 'gantt'
+            ? React.createElement('button', {
+                type:      'button',
+                className: 'fs-programme__toggle fs-programme__toggle--small'
+                            + (ctx.viewMode === 'overview' ? ' fs-programme__toggle--active' : ''),
+                title:     ctx.viewMode === 'overview'
+                             ? 'Back to the selected date range'
+                             : 'See the whole programme at a glance',
+                onClick:   function () {
+                  var next = ctx.viewMode === 'overview' ? 'window' : 'overview';
+                  ctx.setViewMode(next);
+                  if (next === 'overview') { ctx.setTier('month'); }
+                },
+              }, ctx.viewMode === 'overview' ? 'Exit overview' : 'Overview')
             : null,
 
           /* Sprint 8.3.1 — Show float toggle (Gantt only) */
