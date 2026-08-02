@@ -240,6 +240,9 @@
   <!-- Critical-path tier + at-risk ranking (Project 2 spec 3). MUST load
        after api/index.js, which assigns window.FS.api wholesale. -->
   <script src="scripts/api/programme-critical-tier.js?v=1"></script>
+  <!-- Lateness vs baseline + overall progress (Project 2 spec 4). Same
+       load-order constraint: after api/index.js. -->
+  <script src="scripts/api/programme-lateness.js?v=1"></script>
   <script src="scripts/api/programme.js?v=6"></script>
   <!-- Sprint 5.6 / 8.3.1–8.3.2 — Cascade + CPM + floats + over-alloc engine -->
   <script src="scripts/api/programme-schedule.js?v=2"></script>
