@@ -355,6 +355,11 @@ export const ROLES = {
 export const NAV_ITEMS = {
   /* DAILY — Today subsumes Morning Brief; Activity subsumes Live + Review */
   today:      { permission: P('dashboard', 'view'),                   label: 'Today' },
+  /* My Work is the caller's own programme work over a time window - what
+     Today deliberately stops showing at 3 days out (spec 14). Gated on the
+     same programme:view that every role able to see a programme already
+     holds, so it needs no role-definition change. */
+  mywork:     { permission: P('programme', 'view'),                   label: 'My Work' },
   activity:   { permission: P('report',    'view'),                   label: 'Activity' },
 
   /* WORKSPACE */

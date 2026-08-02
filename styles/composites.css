@@ -11118,3 +11118,131 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   flex-wrap: wrap;
 }
 .fs-suggestion-review__adjust-row > * { flex: 1; min-width: 120px; }
+
+/* ── Programme import · reconcile step ────────────────────────────────────
+   The screen where a re-import's cost is shown before it is paid. Replace
+   uses the danger tone deliberately: it destroys work Update would keep, and
+   the visual weight is the point. */
+.fs-prog-import__modes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.fs-prog-import__mode {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas: "radio label" ". hint";
+  gap: 2px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.fs-prog-import__mode--on {
+  border-color: var(--color-accent-500);
+  background: var(--color-accent-50);
+}
+.fs-prog-import__mode input { grid-area: radio; }
+.fs-prog-import__mode-label {
+  grid-area: label;
+  font-weight: var(--font-weight-semibold);
+  font-size: 13px;
+}
+.fs-prog-import__mode-hint {
+  grid-area: hint;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fs-prog-import__diff {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.fs-prog-import__diff--danger {
+  color: var(--status-overdue, var(--danger));
+  font-weight: var(--font-weight-semibold);
+}
+.fs-prog-import__renames {
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.fs-prog-import__rename {
+  display: block;
+  padding: 3px 0;
+  cursor: pointer;
+}
+.fs-prog-import__confirm {
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.fs-prog-import__confirm input {
+  display: block;
+  margin-top: 4px;
+  width: 100%;
+  max-width: 320px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  font: inherit;
+}
+
+/* ── Programme time-range picker ──────────────────────────────────────────
+   Sits in the Programme header. The resolved dates are shown next to the
+   select so it is obvious the range is anchored on today, not on the
+   programme's own start. */
+.fs-prog-window {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.fs-prog-window__label {
+  color: var(--text-secondary);
+  font-weight: var(--font-weight-semibold);
+}
+.fs-prog-window__select {
+  padding: 4px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  font: inherit;
+}
+.fs-prog-window__dates {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── My Work ──────────────────────────────────────────────────────────────
+   Week-grouped list of the caller's own programme work. Overdue takes the
+   red token — temporal urgency; `blocked` is a functional halt and stays
+   magenta, per the deliberate split in the design system. */
+.fs-page--mywork { padding: 16px 20px; }
+.fs-mywork__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.fs-mywork__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: var(--font-weight-semibold);
+}
+.fs-mywork__group {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+.fs-mywork__group--overdue { color: var(--status-overdue, var(--danger)); }
+.fs-mywork__empty {
+  color: var(--text-secondary);
+  font-size: 13px;
+  max-width: 46ch;
+}

@@ -169,6 +169,25 @@ Detailed completed/pending/next-phase tracking lives in **`PLAN.md`**.
 Mirrors `PLAN.md` §3. Each is a real bug that shipped and got fixed;
 re-introducing one is the most common way to break the prototype.
 
+### Registration & load order
+
+Both of these pass every unit test and fail only in the browser. A green
+`node --test` run says nothing about whether a module is reachable at runtime.
+
+- **`FS.api` is assigned WHOLESALE by `scripts/api/index.js:87`**
+  (`window.FS.api = { … }`). Any module registering onto `FS.api` from a
+  `<script>` tag placed *before* that line is **silently wiped** — no error at
+  load, just `Cannot read properties of undefined` from the first consumer.
+  Load new `FS.api` modules in the api block, after `api/index.js`. Registering
+  onto `window.FieldSight` instead is unaffected (composites do that).
+
+- **`scripts/roles.js` is NOT loaded by `app-shell-preview.html`.** It is an ES
+  module; the registry the nav actually renders from is `NAV_ITEMS` in
+  **`scripts/fs-globals.js`**, which also carries each item's `path`. Adding a
+  nav entry to `roles.js` alone produces no error and no nav item — and if the
+  `left-nav.js` group already lists the key, the group looks correct while the
+  item simply never exists.
+
 ### Date math
 
 - **BUG-19 NZDT**: never `new Date('YYYY-MM-DD')` (parses as UTC,

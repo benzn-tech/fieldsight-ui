@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="styles/tokens.css?v=5" />
   <link rel="stylesheet" href="styles/app-shell.css?v=11" />
   <link rel="stylesheet" href="styles/components.css?v=11" />
-  <link rel="stylesheet" href="styles/composites.css?v=94" />
+  <link rel="stylesheet" href="styles/composites.css?v=97" />
 
   <style>
     /* Ensure full-bleed with no scroll */
@@ -38,7 +38,7 @@
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 
   <!-- FieldSight globals: tokens + roles (load order matters) -->
-  <script src="scripts/fs-globals.js?v=9"></script>
+  <script src="scripts/fs-globals.js?v=10"></script>
   <!-- Sprint 7.0 — theme module (must load after fs-globals, before app-shell) -->
   <script src="scripts/theme.js?v=1"></script>
   <!-- Sprint 7.6 — density module (must load after fs-globals, before app-shell) -->
@@ -53,7 +53,7 @@
   <script src="scripts/auth-mock.js?v=2"></script>
 
   <!-- React components (Babel transpiles JSX in-browser) -->
-  <script type="text/babel" src="scripts/left-nav.js?v=17"></script>
+  <script type="text/babel" src="scripts/left-nav.js?v=18"></script>
   <script type="text/babel" src="scripts/drag-divider.js?v=1"></script>
   <script type="text/babel" src="scripts/components/button.js?v=1"></script>
   <script type="text/babel" src="scripts/components/input.js?v=2"></script>
@@ -110,7 +110,13 @@
   <!-- Sprint 5.1 — Programme task editor (modal form for editing a leaf) -->
   <script type="text/babel" src="scripts/composites/programme-task-editor.js?v=4"></script>
   <!-- Sprint 5.4/5.5/8.2.2 — CSV + XML + XLSX import modal -->
-  <script type="text/babel" src="scripts/composites/programme-import-modal.js?v=4"></script>
+  <script type="text/babel" src="scripts/composites/programme-import-modal.js?v=5"></script>
+  <!-- Import reconcile step (spec §6.1) — diff copy + commit-gate logic -->
+  <script src="scripts/composites/programme-import-diff.js?v=1"></script>
+  <!-- Version history + rollback (spec §6.5) — the safety net behind Replace -->
+  <script src="scripts/composites/programme-version-history.js?v=1"></script>
+  <!-- Time-range control (spec §7) — changing it RE-FETCHES, it is not a filter -->
+  <script type="text/babel" src="scripts/composites/programme-window-picker.js?v=1"></script>
   <!-- Sprint 8.6 — SearchPalette (global search overlay, ⌘K / Ctrl+K) -->
   <script type="text/babel" src="scripts/composites/search-palette.js?v=8"></script>
   <!-- Sprint 8.0.3 — ErrorBanner (used by all page providers on fetch failure) -->
@@ -224,6 +230,10 @@
   <!-- Today's section model (spec §14) — overdue / today / next 3 days.
        Pure; loaded before today-adapter.js and pages/today.js. -->
   <script src="scripts/api/today-sections.js?v=1"></script>
+  <!-- My Work grouping (spec §14). MUST load after api/index.js: that file
+       assigns window.FS.api wholesale, so anything registering earlier is
+       silently wiped. -->
+  <script src="scripts/api/my-work-grouping.js?v=1"></script>
   <script src="scripts/api/today-adapter.js?v=12"></script>
   <!-- Sprint 4.2 — Tasks aggregator (cross-day join: timeline + actions) -->
   <script src="scripts/api/tasks-aggregator.js?v=11"></script>
@@ -238,6 +248,12 @@
        Loaded before programme.js, whose getTasksInWindow mock branch filters
        through it. -->
   <script src="scripts/api/programme-window.js?v=1"></script>
+  <!-- Critical-path tier + at-risk ranking (Project 2 spec 3). MUST load
+       after api/index.js, which assigns window.FS.api wholesale. -->
+  <script src="scripts/api/programme-critical-tier.js?v=1"></script>
+  <!-- Lateness vs baseline + overall progress (Project 2 spec 4). Same
+       load-order constraint: after api/index.js. -->
+  <script src="scripts/api/programme-lateness.js?v=1"></script>
   <script src="scripts/api/programme.js?v=6"></script>
   <!-- Sprint 5.6 / 8.3.1–8.3.2 — Cascade + CPM + floats + over-alloc engine -->
   <script src="scripts/api/programme-schedule.js?v=2"></script>
@@ -273,6 +289,7 @@
   <script type="text/babel" src="scripts/pages/tasks.js?v=20"></script>
   <script type="text/babel" src="scripts/pages/evidence.js?v=13"></script>
   <script type="text/babel" src="scripts/pages/programme.js?v=19"></script>
+  <script type="text/babel" src="scripts/pages/my-work.js?v=1"></script>
   <script type="text/babel" src="scripts/pages/safety.js?v=25"></script>
   <script type="text/babel" src="scripts/pages/quality.js?v=21"></script>
   <!-- Sprint 7.1+7.2 — /team page -->
