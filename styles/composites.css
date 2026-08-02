@@ -11187,3 +11187,62 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   border-radius: 4px;
   font: inherit;
 }
+
+/* ── Programme time-range picker ──────────────────────────────────────────
+   Sits in the Programme header. The resolved dates are shown next to the
+   select so it is obvious the range is anchored on today, not on the
+   programme's own start. */
+.fs-prog-window {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.fs-prog-window__label {
+  color: var(--text-secondary);
+  font-weight: var(--font-weight-semibold);
+}
+.fs-prog-window__select {
+  padding: 4px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  font: inherit;
+}
+.fs-prog-window__dates {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── My Work ──────────────────────────────────────────────────────────────
+   Week-grouped list of the caller's own programme work. Overdue takes the
+   red token — temporal urgency; `blocked` is a functional halt and stays
+   magenta, per the deliberate split in the design system. */
+.fs-page--mywork { padding: 16px 20px; }
+.fs-mywork__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.fs-mywork__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: var(--font-weight-semibold);
+}
+.fs-mywork__group {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+.fs-mywork__group--overdue { color: var(--status-overdue, var(--danger)); }
+.fs-mywork__empty {
+  color: var(--text-secondary);
+  font-size: 13px;
+  max-width: 46ch;
+}
