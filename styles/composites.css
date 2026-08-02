@@ -11118,3 +11118,72 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   flex-wrap: wrap;
 }
 .fs-suggestion-review__adjust-row > * { flex: 1; min-width: 120px; }
+
+/* ── Programme import · reconcile step ────────────────────────────────────
+   The screen where a re-import's cost is shown before it is paid. Replace
+   uses the danger tone deliberately: it destroys work Update would keep, and
+   the visual weight is the point. */
+.fs-prog-import__modes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.fs-prog-import__mode {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas: "radio label" ". hint";
+  gap: 2px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.fs-prog-import__mode--on {
+  border-color: var(--color-accent-500);
+  background: var(--color-accent-50);
+}
+.fs-prog-import__mode input { grid-area: radio; }
+.fs-prog-import__mode-label {
+  grid-area: label;
+  font-weight: var(--font-weight-semibold);
+  font-size: 13px;
+}
+.fs-prog-import__mode-hint {
+  grid-area: hint;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fs-prog-import__diff {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.fs-prog-import__diff--danger {
+  color: var(--status-overdue, var(--danger));
+  font-weight: var(--font-weight-semibold);
+}
+.fs-prog-import__renames {
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.fs-prog-import__rename {
+  display: block;
+  padding: 3px 0;
+  cursor: pointer;
+}
+.fs-prog-import__confirm {
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.fs-prog-import__confirm input {
+  display: block;
+  margin-top: 4px;
+  width: 100%;
+  max-width: 320px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  font: inherit;
+}
