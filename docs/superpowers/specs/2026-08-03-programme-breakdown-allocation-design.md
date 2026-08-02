@@ -193,9 +193,35 @@ The user asked for quick duplication. The operation is: take a task (or a
 task plus its breakdown), duplicate it N times, and set a zone and assignee
 per copy. Duplicating a breakdown copies the whole subtree.
 
-Division of dates across copies is a **default, not a decision**: split the
-parent's span evenly, then let the PM drag. Guessing that Level 1 takes longer
-than Level 5 is exactly the kind of invention this design keeps refusing.
+### Correction: the default is parallel, not an even split
+
+This section first said to divide the parent's span evenly between the zones.
+That is wrong, and `programme-zone-split.js` deliberately contradicts it.
+
+You split a building into five zones and hand them to five site managers
+**because the work runs at the same time** — that is what the five managers
+are for. Dividing the span invents a sequence nobody stated (zone 1 finishes
+before zone 2 starts), and lands it on real people's dates. §3 forbids exactly
+this move for AI-generated breakdowns: an inferred order must never become
+data. A zone split is the same hazard with a friendlier name.
+
+So each zone inherits the parent's dates verbatim, and the PM drags whatever
+is genuinely staggered.
+
+Sequential division is still offered, because floor-by-floor splits often are
+sequential. It has to be asked for. When it is, the remainder goes to the
+earliest slices (10 days across 3 zones is 4/3/3, not 3/3/4) — the tail
+absorbs slippage, so leaving it thinnest is the wrong way round.
+
+Note the contrast with §3, which **is** sequential: formwork, rebar, pour and
+cure genuinely follow one another. Same-looking operation, opposite default,
+which is why they are separate functions rather than one with a flag.
+
+Three things the planner refuses rather than guesses: splitting an undated
+WBS header (dated children under an undated parent read as a schedule nobody
+wrote), duplicate zone names (a typo, and merging would drop a manager's
+allocation with no trace), and a partial assignee list (which zone goes
+unowned is a decision).
 
 ### What it means for rollup
 
