@@ -208,6 +208,64 @@
     return { ok: true, task_id: taskId };
   }
 
+  /* Two-phase import. Call with { dry_run: true, parents, leaves } to get the
+     diff without writing, then again with a mode to commit. The user never
+     picks a mode blind — which matters because Replace discards work Update
+     would have kept, and that cost is only visible in the dry run's separate
+     replace_preview block. */
+  async function importProgramme(orgSiteId, payload) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest('/programme/import', {
+        method: 'POST', params: { site: orgSiteId }, body: payload,
+      });
+    }
+    await window.FS.api.delay();
+    if (!payload || !payload.dry_run) {
+      return { counts: {}, version_no: 1,
+               summary: { mode: payload && payload.mode } };
+    }
+    return {
+      dry_run: true,
+      suggested_mode: 'update',
+      update_preview: { added: 0, removed: 0, updated: 0, date_shifted: 0,
+                        max_shift_days: 0, archived_with_parent: 0,
+                        locally_modified_overwritten: [] },
+      rename_candidates: [],
+      replace_preview: { local_tasks_discarded: 0, allocations_discarded: 0,
+                         tasks_with_progress_discarded: 0 },
+    };
+  }
+
+  async function getVersions(orgSiteId) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest('/programme/versions',
+        { params: { site: orgSiteId } });
+    }
+    await window.FS.api.delay();
+    return { versions: [], baseline_version: null, current_version: 0 };
+  }
+
+  async function restoreVersion(orgSiteId, versionNo) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest(
+        '/programme/versions/' + encodeURIComponent(versionNo) + '/restore',
+        { method: 'POST', params: { site: orgSiteId } });
+    }
+    await window.FS.api.delay();
+    return { restored_to: versionNo };
+  }
+
+  async function setBaseline(orgSiteId, versionNo) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest('/programme/baseline', {
+        method: 'POST', params: { site: orgSiteId },
+        body: { version_no: versionNo },
+      });
+    }
+    await window.FS.api.delay();
+    return { programme: { baseline_version: versionNo } };
+  }
+
   async function createTask(programmeId, payload) {
     if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
       return window.FS.api.request(
@@ -345,6 +403,10 @@
     getTasksInWindow:           getTasksInWindow,
     updateTask:                 updateTask,
     createTask:                 createTask,
+    importProgramme:            importProgramme,
+    getVersions:                getVersions,
+    restoreVersion:             restoreVersion,
+    setBaseline:                setBaseline,
     deleteTask:                 deleteTask,
     importTasks:                importTasks,
     saveBaseline:               saveBaseline,
