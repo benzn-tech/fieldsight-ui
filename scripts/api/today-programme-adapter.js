@@ -194,6 +194,15 @@
     var to   = opts.to;
     if (!from || !to) return { rows: [] };
 
+    /* `from`/`to` bound the WINDOW; `asOf` is the day everything is measured
+       relative to. They were the same value until Today started asking for a
+       window that reaches backwards to pick up overdue work — at which point
+       measuring "days until deadline" from the window start would report an
+       overdue task as weeks in hand, which is the opposite of the truth on
+       the one row that most needs to be right. Defaults to `from`, so callers
+       that pass a forward-only window are unaffected. */
+    var asOf = opts.asOf || from;
+
     var folder = opts.user || callerFolder();
 
     var sitesRes = await window.FS.api.org.getOrgSites().catch(function () { return null; });
@@ -224,7 +233,7 @@
 
       leaves.forEach(function (t) {
         /* Deadline (end) must fall within [from, to] — never in the
-           past relative to `from` (that's "overdue", out of scope). */
+           past relative to `from`. Widen `from` to include overdue. */
         if (!t.end || t.end < from || t.end > to) return;
         if (folder && (t.assignees || []).indexOf(folder) === -1) return;
 
@@ -233,8 +242,8 @@
            yet (t.start > from) omits both so ProgrammeTaskCard's
            `row.day_index && row.day_total` guard hides the "Day N of
            M" line instead of showing a confusing negative day count. */
-        var started  = from >= t.start;
-        var dayIndex = started ? diffDays(t.start, from) + 1 : null;
+        var started  = asOf >= t.start;
+        var dayIndex = started ? diffDays(t.start, asOf) + 1 : null;
         var dayTotal = started
           ? ((t.duration_days != null) ? t.duration_days : (diffDays(t.start, t.end) + 1))
           : null;
@@ -257,10 +266,10 @@
           tags:                 t.tags || [],
           site_name:            site.name || null,
           site_slug:            site.site_id || null,
-          /* Additive — how many days until the deadline. Not consumed
-             by ProgrammeTaskCard today; here for the sort below and
-             for any future "Due in Nd" affordance. */
-          deadline_in_days:     diffDays(from, t.end),
+          /* How many days until the deadline, measured from `asOf`.
+             NEGATIVE when the deadline has already passed — which is what
+             makes the sort below put overdue work first. */
+          deadline_in_days:     diffDays(asOf, t.end),
         });
       });
     });
