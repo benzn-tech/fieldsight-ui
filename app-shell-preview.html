@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="styles/tokens.css?v=5" />
   <link rel="stylesheet" href="styles/app-shell.css?v=11" />
   <link rel="stylesheet" href="styles/components.css?v=11" />
-  <link rel="stylesheet" href="styles/composites.css?v=96" />
+  <link rel="stylesheet" href="styles/composites.css?v=97" />
 
   <style>
     /* Ensure full-bleed with no scroll */
@@ -53,7 +53,7 @@
   <script src="scripts/auth-mock.js?v=2"></script>
 
   <!-- React components (Babel transpiles JSX in-browser) -->
-  <script type="text/babel" src="scripts/left-nav.js?v=17"></script>
+  <script type="text/babel" src="scripts/left-nav.js?v=18"></script>
   <script type="text/babel" src="scripts/drag-divider.js?v=1"></script>
   <script type="text/babel" src="scripts/components/button.js?v=1"></script>
   <script type="text/babel" src="scripts/components/input.js?v=2"></script>
@@ -115,6 +115,8 @@
   <script src="scripts/composites/programme-import-diff.js?v=1"></script>
   <!-- Time-range control (spec §7) — changing it RE-FETCHES, it is not a filter -->
   <script type="text/babel" src="scripts/composites/programme-window-picker.js?v=1"></script>
+  <!-- My Work (spec §14) — the caller's own programme work beyond Today's 3 days -->
+  <script src="scripts/pages/my-work-grouping.js?v=1"></script>
   <!-- Sprint 8.6 — SearchPalette (global search overlay, ⌘K / Ctrl+K) -->
   <script type="text/babel" src="scripts/composites/search-palette.js?v=8"></script>
   <!-- Sprint 8.0.3 — ErrorBanner (used by all page providers on fetch failure) -->
@@ -270,6 +272,7 @@
   <script type="text/babel" src="scripts/pages/tasks.js?v=20"></script>
   <script type="text/babel" src="scripts/pages/evidence.js?v=13"></script>
   <script type="text/babel" src="scripts/pages/programme.js?v=19"></script>
+  <script type="text/babel" src="scripts/pages/my-work.js?v=1"></script>
   <script type="text/babel" src="scripts/pages/safety.js?v=25"></script>
   <script type="text/babel" src="scripts/pages/quality.js?v=21"></script>
   <!-- Sprint 7.1+7.2 — /team page -->

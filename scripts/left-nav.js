@@ -37,7 +37,7 @@ const NAV_SECTIONS = [
        fix/today-timeline-and-focus after being found unregistered, then
        removed once we settled that button/deep-link access is the model.) */
     label: 'Daily',
-    items: ['today', 'activity'],
+    items: ['today', 'mywork', 'activity'],
   },
   {
     key: 'WORKSPACE',
