@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="styles/tokens.css?v=5" />
   <link rel="stylesheet" href="styles/app-shell.css?v=11" />
   <link rel="stylesheet" href="styles/components.css?v=11" />
-  <link rel="stylesheet" href="styles/composites.css?v=95" />
+  <link rel="stylesheet" href="styles/composites.css?v=96" />
 
   <style>
     /* Ensure full-bleed with no scroll */
@@ -113,6 +113,8 @@
   <script type="text/babel" src="scripts/composites/programme-import-modal.js?v=5"></script>
   <!-- Import reconcile step (spec §6.1) — diff copy + commit-gate logic -->
   <script src="scripts/composites/programme-import-diff.js?v=1"></script>
+  <!-- Time-range control (spec §7) — changing it RE-FETCHES, it is not a filter -->
+  <script type="text/babel" src="scripts/composites/programme-window-picker.js?v=1"></script>
   <!-- Sprint 8.6 — SearchPalette (global search overlay, ⌘K / Ctrl+K) -->
   <script type="text/babel" src="scripts/composites/search-palette.js?v=8"></script>
   <!-- Sprint 8.0.3 — ErrorBanner (used by all page providers on fetch failure) -->
