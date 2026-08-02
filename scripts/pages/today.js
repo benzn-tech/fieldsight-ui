@@ -64,6 +64,14 @@
      (see loadRollingOpenItems' use of FS.api.window.getSpan()). */
   var PROGRAMME_DEADLINE_DAYS = 7;
 
+  /* How far BACK the same fetch reaches, to pick up programme work whose
+     deadline has passed and which is still open. A fetch depth, not a
+     display range: overdue items surface in their own section regardless of
+     how long ago they slipped, and 30 days is simply where we stop looking.
+     Before this, Today asked for [today, today+7] and an overdue task
+     silently disappeared from the page. */
+  var PROGRAMME_OVERDUE_LOOKBACK_DAYS = 30;
+
   /* feat/today-leftover-grouping / feat/leftover-inline-filter — an open
      item is "aged" when its ageDays EXCEEDS this. Aged items still render
      inline in their Mine/Team section (no separate drawer any more); they
@@ -211,11 +219,16 @@
   }
 
   function SubsectionLabel(props) {
+    /* `tone: 'danger'` is used by Today's Overdue heading. Overdue is
+       temporal urgency, so it takes the red token — `blocked` (a functional
+       halt) is magenta and the two are never interchanged. */
     return React.createElement('div', {
       style: {
         fontSize: '11px',
         fontWeight: 600,
-        color: 'var(--text-secondary)',
+        color: props.tone === 'danger'
+          ? 'var(--status-overdue, var(--danger))'
+          : 'var(--text-secondary)',
         margin: '8px 0 4px',
         padding: '0 4px',
         letterSpacing: '0.02em',
@@ -576,9 +589,18 @@
          Promise resolves with { rows: [...] } regardless of role /
          fixture state, so we can pass it straight through Promise.all
          without bailout logic. */
+      /* The window now reaches BACKWARDS as well. It used to start at today,
+         so a programme task whose deadline had already passed fell outside
+         the range and vanished from Today entirely — the one thing that most
+         needs to be seen. PROGRAMME_OVERDUE_LOOKBACK_DAYS is a fetch depth,
+         not a display range: how far back to look for work that is late and
+         still open. `asOf` keeps "day N of M" and "days until deadline"
+         measured from today rather than from the window's start. */
+      var programmeFrom     = window.FS.api.addDaysISO(today, -PROGRAMME_OVERDUE_LOOKBACK_DAYS);
       var programmeDeadline = window.FS.api.addDaysISO(today, PROGRAMME_DEADLINE_DAYS);
       var programmePromise = (window.FS.api.todayProgramme && window.FS.api.todayProgramme.getUpcomingProgrammeTasks
-        ? window.FS.api.todayProgramme.getUpcomingProgrammeTasks({ from: today, to: programmeDeadline, user: folder })
+        ? window.FS.api.todayProgramme.getUpcomingProgrammeTasks({
+            from: programmeFrom, to: programmeDeadline, asOf: today, user: folder })
         : Promise.resolve({ rows: [] })
       ).then(function (r) { return (r && r.rows) || []; })
        .catch(function () { return []; });
@@ -2038,30 +2060,48 @@
       /* Sub-group 1 — Programme tasks (rendered FIRST since the
          programme work is the structural context for the day; action
          items are reactive details inside it). */
-      data.programmeTasks && data.programmeTasks.length > 0
-        ? React.createElement(React.Fragment, null,
-            React.createElement(SubsectionLabel, null,
-              'Due within ' + PROGRAMME_DEADLINE_DAYS + ' days · ' + data.programmeTasks.length),
-            renderMaybeGrouped(data.programmeTasks, isMultiProject, function (row) {
+      (function renderProgrammeSections() {
+        /* Three sections, not one list (spec §14). Today answers "what do I
+           do today"; everything further out belongs in My Work. Overdue is
+           the single exception — and it is rendered ONLY when non-empty. A
+           permanent "0 overdue" heading trains people to skip the section
+           that matters most. */
+        var sections = window.FS.api.todaySections;
+        if (!sections || !state.today || !(data.programmeTasks || []).length) {
+          return null;
+        }
+        var buckets = sections.bucketTodayTasks(data.programmeTasks, state.today);
+
+        function renderBucket(rows, label, tone) {
+          if (!rows.length) return null;
+          return React.createElement(React.Fragment, { key: label },
+            React.createElement(SubsectionLabel,
+              tone ? { tone: tone } : null,
+              label + ' · ' + rows.length),
+            renderMaybeGrouped(rows, isMultiProject, function (row) {
               return React.createElement(fs.ProgrammeTaskCard, {
-                /* Sprint T-004 style task_id is only unique WITHIN one
-                   site's programme — the today-programme-adapter.js
-                   fan-out (feat/today-by-project) can now return the
-                   same task_id from two different sites, so the React
-                   key must include site_slug too. */
+                /* task_id is only unique WITHIN one site's programme, and
+                   the adapter fans out across sites, so the key needs
+                   site_slug too. */
                 key:      (row.site_slug || '') + '_' + row.task_id,
                 row:      row,
                 onSelect: function () {
-                  /* 4.10.6 — navigate to /programme with deep-link
-                     so the right drawer opens on the same task. */
                   window.FS.Router.navigate(
                     '/programme?task=' + encodeURIComponent(row.task_id)
                       + '&from=today');
                 },
               });
             }),
-          )
-        : null,
+          );
+        }
+
+        return React.createElement(React.Fragment, null,
+          renderBucket(buckets.overdue, 'Overdue', 'danger'),
+          renderBucket(buckets.today, 'Due today'),
+          renderBucket(buckets.soon,
+            'Due within ' + sections.SOON_DAYS + ' days'),
+        );
+      })(),
 
       /* Sub-group 2 — the viewer's own rolling unresolved action items
          ("Open items"). feat/leftover-inline-filter: this is myVisible —

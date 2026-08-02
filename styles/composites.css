@@ -4407,7 +4407,8 @@
      globally (app-shell.css), so the 1px border is inside this 36px. */
   height: 36px;
   /* The tree column is a flex column; without this, rows compress once the
-     content exceeds the container and the row height stops being 36px. */
+     content exceeds the container and the row height stops being 36px —
+     which reintroduces the drift at exactly the scale where it hurts. */
   flex-shrink: 0;
   display: flex;
   align-items: center;

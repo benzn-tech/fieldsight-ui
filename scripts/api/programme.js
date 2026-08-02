@@ -157,6 +157,48 @@
     };
   }
 
+  /* The time-window read — the programme page's LOAD boundary, not a filter
+     (spec §7). Also serves My Work (assignee='me') and Today.
+
+     `from`/`to` are ISO dates; the server caps the span at 400 days.
+     assignee='me' resolves server-side to the caller's folder_name, and a
+     caller with no folder identity gets an empty list rather than the whole
+     programme.
+
+     Mock mode filters the fixture with the SAME overlap rule the server uses,
+     so mock and live cannot disagree about which tasks are in range. */
+  async function getTasksInWindow(orgSiteId, opts) {
+    opts = opts || {};
+    if (orgLive()) {
+      return window.FS.api.orgRequest('/programme/tasks', {
+        params: {
+          site: orgSiteId, from: opts.from, to: opts.to,
+          assignee: opts.assignee || undefined,
+        },
+      });
+    }
+    await window.FS.api.delay();
+    var res = await getProgramme(orgSiteId);
+    var doc = res && res.programme;
+    if (!doc) return { tasks: [], programme_id: null };
+    var win = { from: opts.from, to: opts.to };
+    var pw = window.FS.api.programmeWindow;
+    var tasks = (doc.leaves || []).filter(function (t) {
+      return pw.isInWindow(t, win);
+    });
+    if (opts.assignee && opts.assignee !== 'me') {
+      tasks = tasks.filter(function (t) {
+        return (t.assignees || []).indexOf(opts.assignee) !== -1;
+      });
+    } else if (opts.assignee === 'me') {
+      var folder = callerFolder();
+      tasks = folder
+        ? tasks.filter(function (t) { return (t.assignees || []).indexOf(folder) !== -1; })
+        : [];   /* no identity => no attributable work, NOT everything */
+    }
+    return { tasks: tasks, programme_id: doc.programme_id || null };
+  }
+
   /* =========================================================================
      Per-task writes (PATCH / POST / DELETE)
 
@@ -320,6 +362,7 @@
     getProgramme:               getProgramme,
     saveProgramme:              saveProgramme,
     getProgrammeTasksForRange:  getProgrammeTasksForRange,
+    getTasksInWindow:           getTasksInWindow,
     updateTask:                 updateTask,
     createTask:                 createTask,
     deleteTask:                 deleteTask,
