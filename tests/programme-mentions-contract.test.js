@@ -19,9 +19,10 @@
  *     the window endpoint returns ROW shape (`id`/`source_task_id`,
  *     `start_date`). A docIdOf that handled only rows worked against the live
  *     window endpoint and silently matched nothing in every mock and demo.
- *   - the suggestions fixture carries no `topic_id`, though the backend
- *     selects it and confirm_suggestion depends on it. Without it the
- *     report-topic placement renders nothing in mock mode and looks unbuilt.
+ *   - the suggestions fixture carried no `topic_id` and the daily-report
+ *     fixture no `topic_row_id`, so the report-topic link could not be
+ *     expressed at all. Both were added (plan Task 1); the assertions at the
+ *     bottom of this file are what keep them agreeing.
  */
 const test = require('node:test');
 const assert = require('node:assert');
@@ -39,7 +40,8 @@ function loadFixtures() {
   const sandbox = { window: { FieldSight: { fixtures: {} } } };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  for (const f of ['programme.fixture.js', 'programme-suggestions.fixture.js']) {
+  for (const f of ['programme.fixture.js', 'programme-suggestions.fixture.js',
+                   'daily-report.fixture.js']) {
     const src = fs.readFileSync(
       path.join(__dirname, '..', 'scripts', 'mock', f), 'utf8');
     vm.runInContext(src, sandbox, { filename: f });
@@ -50,6 +52,10 @@ function loadFixtures() {
 const FIX = loadFixtures();
 const PROGRAMME = FIX.programme;
 const SUGGESTIONS = FIX.programmeSuggestions;
+/* Reports are keyed reports[date][folder_name] — checked rather than guessed;
+   the programme fixture publishes flat as `fixtures.programme`, and assuming
+   the same here would silently give `undefined` and pass vacuously. */
+const REPORT = FIX.reports['2026-04-29'].Jarley_Trainor;
 
 test('the fixtures loaded at all', () => {
   /* If this fails the rest of the file is asserting on undefined and would
@@ -135,28 +141,53 @@ test('every fixture suggestion carries the fields the summary renders', () => {
   }
 });
 
-test('the report-topic placement cannot be demoed on the current fixtures',
-  { skip: 'documents a real gap; see the comment' }, () => {
-  /* Not a failing assertion, because nothing here is broken code — the
-     fixtures simply cannot express this link yet, and fabricating demo data
-     to make a test green would hide that.
+test('every fixture suggestion carries topic_id, so the report side can link', () => {
+  /* The backend selects topic_id (repositories/programme_suggestions._COLS)
+     and confirm_suggestion depends on it. */
+  for (const s of SUGGESTIONS) {
+    assert.ok(s.topic_id, `topic_id missing on ${s.id}`);
+  }
+});
 
-     Two halves are missing, and BOTH are needed:
+test('every fixture report topic carries a durable topic_row_id', () => {
+  /* The per-report topic_id is sequential (0, 1, 2...) and every section has
+     a topic 0, so it cannot identify anything across reports. topic_row_id is
+     the topics.id a suggestion actually points at. */
+  for (const t of REPORT.topics) {
+    assert.ok(t.topic_row_id, `topic_row_id missing on topic ${t.topic_id}`);
+    assert.notStrictEqual(t.topic_row_id, t.topic_id);
+  }
+});
 
-       scripts/mock/programme-suggestions.fixture.js has no `topic_id`,
-       though the backend selects it (programme_suggestions._COLS) and
-       confirm_suggestion depends on it.
+test('THE contract assertion: fixture suggestions link to fixture report topics', () => {
+  const byTopic = indexByTopic(SUGGESTIONS);
+  const linked = REPORT.topics.filter(t => mentionsForTopic(t, byTopic).length);
 
-       scripts/mock/daily-report.fixture.js has no `topic_row_id` at all —
-       the durable topics.id that a suggestion's topic_id actually points at.
-       Its topics carry only the per-report sequential topic_id (0, 1, 2…).
+  assert.strictEqual(linked.length, 3,
+    'report topics did not resolve their suggestions — check that each '
+    + "suggestion's topic_id equals a topic's topic_row_id, not its "
+    + `per-report topic_id. suggestion topic_ids: ${SUGGESTIONS.map(s => s.topic_id)}; `
+    + `topic_row_ids: ${REPORT.topics.map(t => t.topic_row_id)}`);
+});
 
-     So in mock mode the report-topic placement renders nothing, and reads as
-     "not built" rather than "fixture incomplete". Adding both — with values
-     that agree — is a prerequisite for demoing §2, and is deliberately left
-     to whoever builds the placement, with real topic ids rather than
-     invented ones.
+test('the link resolves to the right task, not merely to something', () => {
+  /* A count assertion alone would pass if every topic resolved the same
+     suggestion. This pins the actual pairing. */
+  const byTopic = indexByTopic(SUGGESTIONS);
+  const crane = REPORT.topics.find(t => t.topic_title === 'Crane pre-start inspection slot');
+  const got = mentionsForTopic(crane, byTopic);
+  assert.strictEqual(got.length, 1);
+  assert.strictEqual(got[0].topic_title, 'Crane pre-start inspection slot');
+});
 
-     The task-side link above needs none of this and works on the fixtures
-     as shipped. */
+test('the obvious wrong join returns nothing, which is why mentionsForTopic exists', () => {
+  /* byTopic[topic.topic_id] is what anyone would write first. It has to fail
+     here, or the trap is not actually being avoided — it is just absent from
+     this fixture and would reappear against live data. */
+  const byTopic = indexByTopic(SUGGESTIONS);
+  for (const t of REPORT.topics) {
+    assert.strictEqual(byTopic[t.topic_id], undefined,
+                       'a sequential topic_id matched a suggestion bucket — '
+                       + 'the two identifier spaces have collided');
+  }
 });
