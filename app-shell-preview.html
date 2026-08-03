@@ -110,7 +110,7 @@
   <!-- Sprint 5.1 — Programme task editor (modal form for editing a leaf) -->
   <script type="text/babel" src="scripts/composites/programme-task-editor.js?v=4"></script>
   <!-- Sprint 5.4/5.5/8.2.2 — CSV + XML + XLSX import modal -->
-  <script type="text/babel" src="scripts/composites/programme-import-modal.js?v=5"></script>
+  <script type="text/babel" src="scripts/composites/programme-import-modal.js?v=6"></script>
   <!-- Import reconcile step (spec §6.1) — diff copy + commit-gate logic -->
   <script src="scripts/composites/programme-import-diff.js?v=1"></script>
   <!-- Version history + rollback (spec §6.5) — the safety net behind Replace -->
@@ -275,6 +275,10 @@
   <script src="scripts/api/programme-autosave.js?v=1"></script>
   <!-- Sprint 5.4 / 8.2.2 — CSV + XML + XLSX programme importer -->
   <script src="scripts/api/programme-import.js?v=3"></script>
+  <!-- Pluggable import format registry. MUST load after programme-import.js:
+       it registers the built-in adapters against that module at load, and an
+       empty registry reports every file as unsupported. -->
+  <script src="scripts/api/programme-format-registry.js?v=1"></script>
   <!-- Sprint 4.6 — User-activity aggregator -->
   <script src="scripts/api/user-activity-aggregator.js?v=7"></script>
   <!-- Sprint 4.10 — Today-Programme adapter (today's programme tasks for caller) -->
