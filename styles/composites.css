@@ -11288,3 +11288,23 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-topic-card__programme-task:hover {
   text-decoration: underline;
 }
+
+/* Project 3 §2, third placement — tasks nobody has mentioned. Rendered only
+   when non-empty: silentTasks returns [] both for "nothing is neglected" and
+   for "the loaded data cannot support the claim", and a reassuring empty
+   state would read as good news in the second case. */
+.fs-programme-silent { margin-top: 20px; }
+.fs-programme-silent__title {
+  font-size: 12px; font-weight: 600; color: var(--text-primary);
+  text-transform: uppercase; letter-spacing: 0.4px;
+}
+.fs-programme-silent__hint {
+  font-size: 11px; color: var(--text-tertiary); margin: 2px 0 8px;
+}
+.fs-programme-silent__list { list-style: none; margin: 0; padding: 0; }
+.fs-programme-silent__item {
+  display: flex; justify-content: space-between; gap: 8px;
+  padding: 4px 0; font-size: 12px;
+  border-bottom: 1px solid var(--border-subtle, rgba(128,128,128,0.15));
+}
+.fs-programme-silent__since { color: var(--text-tertiary); font-size: 11px; flex-shrink: 0; }

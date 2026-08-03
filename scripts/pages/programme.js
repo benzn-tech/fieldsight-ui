@@ -315,13 +315,28 @@
       }
       var cancelled = false;
       setSuggestionsState(function (prev) { return { status: 'loading', rows: prev.rows }; });
-      window.FS.api.programme.getSuggestions({ site: site, state: 'pending' }).then(function (res) {
+      /* state:'all', though the review queue and its badge only want the
+         pending ones (kept as `rows` below, so nothing downstream changes).
+
+         The whole set is what makes "nobody has mentioned this task" an
+         honest claim: confirming a suggestion moves it OUT of pending, so a
+         pending-only fetch sees nothing for every task whose mentions were
+         all reviewed — the well-run ones — and naive silence detection would
+         light up on exactly the work going best. programmeMentions refuses
+         to answer without this coverage, which is why it is fetched here
+         rather than worked around there. */
+      window.FS.api.programme.getSuggestions({ site: site, state: 'all' }).then(function (res) {
         if (cancelled) return;
         if (res && (res._accessDenied || res._notFound)) {
-          setSuggestionsState({ status: 'error', rows: [] });
+          setSuggestionsState({ status: 'error', rows: [], allRows: [] });
           return;
         }
-        setSuggestionsState({ status: 'ok', rows: (res && res.suggestions) || [] });
+        var all = (res && res.suggestions) || [];
+        setSuggestionsState({
+          status: 'ok',
+          rows: all.filter(function (r) { return r.state === 'pending'; }),
+          allRows: all,
+        });
       }).catch(function () {
         if (cancelled) return;
         setSuggestionsState({ status: 'error', rows: [] });
@@ -835,18 +850,17 @@
        task_id holds and what the rows here carry as `task_id`; the rule lives
        in programmeMentions.docIdOf and must not be re-derived inline.
 
-       These are the PENDING suggestions the page already fetches for the
-       review queue. That is the right set for a marker meaning "there is
-       something here to look at" — but it is NOT enough to claim a task has
-       been silent, because confirming a suggestion removes it from this set.
-       silentTasks (§2's third placement) needs `state: 'all'` and refuses to
-       answer without it, which is why it is a separate task rather than a
-       line added here. */
+       The MARKER uses the pending set: it means "there is something here to
+       look at". SILENCE uses the whole set, because confirming a suggestion
+       moves it out of pending — so a pending-only view sees nothing for every
+       task whose mentions were all reviewed, and would report the best-run
+       work as neglected. */
     var mentionsByTask = React.useMemo(function () {
       var mentions = window.FS.api.programmeMentions;
       var rows = (ctx.suggestionsState && ctx.suggestionsState.rows) || [];
       return mentions ? mentions.indexByTask(rows) : {};
     }, [ctx.suggestionsState]);
+
 
     /* Sprint 8.3.1 — compute float map when showFloat is on */
     var floatMap = React.useMemo(function () {
@@ -1671,6 +1685,29 @@
        slide-in drawer a selected task uses. Project-scoped, not
        task-scoped — reads ctx.suggestionsState (fetched once by
        ProgrammeProvider, shared with the header's count badge). */
+    var leavesForSilence = (ctx && ctx.state && ctx.state.programme
+                            && ctx.state.programme.leaves) || [];
+    /* Project 3 §2, third placement — the tasks nobody has talked about.
+       The least obvious of the three and the most useful: a task with no
+       site mention for weeks currently looks exactly like one going fine.
+
+       `coverage` describes what was ACTUALLY fetched, and is the one thing
+       here that must not be fudged. The page requests state:'all' with no
+       date bound, so that is what is declared; claiming coverage the fetch
+       does not have is the single way to make this feature lie. When the
+       fetch failed, no coverage is passed and silentTasks returns nothing
+       rather than reporting every task as neglected. */
+    var silent = React.useMemo(function () {
+      var mentions = window.FS.api.programmeMentions;
+      var st = ctx.suggestionsState;
+      if (!mentions || !st || st.status !== 'ok') return [];
+      var byTaskAll = mentions.indexByTask(st.allRows || []);
+      return mentions.silentTasks(leavesForSilence, byTaskAll, {
+        today: window.FS.api.todayNZDT(),
+        coverage: { states: 'all', from: null, to: null },
+      });
+    }, [ctx.suggestionsState, leavesForSilence]);
+
     if (sel && sel.kind === 'suggestions_panel') {
       return React.createElement('div', { className: 'fs-programme-detail' },
         React.createElement('div', { className: 'fs-programme-detail__header' },
@@ -1691,6 +1728,40 @@
               siteSlug:    ctx && ctx.resolveReportSlug ? ctx.resolveReportSlug(ctx.orgSiteId) : null,
               onResolved:  ctx && ctx.removeSuggestion,
             })
+          : null,
+
+        /* Project 3 §2, third placement. Rendered only when there IS
+           something to say: silentTasks returns [] both when nothing is
+           neglected and when the loaded data cannot support the claim, and
+           an empty panel is the right output for both. A "no silent tasks"
+           message would read as good news in the second case. */
+        silent.length
+          ? React.createElement('div', { className: 'fs-programme-silent' },
+              React.createElement('div', { className: 'fs-programme-silent__title' },
+                'Not mentioned on site'),
+              React.createElement('div', { className: 'fs-programme-silent__hint' },
+                'Started, unfinished, and nobody has talked about it for '
+                + (window.FS.api.programmeMentions
+                   ? window.FS.api.programmeMentions.SILENT_AFTER_DAYS : 21)
+                + ' days.'),
+              React.createElement('ul', { className: 'fs-programme-silent__list' },
+                silent.map(function (task) {
+                  return React.createElement('li', {
+                    key: task.task_id,
+                    className: 'fs-programme-silent__item',
+                  },
+                    /* Text, not a button. This panel has no task-selection
+                       callback plumbed to it, and a control that looks
+                       clickable and does nothing is worse than a label. The
+                       task is named, so it can be found in the tree. */
+                    React.createElement('span', {
+                      className: 'fs-programme-silent__task',
+                    }, task.name || task.task_id),
+                    React.createElement('span', {
+                      className: 'fs-programme-silent__since',
+                    }, 'since ' + (task.start || task.start_date || '')));
+                })),
+            )
           : null,
       );
     }
