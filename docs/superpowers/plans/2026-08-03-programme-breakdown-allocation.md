@@ -336,10 +336,53 @@ produce local rows, so both are destroyed by the same path.
 3. *Save confirms*, naming how many local rows it will convert. Cheapest;
    relies on people reading dialogs, which is what got us here.
 
-My recommendation is 1, with 3 as an interim if 1 cannot land soon. Not
-implemented: which of these is right is a product decision about what Save
-means, and guessing it would risk the allocation data this project exists to
-create.
+**Interim shipped:** fieldsight-pipeline#211 refuses the destructive save
+(409 naming the count) and fieldsight-ui#187 makes the reason reach the user.
+That is option 3 without the "confirm and lose them" button. Data loss is
+closed; Save is simply unavailable once local rows exist, which is a dead end
+for the PM.
+
+### Option 1, specified
+
+This was previously left as "a product decision". Working out the mechanics
+made the decision much narrower, so here it is concretely — what remains is
+implementation, not judgement.
+
+**The fact that unlocks it:** local rows already carry identity in the PUT
+payload. `programme_snapshot._doc_id` emits the row's **UUID** as `task_id`
+for local rows (source id for imported ones). So the payload can be matched
+back to existing local rows without a `source_task_id` — which was the
+obstacle that made this look undecidable.
+
+`replace_all_tasks` becomes:
+
+1. **Before deleting**, read every live local row: its `id`, its `parent_id`,
+   and the `source_task_id` of that parent. That third value is the only
+   durable link across the rebuild, because imported rows get new UUIDs.
+2. **Delete only `origin = 'imported'` rows.** Local rows stay.
+3. **Re-insert imported rows** from the payload, building
+   `source_task_id → new uuid`.
+4. **For each payload leaf whose `task_id` matches a surviving local row's
+   UUID**: update that row from the payload (so an edit made in the UI is
+   kept) and re-point `parent_id` through the map from step 1.
+5. **Local rows absent from the payload** were deleted by the user in the UI
+   — delete them. Silently keeping them would resurrect work someone removed.
+
+**Why step 4 updates rather than ignores.** Preserving the database copy
+would be safe for identity and wrong for content: a PM who edits a zone's
+dates and presses Save would watch the edit vanish. The payload is the user's
+intent; the database is only the source of identity.
+
+**The case to test hardest:** a local row whose parent was *removed from the
+file* in this same save. Step 1 recorded a `source_task_id` that step 3 never
+mints, so the re-point finds nothing. Options are to re-parent to the group,
+or to soft-delete the orphan. Re-parenting is preferable — the work was
+allocated to a person and should not disappear because the client reorganised
+their WBS — but it must be decided rather than left to a NULL.
+
+Verify against real PostgreSQL, not only the fake: this is the same write
+path where `count_local_tasks` earned its round trip, and every failure mode
+here is silent.
 
 ---
 
