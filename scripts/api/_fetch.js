@@ -213,7 +213,13 @@
       return { _notFound: true, status: 404, raw: body };
     }
     if (!res.ok) {
-      var err = new Error((body && body.message) || ('HTTP ' + res.status));
+      /* org-api returns { error: "..." }; the report-side API returns
+         { message: "..." }. Reading only `message` silently discarded every
+         org-api explanation and left callers rendering "HTTP 409" — which is
+         how a 409 that says WHICH rows a replace would discard reached the
+         user as "Try again", advice that cannot work. */
+      var err = new Error((body && (body.message || body.error))
+                          || ('HTTP ' + res.status));
       err.status = res.status;
       err.body   = body;
       throw err;
