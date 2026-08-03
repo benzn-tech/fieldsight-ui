@@ -775,6 +775,42 @@
      intentionally omitted — it's scoped to a single report; cross-report
      Q&A is Phase 4.
      ===================================================================== */
+  /* ---- alerts Ask route (routing spec §3.5) ------------------------------
+     AskChat is mounted in THREE places on this page — once in
+     AggregatedDayView and twice in TimelineRightDetail — and only the page's
+     day view is in a position to fetch the programme. Wiring the provider to
+     one mount would have made the route work on one route and be silently
+     absent on the other two, which is the same mistake the topic-link
+     placement made and had to be corrected for.
+
+     So the tasks live at module scope, written by whichever view fetched
+     them, and every mount reads the same provider. An empty cache means the
+     route does not exist and the question goes to the agent — the designed
+     degradation, not a bug. */
+  var _programmeTasks = null;
+
+  function makeAlertsProvider(suggestions) {
+    if (!_programmeTasks || !_programmeTasks.length) return null;
+    return function () {
+      var M = window.FS.api.programmeMentions;
+      var today = window.FS.api.todayNZDT();
+      return {
+        tasks:  _programmeTasks,
+        today:  today,
+        /* state:'all' is what this page fetches (see the suggestions effect),
+           so silence is claimable. Passing null instead would be safe but
+           would drop the most useful section. */
+        silent: M ? M.silentTasks(_programmeTasks, M.indexByTask(suggestions || []),
+                                  { today: today,
+                                    coverage: { states: 'all', from: null, to: null } })
+                  : null,
+        /* No baseline is loaded on this page, so lateness is reported as
+           unchecked rather than as "on time". */
+        lateness: null,
+      };
+    };
+  }
+
   function AggregatedDayView(props) {
     var fs                   = window.FieldSight;
     var ErrorBanner          = fs.ErrorBanner;
@@ -788,6 +824,64 @@
     var retryRef   = React.useState(0);
     var retryCount = retryRef[0];
     var setRetry   = retryRef[1];
+
+    /* Project 3 §2 — matcher suggestions for this site, so a topic can show
+       that what was said reached the programme.
+
+       state:'all' here, unlike the Programme page's review queue which wants
+       'pending'. The point on this side is that the link EXISTS, and a
+       CONFIRMED suggestion is the strongest evidence of that — fetching only
+       pending ones would hide the link at exactly the moment it was accepted.
+
+       Failure is silent by design: this is an annotation, and a topic without
+       it must still render. */
+    var suggRef        = React.useState([]);
+    var suggestions    = suggRef[0];
+    var setSuggestions = suggRef[1];
+
+    React.useEffect(function () {
+      var mocked = window.FS.api.useMocks;
+      var site = window.FS.siteContext ? window.FS.siteContext.get() : null;
+      if (!site && !mocked) { setSuggestions([]); return undefined; }
+      var cancelled = false;
+      window.FS.api.programme.getSuggestions({ site: site, state: 'all' })
+        .then(function (res) {
+          if (!cancelled) setSuggestions((res && res.suggestions) || []);
+        })
+        .catch(function () { if (!cancelled) setSuggestions([]); });
+      return function () { cancelled = true; };
+    }, [props.date]);
+
+    /* Programme tasks for the alerts Ask route (routing spec §3.5). The chat
+       already lives on this page; the alert signals did not. One extra call
+       makes the route reachable, which is cheaper than putting a second chat
+       surface on the Programme page just to be near the data.
+
+       Failure is silent and the route simply stays unavailable — the answer
+       then goes to the agent, which is today's behaviour. */
+    var progRef        = React.useState(null);
+    var programmeTasks = progRef[0];
+    var setProgrammeTasks = progRef[1];
+
+    React.useEffect(function () {
+      var site = window.FS.siteContext ? window.FS.siteContext.get() : null;
+      if (!site && !window.FS.api.useMocks) { setProgrammeTasks(null); return undefined; }
+      var cancelled = false;
+      window.FS.api.programme.getProgramme(site)
+        .then(function (res) {
+          if (cancelled) return;
+          var leaves = (res && res.programme && res.programme.leaves) || null;
+          _programmeTasks = leaves;
+          setProgrammeTasks(leaves);
+        })
+        .catch(function () { if (!cancelled) setProgrammeTasks(null); });
+      return function () { cancelled = true; };
+    }, [props.date]);
+
+    var mentionsByTopic = React.useMemo(function () {
+      var m = window.FS.api.programmeMentions;
+      return m ? m.indexByTopic(suggestions) : {};
+    }, [suggestions]);
 
     /* life-conversation separation (Q2) — optimistic redaction/revert patches,
        same mechanism as TimelineMiddleColumn but applied PER SECTION here. Keyed
@@ -1035,12 +1129,30 @@
             'Topics'),
           React.createElement('div', { className: 'fs-timeline-page__topics' },
             _p.visible.map(function (topic) {
+              /* Project 3 §2. mentionsForTopic, never
+                 mentionsByTopic[topic.topic_id]: the report side's topic_id
+                 is per-report sequential (every section has a topic 0) while
+                 a suggestion's is topics.id, a uuid. The durable report-side
+                 key is topic_row_id and the module owns that distinction.
+
+                 This is the SECOND of two TopicCard mounts in this component.
+                 Wiring only one is how a feature ends up working on one
+                 route and silently absent on the other. */
+              var _mentions = window.FS.api.programmeMentions
+                ? window.FS.api.programmeMentions.mentionsForTopic(topic, mentionsByTopic)
+                : [];
+              var _linked = _mentions[0];
               return React.createElement(TopicCard, {
                 key:           topic.topic_id,
                 topic:         topic,
                 date:          props.date,
                 actionState:   actionsMap,
                 userFolder:    sectionUser,
+                programmeTaskName: _linked ? _linked.task_name : null,
+                programmeTaskId:   _linked ? _linked.task_id : null,
+                onOpenProgrammeTask: function (taskId) {
+                  window.location.hash = '#/programme?task=' + encodeURIComponent(taskId || '');
+                },
                 selected:      selectedAggId === ('topic_' + sectionUser + '_' + topic.topic_id),
                 defaultOpen:   false,
                 highlight:     false,
@@ -1923,11 +2035,26 @@
           var defaultOpenProp = !hasTopicTarget
             ? undefined
             : isTarget;
+          /* mentionsForTopic, never mentionsByTopic[topic.topic_id]: the
+             report side's topic_id is per-report sequential (every section
+             has a topic 0) while a suggestion's topic_id is topics.id, a
+             uuid. The durable report-side key is topic_row_id, and the
+             module owns that distinction so no page has to. */
+          var mentions = window.FS.api.programmeMentions
+            ? window.FS.api.programmeMentions.mentionsForTopic(topic, mentionsByTopic)
+            : [];
+          var linked = mentions[0];
+
           return React.createElement(TopicCard, {
             key:         topic.topic_id,
             topic:       topic,
             date:        date,
             actionState: actionState,
+            programmeTaskName: linked ? linked.task_name : null,
+            programmeTaskId:   linked ? linked.task_id : null,
+            onOpenProgrammeTask: function (taskId) {
+              window.location.hash = '#/programme?task=' + encodeURIComponent(taskId || '');
+            },
             /* user-dimension audit key plan (Task 5) — MUST derive from
                report.user_name, never the page `user` param: the
                self-view route has user=null (documented crux trap), and
@@ -1983,6 +2110,14 @@
           date:            date,
           user:            user || (report && report.user_name && window.FS.api.folderName(report.user_name)),
           scope:           'both',
+          /* Supplied only when the programme actually loaded. AskChat treats
+             an absent provider as "this route does not exist", so a failed
+             fetch degrades to the agent rather than to a wrong answer.
+
+             `silent` is passed as null unless the suggestion fetch used
+             state:'all' — programmeMentions refuses to claim silence without
+             that coverage, and flattening it here would undo the refusal. */
+          alertsProvider: makeAlertsProvider(suggestions),
           placeholder:     'Ask anything about today’s report…',
           compact:         true,
           initialQuestion: askPrefill,
@@ -3137,6 +3272,7 @@
       bodyByTab = {
         overview: React.createElement(MeetingOverviewTab, { topic: topic }),
         ask:      AskChat ? React.createElement(AskChat, {
+          alertsProvider: makeAlertsProvider(null),
           date:        sel.date,
           user:        mediaProps.user,
           scope:       'both',  /* meeting transcripts may sit alongside; widen scope */
@@ -3175,6 +3311,7 @@
           canEditContent:  canEditContent,
         }) : null,
         ask:        AskChat        ? React.createElement(AskChat, {
+          alertsProvider: makeAlertsProvider(null),
           date:        sel.date,
           user:        mediaProps.user,
           scope:       'both',

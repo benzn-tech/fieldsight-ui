@@ -290,6 +290,25 @@
      lag values.
      ======================================================================== */
 
+  /* Pad SHORT uids to three digits so ids sort and align; never truncate a
+     long one. The original form was
+
+         'T-' + ('000' + uid).slice(-3)
+
+     which took the LAST three characters, so UID 1234 and UID 234 both became
+     T-234. On a real 849-task subcontractor programme 847 uids exceeded 999
+     and 420 tasks collided, which merged nodes in the dependency graph,
+     fabricated a 30-task cycle, and made the critical path refuse to draw --
+     the headline of the feature, broken by its own importer.
+
+     Extracted into a named function so it can be tested under Node. The XML
+     path itself needs a DOMParser and cannot be; this rule is the part that
+     actually went wrong, and it is now reachable. */
+  function taskIdFromUid(uid) {
+    var u = String(uid == null ? '' : uid);
+    return 'T-' + (u.length >= 3 ? u : ('000' + u).slice(-3));
+  }
+
   /* --- XML DOM helpers (namespace-agnostic) -------------------------------- */
 
   function _getTags(node, localName) {
@@ -409,7 +428,7 @@
         return;
       }
 
-      var taskId = 'T-' + (Array(4).join('0') + uid).slice(-3);
+      var taskId = taskIdFromUid(uid);
 
       if (seenUIDs[uid] !== undefined) {
         errors.push({ row: rowNum, field: 'UID', message: 'Duplicate <UID> ' + uid + ' (task "' + name + '") — skipped.' });
@@ -741,13 +760,27 @@
 
   /* --- attach -------------------------------------------------------------- */
 
-  window.FS = window.FS || {};
-  window.FS.api = window.FS.api || {};
-  window.FS.api.programmeImport = {
+  var api = {
     parseCSV:          parseCSV,
     parseMSProjectXML: parseMSProjectXML,
     parseXLSX:         parseXLSX,
     parseXLSXWithMap:  parseXLSXWithMap,
+    taskIdFromUid:     taskIdFromUid,
   };
+
+  /* Guarded so the module can be required under Node. It used to attach to
+     `window` unconditionally, which made it impossible to import -- so the
+     parser behind every programme import had NO automated coverage at all,
+     and a truncating task id survived to reach a real customer file. The XML
+     path still needs a DOMParser (and says so), but everything else is
+     testable now. */
+  if (typeof window !== 'undefined') {
+    window.FS = window.FS || {};
+    window.FS.api = window.FS.api || {};
+    window.FS.api.programmeImport = api;
+  }
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = api;
+  }
 
 }());

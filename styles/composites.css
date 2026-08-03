@@ -1527,6 +1527,23 @@
   color: var(--color-primary-900);
   letter-spacing: -0.02em;
 }
+/* Palette-scale tokens are NOT theme-flipped: --color-primary-900 (#102A43)
+   sat on --surface-app (#0A1018) in dark mode at ~1.15:1 contrast — the
+   wordmark was effectively invisible. Pin a light brand tint for dark. */
+[data-theme="dark"] .fs-login__brand {
+  color: var(--color-primary-100);
+}
+/* "sight" in the brand accent. Theme-aware by necessity: the primary accent
+   --color-accent-500 (#FFD966) is ~1.4:1 on the light theme's white card
+   (tokens.css warns "yellow fails contrast with #fff"), so light mode steps
+   down the same ramp to accent-800, which clears the 3:1 large-text bar at
+   this 22px bold size. Dark mode gets the real brand yellow (~11:1). */
+.fs-login__brand-accent {
+  color: var(--color-accent-800);
+}
+[data-theme="dark"] .fs-login__brand-accent {
+  color: var(--color-accent-500);
+}
 .fs-login__caption {
   font-size: 13px;
   color: var(--text-tertiary);
@@ -1590,6 +1607,12 @@
   border-radius: var(--radius-md);
   padding: 8px 10px;
   line-height: 1.4;
+}
+/* --text-success DOES flip in dark (-> --color-success-400, a light green) but
+   --color-success-50 (#F0FDF4) does NOT, leaving light-green-on-near-white.
+   Pin the dark-mode foreground back to the readable pairing for that pale bg. */
+[data-theme="dark"] .fs-login__success {
+  color: var(--color-success-700);
 }
 
 /* Show/hide password toggle — sits inside the input's own row. */
@@ -4378,7 +4401,15 @@
 }
 
 .fs-gantt-tree__cell {
+  /* MUST match ROW_H in scripts/pages/programme.js — the Gantt virtualizer
+     derives every spacer height from it, so a mismatch drifts the scroll
+     position by (real - assumed) px per row. box-sizing is border-box
+     globally (app-shell.css), so the 1px border is inside this 36px. */
   height: 36px;
+  /* The tree column is a flex column; without this, rows compress once the
+     content exceeds the container and the row height stops being 36px —
+     which reintroduces the drift at exactly the scale where it hurts. */
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -4443,6 +4474,18 @@
   font-style: italic;
 }
 
+/* Site speech that landed on this task (Project 3 §2). Deliberately has no
+   height, padding or line-height of its own: the row is a fixed 36px and the
+   virtualiser's spacer arithmetic is computed from that constant, so a badge
+   that grew the row would drift the scroll position by tens of thousands of
+   pixels over a 5,000-row programme. */
+.fs-gantt-tree__mention {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--accent-info, var(--text-secondary));
+  letter-spacing: -0.5px;
+}
+
 .fs-gantt__timeline {
   overflow-x: auto;
   overflow-y: auto;
@@ -4484,7 +4527,10 @@
 
 .fs-gantt-row {
   position: relative;
+  /* MUST match ROW_H in scripts/pages/programme.js and
+     .fs-gantt-tree__cell above — the two panes scroll together. */
   height: 36px;
+  flex-shrink: 0;
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -11084,3 +11130,195 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   flex-wrap: wrap;
 }
 .fs-suggestion-review__adjust-row > * { flex: 1; min-width: 120px; }
+
+/* ── Programme import · reconcile step ────────────────────────────────────
+   The screen where a re-import's cost is shown before it is paid. Replace
+   uses the danger tone deliberately: it destroys work Update would keep, and
+   the visual weight is the point. */
+.fs-prog-import__modes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.fs-prog-import__mode {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-areas: "radio label" ". hint";
+  gap: 2px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.fs-prog-import__mode--on {
+  border-color: var(--color-accent-500);
+  background: var(--color-accent-50);
+}
+.fs-prog-import__mode input { grid-area: radio; }
+.fs-prog-import__mode-label {
+  grid-area: label;
+  font-weight: var(--font-weight-semibold);
+  font-size: 13px;
+}
+.fs-prog-import__mode-hint {
+  grid-area: hint;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fs-prog-import__diff {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.fs-prog-import__diff--danger {
+  color: var(--status-overdue, var(--danger));
+  font-weight: var(--font-weight-semibold);
+}
+.fs-prog-import__renames {
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.fs-prog-import__rename {
+  display: block;
+  padding: 3px 0;
+  cursor: pointer;
+}
+.fs-prog-import__confirm {
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.fs-prog-import__confirm input {
+  display: block;
+  margin-top: 4px;
+  width: 100%;
+  max-width: 320px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  font: inherit;
+}
+
+/* ── Programme time-range picker ──────────────────────────────────────────
+   Sits in the Programme header. The resolved dates are shown next to the
+   select so it is obvious the range is anchored on today, not on the
+   programme's own start. */
+.fs-prog-window {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.fs-prog-window__label {
+  color: var(--text-secondary);
+  font-weight: var(--font-weight-semibold);
+}
+.fs-prog-window__select {
+  padding: 4px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  font: inherit;
+}
+.fs-prog-window__dates {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── My Work ──────────────────────────────────────────────────────────────
+   Week-grouped list of the caller's own programme work. Overdue takes the
+   red token — temporal urgency; `blocked` is a functional halt and stays
+   magenta, per the deliberate split in the design system. */
+.fs-page--mywork { padding: 16px 20px; }
+.fs-mywork__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.fs-mywork__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: var(--font-weight-semibold);
+}
+.fs-mywork__group {
+  margin: 14px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+.fs-mywork__group--overdue { color: var(--status-overdue, var(--danger)); }
+.fs-mywork__empty {
+  color: var(--text-secondary);
+  font-size: 13px;
+  max-width: 46ch;
+}
+
+/* Project 3 §2 — a report topic showing that what was said reached the
+   programme. The other direction of the matcher link: without it a
+   suggestion only ever appears in a manager's review queue, and the person
+   who actually spoke never learns their words landed on the plan. */
+.fs-topic-card__programme {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 6px 0 2px;
+  font-size: 11px;
+}
+.fs-topic-card__programme-label {
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-size: 10px;
+}
+.fs-topic-card__programme-task {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: var(--accent-info, var(--text-secondary));
+  text-align: left;
+}
+.fs-topic-card__programme-task:hover {
+  text-decoration: underline;
+}
+
+/* Project 3 §2, third placement — tasks nobody has mentioned. Rendered only
+   when non-empty: silentTasks returns [] both for "nothing is neglected" and
+   for "the loaded data cannot support the claim", and a reassuring empty
+   state would read as good news in the second case. */
+.fs-programme-silent { margin-top: 20px; }
+.fs-programme-silent__title {
+  font-size: 12px; font-weight: 600; color: var(--text-primary);
+  text-transform: uppercase; letter-spacing: 0.4px;
+}
+.fs-programme-silent__hint {
+  font-size: 11px; color: var(--text-tertiary); margin: 2px 0 8px;
+}
+.fs-programme-silent__list { list-style: none; margin: 0; padding: 0; }
+.fs-programme-silent__item {
+  display: flex; justify-content: space-between; gap: 8px;
+  padding: 4px 0; font-size: 12px;
+  border-bottom: 1px solid var(--border-subtle, rgba(128,128,128,0.15));
+}
+.fs-programme-silent__since { color: var(--text-tertiary); font-size: 11px; flex-shrink: 0; }
+
+/* Project 3 §4 — zone split dialog. */
+.fs-zone-split__task { font-weight: 600; margin-bottom: 10px; }
+.fs-zone-split__label { display: block; font-size: 11px; color: var(--text-tertiary); margin-bottom: 4px; }
+.fs-zone-split__zones { width: 100%; font: inherit; padding: 6px; }
+.fs-zone-split__modes { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; font-size: 12px; }
+.fs-zone-split__errors { color: var(--accent-danger, #c0392b); font-size: 12px; margin: 8px 0; padding-left: 16px; }
+.fs-zone-split__preview { margin: 10px 0; font-size: 12px; }
+.fs-zone-split__preview-head { color: var(--text-tertiary); margin-bottom: 4px; }
+.fs-zone-split__preview ul { list-style: none; margin: 0; padding: 0; }
+.fs-zone-split__preview li { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+.fs-zone-split__dates { color: var(--text-tertiary); flex-shrink: 0; }
+.fs-zone-split__overrun { font-size: 12px; color: var(--accent-warning, #b8860b); margin: 8px 0; }
+.fs-zone-split__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }

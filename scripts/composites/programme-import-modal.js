@@ -6,14 +6,26 @@
    programme-import parser (window.FS.api.programmeImport.parseCSV).
 
    Flow:
-     pick  →  preview (validation report + task table)  →  confirm
-                                                     ↓
-                              calls onImport(parents, leaves) on success
+     pick → preview (validation + task table) → reconcile (diff + mode) → commit
+
+   The reconcile step exists because re-importing a revised programme is the
+   moment work gets destroyed. The server's dry run reconciles WITHOUT writing
+   and returns what each mode would cost, so the user never picks blind —
+   Replace discards work Update would have kept, and that cost is invisible
+   from the parsed file alone.
 
    Props:
      open       boolean
      onClose    () => void
-     onImport   (parents, leaves) => void   — called only if no errors
+     siteName   string — typed back by the user to unlock Replace
+     onDryRun   (parents, leaves) => Promise<diff>
+     onCommit   (payload) => Promise<any>
+     onImport   (parents, leaves) => void
+
+   LEGACY FALLBACK: with no onDryRun the modal keeps its original one-step
+   behaviour and calls onImport, so callers that have not been updated still
+   work — including the Programme page, which is being rewritten on another
+   branch and must not have to change here.
 
    Exported to:  window.FieldSight.ProgrammeImportModal
    ========================================================================== */
@@ -353,37 +365,76 @@
     var result     = resultHook[0];
     var setResult  = resultHook[1];
 
+    /* Reconcile phase — the dry-run diff, the chosen mode, the typed
+       confirmation Replace requires, and which rename repairs were accepted. */
+    var diffHook     = React.useState(null);
+    var diff         = diffHook[0];     var setDiff     = diffHook[1];
+    var modeHook     = React.useState('update');
+    var mode         = modeHook[0];     var setMode     = modeHook[1];
+    var typedHook    = React.useState('');
+    var typed        = typedHook[0];    var setTyped    = typedHook[1];
+    var acceptedHook = React.useState({});
+    var accepted     = acceptedHook[0]; var setAccepted = acceptedHook[1];
+    var busyHook     = React.useState(false);
+    var busy         = busyHook[0];     var setBusy     = busyHook[1];
+
+    var siteName = props.siteName || '';
+
     /* Reset state when modal is opened fresh */
     React.useEffect(function () {
-      if (open) { setPhase('pick'); setFileName(''); setResult(null); setPending(null); }
+      if (open) {
+        setPhase('pick'); setFileName(''); setResult(null); setPending(null);
+        setDiff(null); setMode('update'); setTyped(''); setAccepted({});
+        setBusy(false);
+      }
     }, [open]);
 
+    /* Format dispatch lives in window.FS.api.programmeFormats, so adding a
+       format later is registering an adapter rather than editing this
+       component. See scripts/api/programme-format-registry.js.
+
+       The dispatch this replaced was `isXML ? parseMSProjectXML : parseCSV`
+       — CSV was the ELSE, not a branch — so a .mpp or .xer (the two formats
+       deliberately deferred) was read as text and run through the CSV
+       parser, producing a preview of nonsense rows instead of a refusal. */
     function handleFile(f) {
       setFileName(f.name);
-      var ext = f.name.split('.').pop().toLowerCase();
+      var formats = window.FS.api.programmeFormats;
+      var adapter = formats && formats.resolve(f.name);
 
-      if (ext === 'xlsx' || ext === 'xls') {
-        window.FS.api.programmeImport.parseXLSX(f).then(function (parsed) {
-          if (parsed.needsMapping) {
-            setPending({ file: f, headers: parsed.headers, rows: parsed.rows });
-            setPhase('mapping');
-          } else {
-            setResult(parsed);
-            setPhase('preview');
-          }
+      if (!adapter) {
+        var supported = formats ? formats.list().map(function (a) {
+          return a.label;
+        }).join(', ') : '';
+        setResult({
+          parents: [], leaves: [], warnings: [],
+          errors: ['This file type is not supported'
+                   + (supported ? '. Supported formats: ' + supported : '')
+                   + '. Export the programme as CSV, Excel or MS Project XML '
+                   + 'and try again.'],
         });
+        setPhase('preview');
         return;
       }
 
-      var isXML = /\.xml$/i.test(f.name);
+      function accept(parsed) {
+        if (parsed && parsed.needsMapping) {
+          setPending({ file: f, headers: parsed.headers, rows: parsed.rows });
+          setPhase('mapping');
+        } else {
+          setResult(parsed);
+          setPhase('preview');
+        }
+      }
+
+      if (adapter.reads === 'file') {
+        Promise.resolve(adapter.parse(f)).then(accept);
+        return;
+      }
+
       var reader = new FileReader();
       reader.onload = function (e) {
-        var text   = e.target.result;
-        var parsed = isXML
-          ? window.FS.api.programmeImport.parseMSProjectXML(text)
-          : window.FS.api.programmeImport.parseCSV(text);
-        setResult(parsed);
-        setPhase('preview');
+        Promise.resolve(adapter.parse(e.target.result)).then(accept);
       };
       reader.readAsText(f, 'utf-8');
     }
@@ -397,11 +448,47 @@
       });
     }
 
+    /* Preview → reconcile. The dry run reconciles server-side and returns the
+       diff WITHOUT writing, so the user picks a mode having seen what each one
+       costs. When no onDryRun is supplied the modal keeps its original
+       one-step behaviour, so existing callers are unaffected. */
     function handleConfirm() {
-      if (result && result.errors.length === 0) {
+      if (!result || result.errors.length > 0) return;
+      if (!props.onDryRun) {
         onImport(result.parents, result.leaves);
         onClose();
+        return;
       }
+      setBusy(true);
+      Promise.resolve(props.onDryRun(result.parents, result.leaves))
+        .then(function (d) {
+          setDiff(d || {});
+          setMode((d && d.suggested_mode) || 'update');
+          setPhase('reconcile');
+        })
+        .catch(function () {
+          /* A failed dry run must not drop the user back to the file picker
+             with their parsed file gone. */
+          setDiff({ _failed: true });
+          setPhase('reconcile');
+        })
+        .then(function () { setBusy(false); });
+    }
+
+    function handleCommit() {
+      var helpers = window.FieldSight.ProgrammeImportDiff;
+      if (!helpers || !helpers.canCommit(mode, { typed: typed, siteName: siteName })) {
+        return;
+      }
+      var payload = helpers.commitPayload(
+        mode,
+        { parents: result.parents, leaves: result.leaves, filename: fileName },
+        { renameCandidates: (diff && diff.rename_candidates) || [],
+          acceptedRenames: accepted });
+      setBusy(true);
+      Promise.resolve(props.onCommit(payload))
+        .then(function () { onClose(); })
+        .then(function () { setBusy(false); });
     }
 
     var hasErrors = result && result.errors.length > 0;
@@ -411,9 +498,120 @@
       ? pluralise(result.parents.length, 'group') + ', ' + pluralise(result.leaves.length, 'task')
       : '';
 
-    var modalTitle = phase === 'pick'    ? 'Import programme — CSV · XML · XLSX'
-                   : phase === 'mapping' ? 'Map columns — ' + fileName
-                   :                       'Preview import — ' + fileName;
+    var modalTitle = phase === 'pick'      ? 'Import programme — CSV · XML · XLSX'
+                   : phase === 'mapping'   ? 'Map columns — ' + fileName
+                   : phase === 'reconcile' ? 'Review changes — ' + fileName
+                   :                         'Preview import — ' + fileName;
+
+    /* ---- reconcile phase ---------------------------------------------- */
+    function renderReconcile() {
+      var helpers = window.FieldSight.ProgrammeImportDiff;
+      if (!helpers) return null;
+
+      if (diff && diff._failed) {
+        return React.createElement('div', { className: 'fs-prog-import__preview' },
+          React.createElement('p', { className: 'fs-prog-import__replace-note' },
+            'Could not work out what this import would change. Nothing has been '
+            + 'written. Try again, or import as a new programme.'),
+          React.createElement('div', { className: 'fs-prog-import__footer' },
+            React.createElement(Button, {
+              variant: 'secondary', size: 'sm',
+              onClick: function () { setPhase('preview'); setDiff(null); },
+            }, 'Back')));
+      }
+
+      var cands = (diff && diff.rename_candidates) || [];
+      var lines = helpers.describeDiff(mode, diff || {});
+      var ready = helpers.canCommit(mode, { typed: typed, siteName: siteName });
+
+      var MODES = [
+        { key: 'update',  label: 'Update',
+          hint: 'Keep everything built here; apply the file’s changes.' },
+        { key: 'replace', label: 'Replace',
+          hint: 'Start over from this file. Destructive.' },
+        { key: 'new',     label: 'Import as a new programme',
+          hint: 'Keep the current one untouched.' },
+      ];
+
+      return React.createElement('div', { className: 'fs-prog-import__preview' },
+        React.createElement('div', { className: 'fs-prog-import__modes' },
+          MODES.map(function (m) {
+            return React.createElement('label', {
+              key: m.key,
+              className: 'fs-prog-import__mode'
+                + (mode === m.key ? ' fs-prog-import__mode--on' : ''),
+            },
+              React.createElement('input', {
+                type: 'radio', name: 'fs-import-mode',
+                checked: mode === m.key,
+                onChange: function () { setMode(m.key); setTyped(''); },
+              }),
+              React.createElement('span', { className: 'fs-prog-import__mode-label' }, m.label),
+              React.createElement('span', { className: 'fs-prog-import__mode-hint' }, m.hint));
+          })),
+
+        React.createElement('ul', {
+          className: 'fs-prog-import__diff'
+            + (mode === 'replace' ? ' fs-prog-import__diff--danger' : ''),
+        }, lines.map(function (l, i) {
+          return React.createElement('li', { key: i }, l);
+        })),
+
+        /* Rename repairs. A planner changing an Activity ID looks like one
+           removal plus one addition; accepting the pairing keeps the row's
+           allocations and recorded progress attached. Off by default — a
+           wrong pairing transplants one task's history onto another. */
+        mode === 'update' && cands.length
+          ? React.createElement('div', { className: 'fs-prog-import__renames' },
+              React.createElement('p', null,
+                'These look like tasks whose ID changed. Tick any that are the '
+                + 'same task to keep their history:'),
+              cands.map(function (c) {
+                return React.createElement('label', {
+                  key: c.existing_id, className: 'fs-prog-import__rename',
+                },
+                  React.createElement('input', {
+                    type: 'checkbox',
+                    checked: !!accepted[c.existing_id],
+                    onChange: function (e) {
+                      var next = Object.assign({}, accepted);
+                      next[c.existing_id] = e.target.checked;
+                      setAccepted(next);
+                    },
+                  }),
+                  ' ', c.existing_source_task_id, ' → ',
+                  c.incoming_source_task_id, ' · ', c.name);
+              }))
+          : null,
+
+        /* Typing the site name is the gate. A confirm dialog gets clicked
+           through; typing a name while the losses are on screen does not
+           happen by accident. */
+        mode === 'replace'
+          ? React.createElement('div', { className: 'fs-prog-import__confirm' },
+              React.createElement('label', null,
+                'Type the project name to confirm: ',
+                React.createElement('strong', null, siteName || '(unnamed site)')),
+              React.createElement('input', {
+                type: 'text', value: typed,
+                'aria-label': 'Type the project name to confirm replacement',
+                onChange: function (e) { setTyped(e.target.value); },
+              }))
+          : null,
+
+        React.createElement('div', { className: 'fs-prog-import__footer' },
+          React.createElement(Button, {
+            variant: 'secondary', size: 'sm', disabled: busy,
+            onClick: function () { setPhase('preview'); },
+          }, 'Back'),
+          React.createElement(Button, {
+            variant: mode === 'replace' ? 'danger' : 'primary',
+            size: 'sm', disabled: !ready || busy, onClick: handleCommit,
+          }, busy ? 'Importing…'
+             : mode === 'replace' ? 'Replace the programme'
+             : mode === 'new'     ? 'Create a second programme'
+             :                      'Apply changes')));
+    }
 
     return ModalOverlay
       ? React.createElement(ModalOverlay, {
@@ -431,6 +629,8 @@
                 onConfirm: handleColumnMap,
                 onBack:    function () { setPhase('pick'); setPending(null); },
               })
+          : phase === 'reconcile'
+            ? renderReconcile()
             : React.createElement('div', { className: 'fs-prog-import__preview' },
 
                 /* Summary bar */
@@ -461,10 +661,16 @@
                     })
                   : null,
 
-                /* Warning about full replace */
+                /* What happens next. With a dry run wired the destructive
+                   choice is made on the NEXT screen, with the losses counted;
+                   without one this modal keeps its original replace-everything
+                   behaviour, so the warning has to stay. */
                 !hasErrors && React.createElement('p', { className: 'fs-prog-import__replace-note' },
-                  'Confirming will replace the entire programme with the imported data. ' +
-                  'This cannot be undone (mock mode — reload resets to fixture).'),
+                  props.onDryRun
+                    ? 'Next you’ll see exactly what this file changes, and choose '
+                      + 'whether to update the existing programme or replace it.'
+                    : 'Confirming will replace the entire programme with the imported data. '
+                      + 'This cannot be undone (mock mode — reload resets to fixture).'),
 
                 /* Footer actions */
                 React.createElement('div', { className: 'fs-prog-import__footer' },
@@ -479,9 +685,12 @@
                     ? React.createElement(Button, {
                         variant:  'primary',
                         size:     'sm',
-                        disabled: !!hasErrors || taskCount === 0,
+                        disabled: !!hasErrors || taskCount === 0 || busy,
                         onClick:  handleConfirm,
-                      }, hasErrors ? 'Fix errors to import' : 'Import ' + taskCount + ' rows')
+                      }, hasErrors ? 'Fix errors to import'
+                         : busy      ? 'Checking…'
+                         : props.onDryRun ? 'Review changes'
+                         :             'Import ' + taskCount + ' rows')
                     : React.createElement('button', {
                         type:     'button',
                         disabled: !!hasErrors || taskCount === 0,
