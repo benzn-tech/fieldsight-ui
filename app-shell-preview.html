@@ -257,6 +257,15 @@
   <!-- Window rows -> the {parents, leaves} document the Gantt renders.
        Same load-order constraint: after api/index.js. -->
   <script src="scripts/api/programme-window-doc.js?v=1"></script>
+  <!-- Site speech <-> programme task linking (Project 3 spec 2). Same
+       load-order constraint: after api/index.js. -->
+  <script src="scripts/api/programme-mentions.js?v=1"></script>
+  <!-- Zone split planning (Project 3 spec 4). Same load-order constraint:
+       after api/index.js. -->
+  <script src="scripts/api/programme-zone-split.js?v=1"></script>
+  <!-- Breakdown -> contract task progress rollup (Project 3 spec 5). Same
+       load-order constraint: after api/index.js. -->
+  <script src="scripts/api/programme-rollup.js?v=1"></script>
   <script src="scripts/api/programme.js?v=6"></script>
   <!-- Sprint 5.6 / 8.3.1–8.3.2 — Cascade + CPM + floats + over-alloc engine -->
   <script src="scripts/api/programme-schedule.js?v=2"></script>
