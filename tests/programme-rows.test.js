@@ -176,3 +176,113 @@ test('visibleSlice returns an empty slice for an empty programme', () => {
   assert.deepStrictEqual(visibleSlice(0, 600, 0, 44, 200),
     { first: 0, last: -1, topSpc: 0, botSpc: 0 });
 });
+
+/* ---- three levels: local children under a contract task ------------------ */
+/*
+ * The row builder used to iterate `parents` and emit only leaves whose
+ * parent_id matched a WBS GROUP. A task parented to another TASK — exactly
+ * what a zone split and an AI breakdown produce (Project 1 §5: local children
+ * hang under the untouched imported row) — was never emitted. No error, no
+ * warning, just a row that does not exist on screen. That is how ui#178
+ * shipped a zone split whose children were invisible.
+ */
+test('a task parented to another task is rendered', () => {
+  const parents = [{ task_id: 'G1', name: 'Foundations' }];
+  const leaves = [
+    { task_id: 'T1', parent_id: 'G1', name: 'Pour concrete',
+      start: '2026-04-01', end: '2026-04-10', duration_days: 10, progress_pct: 0 },
+    { task_id: 'Z1', parent_id: 'T1', name: 'Pour concrete — Level 1',
+      start: '2026-04-01', end: '2026-04-10', duration_days: 10, progress_pct: 0 },
+  ];
+  const ids = buildRows(parents, leaves, new Set()).map(r => r.task.task_id);
+  assert.deepStrictEqual(ids, ['G1', 'T1', 'Z1']);
+});
+
+test('a zone child is indented one level deeper than its contract task', () => {
+  const parents = [{ task_id: 'G1' }];
+  const leaves = [
+    { task_id: 'T1', parent_id: 'G1' },
+    { task_id: 'Z1', parent_id: 'T1' },
+  ];
+  const rows = buildRows(parents, leaves, new Set());
+  assert.deepStrictEqual(rows.map(r => r.indent), [0, 1, 2]);
+});
+
+test('a task with children is flagged so the cell can offer a toggle', () => {
+  const rows = buildRows([{ task_id: 'G1' }],
+    [{ task_id: 'T1', parent_id: 'G1' }, { task_id: 'Z1', parent_id: 'T1' }],
+    new Set());
+  assert.strictEqual(rows[1].hasChildren, true);
+  assert.strictEqual(rows[2].hasChildren, false);
+});
+
+test('collapsing a contract task hides its zones but keeps the task', () => {
+  const rows = buildRows([{ task_id: 'G1' }],
+    [{ task_id: 'T1', parent_id: 'G1' }, { task_id: 'Z1', parent_id: 'T1' }],
+    new Set(['T1']));
+  assert.deepStrictEqual(rows.map(r => r.task.task_id), ['G1', 'T1']);
+});
+
+test('collapsing the group hides the whole subtree', () => {
+  const rows = buildRows([{ task_id: 'G1' }],
+    [{ task_id: 'T1', parent_id: 'G1' }, { task_id: 'Z1', parent_id: 'T1' }],
+    new Set(['G1']));
+  assert.deepStrictEqual(rows.map(r => r.task.task_id), ['G1']);
+});
+
+test('a group rollup counts its own children, not its grandchildren', () => {
+  /* The zones re-express the same work as their parent. Counting both would
+     double it and report a task as further along than it is. */
+  const rows = buildRows([{ task_id: 'G1' }], [
+    { task_id: 'T1', parent_id: 'G1', duration_days: 10, progress_pct: 0,
+      start: '2026-04-01', end: '2026-04-10' },
+    { task_id: 'Z1', parent_id: 'T1', duration_days: 10, progress_pct: 100,
+      start: '2026-04-01', end: '2026-04-10' },
+  ], new Set());
+  assert.strictEqual(rows[0].task.progress_pct, 0);
+});
+
+test('a parent_id cycle terminates instead of hanging the tab', () => {
+  /* The server-side window CTE was proved to terminate on a cycle against
+     real Aurora. Nothing was protecting the client, and here a cycle is an
+     infinite loop inside a render. */
+  const rows = buildRows([{ task_id: 'G1' }], [
+    { task_id: 'A', parent_id: 'G1' },
+    { task_id: 'B', parent_id: 'A' },
+    { task_id: 'A2', parent_id: 'B', name: 'points back' },
+  ], new Set());
+  assert.ok(rows.length >= 3);
+  assert.ok(rows.length < 20, 'terminated');
+});
+
+test('a task pointing at itself does not recurse', () => {
+  const rows = buildRows([{ task_id: 'G1' }],
+    [{ task_id: 'A', parent_id: 'G1' }, { task_id: 'A', parent_id: 'A' }],
+    new Set());
+  assert.ok(rows.length < 10);
+});
+
+test('depth is bounded', () => {
+  /* Ten levels of nesting is a data problem, not a plan. */
+  const leaves = [{ task_id: 'L0', parent_id: 'G1' }];
+  for (let i = 1; i < 10; i++) {
+    leaves.push({ task_id: 'L' + i, parent_id: 'L' + (i - 1) });
+  }
+  const rows = buildRows([{ task_id: 'G1' }], leaves, new Set());
+  const maxIndent = Math.max(...rows.map(r => r.indent));
+  assert.ok(maxIndent <= 6, 'indent capped, got ' + maxIndent);
+});
+
+test('every row is still one uniform row — the virtualiser depends on it', () => {
+  /* visibleSlice and the spacer heights are pure arithmetic over a row
+     COUNT at a fixed height. Nesting must add rows, never taller ones. */
+  const rows = buildRows([{ task_id: 'G1' }], [
+    { task_id: 'T1', parent_id: 'G1' },
+    { task_id: 'Z1', parent_id: 'T1' },
+    { task_id: 'Z2', parent_id: 'T1' },
+  ], new Set());
+  assert.strictEqual(rows.length, 4);
+  const slice = visibleSlice(0, 100, rows.length, 36, 0);
+  assert.strictEqual(slice.topSpc + (slice.last - slice.first + 1) * 36 + slice.botSpc,
+                     rows.length * 36);
+});

@@ -45,7 +45,10 @@
       role:      'button',
       tabIndex:  0,
     },
-      isGroup
+      /* A WBS group, OR a contract task that has a zone split / breakdown
+         beneath it. Both need the same disclosure control; only the row
+         builder knows which leaves have children, so it says so. */
+      (isGroup || props.hasChildren)
         ? React.createElement('button', {
             type:      'button',
             className: 'fs-gantt-tree__chev'
