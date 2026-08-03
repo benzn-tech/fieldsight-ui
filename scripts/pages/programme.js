@@ -519,6 +519,38 @@
       });
       var newTask = nextLeaves.filter(function (t) { return t.task_id === taskId; })[0];
 
+      /* Project 3 §5 — ticking off a breakdown subtask has to move the
+         contract task, or the breakdown is a private to-do list that never
+         reaches the plan.
+       
+         Placed here rather than at each call site because every mutation
+         path (drag, editor, keyboard) funnels through this function; wiring
+         it per-caller is how one of them ends up silently not rolling up.
+       
+         applyRollup returns null far more often than not — a partial
+         breakdown, or a rollup that would lower progress somebody recorded —
+         and null means LEAVE IT ALONE, not zero. */
+      var rollup = window.FS.api.programmeRollup;
+      if (rollup && newTask && newTask.parent_id) {
+        var parent = nextLeaves.filter(function (t) {
+          return t.task_id === newTask.parent_id;
+        })[0];
+        /* Only when the parent is itself a task. A WBS group header lives in
+           s.programme.parents and has no progress of its own to move. */
+        if (parent) {
+          var kids = nextLeaves.filter(function (t) {
+            return t.parent_id === parent.task_id;
+          });
+          var patch = rollup.applyRollup(parent, rollup.rollupProgress(parent, kids));
+          if (patch) {
+            nextLeaves = nextLeaves.map(function (t) {
+              return t.task_id === parent.task_id
+                ? Object.assign({}, t, patch) : t;
+            });
+          }
+        }
+      }
+
       var sched = window.FieldSight && window.FieldSight.programmeSchedule;
       if (sched) {
         var deltaDays = sched.diffDaysISO(oldTask.end, newTask.end);
@@ -609,6 +641,50 @@
     /* Sprint 5.2 — create a new leaf task from editor form data.
        Mints task_id and WBS, appends to leaves[], recomputes CPM.
        No cascade needed (new task has no dependents yet). */
+    /* Project 3 §4 — create the zone children of ONE contract task.
+       Separate from addTask because that one parents under a WBS group from
+       s.parents, and a zone split parents under a leaf: the imported row
+       stays exactly as the client issued it and the zones hang beneath it
+       (Project 1 §5).
+
+       `children` comes from programmeZoneSplit.planZoneSplit and is not
+       re-derived here — no dates are decided in this function. */
+    function splitIntoZones(parentTaskId, children) {
+      if (!parentTaskId || !children || !children.length) return;
+      setDirty(true);
+      setState(function (s) {
+        if (s.status !== 'ok') return s;
+        var parent = s.leaves.filter(function (t) {
+          return t.task_id === parentTaskId;
+        })[0];
+        if (!parent) return s;
+
+        var next = s.leaves.slice();
+        children.forEach(function (c, i) {
+          next.push({
+            task_id:             mintTaskId(next),
+            wbs:                 (parent.wbs || '') + '.' + (i + 1),
+            parent_id:           parent.task_id,
+            name:                c.name,
+            zone:                c.zone,
+            start:               c.start_date,
+            end:                 c.end_date,
+            duration_days:       c.duration_days,
+            progress_pct:        0,
+            status:              'not_started',
+            depends_on:          [],
+            assignees:           c.assignee ? [c.assignee] : [],
+            resource_pool:       [],
+            linked_action_items: [],
+            tags:                [],
+            baseline_start:      c.start_date,
+            baseline_end:        c.end_date,
+          });
+        });
+        return Object.assign({}, s, { leaves: next });
+      });
+    }
+
     function addTask(opts) {
       opts = opts || {};
       setDirty(true);
@@ -808,6 +884,7 @@
       updateTask:   updateTask,
       editTask:     editTask,
       addTask:      addTask,
+      splitIntoZones: splitIntoZones,
       deleteTask:   deleteTask,
       replaceTasks: replaceTasks,
       canWrite:     canWrite,
@@ -1775,9 +1852,17 @@
       );
     }
 
+    var ZoneSplitDialog = window.FieldSight.ZoneSplitDialog;
     var t = sel.task;
     var s = ctx && ctx.state;
     var critical = s && s.critical && s.critical.has(t.task_id);
+
+    /* Project 3 §4 — zone split. The dialog owns nothing but input; every
+       date decision is planZoneSplit's, and nothing is written until the
+       user presses Split. */
+    var splitOpenRef = React.useState(false);
+    var splitOpen    = splitOpenRef[0];
+    var setSplitOpen = splitOpenRef[1];
 
     var statusTone = ({
       not_started: 'neutral',
@@ -1835,6 +1920,16 @@
           variant: 'ghost', size: 'sm',
           onClick: function () { setEdit(true); },
         }, 'Edit') : null,
+
+        /* Project 3 §4. Dated tasks only: an undated WBS header has nothing
+           to divide and planZoneSplit refuses it, so offering a button that
+           always errors would be worse than not offering it. */
+        ZoneSplitDialog && ctx && ctx.canWrite && ctx.splitIntoZones
+          && (t.start || t.start_date)
+          ? React.createElement(Button, {
+              variant: 'ghost', size: 'sm',
+              onClick: function () { setSplitOpen(true); },
+            }, 'Split into zones') : null,
         IconBtn ? React.createElement(IconBtn, {
           icon: 'x', ariaLabel: 'Close detail', size: 'sm',
           onClick: function () { if (props.onClose) props.onClose(); },
@@ -1908,6 +2003,15 @@
          button. The editor checks `onDelete` truthiness to render the
          red Delete control in the footer, so passing null hides it
          entirely for read-only roles. */
+      ZoneSplitDialog && splitOpen ? React.createElement(ZoneSplitDialog, {
+        open:    true,
+        task:    t,
+        onClose: function () { setSplitOpen(false); },
+        /* The dialog hands back exactly what planZoneSplit produced. No date
+           is decided here either — this only writes. */
+        onSplit: function (children) { ctx.splitIntoZones(t.task_id, children); },
+      }) : null,
+
       Editor ? React.createElement(Editor, {
         open:    editing,
         task:    t,
