@@ -200,22 +200,49 @@
   }
 
   /* =========================================================================
-     Sprint 8.2.1 — Write operations (PATCH / POST / DELETE)
-     No real /api/programmes endpoints exist yet — gated on
-     useMocks=false && writeMocks=false (Phase 0 Task 2 audit sweep) so
-     these stay mocked even once reads go live. In mock mode they return a
-     resolved-success object immediately (mutations live in page state).
+     Per-task writes (PATCH / POST / DELETE)
+
+     These were written in Sprint 8.2.1 against a hypothetical
+     /api/programmes/:id/tasks REST API that never existed, and stayed
+     permanently mocked. They now call the real org-api routes added with the
+     Aurora storage foundation:
+
+       PATCH  /api/org/programme/tasks/{id}   body carries row_version
+       POST   /api/org/programme/tasks        ?site=<org site uuid>
+       DELETE /api/org/programme/tasks/{id}
+
+     `?site=` is the ORG SITE UUID, never the report-side slug — see the
+     module header.
+
+     PATCH is optimistic-locked. A 409 means someone else moved the row; the
+     caller re-reads that one task rather than reloading the programme, so
+     other pending edits survive (see scripts/api/programme-autosave.js).
      ========================================================================= */
 
-  async function updateTask(programmeId, taskId, patch) {
-    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
-      return window.FS.api.request(
-        '/programmes/' + encodeURIComponent(programmeId) +
-        '/tasks/' + encodeURIComponent(taskId),
-        { method: 'PATCH', body: JSON.stringify(patch) });
+  async function updateTask(orgSiteId, taskId, patch) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest(
+        '/programme/tasks/' + encodeURIComponent(taskId),
+        { method: 'PATCH', body: patch });
     }
     await window.FS.api.delay();
     return { ok: true, task_id: taskId };
+  }
+
+  /* One request for a whole cascade — dragging a bar shifts every downstream
+     dependent, and those writes have to be atomic. The server checks every
+     row_version before writing any of them; on 409 the body carries
+     `conflicts: [task_id, ...]` naming the rows that moved, so the caller
+     refreshes exactly those (see programme-autosave.applyBatchConflict)
+     rather than reloading and discarding the user's other pending edits. */
+  async function updateTasksBatch(orgSiteId, tasks) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest('/programme/tasks:batch', {
+        method: 'PATCH', params: { site: orgSiteId }, body: { tasks: tasks },
+      });
+    }
+    await window.FS.api.delay();
+    return { ok: true, count: (tasks || []).length };
   }
 
   /* Two-phase import. Call with { dry_run: true, parents, leaves } to get the
@@ -276,21 +303,20 @@
     return { programme: { baseline_version: versionNo } };
   }
 
-  async function createTask(programmeId, payload) {
-    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
-      return window.FS.api.request(
-        '/programmes/' + encodeURIComponent(programmeId) + '/tasks',
-        { method: 'POST', body: JSON.stringify(payload) });
+  async function createTask(orgSiteId, payload) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest('/programme/tasks', {
+        method: 'POST', params: { site: orgSiteId }, body: payload,
+      });
     }
     await window.FS.api.delay();
     return { ok: true };
   }
 
-  async function deleteTask(programmeId, taskId) {
-    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
-      return window.FS.api.request(
-        '/programmes/' + encodeURIComponent(programmeId) +
-        '/tasks/' + encodeURIComponent(taskId),
+  async function deleteTask(orgSiteId, taskId) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest(
+        '/programme/tasks/' + encodeURIComponent(taskId),
         { method: 'DELETE' });
     }
     await window.FS.api.delay();
@@ -412,6 +438,7 @@
     getProgrammeTasksForRange:  getProgrammeTasksForRange,
     getTasksInWindow:           getTasksInWindow,
     updateTask:                 updateTask,
+    updateTasksBatch:           updateTasksBatch,
     createTask:                 createTask,
     importProgramme:            importProgramme,
     getVersions:                getVersions,
