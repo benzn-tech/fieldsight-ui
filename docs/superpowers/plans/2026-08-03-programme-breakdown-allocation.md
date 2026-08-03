@@ -254,7 +254,81 @@ The parent may have moved. Refetch and retry once; do not loop.
 
 ---
 
-## Task 7: AI breakdown — BLOCKED
+## Task 7 — BLOCKED on an EARLY-stage programme (not on any programme)
+
+Status as of 2026-08-03. The deterministic halves are **done and merged**:
+
+- **7a** `programme-breakdown.js` — validates a proposal before it becomes
+  rows (ui#189)
+- **7b** `programme-review-batch.js` — the batch review gate (ui#190)
+
+What is blocked is the model half, and the blocker changed shape once a real
+file arrived.
+
+### What the real file settled, and what it did not
+
+The Ellesmere subcontractor programme (849 tasks) is a **late** revision. It
+is already broken down finer than any model would propose — 708 leaves at
+outline depth 10, median leaf 7 days, only 12% over 15 days — and its coarse
+bars are mostly lead time that must never be broken down (spec §3
+"Correction: what a real programme actually looks like").
+
+The user's correction to that reading, and it is the right one: **an early
+programme is not like this.** This file is many revisions in; at project
+start there is no such detail. So the breakdown feature is not pointless —
+its target is the early phase, and the smaller builder whose programme is a
+page of bars.
+
+Which produces the design this task now waits on:
+
+> **Classify the programme's maturity first, then choose the mode.**
+> Mature → judge which tasks need intervention. Early → propose a breakdown.
+> The classifier is deterministic; it needs no model.
+
+Two modes rather than one prompt with a different tone, because the failure
+costs are not comparable: a wrong judgement costs a second look, a wrong
+generation writes work that does not exist into the plan.
+
+### The measured anchor — mature end
+
+From the real file, so it is not lost:
+
+| signal | Ellesmere (late) |
+|---|---|
+| leaf tasks | 708 |
+| outline depth | 10 |
+| median leaf duration | 7 days |
+| leaves ≥ 15 days | 12% |
+| dependency coverage | 99% |
+| coarse bars that are lead time | most of the top 86 |
+
+### What is actually missing
+
+**One early-stage programme.** Ideally an early revision of this same project
+— the pair is worth more than ten more mature files, because it makes the
+boundary *measured* rather than chosen.
+
+Without it, every threshold separating "early" from "mature" is invented, and
+this session has already paid repeatedly for thresholds set against imagined
+data (the 60% dependency coverage figure being the closest parallel — the
+real file came in at 99% and the binding constraint turned out to be
+something else entirely).
+
+**Deliberately not built in the meantime:** the maturity classifier calibrated
+on one end only. A classifier anchored at 708 leaves and guessing the other
+boundary would look quantitative and be arbitrary.
+
+### When unblocked
+
+1. Measure both files; set the boundary from the two.
+2. Candidate filter — the vocabulary drawn from real data (procure,
+   fabricate, consent, submission, approval, review, deliver, "allow for")
+   is a genuine starting point and serves both modes.
+3. Then the prompt, and only then.
+
+---
+
+## Task 7 (original notes) — AI breakdown
 
 **Blocked on:** a real client programme (also blocking Project 2 §5).
 
