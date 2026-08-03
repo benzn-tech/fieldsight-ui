@@ -11308,3 +11308,17 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   border-bottom: 1px solid var(--border-subtle, rgba(128,128,128,0.15));
 }
 .fs-programme-silent__since { color: var(--text-tertiary); font-size: 11px; flex-shrink: 0; }
+
+/* Project 3 §4 — zone split dialog. */
+.fs-zone-split__task { font-weight: 600; margin-bottom: 10px; }
+.fs-zone-split__label { display: block; font-size: 11px; color: var(--text-tertiary); margin-bottom: 4px; }
+.fs-zone-split__zones { width: 100%; font: inherit; padding: 6px; }
+.fs-zone-split__modes { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; font-size: 12px; }
+.fs-zone-split__errors { color: var(--accent-danger, #c0392b); font-size: 12px; margin: 8px 0; padding-left: 16px; }
+.fs-zone-split__preview { margin: 10px 0; font-size: 12px; }
+.fs-zone-split__preview-head { color: var(--text-tertiary); margin-bottom: 4px; }
+.fs-zone-split__preview ul { list-style: none; margin: 0; padding: 0; }
+.fs-zone-split__preview li { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+.fs-zone-split__dates { color: var(--text-tertiary); flex-shrink: 0; }
+.fs-zone-split__overrun { font-size: 12px; color: var(--accent-warning, #b8860b); margin: 8px 0; }
+.fs-zone-split__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
