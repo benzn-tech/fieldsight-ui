@@ -1191,7 +1191,10 @@
               key:        r.task.task_id,
               task:       r.task,
               isGroup:    r.kind === 'group',
-              expanded:   r.kind === 'group' && !ctx.collapsed.has(r.task.task_id),
+              /* A contract task with a zone split or breakdown under it gets
+                 the same disclosure control as a group. */
+              hasChildren: !!r.hasChildren,
+              expanded:   !ctx.collapsed.has(r.task.task_id),
               indent:     r.indent,
               critical:   r.kind === 'leaf' && s.critical.has(r.task.task_id),
               selected:   selectedId === r.task.task_id,

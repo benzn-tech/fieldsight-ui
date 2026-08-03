@@ -79,10 +79,51 @@
 
       if (collapsed && collapsed.has(parent.task_id)) continue;
       for (var j = 0; j < children.length; j++) {
-        rows.push({ kind: 'leaf', task: children[j], indent: 1 });
+        pushLeaf(rows, idx, children[j], 1, collapsed, {});
       }
     }
     return rows;
+  }
+
+  /* How deep the tree may go before we stop descending. Groups are level 0,
+     contract tasks 1, their zone split or AI breakdown 2, a breakdown of a
+     zone 3. Beyond that is almost certainly a data problem rather than a
+     plan, and a bound is cheaper than discovering it as a hung tab. */
+  var MAX_DEPTH = 6;
+
+  /* A leaf, then anything parented to THAT leaf.
+   
+     This is what makes the tree three levels rather than two. The row
+     builder used to emit only leaves whose parent_id matched a WBS group, so
+     a task parented to another task — which is exactly what a zone split and
+     an AI breakdown produce (Project 1 §5: local children hang under the
+     untouched imported row) — was silently never emitted. No error, no
+     warning, just a row that does not exist on screen.
+   
+     `seen` guards a parent_id cycle. The server-side window CTE was proved
+     to terminate on one against real Aurora; nothing was protecting the
+     client, and here a cycle is an infinite loop in a render path. */
+  function pushLeaf(rows, idx, task, indent, collapsed, seen) {
+    var id = task.task_id;
+    if (seen[id]) return;
+    seen[id] = true;
+
+    var kids = idx[id] || [];
+    rows.push({
+      kind:   'leaf',
+      task:   task,
+      indent: indent,
+      /* The cell needs to know whether to draw a disclosure control, and
+         only the row builder knows the shape of the tree. */
+      hasChildren: kids.length > 0,
+    });
+
+    if (!kids.length) return;
+    if (collapsed && collapsed.has(id)) return;
+    if (indent + 1 > MAX_DEPTH) return;
+    for (var k = 0; k < kids.length; k++) {
+      pushLeaf(rows, idx, kids[k], indent + 1, collapsed, seen);
+    }
   }
 
   /* Which rows the virtualizer should mount, plus the spacer heights that
