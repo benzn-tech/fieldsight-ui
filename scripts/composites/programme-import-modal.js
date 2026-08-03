@@ -389,32 +389,52 @@
       }
     }, [open]);
 
+    /* Format dispatch lives in window.FS.api.programmeFormats, so adding a
+       format later is registering an adapter rather than editing this
+       component. See scripts/api/programme-format-registry.js.
+
+       The dispatch this replaced was `isXML ? parseMSProjectXML : parseCSV`
+       — CSV was the ELSE, not a branch — so a .mpp or .xer (the two formats
+       deliberately deferred) was read as text and run through the CSV
+       parser, producing a preview of nonsense rows instead of a refusal. */
     function handleFile(f) {
       setFileName(f.name);
-      var ext = f.name.split('.').pop().toLowerCase();
+      var formats = window.FS.api.programmeFormats;
+      var adapter = formats && formats.resolve(f.name);
 
-      if (ext === 'xlsx' || ext === 'xls') {
-        window.FS.api.programmeImport.parseXLSX(f).then(function (parsed) {
-          if (parsed.needsMapping) {
-            setPending({ file: f, headers: parsed.headers, rows: parsed.rows });
-            setPhase('mapping');
-          } else {
-            setResult(parsed);
-            setPhase('preview');
-          }
+      if (!adapter) {
+        var supported = formats ? formats.list().map(function (a) {
+          return a.label;
+        }).join(', ') : '';
+        setResult({
+          parents: [], leaves: [], warnings: [],
+          errors: ['This file type is not supported'
+                   + (supported ? '. Supported formats: ' + supported : '')
+                   + '. Export the programme as CSV, Excel or MS Project XML '
+                   + 'and try again.'],
         });
+        setPhase('preview');
         return;
       }
 
-      var isXML = /\.xml$/i.test(f.name);
+      function accept(parsed) {
+        if (parsed && parsed.needsMapping) {
+          setPending({ file: f, headers: parsed.headers, rows: parsed.rows });
+          setPhase('mapping');
+        } else {
+          setResult(parsed);
+          setPhase('preview');
+        }
+      }
+
+      if (adapter.reads === 'file') {
+        Promise.resolve(adapter.parse(f)).then(accept);
+        return;
+      }
+
       var reader = new FileReader();
       reader.onload = function (e) {
-        var text   = e.target.result;
-        var parsed = isXML
-          ? window.FS.api.programmeImport.parseMSProjectXML(text)
-          : window.FS.api.programmeImport.parseCSV(text);
-        setResult(parsed);
-        setPhase('preview');
+        Promise.resolve(adapter.parse(e.target.result)).then(accept);
       };
       reader.readAsText(f, 'utf-8');
     }
