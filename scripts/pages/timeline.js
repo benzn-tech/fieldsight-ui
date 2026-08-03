@@ -1112,14 +1112,61 @@
                 style: { fontSize: '12px', color: 'var(--text-tertiary)' },
               }, roleLabel) : null,
             ),
-            React.createElement('button', {
-              type:      'button',
-              className: 'fs-btn fs-btn--tertiary fs-btn--sm',
-              onClick:   function () {
-                window.FS.Router.navigate('/timeline?site=' + encodeURIComponent(props.site)
-                  + '&date=' + props.date + '&user=' + encodeURIComponent(sectionUser));
-              },
-            }, 'View only'),
+            /* The day's outstanding actions for this person, as a mail draft.
+               Inlined here because it was previously reachable ONLY by first
+               going into the single-person view — behind a button labelled
+               "View only", which reads as "you may only look". The most
+               common hand-off on the page should not be hidden behind a
+               control that says the opposite of what it does.
+
+               session: null is the whole-day scope buildSessionEmailDraft
+               already supports (it labels the draft "All day" and unions the
+               participants across topics), which is exactly this view's
+               scope. The button disables itself when nothing is outstanding.
+
+               "Generate report" is NOT inlined alongside it: that flow is
+               per-MEETING by construction (GenerateReportButton returns null
+               without a session, and the backend scopes the export to one
+               session's topic_row_ids). A day can hold several meetings, so
+               there is no correct session to pass from here — it stays in
+               the single-person view where a meeting can actually be picked. */
+            React.createElement('div', {
+              style: { display: 'flex', alignItems: 'center', gap: '8px' },
+            },
+              React.createElement(DraftEmailButton, {
+                topics:     _p.visible,
+                session:    null,
+                siteName:   report.site,
+                date:       props.date,
+                reportDate: report.report_date || props.date,
+                deepLink:   (typeof window !== 'undefined' && window.location)
+                  ? window.location.href : '',
+                /* Mirrors the single-person view's _isActionDone: the Aurora
+                   status column wins when present, else the check-off overlay.
+                   Keyed on THIS section's folder — the audit key carries a user
+                   dimension (#23), so passing the caller's folder here would
+                   read another person's check-offs. */
+                isDone: function (a, topicId, idx) {
+                  if (a && a.status) return a.status === 'done';
+                  var st = window.FS.api.actions.lookupAction(
+                    actionsMap, sectionUser, topicId, idx);
+                  return !!(st && st.checked);
+                },
+              }),
+              React.createElement('button', {
+                type:      'button',
+                className: 'fs-btn fs-btn--tertiary fs-btn--sm',
+                /* Was "View only". It navigates to this person's own day, which
+                   carries MORE than this section does (date picker, meeting
+                   picker, Generate report, Ask, audio/video) — the old label
+                   advertised a permission limit that does not exist. */
+                title:     "Open this person's day — meetings, report, Ask, audio",
+                onClick:   function () {
+                  window.FS.Router.navigate('/timeline?site=' + encodeURIComponent(props.site)
+                    + '&date=' + props.date + '&user=' + encodeURIComponent(sectionUser));
+                },
+              }, 'Open'),
+            ),
           ),
           React.createElement(ReportKpis, { report: report }),
           (report.executive_summary || []).length > 0
