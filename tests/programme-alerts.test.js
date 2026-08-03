@@ -221,3 +221,44 @@ test('singular and plural read correctly', () => {
   assert.match(r.sections.filter(s => s.key === 'lateness')[0].title, /^1 day behind/);
   assert.match(r.sections.filter(s => s.key === 'blocked')[0].title, /^1 task blocked/);
 });
+
+/* ---- the answer text ----------------------------------------------------- */
+
+const { formatAlerts } = require('../scripts/api/programme-alerts.js');
+
+test('the all-clear is only rendered when everything was checkable', () => {
+  const clean = buildAlerts({ tasks: [], today: TODAY, silent: [],
+                              lateness: { status: 'ok', days: 0 } });
+  assert.match(formatAlerts(clean), /Nothing is overdue/);
+});
+
+test('an unchecked section is named instead of an all-clear', () => {
+  /* The failure this whole route guards: reassurance assembled from data
+     that was never loaded. */
+  const partial = buildAlerts({ tasks: [], today: TODAY, silent: null,
+                                lateness: { status: 'ok', days: 0 } });
+  const text = formatAlerts(partial);
+  assert.doesNotMatch(text, /Nothing is overdue/);
+  assert.match(text, /Not checked:.*mentioned/i);
+});
+
+test('a truncated list says how many it left out', () => {
+  /* An unmarked top-5 is the same silent incompleteness this route exists
+     to avoid. */
+  const many = Array.from({ length: 9 }, (_, i) =>
+    t('x' + i, { end: '2026-04-0' + ((i % 9) + 1), status: 'blocked' }));
+  const text = formatAlerts(buildAlerts({ tasks: many, today: TODAY, silent: [],
+                                          lateness: { status: 'ok', days: 0 } }),
+                            { limit: 5 });
+  assert.match(text, /and 4 more/);
+});
+
+test('lateness renders its baseline detail', () => {
+  const text = formatAlerts(buildAlerts({
+    tasks: [], today: TODAY, silent: [],
+    lateness: { status: 'ok', days: 12, projectedFinish: '2026-06-01',
+                baselineFinish: '2026-05-20' },
+  }));
+  assert.match(text, /12 days behind baseline/);
+  assert.match(text, /2026-05-20/);
+});

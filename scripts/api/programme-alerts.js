@@ -208,8 +208,48 @@
     };
   }
 
+  /* Render buildAlerts output as the answer text Ask shows.
+
+     Lives here rather than in the chat component so the wording is testable
+     and so the honesty rules stay next to the data that motivates them: the
+     all-clear sentence and the "could not check" sentence are the two lines
+     most likely to be quietly wrong, and they must not drift from `empty`
+     and `unavailable`. */
+  function formatAlerts(built, opts) {
+    opts = opts || {};
+    var limit = opts.limit || 5;
+    var lines = [];
+
+    if (built.empty) {
+      lines.push('Nothing is overdue, blocked or unmentioned, and the '
+                 + 'programme is not behind its baseline.');
+      return lines.join('\n');
+    }
+
+    built.sections.forEach(function (sec) {
+      lines.push('**' + sec.title + '**');
+      if (sec.detail) lines.push(sec.detail);
+      var shown = (sec.items || []).slice(0, limit);
+      shown.forEach(function (t) {
+        var end = _str(t.end_date) || _str(t.end);
+        lines.push('- ' + (t.name || t.task_id) + (end ? '  (due ' + end + ')' : ''));
+      });
+      var rest = (sec.items || []).length - shown.length;
+      /* Say what was truncated. An unmarked top-5 is the same silent
+         incompleteness this route exists to avoid in the first place. */
+      if (rest > 0) lines.push('- …and ' + rest + ' more');
+      lines.push('');
+    });
+
+    if (built.unavailable.length) {
+      lines.push('Not checked: ' + built.unavailable.join('; ') + '.');
+    }
+    return lines.join('\n').trim();
+  }
+
   var api = {
     isAlertsQuestion:  isAlertsQuestion,
+    formatAlerts:      formatAlerts,
     buildAlerts:       buildAlerts,
     overdueTasks:      overdueTasks,
     blockedTasks:      blockedTasks,
