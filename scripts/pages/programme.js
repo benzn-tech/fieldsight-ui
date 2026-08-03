@@ -119,20 +119,8 @@
     );
   }
 
-  /* Roll up child date range + progress for a group row. Used to
-     render summary bars in the Gantt without backend support. */
-  function rollupGroup(parent, leaves) {
-    var children = leaves.filter(function (t) { return t.parent_id === parent.task_id; });
-    if (!children.length) return { start: null, end: null, progress: 0 };
-    var start = children.reduce(function (m, t) { return !m || t.start < m ? t.start : m; }, null);
-    var end   = children.reduce(function (m, t) { return !m || t.end   > m ? t.end   : m; }, null);
-    var totalDays = children.reduce(function (s, t) { return s + (t.duration_days || 0); }, 0);
-    var doneDays  = children.reduce(function (s, t) {
-      return s + ((t.duration_days || 0) * (t.progress_pct || 0) / 100);
-    }, 0);
-    var progress = totalDays > 0 ? Math.round(doneDays / totalDays * 100) : 0;
-    return { start: start, end: end, progress: progress };
-  }
+  /* Group rollup moved to scripts/api/programme-rows.js — it is part of the
+     row model now, and had to leave this file to be testable under Node. */
 
   /* ---------- ProgrammeContext ---------------------------------------- */
 
@@ -798,23 +786,15 @@
     }, [ctx.baselineData]);
 
     /* Build the visible rows in WBS order: each parent followed by its
-       leaves (unless collapsed). */
-    var rows = [];
-    s.parents.forEach(function (parent) {
-      var roll = rollupGroup(parent, s.leaves);
-      var groupTask = Object.assign({}, parent, {
-        start: roll.start, end: roll.end, duration_days: 0,
-        progress_pct: roll.progress, status: 'group',
-      });
-      rows.push({ kind: 'group', task: groupTask, parent: parent, indent: 0 });
-      if (!ctx.collapsed.has(parent.task_id)) {
-        s.leaves
-          .filter(function (t) { return t.parent_id === parent.task_id; })
-          .forEach(function (leaf) {
-            rows.push({ kind: 'leaf', task: leaf, indent: 1 });
-          });
-      }
-    });
+       leaves (unless collapsed).
+
+       Memoized because this used to run on every render — including every
+       scroll event — at O(parents x leaves). See scripts/api/programme-rows.js.
+       The identity stability also matters downstream: the virtual slice
+       (below) and the memoized row composites both key off it. */
+    var rows = React.useMemo(function () {
+      return window.FS.api.programmeRows.buildRows(s.parents, s.leaves, ctx.collapsed);
+    }, [s.parents, s.leaves, ctx.collapsed]);
 
     var ppd        = TIER_PIXELS[ctx.tier] || 24;
     var totalDays  = diffDays(prog.start_date, prog.end_date) + 1;
@@ -840,32 +820,67 @@
     var OVERSCAN = 200;
     var DO_VIRT  = rows.length > 50;
 
-    var scrollRef  = React.useRef(null);
-    var refSTop    = React.useState(0);
-    var sTop       = refSTop[0]; var setSTop = refSTop[1];
-    var refVpH     = React.useState(600);
-    var vpH        = refVpH[0];  var setVpH  = refVpH[1];
+    var scrollRef = React.useRef(null);
+
+    /* The mounted window, as row indices. Scrolling only sets state when the
+       window actually moves: a scroll event that shifts the viewport by a few
+       pixels usually leaves `first`/`last` unchanged, and re-rendering for it
+       is pure cost. Combined with the rAF gate below, a fast flick produces at
+       most one render per frame, and often far fewer. */
+    /* Lazily seeded with a real slice for a 600px viewport at scrollTop 0, so
+       the first paint already has rows. Seeding with an empty slice instead
+       would blank the list for one frame before the effect below measures. */
+    var sliceHook = React.useState(function () {
+      return window.FS.api.programmeRows.visibleSlice(0, 600, rows.length, ROW_H, OVERSCAN);
+    });
+    var slice     = sliceHook[0];
+    var setSlice  = sliceHook[1];
+
+    /* Read inside the scroll handler without re-subscribing on every change. */
+    var rowCountRef = React.useRef(rows.length);
+    rowCountRef.current = rows.length;
 
     React.useEffect(function () {
-      if (!DO_VIRT) return;
       var el = scrollRef.current;
       if (!el) return;
-      setVpH(el.clientHeight || 600);
-      function onScroll() { setSTop(el.scrollTop); }
-      function onResize() { setVpH(el.clientHeight || 600); }
-      el.addEventListener('scroll', onScroll, { passive: true });
-      window.addEventListener('resize', onResize);
-      return function () {
-        el.removeEventListener('scroll', onScroll);
-        window.removeEventListener('resize', onResize);
-      };
-    }, [DO_VIRT]);
 
-    var first   = DO_VIRT ? Math.max(0, Math.floor((sTop - OVERSCAN) / ROW_H)) : 0;
-    var last    = DO_VIRT ? Math.min(rows.length - 1, Math.ceil((sTop + vpH + OVERSCAN) / ROW_H)) : rows.length - 1;
-    var vRows   = DO_VIRT ? rows.slice(first, last + 1) : rows;
-    var topSpc  = DO_VIRT ? first * ROW_H : 0;
-    var botSpc  = DO_VIRT ? Math.max(0, (rows.length - 1 - last) * ROW_H) : 0;
+      var frame = 0;
+
+      function measure() {
+        frame = 0;
+        var node = scrollRef.current;
+        if (!node) return;
+        var next = window.FS.api.programmeRows.visibleSlice(
+          node.scrollTop, node.clientHeight || 600,
+          rowCountRef.current, ROW_H, OVERSCAN,
+        );
+        setSlice(function (prev) {
+          return (prev.first === next.first && prev.last === next.last) ? prev : next;
+        });
+      }
+
+      /* One measurement per animation frame, no matter how many scroll
+         events the browser delivers in between. */
+      function schedule() {
+        if (frame) return;
+        frame = window.requestAnimationFrame(measure);
+      }
+
+      measure();
+      el.addEventListener('scroll', schedule, { passive: true });
+      window.addEventListener('resize', schedule);
+      return function () {
+        if (frame) window.cancelAnimationFrame(frame);
+        el.removeEventListener('scroll', schedule);
+        window.removeEventListener('resize', schedule);
+      };
+    }, [rows]);
+
+    var first  = DO_VIRT ? slice.first : 0;
+    var last   = DO_VIRT ? Math.min(slice.last, rows.length - 1) : rows.length - 1;
+    var vRows  = DO_VIRT ? rows.slice(first, last + 1) : rows;
+    var topSpc = DO_VIRT ? slice.topSpc : 0;
+    var botSpc = DO_VIRT ? Math.max(0, (rows.length - 1 - last) * ROW_H) : 0;
 
     /* ---- Sprint 4.9 — drag controller --------------------------------
        We hold one in-flight drag at a time. The active drag lives in
@@ -880,7 +895,12 @@
     var dragRef     = React.useRef(dragState);
     dragRef.current = dragState;
 
-    function dragStart(task, mode, clientX) {
+    /* The three drag callbacks are useCallback'd for the same reason as the
+       row callbacks below: they are props on every leaf GanttRow, and a fresh
+       identity each render would defeat React.memo on all of them. They read
+       live drag state through dragRef, not through the closure, so their
+       dependency lists stay small. */
+    var dragStart = React.useCallback(function (task, mode, clientX) {
       var next = {
         taskId:    task.task_id,
         mode:      mode,
@@ -893,9 +913,9 @@
       setDragState(next);
       document.body.classList.add('fs-gantt-dragging');
       document.body.classList.add('fs-gantt-dragging--' + mode);
-    }
+    }, []);
 
-    function dragMove(clientX) {
+    var dragMove = React.useCallback(function (clientX) {
       var d = dragRef.current;
       if (!d.taskId) return;
       var deltaPx   = clientX - d.originX;
@@ -920,9 +940,9 @@
 
       if (nextStart === d.start && nextEnd === d.end) return;
       setDragState(Object.assign({}, d, { start: nextStart, end: nextEnd }));
-    }
+    }, [ppd, prog.start_date, prog.end_date]);
 
-    function dragEnd() {
+    var dragEnd = React.useCallback(function () {
       var d = dragRef.current;
       document.body.classList.remove('fs-gantt-dragging');
       document.body.classList.remove('fs-gantt-dragging--move');
@@ -936,7 +956,31 @@
       }
       setDragState({ taskId: null, mode: null, originX: 0,
                      origStart: '', origEnd: '', start: '', end: '' });
-    }
+    }, [ctx.updateTask]);
+
+    /* Stable across renders so React.memo on the row composites can actually
+       short-circuit. Each row previously got a freshly-created closure, which
+       made every memo comparison fail. */
+    var handleToggle = React.useCallback(function (taskId) {
+      ctx.toggleGroup(taskId);
+    }, [ctx.toggleGroup]);
+
+    var handleSelect = React.useCallback(function (task) {
+      /* Group rows are not selectable. buildRows stamps status:'group' on
+         every derived group task, so this is exactly the r.kind === 'group'
+         guard that used to live at the call site. */
+      if (task.status === 'group') return;
+      props.onSelect({
+        kind:    'programme_task',
+        id:      'task_' + task.task_id,
+        task_id: task.task_id,
+        task:    task,
+      });
+    }, [props.onSelect]);
+
+    var handleKeyboardMove = React.useCallback(function (opts) {
+      ctx.updateTask(opts);
+    }, [ctx.updateTask]);
 
     var showOverAllocBanner = ctx.canWrite
       && !ctx.overAllocDismissed
@@ -976,16 +1020,8 @@
               indent:     r.indent,
               critical:   r.kind === 'leaf' && s.critical.has(r.task.task_id),
               selected:   selectedId === r.task.task_id,
-              onToggle:   function () { ctx.toggleGroup(r.task.task_id); },
-              onSelect:   function () {
-                if (r.kind === 'group') return;
-                props.onSelect({
-                  kind:     'programme_task',
-                  id:       'task_' + r.task.task_id,
-                  task_id:  r.task.task_id,
-                  task:     r.task,
-                });
-              },
+              onToggle:   handleToggle,
+              onSelect:   handleSelect,
             });
           }),
           DO_VIRT && botSpc > 0
@@ -1024,7 +1060,7 @@
                 onDragMove:     r.kind === 'leaf' ? dragMove  : null,
                 onDragEnd:      r.kind === 'leaf' ? dragEnd   : null,
                 /* Sprint 8.5.5 — keyboard move commits directly via updateTask */
-                onKeyboardMove: r.kind === 'leaf' ? function (opts) { ctx.updateTask(opts); } : null,
+                onKeyboardMove: r.kind === 'leaf' ? handleKeyboardMove : null,
                 programmeDurationDays: diffDays(prog.start_date, prog.end_date) + 1,
                 /* Sprint 8.3.1 — float */
                 showFloat:  ctx.showFloat && r.kind === 'leaf',
@@ -1035,15 +1071,7 @@
                 showBaseline:  ctx.showBaseline && !!bLine,
                 baselineStart: bLine ? bLine.start : null,
                 baselineEnd:   bLine ? bLine.end   : null,
-                onSelect:      function () {
-                  if (r.kind === 'group') return;
-                  props.onSelect({
-                    kind:     'programme_task',
-                    id:       'task_' + r.task.task_id,
-                    task_id:  r.task.task_id,
-                    task:     r.task,
-                  });
-                },
+                onSelect:      handleSelect,
               });
             }),
 

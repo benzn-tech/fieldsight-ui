@@ -65,28 +65,35 @@
     var ppd  = props.pixelsPerDay || 24;
     var tier = props.tier || 'day';
 
-    var dates = dateRangeISO(from, to);
-    var totalWidth = dates.length * ppd;
+    /* Memoized: at day tier this builds one marker per calendar day across
+       the whole programme — ~1,100 for a three-year run — and it used to be
+       rebuilt on every render of the page, including every scroll frame. */
+    var strip = React.useMemo(function () {
+      var dates = dateRangeISO(from, to);
+      var out = [];
+      if (tier === 'day') {
+        dates.forEach(function (d, i) {
+          out.push({ iso: d, label: formatDay(d), x: i * ppd });
+        });
+      } else if (tier === 'week') {
+        dates.forEach(function (d, i) {
+          if (isMonday(d) || i === 0) {
+            out.push({ iso: d, label: formatWeek(d), x: i * ppd });
+          }
+        });
+      } else {
+        /* month */
+        dates.forEach(function (d, i) {
+          if (isFirstOfMonth(d) || i === 0) {
+            out.push({ iso: d, label: formatMonth(d), x: i * ppd });
+          }
+        });
+      }
+      return { markers: out, totalWidth: dates.length * ppd };
+    }, [from, to, ppd, tier]);
 
-    var markers = [];
-    if (tier === 'day') {
-      dates.forEach(function (d, i) {
-        markers.push({ iso: d, label: formatDay(d), x: i * ppd });
-      });
-    } else if (tier === 'week') {
-      dates.forEach(function (d, i) {
-        if (isMonday(d) || i === 0) {
-          markers.push({ iso: d, label: formatWeek(d), x: i * ppd });
-        }
-      });
-    } else {
-      /* month */
-      dates.forEach(function (d, i) {
-        if (isFirstOfMonth(d) || i === 0) {
-          markers.push({ iso: d, label: formatMonth(d), x: i * ppd });
-        }
-      });
-    }
+    var markers    = strip.markers;
+    var totalWidth = strip.totalWidth;
 
     return React.createElement('div', {
       className: 'fs-gantt-strip',
@@ -104,5 +111,5 @@
   }
 
   if (!window.FieldSight) window.FieldSight = {};
-  window.FieldSight.GanttStrip = GanttStrip;
+  window.FieldSight.GanttStrip = React.memo(GanttStrip);
 })();
