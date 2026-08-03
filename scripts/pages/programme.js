@@ -300,13 +300,22 @@
     var setSuggestionsRetry = refSuggestionsRetry[1];
 
     React.useEffect(function () {
-      if (!orgApiLive() || !orgSiteId) {
+      /* Mock mode has no orgSiteId, so this used to return early and the
+         suggestion queue, its badge and (now) the per-task markers were all
+         invisible in every demo — the feature looked unbuilt rather than
+         unwired. getSuggestions has a mock branch reading
+         fixtures.programmeSuggestions; it just needs the site the rest of the
+         mock world uses. */
+      var mocked = window.FS.api.useMocks;
+      var site = orgSiteId || (mocked && window.FS.siteContext
+                              ? window.FS.siteContext.get() : null);
+      if ((!orgApiLive() && !mocked) || !site) {
         setSuggestionsState({ status: 'idle', rows: [] });
         return undefined;
       }
       var cancelled = false;
       setSuggestionsState(function (prev) { return { status: 'loading', rows: prev.rows }; });
-      window.FS.api.programme.getSuggestions({ site: orgSiteId, state: 'pending' }).then(function (res) {
+      window.FS.api.programme.getSuggestions({ site: site, state: 'pending' }).then(function (res) {
         if (cancelled) return;
         if (res && (res._accessDenied || res._notFound)) {
           setSuggestionsState({ status: 'error', rows: [] });
@@ -821,6 +830,24 @@
     var s   = ctx.state;
     var prog = s.programme;
 
+    /* Project 3 §2 — site speech that landed on each task, indexed once.
+       Keyed on the document id, which is what programme_progress_suggestions.
+       task_id holds and what the rows here carry as `task_id`; the rule lives
+       in programmeMentions.docIdOf and must not be re-derived inline.
+
+       These are the PENDING suggestions the page already fetches for the
+       review queue. That is the right set for a marker meaning "there is
+       something here to look at" — but it is NOT enough to claim a task has
+       been silent, because confirming a suggestion removes it from this set.
+       silentTasks (§2's third placement) needs `state: 'all'` and refuses to
+       answer without it, which is why it is a separate task rather than a
+       line added here. */
+    var mentionsByTask = React.useMemo(function () {
+      var mentions = window.FS.api.programmeMentions;
+      var rows = (ctx.suggestionsState && ctx.suggestionsState.rows) || [];
+      return mentions ? mentions.indexByTask(rows) : {};
+    }, [ctx.suggestionsState]);
+
     /* Sprint 8.3.1 — compute float map when showFloat is on */
     var floatMap = React.useMemo(function () {
       if (!ctx.showFloat) return {};
@@ -1079,6 +1106,10 @@
               selected:   selectedId === r.task.task_id,
               onToggle:   handleToggle,
               onSelect:   handleSelect,
+              /* A number, deliberately — see TaskTreeCell's comment. Passing
+                 the suggestion rows themselves would break its shallow memo
+                 and re-reconcile every visible row on every scroll frame. */
+              mentionCount: (mentionsByTask[r.task.task_id] || []).length,
             });
           }),
           DO_VIRT && botSpc > 0
