@@ -409,7 +409,17 @@
         return;
       }
 
-      var taskId = 'T-' + (Array(4).join('0') + uid).slice(-3);
+      /* Pad SHORT uids to three digits so ids sort and align; never truncate
+         a long one. The previous form was
+             'T-' + ('000' + uid).slice(-3)
+         which took the LAST three characters, so UID 1234 and UID 234 both
+         became T-234. On a real 849-task subcontractor programme 847 uids
+         exceeded 999 and 420 tasks collided, which merged nodes in the
+         dependency graph, fabricated a 30-task cycle, and made the critical
+         path refuse to draw — the headline of the feature, broken by its own
+         importer. Only a real file exposed it: every fixture had uids under
+         1000. */
+      var taskId = 'T-' + (uid.length >= 3 ? uid : ('000' + uid).slice(-3));
 
       if (seenUIDs[uid] !== undefined) {
         errors.push({ row: rowNum, field: 'UID', message: 'Duplicate <UID> ' + uid + ' (task "' + name + '") — skipped.' });
