@@ -14,8 +14,8 @@
   <!-- Design tokens + AppShell CSS -->
   <link rel="stylesheet" href="styles/tokens.css?v=5" />
   <link rel="stylesheet" href="styles/app-shell.css?v=11" />
-  <link rel="stylesheet" href="styles/components.css?v=10" />
-  <link rel="stylesheet" href="styles/composites.css?v=91" />
+  <link rel="stylesheet" href="styles/components.css?v=11" />
+  <link rel="stylesheet" href="styles/composites.css?v=101" />
 
   <style>
     /* Ensure full-bleed with no scroll */
@@ -38,7 +38,7 @@
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 
   <!-- FieldSight globals: tokens + roles (load order matters) -->
-  <script src="scripts/fs-globals.js?v=9"></script>
+  <script src="scripts/fs-globals.js?v=10"></script>
   <!-- Sprint 7.0 — theme module (must load after fs-globals, before app-shell) -->
   <script src="scripts/theme.js?v=1"></script>
   <!-- Sprint 7.6 — density module (must load after fs-globals, before app-shell) -->
@@ -53,7 +53,7 @@
   <script src="scripts/auth-mock.js?v=2"></script>
 
   <!-- React components (Babel transpiles JSX in-browser) -->
-  <script type="text/babel" src="scripts/left-nav.js?v=17"></script>
+  <script type="text/babel" src="scripts/left-nav.js?v=18"></script>
   <script type="text/babel" src="scripts/drag-divider.js?v=1"></script>
   <script type="text/babel" src="scripts/components/button.js?v=1"></script>
   <script type="text/babel" src="scripts/components/input.js?v=2"></script>
@@ -80,7 +80,7 @@
   <script type="text/babel" src="scripts/composites/executive-summary-card.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/safety-flag-row.js?v=4"></script>
   <script type="text/babel" src="scripts/composites/action-item-row.js?v=9"></script>
-  <script type="text/babel" src="scripts/composites/topic-card.js?v=7"></script>
+  <script type="text/babel" src="scripts/composites/topic-card.js?v=8"></script>
   <!-- Sprint 2.3 (Phase C) Topic-detail media composites -->
   <script type="text/babel" src="scripts/composites/photo-grid.js?v=3"></script>
   <script type="text/babel" src="scripts/composites/transcript-list.js?v=4"></script>
@@ -95,11 +95,11 @@
   <script type="text/babel" src="scripts/composites/range-toolbar.js?v=1"></script>
   <!-- Sprint 2.7 (Phase G) Ask Agent chat strip -->
   <script src="scripts/composites/markdown.js?v=1"></script>
-  <script type="text/babel" src="scripts/composites/ask-chat.js?v=9"></script>
+  <script type="text/babel" src="scripts/composites/ask-chat.js?v=10"></script>
   <!-- Sprint 2.8 (Phase H) Meeting Minutes -->
   <script type="text/babel" src="scripts/composites/meeting-topic-card.js?v=2"></script>
   <!-- Sprint 2.9 (Phase I) Auth scaffolding — Login + 403 -->
-  <script type="text/babel" src="scripts/composites/login-screen.js?v=8"></script>
+  <script type="text/babel" src="scripts/composites/login-screen.js?v=10"></script>
   <script type="text/babel" src="scripts/composites/access-denied.js?v=1"></script>
   <!-- Sprint 4.7 — Slide-in drawer used by full-width pages (Programme) -->
   <script type="text/babel" src="scripts/composites/right-drawer.js?v=2"></script>
@@ -110,7 +110,15 @@
   <!-- Sprint 5.1 — Programme task editor (modal form for editing a leaf) -->
   <script type="text/babel" src="scripts/composites/programme-task-editor.js?v=4"></script>
   <!-- Sprint 5.4/5.5/8.2.2 — CSV + XML + XLSX import modal -->
-  <script type="text/babel" src="scripts/composites/programme-import-modal.js?v=4"></script>
+  <script type="text/babel" src="scripts/composites/programme-import-modal.js?v=6"></script>
+  <!-- Zone split dialog (Project 3 §4). -->
+  <script type="text/babel" src="scripts/composites/zone-split-dialog.js?v=1"></script>
+  <!-- Import reconcile step (spec §6.1) — diff copy + commit-gate logic -->
+  <script src="scripts/composites/programme-import-diff.js?v=1"></script>
+  <!-- Version history + rollback (spec §6.5) — the safety net behind Replace -->
+  <script src="scripts/composites/programme-version-history.js?v=1"></script>
+  <!-- Time-range control (spec §7) — changing it RE-FETCHES, it is not a filter -->
+  <script type="text/babel" src="scripts/composites/programme-window-picker.js?v=1"></script>
   <!-- Sprint 8.6 — SearchPalette (global search overlay, ⌘K / Ctrl+K) -->
   <script type="text/babel" src="scripts/composites/search-palette.js?v=8"></script>
   <!-- Sprint 8.0.3 — ErrorBanner (used by all page providers on fetch failure) -->
@@ -133,7 +141,7 @@
   <script type="text/babel" src="scripts/composites/evidence-tabs.js?v=1"></script>
   <!-- Sprint 4.4 — Programme MVP composites (Gantt + TO-DO) -->
   <script type="text/babel" src="scripts/composites/gantt-strip.js?v=1"></script>
-  <script type="text/babel" src="scripts/composites/task-tree-cell.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/task-tree-cell.js?v=3"></script>
   <script type="text/babel" src="scripts/composites/gantt-row.js?v=4"></script>
   <!-- Sprint 8.3.2 — Over-allocation banner (above Gantt) -->
   <script type="text/babel" src="scripts/composites/over-allocation-banner.js?v=1"></script>
@@ -174,7 +182,7 @@
   <!-- Backend-shaped data layer (Sprint 2.1, Phase A): fixtures → api modules → adapter -->
   <!--   1. FS.api namespace + helpers (must precede every api/* and adapter) -->
   <script src="scripts/api/index.js?v=99"></script>
-  <script src="scripts/api/_fetch.js?v=7"></script>
+  <script src="scripts/api/_fetch.js?v=8"></script>
   <!-- TTL read-cache for session-stable reads (getTimeline/getDates/getSpan) -->
   <script src="scripts/api/_cache.js?v=1"></script>
   <!--   2. Fixtures populate window.FieldSight.fixtures.* -->
@@ -188,6 +196,9 @@
   <script src="scripts/mock/meeting-minutes.fixture.js?v=1"></script>
   <!-- Sprint 4.4 — Programme MVP fixture -->
   <script src="scripts/mock/programme.fixture.js?v=2"></script>
+  <!-- Perf verification only; opt in with ?bigprogramme=1. See
+       docs/superpowers/plans/2026-08-02-programme-render-performance.md -->
+  <script src="scripts/mock/programme-large.fixture.js?v=1"></script>
   <!-- Sprint 11 (Task 6) — Programme suggestion review queue fixture -->
   <script src="scripts/mock/programme-suggestions.fixture.js?v=1"></script>
   <!-- Sprint 10 B.0 — Template library fixture -->
@@ -218,6 +229,13 @@
        today-adapter.js + tasks.js (below), which both call it. -->
   <script src="scripts/api/mine-team.js?v=1"></script>
   <!--   4. Today adapter (PLAN Phase D sketch — feeds mock-data.js shim) -->
+  <!-- Today's section model (spec §14) — overdue / today / next 3 days.
+       Pure; loaded before today-adapter.js and pages/today.js. -->
+  <script src="scripts/api/today-sections.js?v=1"></script>
+  <!-- My Work grouping (spec §14). MUST load after api/index.js: that file
+       assigns window.FS.api wholesale, so anything registering earlier is
+       silently wiped. -->
+  <script src="scripts/api/my-work-grouping.js?v=1"></script>
   <script src="scripts/api/today-adapter.js?v=12"></script>
   <!-- Sprint 4.2 — Tasks aggregator (cross-day join: timeline + actions) -->
   <script src="scripts/api/tasks-aggregator.js?v=11"></script>
@@ -228,11 +246,50 @@
   <!-- Sprint 9 Track C.1 — Strategic aggregator (per-site / per-region / org rollups) -->
   <script src="scripts/api/strategic-aggregator.js?v=2"></script>
   <!-- Sprint 4.4 / 8.2.1 — Programme api + write operations -->
-  <script src="scripts/api/programme.js?v=5"></script>
+  <!-- Programme time window (spec §7) — presets + overlap arithmetic.
+       Loaded before programme.js, whose getTasksInWindow mock branch filters
+       through it. -->
+  <script src="scripts/api/programme-window.js?v=1"></script>
+  <!-- Critical-path tier + at-risk ranking (Project 2 spec 3). MUST load
+       after api/index.js, which assigns window.FS.api wholesale. -->
+  <script src="scripts/api/programme-critical-tier.js?v=1"></script>
+  <!-- Lateness vs baseline + overall progress (Project 2 spec 4). Same
+       load-order constraint: after api/index.js. -->
+  <script src="scripts/api/programme-lateness.js?v=1"></script>
+  <!-- Window rows -> the {parents, leaves} document the Gantt renders.
+       Same load-order constraint: after api/index.js. -->
+  <script src="scripts/api/programme-window-doc.js?v=1"></script>
+  <!-- Site speech <-> programme task linking (Project 3 spec 2). Same
+       load-order constraint: after api/index.js. -->
+  <script src="scripts/api/programme-mentions.js?v=1"></script>
+  <!-- Zone split planning (Project 3 spec 4). Same load-order constraint:
+       after api/index.js. -->
+  <script src="scripts/api/programme-zone-split.js?v=1"></script>
+  <!-- Breakdown -> contract task progress rollup (Project 3 spec 5). Same
+       load-order constraint: after api/index.js. -->
+  <script src="scripts/api/programme-rollup.js?v=1"></script>
+  <!-- "What should I worry about" — the alerts Ask route (routing spec §3.5).
+       Same load-order constraint: after api/index.js. -->
+  <script src="scripts/api/programme-alerts.js?v=2"></script>
+  <!-- AI breakdown proposal validation (Project 3 §3, Task 7a). Same
+       load-order constraint: after api/index.js. -->
+  <script src="scripts/api/programme-breakdown.js?v=1"></script>
+  <!-- Breakdown review gate batch state (Project 3 §3.5, Task 7b). Same
+       load-order constraint: after api/index.js. -->
+  <script src="scripts/api/programme-review-batch.js?v=1"></script>
+  <script src="scripts/api/programme.js?v=6"></script>
   <!-- Sprint 5.6 / 8.3.1–8.3.2 — Cascade + CPM + floats + over-alloc engine -->
   <script src="scripts/api/programme-schedule.js?v=2"></script>
+  <!-- Programme foundation (Plan A) — pure row model behind the Gantt -->
+  <script src="scripts/api/programme-rows.js?v=2"></script>
+  <!-- Programme foundation (Plan B) — autosave planning helpers -->
+  <script src="scripts/api/programme-autosave.js?v=1"></script>
   <!-- Sprint 5.4 / 8.2.2 — CSV + XML + XLSX programme importer -->
-  <script src="scripts/api/programme-import.js?v=3"></script>
+  <script src="scripts/api/programme-import.js?v=5"></script>
+  <!-- Pluggable import format registry. MUST load after programme-import.js:
+       it registers the built-in adapters against that module at load, and an
+       empty registry reports every file as unsupported. -->
+  <script src="scripts/api/programme-format-registry.js?v=1"></script>
   <!-- Sprint 4.6 — User-activity aggregator -->
   <script src="scripts/api/user-activity-aggregator.js?v=7"></script>
   <!-- Sprint 4.10 — Today-Programme adapter (today's programme tasks for caller) -->
@@ -240,23 +297,32 @@
   <!-- Sprint 10 B.0 — Template store (LocalStorage-backed template API) -->
   <script src="scripts/api/template-store.js?v=2"></script>
 
+  <!-- Web Task 1/2/3 (2026-07-30) — QR terminal login: vendored generator
+       (plain UMD, not Babel-transpiled) + api call + Layer-5 modal. Must
+       load after _fetch.js (orgRequest) and before settings.js (Task 4),
+       which opens QrLoginModal from Settings → Security. -->
+  <script src="scripts/vendor/qrcode-generator.js?v=1"></script>
+  <script src="scripts/api/qr-login.js?v=2"></script>
+  <script type="text/babel" src="scripts/composites/qr-login-modal.js?v=2"></script>
+
   <!-- Mock data shim (weather only) + page registry + pages -->
   <script type="text/babel" src="scripts/mock-data.js?v=4"></script>
   <script type="text/babel" src="scripts/pages/_page-registry.js?v=1"></script>
   <script type="text/babel" src="scripts/pages/today.js?v=53"></script>
-  <script type="text/babel" src="scripts/pages/timeline.js?v=49"></script>
+  <script type="text/babel" src="scripts/pages/timeline.js?v=53"></script>
   <script type="text/babel" src="scripts/pages/reports.js?v=5"></script>
   <script type="text/babel" src="scripts/pages/sites.js?v=14"></script>
   <script type="text/babel" src="scripts/pages/activity.js?v=5"></script>
   <script type="text/babel" src="scripts/pages/tasks.js?v=20"></script>
   <script type="text/babel" src="scripts/pages/evidence.js?v=13"></script>
-  <script type="text/babel" src="scripts/pages/programme.js?v=18"></script>
+  <script type="text/babel" src="scripts/pages/programme.js?v=27"></script>
+  <script type="text/babel" src="scripts/pages/my-work.js?v=1"></script>
   <script type="text/babel" src="scripts/pages/safety.js?v=25"></script>
   <script type="text/babel" src="scripts/pages/quality.js?v=21"></script>
   <!-- Sprint 7.1+7.2 — /team page -->
   <script type="text/babel" src="scripts/pages/team.js?v=13"></script>
   <!-- Sprint 7.3 + 7.6 — /settings page (density toggle added in 7.6) -->
-  <script type="text/babel" src="scripts/pages/settings.js?v=12"></script>
+  <script type="text/babel" src="scripts/pages/settings.js?v=13"></script>
   <!-- Sprint 10 B.2 — Template upload modal composite -->
   <script type="text/babel" src="scripts/composites/template-upload-modal.js?v=2"></script>
   <!-- Sprint 10 B.1+B.3 — /library page (template library + skip-edit preview) -->

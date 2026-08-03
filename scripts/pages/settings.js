@@ -373,6 +373,8 @@
     var ctx = props.ctx;
     var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
     var refPw = React.useState(false); var pwOpen = refPw[0], setPwOpen = refPw[1];
+    /* Web Task 4 (2026-07-30) — QR terminal login: self-service, no role gate. */
+    var refQr = React.useState(false); var qrOpen = refQr[0], setQrOpen = refQr[1];
     function row(icon, title, sub, btnLabel, onClick) {
       return React.createElement('div', { className: 'fs-settings__security-row' },
         React.createElement('div', { className: 'fs-settings__security-main' },
@@ -388,7 +390,8 @@
     return React.createElement('section', { className: 'fs-settings__section' },
       React.createElement('div', { className: 'fs-settings__security-card' },
         row('🔑', 'Password', null, 'Change', function () { setPwOpen(true); }),
-        row('🛡', 'Two-factor authentication', ctx.security.twoFactor ? 'On' : 'Off', 'Change', ctx.toggle2FA)
+        row('🛡', 'Two-factor authentication', ctx.security.twoFactor ? 'On' : 'Off', 'Change', ctx.toggle2FA),
+        row('🖥', 'Log in a terminal', 'Scan a QR code to sign in on a FieldSight recording terminal.', 'Log in a terminal', function () { setQrOpen(true); })
       ),
       (pwOpen && Modal) ? React.createElement(Modal, {
         open: true, size: 'sm', title: 'Change password', onClose: function () { setPwOpen(false); },
@@ -402,6 +405,14 @@
             React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--md', onClick: function () { setPwOpen(false); toast('Password updated (demo)'); } }, 'Update password')
           )
         )
+      ) : null,
+      /* No title passed — QrLoginModal renders its own "Log in a terminal"
+         h2 + hint + Done button, so ModalOverlay's own header is skipped to
+         avoid a double title. */
+      (qrOpen && Modal && window.FieldSight.QrLoginModal) ? React.createElement(Modal, {
+        open: true, size: 'sm', ariaLabel: 'Log in a terminal', onClose: function () { setQrOpen(false); },
+      },
+        React.createElement(window.FieldSight.QrLoginModal, { onClose: function () { setQrOpen(false); } })
       ) : null
     );
   }

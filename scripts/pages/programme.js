@@ -119,20 +119,8 @@
     );
   }
 
-  /* Roll up child date range + progress for a group row. Used to
-     render summary bars in the Gantt without backend support. */
-  function rollupGroup(parent, leaves) {
-    var children = leaves.filter(function (t) { return t.parent_id === parent.task_id; });
-    if (!children.length) return { start: null, end: null, progress: 0 };
-    var start = children.reduce(function (m, t) { return !m || t.start < m ? t.start : m; }, null);
-    var end   = children.reduce(function (m, t) { return !m || t.end   > m ? t.end   : m; }, null);
-    var totalDays = children.reduce(function (s, t) { return s + (t.duration_days || 0); }, 0);
-    var doneDays  = children.reduce(function (s, t) {
-      return s + ((t.duration_days || 0) * (t.progress_pct || 0) / 100);
-    }, 0);
-    var progress = totalDays > 0 ? Math.round(doneDays / totalDays * 100) : 0;
-    return { start: start, end: end, progress: progress };
-  }
+  /* Group rollup moved to scripts/api/programme-rows.js — it is part of the
+     row model now, and had to leave this file to be testable under Node. */
 
   /* ---------- ProgrammeContext ---------------------------------------- */
 
@@ -312,19 +300,43 @@
     var setSuggestionsRetry = refSuggestionsRetry[1];
 
     React.useEffect(function () {
-      if (!orgApiLive() || !orgSiteId) {
+      /* Mock mode has no orgSiteId, so this used to return early and the
+         suggestion queue, its badge and (now) the per-task markers were all
+         invisible in every demo — the feature looked unbuilt rather than
+         unwired. getSuggestions has a mock branch reading
+         fixtures.programmeSuggestions; it just needs the site the rest of the
+         mock world uses. */
+      var mocked = window.FS.api.useMocks;
+      var site = orgSiteId || (mocked && window.FS.siteContext
+                              ? window.FS.siteContext.get() : null);
+      if ((!orgApiLive() && !mocked) || !site) {
         setSuggestionsState({ status: 'idle', rows: [] });
         return undefined;
       }
       var cancelled = false;
       setSuggestionsState(function (prev) { return { status: 'loading', rows: prev.rows }; });
-      window.FS.api.programme.getSuggestions({ site: orgSiteId, state: 'pending' }).then(function (res) {
+      /* state:'all', though the review queue and its badge only want the
+         pending ones (kept as `rows` below, so nothing downstream changes).
+
+         The whole set is what makes "nobody has mentioned this task" an
+         honest claim: confirming a suggestion moves it OUT of pending, so a
+         pending-only fetch sees nothing for every task whose mentions were
+         all reviewed — the well-run ones — and naive silence detection would
+         light up on exactly the work going best. programmeMentions refuses
+         to answer without this coverage, which is why it is fetched here
+         rather than worked around there. */
+      window.FS.api.programme.getSuggestions({ site: site, state: 'all' }).then(function (res) {
         if (cancelled) return;
         if (res && (res._accessDenied || res._notFound)) {
-          setSuggestionsState({ status: 'error', rows: [] });
+          setSuggestionsState({ status: 'error', rows: [], allRows: [] });
           return;
         }
-        setSuggestionsState({ status: 'ok', rows: (res && res.suggestions) || [] });
+        var all = (res && res.suggestions) || [];
+        setSuggestionsState({
+          status: 'ok',
+          rows: all.filter(function (r) { return r.state === 'pending'; }),
+          allRows: all,
+        });
       }).catch(function () {
         if (cancelled) return;
         setSuggestionsState({ status: 'error', rows: [] });
@@ -351,6 +363,37 @@
     var saving    = refSaving[0];
     var setSaving = refSaving[1];
 
+    /* Time window (spec 7). The window is the LOAD BOUNDARY, not a filter:
+       changing it refetches. `overview` loads the whole programme instead,
+       deliberately coarse, so the full shape stays reachable without giving
+       up the working view. */
+    var pw = window.FS.api.programmeWindow;
+    var pref = window.FieldSight.programmeWindowPref;
+    var refPreset = React.useState(pw.presetByKey(pw.DEFAULT_PRESET_KEY));
+    var preset = refPreset[0]; var setPreset = refPreset[1];
+    var refMode = React.useState('window');
+    var viewMode = refMode[0]; var setViewMode = refMode[1];
+
+    /* Seed from the stored preference before the first fetch, so the page does
+       not load one window and immediately reload another. */
+    React.useEffect(function () {
+      var cancelled = false;
+      window.FS.api.org.getMe()
+        .then(function (me) { if (!cancelled) setPreset(pref.readWindowPref(me)); })
+        .catch(function () { /* keep the default */ });
+      return function () { cancelled = true; };
+    }, []);
+
+    function changePreset(next) {
+      setPreset(next);
+      /* Fire and forget — a failed preference write must not block the range
+         change the user just made; it re-reads on the next visit. */
+      if (window.FS.api.org.updateMe) {
+        Promise.resolve(window.FS.api.org.updateMe(pref.windowPrefPatch(next)))
+          .catch(function () {});
+      }
+    }
+
     React.useEffect(function () {
       if (!orgSiteId) {
         setState({ status: 'no_site' });
@@ -360,7 +403,26 @@
       setState({ status: 'loading' });
       setDirty(false);
 
-      window.FS.api.programme.getProgramme(orgSiteId).then(function (res) {
+      /* Window mode fetches ONLY the selected range (plus the ancestors
+         needed to render the tree). Overview, and mock mode, load the whole
+         document. Filtering a fully-loaded programme client-side would look
+         identical here and discard the entire point — a ten-week window is a
+         few hundred rows whatever the programme's size. */
+      var api = window.FS.api.programme;
+      var useWindow = viewMode === 'window' && !window.FS.api.useMocks
+                      && !!window.FS.api.orgBaseUrl;
+      var win = pw.resolveWindow(preset, window.FS.api.todayNZDT());
+      var load = useWindow
+        ? api.getTasksInWindow(orgSiteId, { from: win.from, to: win.to })
+            .then(function (r) {
+              if (r && (r._accessDenied || r._notFound)) return r;
+              return { programme: Object.assign(
+                window.FS.api.programmeWindowDoc.windowRowsToDoc(r && r.tasks),
+                { name: 'Programme', windowed: true }) };
+            })
+        : api.getProgramme(orgSiteId);
+
+      load.then(function (res) {
         if (cancelled) return;
         if (res && res._accessDenied) {
           setState({ status: 'access_denied', message: res.error });
@@ -412,7 +474,9 @@
       });
 
       return function () { cancelled = true; };
-    }, [depKey, retryCount, orgSiteId]);
+    /* preset/viewMode are dependencies because the window is the load
+       boundary: changing the range must REFETCH, not re-filter. */
+    }, [depKey, retryCount, orgSiteId, preset, viewMode]);
 
     function toggleGroup(groupId) {
       setCollapsed(function (prev) {
@@ -454,6 +518,38 @@
         return t.task_id === taskId ? patcher(t) : t;
       });
       var newTask = nextLeaves.filter(function (t) { return t.task_id === taskId; })[0];
+
+      /* Project 3 §5 — ticking off a breakdown subtask has to move the
+         contract task, or the breakdown is a private to-do list that never
+         reaches the plan.
+       
+         Placed here rather than at each call site because every mutation
+         path (drag, editor, keyboard) funnels through this function; wiring
+         it per-caller is how one of them ends up silently not rolling up.
+       
+         applyRollup returns null far more often than not — a partial
+         breakdown, or a rollup that would lower progress somebody recorded —
+         and null means LEAVE IT ALONE, not zero. */
+      var rollup = window.FS.api.programmeRollup;
+      if (rollup && newTask && newTask.parent_id) {
+        var parent = nextLeaves.filter(function (t) {
+          return t.task_id === newTask.parent_id;
+        })[0];
+        /* Only when the parent is itself a task. A WBS group header lives in
+           s.programme.parents and has no progress of its own to move. */
+        if (parent) {
+          var kids = nextLeaves.filter(function (t) {
+            return t.parent_id === parent.task_id;
+          });
+          var patch = rollup.applyRollup(parent, rollup.rollupProgress(parent, kids));
+          if (patch) {
+            nextLeaves = nextLeaves.map(function (t) {
+              return t.task_id === parent.task_id
+                ? Object.assign({}, t, patch) : t;
+            });
+          }
+        }
+      }
 
       var sched = window.FieldSight && window.FieldSight.programmeSchedule;
       if (sched) {
@@ -545,6 +641,50 @@
     /* Sprint 5.2 — create a new leaf task from editor form data.
        Mints task_id and WBS, appends to leaves[], recomputes CPM.
        No cascade needed (new task has no dependents yet). */
+    /* Project 3 §4 — create the zone children of ONE contract task.
+       Separate from addTask because that one parents under a WBS group from
+       s.parents, and a zone split parents under a leaf: the imported row
+       stays exactly as the client issued it and the zones hang beneath it
+       (Project 1 §5).
+
+       `children` comes from programmeZoneSplit.planZoneSplit and is not
+       re-derived here — no dates are decided in this function. */
+    function splitIntoZones(parentTaskId, children) {
+      if (!parentTaskId || !children || !children.length) return;
+      setDirty(true);
+      setState(function (s) {
+        if (s.status !== 'ok') return s;
+        var parent = s.leaves.filter(function (t) {
+          return t.task_id === parentTaskId;
+        })[0];
+        if (!parent) return s;
+
+        var next = s.leaves.slice();
+        children.forEach(function (c, i) {
+          next.push({
+            task_id:             mintTaskId(next),
+            wbs:                 (parent.wbs || '') + '.' + (i + 1),
+            parent_id:           parent.task_id,
+            name:                c.name,
+            zone:                c.zone,
+            start:               c.start_date,
+            end:                 c.end_date,
+            duration_days:       c.duration_days,
+            progress_pct:        0,
+            status:              'not_started',
+            depends_on:          [],
+            assignees:           c.assignee ? [c.assignee] : [],
+            resource_pool:       [],
+            linked_action_items: [],
+            tags:                [],
+            baseline_start:      c.start_date,
+            baseline_end:        c.end_date,
+          });
+        });
+        return Object.assign({}, s, { leaves: next });
+      });
+    }
+
     function addTask(opts) {
       opts = opts || {};
       setDirty(true);
@@ -694,9 +834,16 @@
             });
           });
         }
-      }).catch(function () {
+      }).catch(function (e) {
         setSaving(false);
-        if (window.FS.toast) window.FS.toast.show({ message: 'Could not save programme. Try again.', tone: 'error' });
+        /* Prefer the server's own words. A save can now be refused for a
+           reason the user must act on -- a replace that would discard zone
+           splits or breakdowns names the count and points at import Update
+           mode -- and "Try again" is advice that cannot work. */
+        var msg = (e && e.message && !/^HTTP \d+$/.test(e.message))
+          ? e.message
+          : 'Could not save programme. Try again.';
+        if (window.FS.toast) window.FS.toast.show({ message: msg, tone: 'error' });
       });
     }
 
@@ -744,6 +891,7 @@
       updateTask:   updateTask,
       editTask:     editTask,
       addTask:      addTask,
+      splitIntoZones: splitIntoZones,
       deleteTask:   deleteTask,
       replaceTasks: replaceTasks,
       canWrite:     canWrite,
@@ -753,6 +901,11 @@
       /* Sprint 8.3.2 */
       overAllocDismissed:    overAllocDismissed,
       setOverAllocDismissed: setOverAllocDismissed,
+      /* Time window (spec 7) */
+      preset:         preset,
+      changePreset:   changePreset,
+      viewMode:       viewMode,
+      setViewMode:    setViewMode,
       /* Sprint 8.3.3 */
       showBaseline:   showBaseline,
       setShowBaseline: setShowBaseline,
@@ -776,6 +929,23 @@
     var s   = ctx.state;
     var prog = s.programme;
 
+    /* Project 3 §2 — site speech that landed on each task, indexed once.
+       Keyed on the document id, which is what programme_progress_suggestions.
+       task_id holds and what the rows here carry as `task_id`; the rule lives
+       in programmeMentions.docIdOf and must not be re-derived inline.
+
+       The MARKER uses the pending set: it means "there is something here to
+       look at". SILENCE uses the whole set, because confirming a suggestion
+       moves it out of pending — so a pending-only view sees nothing for every
+       task whose mentions were all reviewed, and would report the best-run
+       work as neglected. */
+    var mentionsByTask = React.useMemo(function () {
+      var mentions = window.FS.api.programmeMentions;
+      var rows = (ctx.suggestionsState && ctx.suggestionsState.rows) || [];
+      return mentions ? mentions.indexByTask(rows) : {};
+    }, [ctx.suggestionsState]);
+
+
     /* Sprint 8.3.1 — compute float map when showFloat is on */
     var floatMap = React.useMemo(function () {
       if (!ctx.showFloat) return {};
@@ -798,23 +968,15 @@
     }, [ctx.baselineData]);
 
     /* Build the visible rows in WBS order: each parent followed by its
-       leaves (unless collapsed). */
-    var rows = [];
-    s.parents.forEach(function (parent) {
-      var roll = rollupGroup(parent, s.leaves);
-      var groupTask = Object.assign({}, parent, {
-        start: roll.start, end: roll.end, duration_days: 0,
-        progress_pct: roll.progress, status: 'group',
-      });
-      rows.push({ kind: 'group', task: groupTask, parent: parent, indent: 0 });
-      if (!ctx.collapsed.has(parent.task_id)) {
-        s.leaves
-          .filter(function (t) { return t.parent_id === parent.task_id; })
-          .forEach(function (leaf) {
-            rows.push({ kind: 'leaf', task: leaf, indent: 1 });
-          });
-      }
-    });
+       leaves (unless collapsed).
+
+       Memoized because this used to run on every render — including every
+       scroll event — at O(parents x leaves). See scripts/api/programme-rows.js.
+       The identity stability also matters downstream: the virtual slice
+       (below) and the memoized row composites both key off it. */
+    var rows = React.useMemo(function () {
+      return window.FS.api.programmeRows.buildRows(s.parents, s.leaves, ctx.collapsed);
+    }, [s.parents, s.leaves, ctx.collapsed]);
 
     var ppd        = TIER_PIXELS[ctx.tier] || 24;
     var totalDays  = diffDays(prog.start_date, prog.end_date) + 1;
@@ -831,36 +993,76 @@
       : null;
 
     /* Sprint 8.8.3 — virtual list (only engaged when rows > 50) */
-    var ROW_H    = 44;
+    /* MUST match .fs-gantt-tree__cell / .fs-gantt-row in styles/composites.css.
+       This read 44 while the rows have always rendered at 36px, so every
+       virtual spacer was 8px per row too tall — measured at 41,600px of drift
+       over a 5,000-row programme, which is why the scrollbar never matched
+       the content and scrolling jumped and overshot. */
+    var ROW_H    = 36;
     var OVERSCAN = 200;
     var DO_VIRT  = rows.length > 50;
 
-    var scrollRef  = React.useRef(null);
-    var refSTop    = React.useState(0);
-    var sTop       = refSTop[0]; var setSTop = refSTop[1];
-    var refVpH     = React.useState(600);
-    var vpH        = refVpH[0];  var setVpH  = refVpH[1];
+    var scrollRef = React.useRef(null);
+
+    /* The mounted window, as row indices. Scrolling only sets state when the
+       window actually moves: a scroll event that shifts the viewport by a few
+       pixels usually leaves `first`/`last` unchanged, and re-rendering for it
+       is pure cost. Combined with the rAF gate below, a fast flick produces at
+       most one render per frame, and often far fewer. */
+    /* Lazily seeded with a real slice for a 600px viewport at scrollTop 0, so
+       the first paint already has rows. Seeding with an empty slice instead
+       would blank the list for one frame before the effect below measures. */
+    var sliceHook = React.useState(function () {
+      return window.FS.api.programmeRows.visibleSlice(0, 600, rows.length, ROW_H, OVERSCAN);
+    });
+    var slice     = sliceHook[0];
+    var setSlice  = sliceHook[1];
+
+    /* Read inside the scroll handler without re-subscribing on every change. */
+    var rowCountRef = React.useRef(rows.length);
+    rowCountRef.current = rows.length;
 
     React.useEffect(function () {
-      if (!DO_VIRT) return;
       var el = scrollRef.current;
       if (!el) return;
-      setVpH(el.clientHeight || 600);
-      function onScroll() { setSTop(el.scrollTop); }
-      function onResize() { setVpH(el.clientHeight || 600); }
-      el.addEventListener('scroll', onScroll, { passive: true });
-      window.addEventListener('resize', onResize);
-      return function () {
-        el.removeEventListener('scroll', onScroll);
-        window.removeEventListener('resize', onResize);
-      };
-    }, [DO_VIRT]);
 
-    var first   = DO_VIRT ? Math.max(0, Math.floor((sTop - OVERSCAN) / ROW_H)) : 0;
-    var last    = DO_VIRT ? Math.min(rows.length - 1, Math.ceil((sTop + vpH + OVERSCAN) / ROW_H)) : rows.length - 1;
-    var vRows   = DO_VIRT ? rows.slice(first, last + 1) : rows;
-    var topSpc  = DO_VIRT ? first * ROW_H : 0;
-    var botSpc  = DO_VIRT ? Math.max(0, (rows.length - 1 - last) * ROW_H) : 0;
+      var frame = 0;
+
+      function measure() {
+        frame = 0;
+        var node = scrollRef.current;
+        if (!node) return;
+        var next = window.FS.api.programmeRows.visibleSlice(
+          node.scrollTop, node.clientHeight || 600,
+          rowCountRef.current, ROW_H, OVERSCAN,
+        );
+        setSlice(function (prev) {
+          return (prev.first === next.first && prev.last === next.last) ? prev : next;
+        });
+      }
+
+      /* One measurement per animation frame, no matter how many scroll
+         events the browser delivers in between. */
+      function schedule() {
+        if (frame) return;
+        frame = window.requestAnimationFrame(measure);
+      }
+
+      measure();
+      el.addEventListener('scroll', schedule, { passive: true });
+      window.addEventListener('resize', schedule);
+      return function () {
+        if (frame) window.cancelAnimationFrame(frame);
+        el.removeEventListener('scroll', schedule);
+        window.removeEventListener('resize', schedule);
+      };
+    }, [rows]);
+
+    var first  = DO_VIRT ? slice.first : 0;
+    var last   = DO_VIRT ? Math.min(slice.last, rows.length - 1) : rows.length - 1;
+    var vRows  = DO_VIRT ? rows.slice(first, last + 1) : rows;
+    var topSpc = DO_VIRT ? slice.topSpc : 0;
+    var botSpc = DO_VIRT ? Math.max(0, (rows.length - 1 - last) * ROW_H) : 0;
 
     /* ---- Sprint 4.9 — drag controller --------------------------------
        We hold one in-flight drag at a time. The active drag lives in
@@ -875,7 +1077,12 @@
     var dragRef     = React.useRef(dragState);
     dragRef.current = dragState;
 
-    function dragStart(task, mode, clientX) {
+    /* The three drag callbacks are useCallback'd for the same reason as the
+       row callbacks below: they are props on every leaf GanttRow, and a fresh
+       identity each render would defeat React.memo on all of them. They read
+       live drag state through dragRef, not through the closure, so their
+       dependency lists stay small. */
+    var dragStart = React.useCallback(function (task, mode, clientX) {
       var next = {
         taskId:    task.task_id,
         mode:      mode,
@@ -888,9 +1095,9 @@
       setDragState(next);
       document.body.classList.add('fs-gantt-dragging');
       document.body.classList.add('fs-gantt-dragging--' + mode);
-    }
+    }, []);
 
-    function dragMove(clientX) {
+    var dragMove = React.useCallback(function (clientX) {
       var d = dragRef.current;
       if (!d.taskId) return;
       var deltaPx   = clientX - d.originX;
@@ -915,9 +1122,9 @@
 
       if (nextStart === d.start && nextEnd === d.end) return;
       setDragState(Object.assign({}, d, { start: nextStart, end: nextEnd }));
-    }
+    }, [ppd, prog.start_date, prog.end_date]);
 
-    function dragEnd() {
+    var dragEnd = React.useCallback(function () {
       var d = dragRef.current;
       document.body.classList.remove('fs-gantt-dragging');
       document.body.classList.remove('fs-gantt-dragging--move');
@@ -931,7 +1138,31 @@
       }
       setDragState({ taskId: null, mode: null, originX: 0,
                      origStart: '', origEnd: '', start: '', end: '' });
-    }
+    }, [ctx.updateTask]);
+
+    /* Stable across renders so React.memo on the row composites can actually
+       short-circuit. Each row previously got a freshly-created closure, which
+       made every memo comparison fail. */
+    var handleToggle = React.useCallback(function (taskId) {
+      ctx.toggleGroup(taskId);
+    }, [ctx.toggleGroup]);
+
+    var handleSelect = React.useCallback(function (task) {
+      /* Group rows are not selectable. buildRows stamps status:'group' on
+         every derived group task, so this is exactly the r.kind === 'group'
+         guard that used to live at the call site. */
+      if (task.status === 'group') return;
+      props.onSelect({
+        kind:    'programme_task',
+        id:      'task_' + task.task_id,
+        task_id: task.task_id,
+        task:    task,
+      });
+    }, [props.onSelect]);
+
+    var handleKeyboardMove = React.useCallback(function (opts) {
+      ctx.updateTask(opts);
+    }, [ctx.updateTask]);
 
     var showOverAllocBanner = ctx.canWrite
       && !ctx.overAllocDismissed
@@ -967,20 +1198,19 @@
               key:        r.task.task_id,
               task:       r.task,
               isGroup:    r.kind === 'group',
-              expanded:   r.kind === 'group' && !ctx.collapsed.has(r.task.task_id),
+              /* A contract task with a zone split or breakdown under it gets
+                 the same disclosure control as a group. */
+              hasChildren: !!r.hasChildren,
+              expanded:   !ctx.collapsed.has(r.task.task_id),
               indent:     r.indent,
               critical:   r.kind === 'leaf' && s.critical.has(r.task.task_id),
               selected:   selectedId === r.task.task_id,
-              onToggle:   function () { ctx.toggleGroup(r.task.task_id); },
-              onSelect:   function () {
-                if (r.kind === 'group') return;
-                props.onSelect({
-                  kind:     'programme_task',
-                  id:       'task_' + r.task.task_id,
-                  task_id:  r.task.task_id,
-                  task:     r.task,
-                });
-              },
+              onToggle:   handleToggle,
+              onSelect:   handleSelect,
+              /* A number, deliberately — see TaskTreeCell's comment. Passing
+                 the suggestion rows themselves would break its shallow memo
+                 and re-reconcile every visible row on every scroll frame. */
+              mentionCount: (mentionsByTask[r.task.task_id] || []).length,
             });
           }),
           DO_VIRT && botSpc > 0
@@ -1019,7 +1249,7 @@
                 onDragMove:     r.kind === 'leaf' ? dragMove  : null,
                 onDragEnd:      r.kind === 'leaf' ? dragEnd   : null,
                 /* Sprint 8.5.5 — keyboard move commits directly via updateTask */
-                onKeyboardMove: r.kind === 'leaf' ? function (opts) { ctx.updateTask(opts); } : null,
+                onKeyboardMove: r.kind === 'leaf' ? handleKeyboardMove : null,
                 programmeDurationDays: diffDays(prog.start_date, prog.end_date) + 1,
                 /* Sprint 8.3.1 — float */
                 showFloat:  ctx.showFloat && r.kind === 'leaf',
@@ -1030,15 +1260,7 @@
                 showBaseline:  ctx.showBaseline && !!bLine,
                 baselineStart: bLine ? bLine.start : null,
                 baselineEnd:   bLine ? bLine.end   : null,
-                onSelect:      function () {
-                  if (r.kind === 'group') return;
-                  props.onSelect({
-                    kind:     'programme_task',
-                    id:       'task_' + r.task.task_id,
-                    task_id:  r.task.task_id,
-                    task:     r.task,
-                  });
-                },
+                onSelect:      handleSelect,
               });
             }),
 
@@ -1273,6 +1495,37 @@
                   }, k.charAt(0).toUpperCase() + k.slice(1));
                 }),
               )
+            : null,
+
+          /* Time range (spec 7). Changing it REFETCHES — the window is what
+             gets loaded, not a filter over what was loaded. Hidden in
+             Overview, where the whole programme is deliberately in view. */
+          ctx.view === 'gantt' && ctx.viewMode === 'window' && fs.ProgrammeWindowPicker
+            ? React.createElement(fs.ProgrammeWindowPicker, {
+                preset:   ctx.preset,
+                today:    window.FS.api.todayNZDT(),
+                disabled: ctx.state.status === 'loading',
+                onChange: ctx.changePreset,
+              })
+            : null,
+
+          /* Overview loads the whole programme, coarsely — month tier,
+             collapsed, no drag. Its coarseness is what keeps it affordable at
+             30,000 tasks; it is not a second Gantt. */
+          ctx.view === 'gantt'
+            ? React.createElement('button', {
+                type:      'button',
+                className: 'fs-programme__toggle fs-programme__toggle--small'
+                            + (ctx.viewMode === 'overview' ? ' fs-programme__toggle--active' : ''),
+                title:     ctx.viewMode === 'overview'
+                             ? 'Back to the selected date range'
+                             : 'See the whole programme at a glance',
+                onClick:   function () {
+                  var next = ctx.viewMode === 'overview' ? 'window' : 'overview';
+                  ctx.setViewMode(next);
+                  if (next === 'overview') { ctx.setTier('month'); }
+                },
+              }, ctx.viewMode === 'overview' ? 'Exit overview' : 'Overview')
             : null,
 
           /* Sprint 8.3.1 — Show float toggle (Gantt only) */
@@ -1519,6 +1772,39 @@
        slide-in drawer a selected task uses. Project-scoped, not
        task-scoped — reads ctx.suggestionsState (fetched once by
        ProgrammeProvider, shared with the header's count badge). */
+    /* Project 3 §4 — zone-split dialog visibility.
+       MUST live here, above every conditional return in this component.
+       It was first written next to the task-detail body, which is AFTER the
+       suggestions_panel branch returns: selecting a task then ran one more
+       hook than rendering the panel had, and React tore the whole page down
+       with "Rendered more hooks than during the previous render". */
+    var splitOpenRef = React.useState(false);
+    var splitOpen    = splitOpenRef[0];
+    var setSplitOpen = splitOpenRef[1];
+
+    var leavesForSilence = (ctx && ctx.state && ctx.state.programme
+                            && ctx.state.programme.leaves) || [];
+    /* Project 3 §2, third placement — the tasks nobody has talked about.
+       The least obvious of the three and the most useful: a task with no
+       site mention for weeks currently looks exactly like one going fine.
+
+       `coverage` describes what was ACTUALLY fetched, and is the one thing
+       here that must not be fudged. The page requests state:'all' with no
+       date bound, so that is what is declared; claiming coverage the fetch
+       does not have is the single way to make this feature lie. When the
+       fetch failed, no coverage is passed and silentTasks returns nothing
+       rather than reporting every task as neglected. */
+    var silent = React.useMemo(function () {
+      var mentions = window.FS.api.programmeMentions;
+      var st = ctx.suggestionsState;
+      if (!mentions || !st || st.status !== 'ok') return [];
+      var byTaskAll = mentions.indexByTask(st.allRows || []);
+      return mentions.silentTasks(leavesForSilence, byTaskAll, {
+        today: window.FS.api.todayNZDT(),
+        coverage: { states: 'all', from: null, to: null },
+      });
+    }, [ctx.suggestionsState, leavesForSilence]);
+
     if (sel && sel.kind === 'suggestions_panel') {
       return React.createElement('div', { className: 'fs-programme-detail' },
         React.createElement('div', { className: 'fs-programme-detail__header' },
@@ -1540,6 +1826,40 @@
               onResolved:  ctx && ctx.removeSuggestion,
             })
           : null,
+
+        /* Project 3 §2, third placement. Rendered only when there IS
+           something to say: silentTasks returns [] both when nothing is
+           neglected and when the loaded data cannot support the claim, and
+           an empty panel is the right output for both. A "no silent tasks"
+           message would read as good news in the second case. */
+        silent.length
+          ? React.createElement('div', { className: 'fs-programme-silent' },
+              React.createElement('div', { className: 'fs-programme-silent__title' },
+                'Not mentioned on site'),
+              React.createElement('div', { className: 'fs-programme-silent__hint' },
+                'Started, unfinished, and nobody has talked about it for '
+                + (window.FS.api.programmeMentions
+                   ? window.FS.api.programmeMentions.SILENT_AFTER_DAYS : 21)
+                + ' days.'),
+              React.createElement('ul', { className: 'fs-programme-silent__list' },
+                silent.map(function (task) {
+                  return React.createElement('li', {
+                    key: task.task_id,
+                    className: 'fs-programme-silent__item',
+                  },
+                    /* Text, not a button. This panel has no task-selection
+                       callback plumbed to it, and a control that looks
+                       clickable and does nothing is worse than a label. The
+                       task is named, so it can be found in the tree. */
+                    React.createElement('span', {
+                      className: 'fs-programme-silent__task',
+                    }, task.name || task.task_id),
+                    React.createElement('span', {
+                      className: 'fs-programme-silent__since',
+                    }, 'since ' + (task.start || task.start_date || '')));
+                })),
+            )
+          : null,
       );
     }
 
@@ -1552,9 +1872,11 @@
       );
     }
 
+    var ZoneSplitDialog = window.FieldSight.ZoneSplitDialog;
     var t = sel.task;
     var s = ctx && ctx.state;
     var critical = s && s.critical && s.critical.has(t.task_id);
+
 
     var statusTone = ({
       not_started: 'neutral',
@@ -1612,6 +1934,16 @@
           variant: 'ghost', size: 'sm',
           onClick: function () { setEdit(true); },
         }, 'Edit') : null,
+
+        /* Project 3 §4. Dated tasks only: an undated WBS header has nothing
+           to divide and planZoneSplit refuses it, so offering a button that
+           always errors would be worse than not offering it. */
+        ZoneSplitDialog && ctx && ctx.canWrite && ctx.splitIntoZones
+          && (t.start || t.start_date)
+          ? React.createElement(Button, {
+              variant: 'ghost', size: 'sm',
+              onClick: function () { setSplitOpen(true); },
+            }, 'Split into zones') : null,
         IconBtn ? React.createElement(IconBtn, {
           icon: 'x', ariaLabel: 'Close detail', size: 'sm',
           onClick: function () { if (props.onClose) props.onClose(); },
@@ -1685,6 +2017,15 @@
          button. The editor checks `onDelete` truthiness to render the
          red Delete control in the footer, so passing null hides it
          entirely for read-only roles. */
+      ZoneSplitDialog && splitOpen ? React.createElement(ZoneSplitDialog, {
+        open:    true,
+        task:    t,
+        onClose: function () { setSplitOpen(false); },
+        /* The dialog hands back exactly what planZoneSplit produced. No date
+           is decided here either — this only writes. */
+        onSplit: function (children) { ctx.splitIntoZones(t.task_id, children); },
+      }) : null,
+
       Editor ? React.createElement(Editor, {
         open:    editing,
         task:    t,

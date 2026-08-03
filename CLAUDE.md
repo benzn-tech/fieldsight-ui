@@ -139,6 +139,17 @@ Detailed completed/pending/next-phase tracking lives in **`PLAN.md`**.
 
 ## Current State
 
+- **`main` IS PRODUCTION.** Amplify app `d2fssznicvuckr`: branch `main` =
+  PRODUCTION (`main.d2fssznicvuckr.amplifyapp.com`, autoBuild ON, prod org
+  gateway `ys94qy2tk0`, `FS_USEMOCKS=false`); branch `dev` = DEVELOPMENT.
+  **Merging to `main` deploys to the customer site within ~1-2 min** — there
+  is no approval gate. Env is injected at build time by `amplify.yml` into
+  `/env.js` (root, not `scripts/`).
+- **Shipped 2026-07-31/08-01**: QR terminal sign-in (PR #141 — Settings →
+  "Log in a terminal" mints a one-time code the F2SP scans; QR is **prod-only**
+  because the backend code table is prod-gated, so it cannot be exercised on
+  `dev`). Login-screen dark-theme contrast fixes + the "Sight" brand-accent
+  wordmark (PRs #144/#146/#147).
 - **Active branches**:
   - `claude/sprint10-prep` — Sprint 10 + Sprint 10 follow-up fixes (library
     drag/promote, today CTA + 3-panel revert, activity width cap, insights
@@ -157,6 +168,25 @@ Detailed completed/pending/next-phase tracking lives in **`PLAN.md`**.
 
 Mirrors `PLAN.md` §3. Each is a real bug that shipped and got fixed;
 re-introducing one is the most common way to break the prototype.
+
+### Registration & load order
+
+Both of these pass every unit test and fail only in the browser. A green
+`node --test` run says nothing about whether a module is reachable at runtime.
+
+- **`FS.api` is assigned WHOLESALE by `scripts/api/index.js:87`**
+  (`window.FS.api = { … }`). Any module registering onto `FS.api` from a
+  `<script>` tag placed *before* that line is **silently wiped** — no error at
+  load, just `Cannot read properties of undefined` from the first consumer.
+  Load new `FS.api` modules in the api block, after `api/index.js`. Registering
+  onto `window.FieldSight` instead is unaffected (composites do that).
+
+- **`scripts/roles.js` is NOT loaded by `app-shell-preview.html`.** It is an ES
+  module; the registry the nav actually renders from is `NAV_ITEMS` in
+  **`scripts/fs-globals.js`**, which also carries each item's `path`. Adding a
+  nav entry to `roles.js` alone produces no error and no nav item — and if the
+  `left-nav.js` group already lists the key, the group looks correct while the
+  item simply never exists.
 
 ### Date math
 
@@ -179,6 +209,22 @@ re-introducing one is the most common way to break the prototype.
   light-mode hex. In React `style={{ ... }}` use string literals:
   `style={{ background: 'var(--surface-panel)' }}` — never
   `t.surface.panel`.
+- **Palette-scale tokens are not theme-flipped either** —
+  `--color-{primary,accent,success,danger}-{50…900}` are fixed hex. Only
+  the *semantic* tokens (`--text-*`, `--surface-*`, `--border-*`) flip.
+  Using a scale token as a foreground silently breaks one theme:
+  - 2026-08-01, login screen: the wordmark used `--color-primary-900`
+    (#102A43) which sits on `--surface-app` (#0A1018) in dark at **~1.15:1**
+    — invisible. Same screen, `.fs-login__success` paired `--text-success`
+    (which *does* flip, to a light green) with `--color-success-50`
+    (#F0FDF4, which does not) → light-on-near-white.
+  - **Remedy** (used there): keep the light rule and add a
+    `[data-theme="dark"] .fs-X { color: … }` override.
+  - **Yellow is a special case**: `--color-accent-500` (#FFD966) is
+    ~1.4:1 on white — `tokens.css` says so inline. It can only be a
+    foreground on dark surfaces; on light, step down the ramp
+    (`accent-800`/`-900`). The login wordmark's "Sight" does exactly
+    this — brand yellow in dark, amber in light.
 - **NavIcon SVG `var()` resolution**: `svg.setAttribute('stroke',
   'var(...)')` does **not** resolve. Use `svg.style.stroke = color`.
 - **Status colour tokens are not theme-flipped** (`--color-{success,

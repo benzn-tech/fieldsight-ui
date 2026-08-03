@@ -90,6 +90,16 @@
       return window.FS.api.orgRequest('/programme', { params: { site: orgSiteId } });
     }
     await window.FS.api.delay();
+
+    /* Perf harness (render-performance plan, Task 7). Opt-in via
+       ?bigprogramme=1 and only inside the mock branch, so a real backend
+       response is never intercepted. */
+    if (window.location
+        && window.location.search.indexOf('bigprogramme=1') !== -1
+        && window.FieldSight.PROGRAMME_LARGE_FIXTURE) {
+      return { programme: window.FieldSight.PROGRAMME_LARGE_FIXTURE };
+    }
+
     var p = fixtures().programme;
     if (!p || (orgSiteId && p.site_id && p.site_id !== orgSiteId)) {
       return { programme: null };
@@ -147,40 +157,166 @@
     };
   }
 
+  /* The time-window read — the programme page's LOAD boundary, not a filter
+     (spec §7). Also serves My Work (assignee='me') and Today.
+
+     `from`/`to` are ISO dates; the server caps the span at 400 days.
+     assignee='me' resolves server-side to the caller's folder_name, and a
+     caller with no folder identity gets an empty list rather than the whole
+     programme.
+
+     Mock mode filters the fixture with the SAME overlap rule the server uses,
+     so mock and live cannot disagree about which tasks are in range. */
+  async function getTasksInWindow(orgSiteId, opts) {
+    opts = opts || {};
+    if (orgLive()) {
+      return window.FS.api.orgRequest('/programme/tasks', {
+        params: {
+          site: orgSiteId, from: opts.from, to: opts.to,
+          assignee: opts.assignee || undefined,
+        },
+      });
+    }
+    await window.FS.api.delay();
+    var res = await getProgramme(orgSiteId);
+    var doc = res && res.programme;
+    if (!doc) return { tasks: [], programme_id: null };
+    var win = { from: opts.from, to: opts.to };
+    var pw = window.FS.api.programmeWindow;
+    var tasks = (doc.leaves || []).filter(function (t) {
+      return pw.isInWindow(t, win);
+    });
+    if (opts.assignee && opts.assignee !== 'me') {
+      tasks = tasks.filter(function (t) {
+        return (t.assignees || []).indexOf(opts.assignee) !== -1;
+      });
+    } else if (opts.assignee === 'me') {
+      var folder = callerFolder();
+      tasks = folder
+        ? tasks.filter(function (t) { return (t.assignees || []).indexOf(folder) !== -1; })
+        : [];   /* no identity => no attributable work, NOT everything */
+    }
+    return { tasks: tasks, programme_id: doc.programme_id || null };
+  }
+
   /* =========================================================================
-     Sprint 8.2.1 — Write operations (PATCH / POST / DELETE)
-     No real /api/programmes endpoints exist yet — gated on
-     useMocks=false && writeMocks=false (Phase 0 Task 2 audit sweep) so
-     these stay mocked even once reads go live. In mock mode they return a
-     resolved-success object immediately (mutations live in page state).
+     Per-task writes (PATCH / POST / DELETE)
+
+     These were written in Sprint 8.2.1 against a hypothetical
+     /api/programmes/:id/tasks REST API that never existed, and stayed
+     permanently mocked. They now call the real org-api routes added with the
+     Aurora storage foundation:
+
+       PATCH  /api/org/programme/tasks/{id}   body carries row_version
+       POST   /api/org/programme/tasks        ?site=<org site uuid>
+       DELETE /api/org/programme/tasks/{id}
+
+     `?site=` is the ORG SITE UUID, never the report-side slug — see the
+     module header.
+
+     PATCH is optimistic-locked. A 409 means someone else moved the row; the
+     caller re-reads that one task rather than reloading the programme, so
+     other pending edits survive (see scripts/api/programme-autosave.js).
      ========================================================================= */
 
-  async function updateTask(programmeId, taskId, patch) {
-    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
-      return window.FS.api.request(
-        '/programmes/' + encodeURIComponent(programmeId) +
-        '/tasks/' + encodeURIComponent(taskId),
-        { method: 'PATCH', body: JSON.stringify(patch) });
+  async function updateTask(orgSiteId, taskId, patch) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest(
+        '/programme/tasks/' + encodeURIComponent(taskId),
+        { method: 'PATCH', body: patch });
     }
     await window.FS.api.delay();
     return { ok: true, task_id: taskId };
   }
 
-  async function createTask(programmeId, payload) {
-    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
-      return window.FS.api.request(
-        '/programmes/' + encodeURIComponent(programmeId) + '/tasks',
-        { method: 'POST', body: JSON.stringify(payload) });
+  /* One request for a whole cascade — dragging a bar shifts every downstream
+     dependent, and those writes have to be atomic. The server checks every
+     row_version before writing any of them; on 409 the body carries
+     `conflicts: [task_id, ...]` naming the rows that moved, so the caller
+     refreshes exactly those (see programme-autosave.applyBatchConflict)
+     rather than reloading and discarding the user's other pending edits. */
+  async function updateTasksBatch(orgSiteId, tasks) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest('/programme/tasks:batch', {
+        method: 'PATCH', params: { site: orgSiteId }, body: { tasks: tasks },
+      });
+    }
+    await window.FS.api.delay();
+    return { ok: true, count: (tasks || []).length };
+  }
+
+  /* Two-phase import. Call with { dry_run: true, parents, leaves } to get the
+     diff without writing, then again with a mode to commit. The user never
+     picks a mode blind — which matters because Replace discards work Update
+     would have kept, and that cost is only visible in the dry run's separate
+     replace_preview block. */
+  async function importProgramme(orgSiteId, payload) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest('/programme/import', {
+        method: 'POST', params: { site: orgSiteId }, body: payload,
+      });
+    }
+    await window.FS.api.delay();
+    if (!payload || !payload.dry_run) {
+      return { counts: {}, version_no: 1,
+               summary: { mode: payload && payload.mode } };
+    }
+    return {
+      dry_run: true,
+      suggested_mode: 'update',
+      update_preview: { added: 0, removed: 0, updated: 0, date_shifted: 0,
+                        max_shift_days: 0, archived_with_parent: 0,
+                        locally_modified_overwritten: [] },
+      rename_candidates: [],
+      replace_preview: { local_tasks_discarded: 0, allocations_discarded: 0,
+                         tasks_with_progress_discarded: 0 },
+    };
+  }
+
+  async function getVersions(orgSiteId) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest('/programme/versions',
+        { params: { site: orgSiteId } });
+    }
+    await window.FS.api.delay();
+    return { versions: [], baseline_version: null, current_version: 0 };
+  }
+
+  async function restoreVersion(orgSiteId, versionNo) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest(
+        '/programme/versions/' + encodeURIComponent(versionNo) + '/restore',
+        { method: 'POST', params: { site: orgSiteId } });
+    }
+    await window.FS.api.delay();
+    return { restored_to: versionNo };
+  }
+
+  async function setBaseline(orgSiteId, versionNo) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest('/programme/baseline', {
+        method: 'POST', params: { site: orgSiteId },
+        body: { version_no: versionNo },
+      });
+    }
+    await window.FS.api.delay();
+    return { programme: { baseline_version: versionNo } };
+  }
+
+  async function createTask(orgSiteId, payload) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest('/programme/tasks', {
+        method: 'POST', params: { site: orgSiteId }, body: payload,
+      });
     }
     await window.FS.api.delay();
     return { ok: true };
   }
 
-  async function deleteTask(programmeId, taskId) {
-    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
-      return window.FS.api.request(
-        '/programmes/' + encodeURIComponent(programmeId) +
-        '/tasks/' + encodeURIComponent(taskId),
+  async function deleteTask(orgSiteId, taskId) {
+    if (orgLive()) {
+      return window.FS.api.orgRequest(
+        '/programme/tasks/' + encodeURIComponent(taskId),
         { method: 'DELETE' });
     }
     await window.FS.api.delay();
@@ -300,8 +436,14 @@
     getProgramme:               getProgramme,
     saveProgramme:              saveProgramme,
     getProgrammeTasksForRange:  getProgrammeTasksForRange,
+    getTasksInWindow:           getTasksInWindow,
     updateTask:                 updateTask,
+    updateTasksBatch:           updateTasksBatch,
     createTask:                 createTask,
+    importProgramme:            importProgramme,
+    getVersions:                getVersions,
+    restoreVersion:             restoreVersion,
+    setBaseline:                setBaseline,
     deleteTask:                 deleteTask,
     importTasks:                importTasks,
     saveBaseline:               saveBaseline,

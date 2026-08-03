@@ -236,6 +236,32 @@
               topic.summary)
           : null,
 
+        /* Project 3 §2 — the other direction of the matcher link. The person
+           who spoke sees that their words reached the plan, instead of the
+           suggestion only ever appearing in a manager's review queue.
+
+           Two strings rather than the suggestion row, because the matcher
+           picks exactly ONE task per topic (lambda_programme_matcher's
+           discrimination step answers with a single task_id or null), so
+           there is nothing here that needs a list. */
+        props.programmeTaskName
+          ? React.createElement('div', { className: 'fs-topic-card__programme' },
+              React.createElement('span', {
+                className: 'fs-topic-card__programme-label',
+              }, 'Linked to programme'),
+              React.createElement('button', {
+                type:      'button',
+                className: 'fs-topic-card__programme-task',
+                title:     'Open this task on the Programme',
+                onClick:   function (e) {
+                  e.stopPropagation();
+                  if (props.onOpenProgrammeTask) {
+                    props.onOpenProgrammeTask(props.programmeTaskId);
+                  }
+                },
+              }, props.programmeTaskName + ' →'))
+          : null,
+
         decisions.length > 0
           ? React.createElement('div', { className: 'fs-topic-card__section' },
               React.createElement('div', { className: 'fs-topic-card__section-label' },

@@ -368,6 +368,11 @@
     /* DAILY */
     today:      { permission: P('dashboard','view'),  label: 'Today',      path: '/today' },
     timeline:   { permission: P('report','view'),     label: 'Timeline',   path: '/timeline' },
+    /* My Work — the caller's own programme work over a time window, i.e.
+       what Today deliberately stops showing at 3 days out (spec 14). Gated
+       on the same programme:view every role able to see a programme already
+       holds, so no role definition changes. */
+    mywork:     { permission: P('programme','view'), label: 'My Work',    path: '/my-work' },
     activity:   { permission: P('report','view'),     label: 'Activity',   path: '/activity' },
 
     /* WORKSPACE */
