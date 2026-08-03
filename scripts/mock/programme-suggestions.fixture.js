@@ -13,7 +13,7 @@
      topic 3 'Wind warning — secure tarps and edge protection'
 
    Row shape mirrors the live backend contract (see scripts/api/programme.js
-   header): { id, site_id, task_id, task_name, topic_title, topic_summary,
+   header): { id, site_id, task_id, task_name, topic_id, topic_title, topic_summary,
    report_date, suggested_status, suggested_progress, task_status_before,
    task_progress_before, confidence, match_evidence: { llm_evidence,
    assignee_overlap, programme_updated_at }, state }.
@@ -32,6 +32,9 @@
   var suggestions = [
     {
       id:                    'sugg-001',
+      /* topics.id of the source topic -- the daily-report fixture's
+         topic_row_id, NOT its per-report sequential topic_id. */
+      topic_id:              '7d0c0002-0429-4a29-9b00-000000000002',
       site_id:               'sb1108-ellesmere',
       task_id:               'T-003',
       task_name:             'Foundation pour',
@@ -52,6 +55,9 @@
     },
     {
       id:                    'sugg-002',
+      /* topics.id of the source topic -- the daily-report fixture's
+         topic_row_id, NOT its per-report sequential topic_id. */
+      topic_id:              '7d0c0003-0429-4a29-9b00-000000000003',
       site_id:               'sb1108-ellesmere',
       task_id:               'T-006',
       task_name:             'Roof structure',
@@ -72,6 +78,9 @@
     },
     {
       id:                    'sugg-003',
+      /* topics.id of the source topic -- the daily-report fixture's
+         topic_row_id, NOT its per-report sequential topic_id. */
+      topic_id:              '7d0c0001-0429-4a29-9b00-000000000001',
       site_id:               'sb1108-ellesmere',
       task_id:               'T-004',
       task_name:             'Steel frame',

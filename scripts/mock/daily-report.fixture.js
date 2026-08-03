@@ -92,6 +92,7 @@
     topics: [
       {
         topic_id:    0,
+        topic_row_id: '7d0c0000-0429-4a29-9b00-000000000000',
         time_range:  '07:00 ' + EN + ' 07:30',
         topic_title: 'Morning Safety Briefing',
         category:    'safety',
@@ -134,6 +135,7 @@
 
       {
         topic_id:    1,
+        topic_row_id: '7d0c0001-0429-4a29-9b00-000000000001',
         time_range:  '08:30 ' + EN + ' 09:15',
         topic_title: 'Crane pre-start inspection slot',
         category:    'progress',
@@ -164,6 +166,7 @@
 
       {
         topic_id:    2,
+        topic_row_id: '7d0c0002-0429-4a29-9b00-000000000002',
         time_range:  '11:00 ' + EN + ' 11:45',
         topic_title: 'Concrete pour — Block 4 south footing',
         category:    'quality',
@@ -200,6 +203,7 @@
 
       {
         topic_id:    3,
+        topic_row_id: '7d0c0003-0429-4a29-9b00-000000000003',
         time_range:  '13:30 ' + EN + ' 14:00',
         topic_title: 'Wind warning — secure tarps and edge protection',
         category:    'safety',
@@ -289,7 +293,8 @@
     ],
     topics: [
       {
-        topic_id: 0, time_range: '07:30 ' + EN + ' 08:00',
+        topic_id: 0, topic_row_id: '7d0c0004-0429-4a29-9b00-000000000004',
+        time_range: '07:30 ' + EN + ' 08:00',
         topic_title: 'Block C scaffold — STOP work',
         category: 'safety',
         participants: ['Jarley Trainor', 'Jack Gibson', 'Independent inspector'],
@@ -336,7 +341,8 @@
     safety_observations: [],
     topics: [
       {
-        topic_id: 0, time_range: '08:00 ' + EN + ' 08:15',
+        topic_id: 0, topic_row_id: '7d0c0005-0429-4a29-9b00-000000000005',
+        time_range: '08:00 ' + EN + ' 08:15',
         topic_title: 'Saturday safety check-in',
         category: 'safety',
         participants: ['David Barillaro', 'Ben Lin'],
@@ -347,7 +353,8 @@
         related_photos: [],
       },
       {
-        topic_id: 1, time_range: '11:00 ' + EN + ' 11:30',
+        topic_id: 1, topic_row_id: '7d0c0006-0429-4a29-9b00-000000000006',
+        time_range: '11:00 ' + EN + ' 11:30',
         topic_title: 'Form strip — south footing',
         category: 'progress',
         participants: ['David Barillaro', 'Ben Lin'],
@@ -392,7 +399,8 @@
     ],
     topics: [
       {
-        topic_id: 0, time_range: '09:00 ' + EN + ' 09:30',
+        topic_id: 0, topic_row_id: '7d0c0007-0429-4a29-9b00-000000000007',
+        time_range: '09:00 ' + EN + ' 09:30',
         topic_title: 'Steel offload coordination',
         category: 'progress',
         participants: ['Jarley Trainor', 'David Barillaro'],
@@ -437,7 +445,8 @@
     ],
     topics: [
       {
-        topic_id: 0, time_range: '14:30 ' + EN + ' 16:30',
+        topic_id: 0, topic_row_id: '7d0c0008-0429-4a29-9b00-000000000008',
+        time_range: '14:30 ' + EN + ' 16:30',
         topic_title: 'Wind event — site-wide stand-down',
         category: 'safety',
         participants: ['Sarah Chen', 'Jarley Trainor', 'Ben Lin'],
