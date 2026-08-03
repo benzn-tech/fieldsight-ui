@@ -153,6 +153,60 @@ invalidated and the PM is offered a re-plan. Wiring that flag to this feature
 is what finally makes `rebase_children` reachable — it has been written and
 tested since Plan C and deliberately left uncalled.
 
+### Correction: what a real programme actually looks like
+
+Written against the first real file — an 849-task subcontractor programme
+(Ellesmere College, 16.10.24). It contradicts the premise this section was
+built on, so the premise is corrected here rather than quietly worked around.
+
+**The brief said** programmes are high level: *"比如说 pour concrete，它不会说
+很细节，前面的准备工作。"*
+
+**The file is not.** 708 leaf tasks at an outline depth of 10, with names like
+`Saw Cuts`, `Strip Formwork From Slab and Box Nibs`, `Reinforcing For Nibs`,
+`Prepour Inspections`. Where site work happens, this programme is already
+broken down finer than any model would propose. Median leaf duration is 7
+days; only 12% exceed 15 days.
+
+**And the coarse tasks are mostly the wrong target.** Of the 86 leaves at 15
+days or more, the longest are lead time rather than work:
+
+```
+100d  Procurement Phase / Manufacture & Delivery
+ 60d  Resource Consent Processing Restart
+ 55d  Procurement: Mechanical
+ 50d  Fabrication: Timber Joinery
+ 40d  Shop drawing Submission            (x7 across the programme)
+ 40d  Allow For Grass to Establish as per RC Conditions
+```
+
+Nobody breaks down `Resource Consent Processing`. Nobody allocates
+`Allow For Grass to Establish` to a site manager. Proposing sub-steps for
+these would fabricate work that does not exist, on the bars where a programme
+is *waiting* rather than *doing*.
+
+Filtering by hand for genuine site work leaves roughly **nine** candidates in
+708 tasks — about 1.3%: stormwater install, electrical/ICT network, site
+scrape, fire hydrant main, trenching, commissioning, defecting, prep.
+
+**What this changes.** The eligibility filter matters more than the prompt,
+and becomes a prerequisite to it. A good prompt offered on the wrong task is
+worse than no feature: it invents sub-steps for a consent application, and
+they look plausible. Deciding *what may be offered* is where the harm lives;
+generating the steps is the easy half.
+
+Duration alone cannot separate the nine from the eighty-six —
+`Resource Consent Processing` (54d) sits beside `Stormwater, Sewer & Water
+Install` (50d). The signal is the *kind* of task, and the vocabulary above
+(procure, fabricate, consent, submission, approval, review, deliver, allow
+for) is a starting point drawn from a real programme rather than from
+imagination.
+
+**A product question this document cannot answer:** if a well-run programme
+is already broken down, who is this feature for? Plausibly the smaller
+builder whose programme is a page of bars — not the subcontractor schedule
+that prompted it. Worth asking before building the model half.
+
 ### The prompt
 
 One backend Lambda, non-VPC (the matcher's constraint applies: in-VPC has no
