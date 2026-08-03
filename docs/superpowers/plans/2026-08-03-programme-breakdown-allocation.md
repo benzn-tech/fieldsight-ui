@@ -288,6 +288,61 @@ a round trip). 5 and 6 wait for ui#152. 7 and 8 are blocked as noted.
 Nothing here can ship to users before `fieldsight-pipeline#209` releases
 Project 1 to prod.
 
+## BLOCKING ISSUE — Save converts local rows to imported
+
+Found 2026-08-03 while checking whether a zone split survives a reload. It
+does survive; what it does not survive is the next import, and the trigger is
+the most ordinary action in the UI.
+
+**The chain**
+
+1. A PM splits a contract task into zones. The children are `origin='local'`
+   in page state (Project 1 §5: they hang under the untouched imported row).
+2. The PM presses **Save** — `doSaveProgramme` PUTs the whole
+   `{parents, leaves}` document.
+3. `put_programme` calls `programme_tasks.replace_all_tasks`, which
+   `DELETE`s every row under the programme and re-inserts them all with
+   `origin='imported'`.
+4. The zone children survive as rows but are no longer local.
+5. The next import's reconciliation sees them as file rows that are absent
+   from the file, and soft-deletes them as departed.
+
+The allocation is gone, and nothing warned anyone.
+
+**Why it is nobody's bug and everybody's problem**
+
+Both sides documented an assumption and neither enforced it:
+
+- `put_programme`: *"Everything under the programme is discarded, including
+  local rows. That is what replace means; the client confirms before calling
+  it."* There is no server-side gate.
+- `doSaveProgramme`: a plain Save button. No confirmation, and it does not
+  distinguish local rows from imported ones.
+
+Replace semantics are correct for a *replace*. The defect is that the only
+save the UI offers **is** a replace.
+
+**This blocks Tasks 5–7 in practice.** Zone splits and AI breakdowns both
+produce local rows, so both are destroyed by the same path.
+
+**Three fixes, needing a decision rather than a guess**
+
+1. *Save becomes update-mode* — reconcile rather than replace, preserving
+   local subtrees. Correct, and the largest change; update-mode
+   reconciliation already exists for imports (`programme_reconcile`).
+2. *Save refuses when local rows are present*, directing the user to import
+   Update mode. Smallest, and honest, but leaves the PM with no way to save
+   an ordinary edit once a split exists.
+3. *Save confirms*, naming how many local rows it will convert. Cheapest;
+   relies on people reading dialogs, which is what got us here.
+
+My recommendation is 1, with 3 as an interim if 1 cannot land soon. Not
+implemented: which of these is right is a product decision about what Save
+means, and guessing it would risk the allocation data this project exists to
+create.
+
+---
+
 ## What is NOT in this plan
 
 - **A backfill from S3 `programme.json` into `programme_tasks`.** Verified
