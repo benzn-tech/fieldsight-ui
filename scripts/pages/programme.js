@@ -1762,6 +1762,16 @@
        slide-in drawer a selected task uses. Project-scoped, not
        task-scoped — reads ctx.suggestionsState (fetched once by
        ProgrammeProvider, shared with the header's count badge). */
+    /* Project 3 §4 — zone-split dialog visibility.
+       MUST live here, above every conditional return in this component.
+       It was first written next to the task-detail body, which is AFTER the
+       suggestions_panel branch returns: selecting a task then ran one more
+       hook than rendering the panel had, and React tore the whole page down
+       with "Rendered more hooks than during the previous render". */
+    var splitOpenRef = React.useState(false);
+    var splitOpen    = splitOpenRef[0];
+    var setSplitOpen = splitOpenRef[1];
+
     var leavesForSilence = (ctx && ctx.state && ctx.state.programme
                             && ctx.state.programme.leaves) || [];
     /* Project 3 §2, third placement — the tasks nobody has talked about.
@@ -1857,12 +1867,6 @@
     var s = ctx && ctx.state;
     var critical = s && s.critical && s.critical.has(t.task_id);
 
-    /* Project 3 §4 — zone split. The dialog owns nothing but input; every
-       date decision is planZoneSplit's, and nothing is written until the
-       user presses Split. */
-    var splitOpenRef = React.useState(false);
-    var splitOpen    = splitOpenRef[0];
-    var setSplitOpen = splitOpenRef[1];
 
     var statusTone = ({
       not_started: 'neutral',
