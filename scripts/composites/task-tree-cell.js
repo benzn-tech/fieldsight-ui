@@ -63,6 +63,24 @@
       React.createElement('span', { className: 'fs-gantt-tree__name' },
         t.name || t.task_id),
 
+      /* Site speech that landed on this task (Project 3 §2). A COUNT, not the
+         suggestion objects: this component is React.memo'd with a shallow
+         compare, and handing it a fresh array or object every render would
+         re-reconcile every visible row on every scroll frame — undoing the
+         virtualisation work this page was measured on.
+
+         A span inside the existing flex row, so the 36px row height that the
+         virtualiser's spacer arithmetic depends on is unchanged. */
+      props.mentionCount > 0
+        ? React.createElement('span', {
+            className: 'fs-gantt-tree__mention',
+            title:     props.mentionCount === 1
+              ? 'Someone on site mentioned this task'
+              : props.mentionCount + ' site mentions of this task',
+            'aria-label': props.mentionCount + ' site mentions',
+          }, '● ' + props.mentionCount)
+        : null,
+
       !isGroup && (t.assignees || []).length
         ? React.createElement('span', { className: 'fs-gantt-tree__assignees' },
             (t.assignees[0] || '').replace(/_/g, ' ')
