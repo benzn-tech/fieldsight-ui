@@ -834,9 +834,16 @@
             });
           });
         }
-      }).catch(function () {
+      }).catch(function (e) {
         setSaving(false);
-        if (window.FS.toast) window.FS.toast.show({ message: 'Could not save programme. Try again.', tone: 'error' });
+        /* Prefer the server's own words. A save can now be refused for a
+           reason the user must act on -- a replace that would discard zone
+           splits or breakdowns names the count and points at import Update
+           mode -- and "Try again" is advice that cannot work. */
+        var msg = (e && e.message && !/^HTTP \d+$/.test(e.message))
+          ? e.message
+          : 'Could not save programme. Try again.';
+        if (window.FS.toast) window.FS.toast.show({ message: msg, tone: 'error' });
       });
     }
 
