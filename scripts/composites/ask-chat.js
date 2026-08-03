@@ -155,6 +155,37 @@
       setQ('');
       setBusy(true);
 
+      /* The alerts route (routing spec 3.5). Answered here rather than by
+         the agent because every signal is already on the client and none of
+         it is a retrieval problem: overdue, blocked, behind baseline, and
+         tasks nobody has mentioned.
+
+         Only available when the mounting page supplies programme context via
+         `alertsProvider`. Without it the route does not exist and every
+         question goes to the agent exactly as before — this component knows
+         nothing about programme state on its own.
+
+         The answer says which path it took. A route the reader cannot see is
+         a route they cannot correct. */
+      var alerts = window.FS.api.programmeAlerts;
+      if (alerts && props.alertsProvider && alerts.isAlertsQuestion(question)) {
+        var built = null;
+        try {
+          built = alerts.buildAlerts(props.alertsProvider() || {});
+        } catch (e) { built = null; }
+        if (built) {
+          setMsgs(function (m) { return m.concat([{
+            role:  'assistant',
+            text:  alerts.formatAlerts(built),
+            route: 'alerts',
+          }]); });
+          setBusy(false);
+          return;
+        }
+        /* Falling through to the agent is the right failure: retrieval is
+           this product's normal answer, and it is the recoverable one. */
+      }
+
       window.FS.api.ask.ask({
         date:     date,
         user:     user,
@@ -235,6 +266,13 @@
             m.role === 'assistant' && m.model
               ? React.createElement('div', { className: 'fs-ask-chat__model' },
                   m.model)
+              : null,
+            /* Which route answered. The routing spec requires the answer to
+               say — a route the reader cannot see is one they cannot
+               correct. */
+            m.route === 'alerts'
+              ? React.createElement('div', { className: 'fs-ask-chat__model' },
+                  'from the programme, not the reports')
               : null,
           );
         }),
