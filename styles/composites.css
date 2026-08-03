@@ -11258,3 +11258,33 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   font-size: 13px;
   max-width: 46ch;
 }
+
+/* Project 3 §2 — a report topic showing that what was said reached the
+   programme. The other direction of the matcher link: without it a
+   suggestion only ever appears in a manager's review queue, and the person
+   who actually spoke never learns their words landed on the plan. */
+.fs-topic-card__programme {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 6px 0 2px;
+  font-size: 11px;
+}
+.fs-topic-card__programme-label {
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-size: 10px;
+}
+.fs-topic-card__programme-task {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: var(--accent-info, var(--text-secondary));
+  text-align: left;
+}
+.fs-topic-card__programme-task:hover {
+  text-decoration: underline;
+}

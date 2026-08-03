@@ -771,6 +771,38 @@
     var retryCount = retryRef[0];
     var setRetry   = retryRef[1];
 
+    /* Project 3 §2 — matcher suggestions for this site, so a topic can show
+       that what was said reached the programme.
+
+       state:'all' here, unlike the Programme page's review queue which wants
+       'pending'. The point on this side is that the link EXISTS, and a
+       CONFIRMED suggestion is the strongest evidence of that — fetching only
+       pending ones would hide the link at exactly the moment it was accepted.
+
+       Failure is silent by design: this is an annotation, and a topic without
+       it must still render. */
+    var suggRef        = React.useState([]);
+    var suggestions    = suggRef[0];
+    var setSuggestions = suggRef[1];
+
+    React.useEffect(function () {
+      var mocked = window.FS.api.useMocks;
+      var site = window.FS.siteContext ? window.FS.siteContext.get() : null;
+      if (!site && !mocked) { setSuggestions([]); return undefined; }
+      var cancelled = false;
+      window.FS.api.programme.getSuggestions({ site: site, state: 'all' })
+        .then(function (res) {
+          if (!cancelled) setSuggestions((res && res.suggestions) || []);
+        })
+        .catch(function () { if (!cancelled) setSuggestions([]); });
+      return function () { cancelled = true; };
+    }, [props.date]);
+
+    var mentionsByTopic = React.useMemo(function () {
+      var m = window.FS.api.programmeMentions;
+      return m ? m.indexByTopic(suggestions) : {};
+    }, [suggestions]);
+
     /* life-conversation separation (Q2) — optimistic redaction/revert patches,
        same mechanism as TimelineMiddleColumn but applied PER SECTION here. Keyed
        by durable topic_row_id; merged over each section's report before
@@ -1017,12 +1049,30 @@
             'Topics'),
           React.createElement('div', { className: 'fs-timeline-page__topics' },
             _p.visible.map(function (topic) {
+              /* Project 3 §2. mentionsForTopic, never
+                 mentionsByTopic[topic.topic_id]: the report side's topic_id
+                 is per-report sequential (every section has a topic 0) while
+                 a suggestion's is topics.id, a uuid. The durable report-side
+                 key is topic_row_id and the module owns that distinction.
+
+                 This is the SECOND of two TopicCard mounts in this component.
+                 Wiring only one is how a feature ends up working on one
+                 route and silently absent on the other. */
+              var _mentions = window.FS.api.programmeMentions
+                ? window.FS.api.programmeMentions.mentionsForTopic(topic, mentionsByTopic)
+                : [];
+              var _linked = _mentions[0];
               return React.createElement(TopicCard, {
                 key:           topic.topic_id,
                 topic:         topic,
                 date:          props.date,
                 actionState:   actionsMap,
                 userFolder:    sectionUser,
+                programmeTaskName: _linked ? _linked.task_name : null,
+                programmeTaskId:   _linked ? _linked.task_id : null,
+                onOpenProgrammeTask: function (taskId) {
+                  window.location.hash = '#/programme?task=' + encodeURIComponent(taskId || '');
+                },
                 selected:      selectedAggId === ('topic_' + sectionUser + '_' + topic.topic_id),
                 defaultOpen:   false,
                 highlight:     false,
@@ -1905,11 +1955,26 @@
           var defaultOpenProp = !hasTopicTarget
             ? undefined
             : isTarget;
+          /* mentionsForTopic, never mentionsByTopic[topic.topic_id]: the
+             report side's topic_id is per-report sequential (every section
+             has a topic 0) while a suggestion's topic_id is topics.id, a
+             uuid. The durable report-side key is topic_row_id, and the
+             module owns that distinction so no page has to. */
+          var mentions = window.FS.api.programmeMentions
+            ? window.FS.api.programmeMentions.mentionsForTopic(topic, mentionsByTopic)
+            : [];
+          var linked = mentions[0];
+
           return React.createElement(TopicCard, {
             key:         topic.topic_id,
             topic:       topic,
             date:        date,
             actionState: actionState,
+            programmeTaskName: linked ? linked.task_name : null,
+            programmeTaskId:   linked ? linked.task_id : null,
+            onOpenProgrammeTask: function (taskId) {
+              window.location.hash = '#/programme?task=' + encodeURIComponent(taskId || '');
+            },
             /* user-dimension audit key plan (Task 5) — MUST derive from
                report.user_name, never the page `user` param: the
                self-view route has user=null (documented crux trap), and
