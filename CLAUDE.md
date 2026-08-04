@@ -389,6 +389,29 @@ caught that session; none was caught by reading a diff.
 - **A module that cannot be `require`d has no coverage at all.** Guard the
   `window` attach and add `module.exports`, or the parser behind every import
   is untested and nobody notices.
+- **An empty mock is not a neutral default — it is a claim that the feature
+  is finished and the data is absent.** `org.getSessions` and
+  `getSessionReportPreview` both returned `{sessions: []}` / `{topics: []}`.
+  Between them that silently removed the meeting picker, Today's meeting
+  groups, the `?session=` deep link and the whole Generate-report entry
+  point: four surfaces that looked complete-and-empty rather than
+  unverifiable, so none of them could be checked locally and two of them
+  shipped bugs. The rule that came out of it: a **read** stub has nothing to
+  refuse and should serve the day's own fixture. Only a **write** stub is
+  right to refuse offline, because there the alternative is faking a result
+  that will never exist.
+- **A join needs both halves in the fixture.** The timeline filters topics on
+  `topic.session_id`; no fixture topic carried one, so picking any meeting
+  filtered the day to zero and the feature read as broken when only the
+  fixture was. Derive the id in ONE place and let both sides read it, the way
+  the backend derives sessions from the topics' own `source_s3_key`.
+- **Known remaining gap (2026-08-05):** on prod a session usually holds
+  SEVERAL topics — one real recording covered three. The fixture stamps a
+  distinct session per topic, so multi-topic grouping (`topic_count`, block
+  merging, a session report spanning topics) is never exercised locally.
+  Fixing it means adding a topic that shares a session with an existing one;
+  it was left alone the night before a manual test because it moves the
+  per-day topic counts other suites assert on.
 
 ### Design rules these produced
 
