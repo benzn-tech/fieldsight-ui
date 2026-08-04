@@ -260,16 +260,20 @@
      date (a topic_id is only unique within one report). Every existing
      call site omits `topic`, so this is purely additive. */
   function TimelineLink(props) {
-    var dateOpt  = props.date || null;
-    var userOpt  = props.user || null;
-    var topicOpt = props.topic;
-    var label    = props.label || 'Open timeline';
+    var dateOpt    = props.date || null;
+    var userOpt    = props.user || null;
+    var topicOpt   = props.topic;
+    var sessionOpt = props.session || null;
+    var label      = props.label || 'Open timeline';
 
     function onClick() {
       var parts = [];
       if (dateOpt) parts.push('date=' + encodeURIComponent(dateOpt));
       if (dateOpt && userOpt) parts.push('user=' + encodeURIComponent(userOpt));
       if (dateOpt && topicOpt != null && topicOpt >= 0) parts.push('topic=' + encodeURIComponent(topicOpt));
+      /* Same guard shape as `topic`: a session id is only meaningful within a
+         day, so it rides along only when a date does. */
+      if (dateOpt && sessionOpt) parts.push('session=' + encodeURIComponent(sessionOpt));
       parts.push('from=today');
       window.FS.Router.navigate('/timeline?' + parts.join('&'));
     }
@@ -316,13 +320,23 @@
 
   function GeneratedTodayRow(props) {
     var sess = props.session || {};
-    var title = sess.label || sess.site_name || 'Meeting';
+    /* `title` (server-derived from the session's most-salient topic — the one
+       with the most open actions) NOT `label`, which is the "11:02 – 11:47"
+       time range. The row used to headline the time range and drop the title
+       entirely, so a day of meetings read as a column of clock times with no
+       way to tell what any of them was about. The time still shows, one line
+       down with the counts, where it belongs. */
+    var title = sess.title || sess.site_name || 'Meeting';
     var time = _sessionTimeRange(sess);
     var topics = sess.topic_count || 0;
     var people = (sess.participants || []).length;
+    var openActions = sess.open_action_count || 0;
     var bits = [];
     if (time) bits.push(time);
     bits.push(topics + (topics === 1 ? ' topic' : ' topics'));
+    /* The one number that says "this needs you" — already computed server-side
+       and, until now, thrown away. */
+    if (openActions) bits.push(openActions + ' open');
     if (people) bits.push(people + (people === 1 ? ' person' : ' people'));
 
     return React.createElement('div', {
@@ -337,14 +351,24 @@
         React.createElement('div', {
           style: {
             fontWeight: 600, color: 'var(--text-primary, #102A43)',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            /* Wraps. A meeting title is a sentence pulled out of speech, and
+               a one-line ellipsis on it hides the part that says what the
+               meeting was about — the same reason the task card dropped its
+               clamp. */
+            overflowWrap: 'anywhere',
           },
         }, title),
         React.createElement('div', {
           style: { fontSize: '0.8125rem', color: 'var(--text-secondary, #627d98)' },
         }, bits.join(' · ')),
       ),
-      React.createElement(TimelineLink, { date: props.date, label: 'Open' }),
+      /* session carries the deep link: Open now lands on THIS meeting's topics
+         instead of the whole day, which is what made the button worth pressing.
+         Without it the caller arrived at an unfiltered day and had to scroll to
+         find the meeting they had just clicked on. */
+      React.createElement(TimelineLink, {
+        date: props.date, session: sess.session_id, label: 'Open',
+      }),
     );
   }
 

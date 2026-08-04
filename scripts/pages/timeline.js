@@ -1509,6 +1509,43 @@
       window.FS.Router.navigate('/timeline' + qs);
     }
 
+    /* Project 3 §2 — matcher suggestions, so a topic can show that what was
+       said reached the programme. Mirrors AggregatedDayView's fetch (same
+       state:'all' reasoning: the point here is that the LINK EXISTS, and a
+       confirmed suggestion is the strongest evidence of that, so fetching
+       only pending ones would hide the link at the moment it was accepted).
+
+       This view rendered `mentionsByTopic` without ever declaring it — the
+       block was carried over from AggregatedDayView, comment and all, into a
+       component that has neither the fetch nor the index. The result was a
+       bare ReferenceError inside the topic map, which React turns into an
+       unmounted subtree: EVERY single-person timeline was a white screen, not
+       just the ones reached through "Open". The variable is now real.
+
+       Failure is silent by design: this is an annotation, and a topic without
+       it must still render. */
+    var suggRef        = React.useState([]);
+    var suggestions    = suggRef[0];
+    var setSuggestions = suggRef[1];
+
+    React.useEffect(function () {
+      var mocked = window.FS.api.useMocks;
+      var suggSite = window.FS.siteContext ? window.FS.siteContext.get() : null;
+      if (!suggSite && !mocked) { setSuggestions([]); return undefined; }
+      var cancelled = false;
+      window.FS.api.programme.getSuggestions({ site: suggSite, state: 'all' })
+        .then(function (res) {
+          if (!cancelled) setSuggestions((res && res.suggestions) || []);
+        })
+        .catch(function () { if (!cancelled) setSuggestions([]); });
+      return function () { cancelled = true; };
+    }, [date]);
+
+    var mentionsByTopic = React.useMemo(function () {
+      var m = window.FS.api.programmeMentions;
+      return m ? m.indexByTopic(suggestions) : {};
+    }, [suggestions]);
+
     var refState = React.useState({ status: 'loading' });
     var state    = refState[0];
     var setState = refState[1];
@@ -1557,7 +1594,20 @@
           setSessionsState({ status: 'ok', sessions: [], excluded: null });
           return;
         }
-        setSessionsState({ status: 'ok', sessions: res.sessions || [], excluded: res.excluded || null });
+        var loaded = res.sessions || [];
+        setSessionsState({ status: 'ok', sessions: loaded, excluded: res.excluded || null });
+        /* Deep link: ?session=<id> preselects that meeting in the picker, so
+           arriving from Today's "Open" lands on THAT meeting's topics instead
+           of an unfiltered day the caller then has to scroll. Applied here
+           rather than at mount because the picker can only hold a session that
+           actually exists in the loaded list — a stale or cross-day id would
+           otherwise filter everything away and render a blank day, which is
+           strictly worse than showing all of it. Silently ignored when it does
+           not match; "All day" remains the honest fallback. */
+        var wanted = params.session;
+        if (wanted && loaded.some(function (s) { return s.session_id === wanted; })) {
+          setSelectedSessionId(wanted);
+        }
       }).catch(function () {
         if (!cancelled) setSessionsState({ status: 'ok', sessions: [], excluded: null });
       });
