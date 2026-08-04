@@ -1195,6 +1195,10 @@
               React.createElement(DraftEmailButton, {
                 topics:     _p.visible,
                 session:    null,
+                /* THIS section's recorder — photo S3 keys are per-folder, so
+                   the caller's own folder here would resolve someone else's
+                   pictures prefix (or none). */
+                userFolder: sectionUser,
                 siteName:   report.site,
                 date:       props.date,
                 reportDate: report.report_date || props.date,
@@ -2186,6 +2190,9 @@
     var _draftEl = React.createElement(DraftEmailButton, {
       topics:     visibleTopics,
       session:    _selectedSession,
+      /* ownerFolder, not `user`: the self-view has user===null and the photos
+         belong to whoever recorded the day. */
+      userFolder: ownerFolder,
       siteName:   report.site || site || '',
       date:       date,
       reportDate: report.report_date || date,
@@ -2417,13 +2424,58 @@
          + ' item' + (draft.omittedItems === 1 ? '' : 's')
          + ' trimmed to fit; full list via the link in the email. Nothing is sent until you send it.')
       : 'Opens a draft in your mail client — nothing is sent until you send it';
-    return React.createElement('a', {
-      className: 'fs-btn fs-btn--secondary fs-btn--sm fs-draft-email',
-      href:      draft.url,
-      title:     tip,
-      /* mailto stays in the same tab handoff to the OS mail client; no
-         target/_blank needed and no rel required for a mailto scheme. */
-    }, 'Draft email');
+    return React.createElement(React.Fragment, null,
+      React.createElement('a', {
+        className: 'fs-btn fs-btn--secondary fs-btn--sm fs-draft-email',
+        href:      draft.url,
+        title:     tip,
+        /* mailto stays in the same tab handoff to the OS mail client; no
+           target/_blank needed and no rel required for a mailto scheme. */
+      }, 'Draft email'),
+      /* Beside it, not instead of it. The two hand-offs lose different
+         things and neither dominates:
+           Draft email  pre-fills recipient + subject and opens the compose
+                        window — but mailto rides in a URL, so it cannot
+                        attach a photo and it TRIMS items past ~1800 chars.
+           Preview      shows what is about to go, carries the photos that
+                        evidence each finding, and never truncates — but the
+                        user pastes into a message they opened themselves.
+         A finding without its photo is an assertion; with it, it is
+         evidence. That is what earns the second button. */
+      React.createElement(PreviewEmailButton, props),
+    );
+  }
+
+  /* Opens EmailPreviewModal. Separate component so the modal's open/closed
+     state does not live in DraftEmailButton, which renders in two places
+     (the aggregated person-section and the single-day view) and would
+     otherwise share one flag across both. */
+  function PreviewEmailButton(props) {
+    var openRef = React.useState(false);
+    var open    = openRef[0];
+    var setOpen = openRef[1];
+    var Modal   = window.FieldSight.EmailPreviewModal;
+    if (!Modal) return null;          /* script not loaded → no broken button */
+    return React.createElement(React.Fragment, null,
+      React.createElement('button', {
+        type:      'button',
+        className: 'fs-btn fs-btn--tertiary fs-btn--sm',
+        title:     'See the hand-off with its photos, then copy it into any email',
+        onClick:   function () { setOpen(true); },
+      }, 'Preview & copy'),
+      React.createElement(Modal, {
+        open:       open,
+        onClose:    function () { setOpen(false); },
+        topics:     props.topics,
+        session:    props.session,
+        date:       props.date,
+        reportDate: props.reportDate || props.date,
+        siteName:   props.siteName,
+        userFolder: props.userFolder,
+        isDone:     props.isDone,
+        deepLink:   props.deepLink,
+      }),
+    );
   }
 
   /* Delivery-C Tier-2 — a per-session "Generate report" control beside the mailto

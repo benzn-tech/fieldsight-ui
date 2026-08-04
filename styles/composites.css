@@ -11327,3 +11327,55 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-zone-split__dates { color: var(--text-tertiary); flex-shrink: 0; }
 .fs-zone-split__overrun { font-size: 12px; color: var(--accent-warning, #b8860b); margin: 8px 0; }
 .fs-zone-split__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* ==========================================================================
+   EmailPreviewModal — the hand-off, shown before it leaves
+   ========================================================================== */
+
+.fs-email-preview {
+  font-size: 14px;
+  color: var(--text-primary);
+  /* The modal body scrolls, the actions footer does not — a long day must
+     not push Copy off the bottom of the screen. */
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.fs-email-preview__subject,
+.fs-email-preview__intro { margin: 0 0 12px; }
+
+.fs-email-preview__group {
+  margin: 0 0 18px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.fs-email-preview__group:last-of-type { border-bottom: 0; }
+
+.fs-email-preview__topic { font-weight: var(--font-weight-semibold); }
+.fs-email-preview__time  { font-weight: 400; color: var(--text-tertiary); }
+
+.fs-email-preview__items { margin: 4px 0 8px; padding-left: 20px; }
+.fs-email-preview__items li { margin: 0 0 3px; overflow-wrap: anywhere; }
+
+.fs-email-preview__photos { display: flex; flex-wrap: wrap; gap: 8px; }
+.fs-email-preview__photo {
+  max-width: 200px; height: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 4px);
+}
+.fs-email-preview__photo-pending {
+  font-size: 12px; color: var(--text-tertiary);
+}
+
+.fs-email-preview__footer,
+.fs-email-preview__note,
+.fs-email-preview__empty {
+  font-size: 12px; color: var(--text-tertiary);
+}
+.fs-email-preview__note { color: var(--text-secondary); }
+
+.fs-email-preview__actions {
+  display: flex; justify-content: flex-end; gap: 8px;
+  margin-top: 14px; padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
