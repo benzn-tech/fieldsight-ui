@@ -243,19 +243,9 @@
         g.photos.forEach(function (f) { if (names.indexOf(f) < 0) names.push(f); });
       });
       if (!names.length) return undefined;
-      Promise.all(names.map(function (f) {
-        var key = window.FS.api.media.photoKey({
-          userDisplayName: props.userFolder, date: props.date, filename: f,
-        });
-        return window.FS.api.media.getUrl(key)
-          .then(function (u) { return { f: f, url: (u && u.url) || u }; })
-          .catch(function () { return null; });
-      })).then(function (rows) {
-        if (cancelled) return;
-        var m = {};
-        rows.filter(Boolean).forEach(function (r) { if (r.url) m[r.f] = r.url; });
-        setPhotoSrc(m);
-      });
+      window.FS.api.media.photoUrls({
+        userDisplayName: props.userFolder, date: props.date, filenames: names,
+      }).then(function (m) { if (!cancelled) setPhotoSrc(m); });
       return function () { cancelled = true; };
     }, [props.open, props.userFolder, props.date, model]);
 

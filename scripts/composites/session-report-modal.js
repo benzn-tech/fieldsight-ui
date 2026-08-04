@@ -175,6 +175,7 @@
     var s_req = React.useState(null); var reqId = s_req[0], setReqId = s_req[1];
     var s_result = React.useState(null); var result = s_result[0], setResult = s_result[1];
     var s_error = React.useState(null); var error = s_error[0], setError = s_error[1];
+    var s_photos = React.useState({}); var photoSrc = s_photos[0], setPhotoSrc = s_photos[1];
 
     function sid() { return props.session ? props.session.session_id : null; }
 
@@ -182,7 +183,7 @@
     React.useEffect(function () {
       if (props.open) {
         setStep('preview'); setReqId(null); setResult(null); setError(null);
-        setPreview(null); setPreviewErr(null);
+        setPreview(null); setPreviewErr(null); setPhotoSrc({});
         setDeliver('download'); setRecip([]); setRecipText('');
       }
     }, [props.open]);
@@ -209,6 +210,34 @@
       }).catch(function () { if (alive) setPreviewErr('Could not load the preview.'); });
       return function () { alive = false; };
     }, [props.open]);
+
+    /* Presign the topics' photos once the preview lands. This review step is
+       where someone decides whether the report is right before it is generated
+       and possibly emailed — and a topic's photograph is the part of it they
+       can check fastest. Showing the prose without the evidence made the
+       reviewer approve something they had not actually seen.
+
+       Failure is deliberately silent: photoUrls omits a key it cannot
+       presign, so a missing picture costs its own thumbnail and nothing
+       else. The report itself is assembled server-side and does not depend
+       on any of this. */
+    React.useEffect(function () {
+      if (!props.open || !preview || !props.userFolder) return undefined;
+      var media = (((window.FS || {}).api) || {}).media;
+      if (!media || !media.photoUrls) return undefined;
+      var names = [];
+      (preview.topics || []).forEach(function (t) {
+        (t.related_photos || []).forEach(function (f) { names.push(f); });
+      });
+      if (!names.length) return undefined;
+      var alive = true;
+      media.photoUrls({
+        userDisplayName: props.userFolder,
+        date: preview.date || props.date,
+        filenames: names,
+      }).then(function (m) { if (alive) setPhotoSrc(m); });
+      return function () { alive = false; };
+    }, [props.open, preview, props.userFolder]);
 
     // F5 — poll the async status while generating, until a terminal phase.
     React.useEffect(function () {
@@ -247,6 +276,22 @@
       }).catch(function () { setError('Could not start report generation.'); setStep('error'); });
     }
 
+    /* A topic's photos, or nothing at all. Only files that presigned get an
+       <img>; one that then fails to decode hides itself, because a
+       broken-image icon in a REVIEW step reads as "the report is broken"
+       when the truth is narrower — this one file is unreachable. */
+    function photoStrip(filenames) {
+      var srcs = (filenames || []).map(function (f) { return photoSrc[f]; }).filter(Boolean);
+      if (!srcs.length) return null;
+      return h('div', { className: 'fs-srm__preview-photos' },
+        srcs.map(function (src, i) {
+          return h('img', {
+            key: i, src: src, alt: '', className: 'fs-srm__preview-photo',
+            onError: function (e) { e.target.style.display = 'none'; },
+          });
+        }));
+    }
+
     function btn(label, onClick, variant) {
       return h('button', {
         type: 'button', className: 'fs-btn' + (variant ? ' fs-btn--' + variant : ''), onClick: onClick,
@@ -277,7 +322,11 @@
                         return h('li', { key: j },
                           (a.action || a.text || '') + (a.responsible ? ' — ' + a.responsible : ''));
                       }))
-                  : null);
+                  : null,
+                /* Inside the topic block, after its actions — the photo is
+                   evidence FOR this topic, and a strip at the bottom of the
+                   modal would make the reader guess which claim it backs. */
+                photoStrip(t.related_photos));
             })));
       }
     } else if (step === 'fill') {
