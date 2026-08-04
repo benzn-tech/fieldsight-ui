@@ -318,6 +318,84 @@ Both of these pass every unit test and fail only in the browser. A green
   `@media (prefers-reduced-motion: reduce)` override — field workers
   with vestibular disorders are a real audience.
 
+## How to verify (read before trusting a green test run)
+
+Every entry below is a real defect from one session, and the point of the
+section is the pattern rather than the list: **a green suite is evidence
+about the code you wrote, not about the code that runs.** Eight defects were
+caught that session; none was caught by reading a diff.
+
+### Three things that actually find bugs
+
+1. **Open the page and look at what rendered.** Not the diff, not the test
+   output — the DOM. A zone split shipped whose rows were invisible because
+   `buildRows` only emitted leaves parented to a WBS group; every test
+   passed. A topic-to-programme link shipped wired to one of *three*
+   `AskChat` mounts; the route under test rendered a different one.
+
+2. **Run the SQL against a real database.** Test doubles do not enforce
+   foreign keys, and that is where the expensive ones hide. A fix written to
+   *preserve* local rows would have **deleted** them, because `parent_id` is
+   `ON DELETE CASCADE` and scoping the `DELETE` to `origin='imported'` is not
+   enough on its own. 1598 unit tests passed both before and after that fix.
+   Also caught this way: `ORDER BY ... DESC` needs `NULLS LAST` or a NULL
+   comparison sorts ahead of an exact match.
+
+3. **Re-check your own claims.** The most expensive defect of the session was
+   the sentence *"the guard is now redundant but harmless"* in a commit
+   message. It was not harmless — it still refused every save, which made the
+   fix behind it unreachable. Treat anything you asserted in a comment, a
+   commit message or a PR body as a proposition to verify, not a fact.
+
+### Measure the right thing
+
+- **Frame rate cannot be measured in an automated browser tab.** It is
+  always `visibilityState: hidden`, so rAF is throttled to ~1fps. Measure
+  **main-thread blocking** instead: swap `requestAnimationFrame` for a
+  synchronous shim, stop the clock on a real `MutationObserver` commit, and
+  record `PerformanceObserver({entryTypes:['longtask']})`.
+- **A measurement that detects nothing also reports zero.** Always run a
+  control that should fail. Forcing 1,200 rows produced 1,294ms of blocking,
+  which is what made the quiet 174/180 result meaningful.
+- **Stop the clock after the commit, not after a microtask.** `await
+  Promise.resolve()` gave a median of 0.1ms; waiting for the DOM mutation
+  gave 33ms. The first number measured the scroll handler and nothing else.
+- **Read the rendered node, not `textContent`.** It strips markup by
+  definition. A "markdown does not render" bug was reported that way and did
+  not exist.
+
+### Fixtures lie in specific ways
+
+- **Feed real output into the real consumer.** Twenty-two unit tests passed
+  on invented task objects while the module could read only one of the two
+  shapes it is actually given (`{task_id, start}` from `GET /programme`
+  versus `{id, source_task_id, start_date}` from the window endpoint).
+- **When a fixture keeps producing the wrong result, read the classifier.**
+  Three CSV fixtures in a row produced parents and no leaves. The module was
+  right every time; the idea of its input was wrong.
+- **Every fixture had uids under 1000**, which is why a task id built with
+  `('000' + uid).slice(-3)` — padding that also truncates — survived until a
+  real 849-task programme arrived, collided 420 tasks, fabricated a
+  dependency cycle and stopped the critical path from drawing.
+- **A module that cannot be `require`d has no coverage at all.** Guard the
+  `window` attach and add `module.exports`, or the parser behind every import
+  is untested and nobody notices.
+
+### Design rules these produced
+
+- **Return a status, never a bare number, when the answer might be unknown.**
+  `0` renders as "on programme"; `[]` renders as "nothing is neglected".
+  Both are claims. `programme-lateness` and `programme-mentions` refuse
+  instead.
+- **`null` means "no restriction"; `[]` means "restrict to nothing."**
+  Conflating them once handed every user's reports to an account that should
+  have seen none.
+- **Silence is not consent.** A review batch starts every item pending and
+  blocks commit while any remain — scrolling past twenty proposals is not
+  reviewing them.
+- **Never store an inferred order as data.** A sequence nobody stated lands
+  on real people's dates.
+
 ## Working with this Project
 
 - The user issues **specs in markdown** for each sub-sprint — patch-by-patch
