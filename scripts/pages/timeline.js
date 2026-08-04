@@ -57,17 +57,30 @@
      it used to ask isAdminLike, which silently excluded pm and site_manager
      and left them with NO way out of a person's day once they opened one.
 
-     It is not the same question as isAdminLike:
-       • admin/gm     — yes, with or without a site (no site → the cross-site
-                        user list; with one → that site's day).
-       • pm / site_mgr — only WITH a site anchored. Without one the resolver
-                        below forces them back to self, so a siteless "back"
-                        would bounce them straight into the view they just
-                        tried to leave.
-       • worker       — never; they have no overview to return to. */
-  function canSeeOverview(caller, site) {
-    if (!caller || caller.role === 'worker') return false;
-    return isAdminLike(caller) || !!site;
+     It is not the same question as isAdminLike — that silently excluded pm
+     and site_manager, who are most of the people who open someone else's day.
+
+     It is also no longer gated on having a site anchored, which is what the
+     first version of this got wrong. The reasoning then was that a siteless
+     "back" would bounce a pm/site_manager into the view they just left. It
+     does not: ?view=team with no site renders the PROJECT PICKER, which is a
+     next step rather than a dead end.
+
+     Requiring a site made this false in exactly the default state — the
+     header sits on "— All projects —", so siteContext is null until someone
+     chooses — and that took the empty-day handover below down with it. On
+     prod, 8 of 10 site managers have no recordings of their own, so the
+     handover firing is the difference between them landing on a usable page
+     and landing on "No report for <their own name>".
+
+       • worker — never; they are pinned to themselves and have no overview
+                  to return to.
+
+     A caller with NO role is not a caller yet — identity has not resolved.
+     Answering "yes" there would guess upward from silence, so it answers no
+     and the page shows the one thing it can be sure of. */
+  function canSeeOverview(caller) {
+    return !!(caller && caller.role) && caller.role !== 'worker';
   }
 
   /* Whose day does this URL mean? Pure, so the landing rule is testable
@@ -1964,14 +1977,24 @@
       );
     }
 
-    /* Batch A — multi-project admin/gm caller with no project chosen:
-       offer the project picker instead of the raw cross-site user list
+    /* "Is this the multi-person view?" — asked once, because it is NOT the
+       same as `!user` any more. The own-day handover deliberately leaves
+       `user` set to the caller (so moving to a date where they DID record
+       shows their own day again, with no URL rewrite) and signals itself
+       through state. Every branch that used to test `!user` has to test this
+       instead, or the handover sets a state nothing renders and the page
+       falls through to the very empty day it was trying to avoid — which is
+       exactly what it did. */
+    var teamView = !user || !!state.aggregated;
+
+    /* Batch A — multi-project caller with no project chosen: offer the
+       project picker instead of the raw cross-site user list
        (available_users below) once we know there's more than one option.
        While sitesList is still resolving, sitesList.length is 0 so this
        branch simply doesn't match yet — the 'loading' branch above (from
        the still-in-flight, non-short-circuited fetch below) covers that
        window without any extra state. */
-    if (!site && !user && sitesList.length > 1) {
+    if (!site && teamView && sitesList.length > 1) {
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: null,
@@ -1987,11 +2010,7 @@
        every user on the site (AggregatedDayView) instead of a single
        report. The fetch effect above short-circuits to a minimal
        ok-state for this case; AggregatedDayView does its own fetching. */
-    /* `state.aggregated` as well as `!user`: the own-day-first fallback keeps
-       `user` set to the caller (nothing asked it to change) and signals the
-       handover through state, so the URL stays free of an explicit choice and
-       a date where they DID record shows their own day again. */
-    if (site && (!user || state.aggregated)) {
+    if (site && teamView) {
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: null,
