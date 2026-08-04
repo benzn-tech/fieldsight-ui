@@ -151,9 +151,17 @@
      section still filters its own bucket by the same isMineTask-derived
      membership it always had. */
   function visibleTasks(list, hideAged) {
-    return (list || []).filter(function (t) {
+    var kept = (list || []).filter(function (t) {
       return !hideAged || !isAgedTask(t);
     });
+    /* ...and ORDERED. Before this the list came out in transcript order —
+       the order things were said, which has nothing to do with the order
+       they should be done — and the reported symptom was not being able to
+       tell what mattered. The rules and the data behind them live in
+       api/today-ordering.js. Absent (older cached page, module not loaded)
+       degrades to the previous unordered behaviour rather than crashing. */
+    var order = window.FS && window.FS.api && window.FS.api.orderOpenItems;
+    return order ? order(kept) : kept;
   }
 
   /* feat/leftover-inline-filter — how many aged items a list holds. Used
