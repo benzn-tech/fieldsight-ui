@@ -106,6 +106,7 @@
 
   <!-- Sprint 8 — new L5 composites -->
   <script type="text/babel" src="scripts/composites/error-banner.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/page-error-boundary.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/over-allocation-banner.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/tooltip.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/toast.js?v=1"></script>
@@ -160,6 +161,8 @@
             SchemaEditor, VersionHistoryPanel,
             /* Sprint 11 (Task 6) — programme suggestion review queue */
             SuggestionReview,
+            /* Keeps one page's crash from unmounting the whole app */
+            PageErrorBoundary,
             /* T4 — shared multi-select hook + bulk-bar (Today Leftover /
                Safety / Quality) */
             useMultiSelect, MultiSelectBulkBar,
@@ -1290,6 +1293,29 @@
                   onRetry={() => alert('retry fired')}
                   mini={true}
                 />}
+              </div>
+            </Row>
+          </Section>
+
+          {/* The only composite here whose demo has to actually break to be a
+              demo: it is a React error boundary, and a boundary that is never
+              given a throwing child has not been shown to work. Thrower is
+              gated behind a button so the page renders normally until asked. */}
+          <Section title="PageErrorBoundary — a page crash must not take the app">
+            <Row label="caught">
+              <div style={{ flex: 1 }}>
+                {PageErrorBoundary
+                  ? React.createElement(PageErrorBoundary, { route: '/demo' },
+                      React.createElement(function Thrower() {
+                        const [boom, setBoom] = React.useState(false);
+                        if (boom) throw new TypeError(
+                          "Cannot read properties of null (reading 'split')");
+                        return <button className="fs-btn fs-btn--secondary"
+                                       onClick={() => setBoom(true)}>
+                          Throw the prod exception
+                        </button>;
+                      }))
+                  : <em>PageErrorBoundary not loaded</em>}
               </div>
             </Row>
           </Section>
