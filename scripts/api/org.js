@@ -363,15 +363,80 @@
      getSiteMembers. Mock/pre-gate default is an empty sessions list (the
      picker simply doesn't render — matches getLiveItems' "nothing until
      seeded" posture), never a fabricated session. */
+  /* The mock day's sessions, paired with the topic each was derived from.
+     Shared by getSessions and getSessionReportPreview so the picker cannot
+     offer a session the preview then fails to resolve — the two drifting
+     apart is exactly how a mock stops being a rehearsal of the real thing.
+     Returns [{ session, topic }]. */
+  function _mockSessions(date, user) {
+    var day = (((window.FieldSight || {}).fixtures || {}).reports || {})[date] || {};
+    var rep = day[user] || {};
+    var order = [], byId = {};
+    (rep.topics || []).forEach(function (t) {
+      /* Grouped BY the topic's own session_id — the same join the timeline
+         filter uses, and the same shape the backend builds by bucketing
+         topic rows on the session parsed out of source_s3_key. Deriving a
+         fresh id here instead would let the picker offer a session no topic
+         belongs to, which filters the day down to nothing. */
+      var id = t.session_id;
+      if (!id) return;                        // report-scoped topic: no session
+      if (!byId[id]) { byId[id] = { topic: t, topics: [] }; order.push(id); }
+      byId[id].topics.push(t);
+    });
+    return order.map(function (id) {
+      var g = byId[id], topics = g.topics;
+      function edge(t, i) { return String(t.time_range || '').split(/\s*[–—-]\s*/)[i]; }
+      var from = (edge(topics[0], 0) || '00:00').trim();
+      var to   = (edge(topics[topics.length - 1], 1) || from).trim();
+      var open = 0, people = [], rowIds = [];
+      topics.forEach(function (t) {
+        open += (t.action_items || []).filter(function (a) {
+          return (a.status || 'open') === 'open';
+        }).length;
+        (t.participants || []).forEach(function (n) {
+          if (people.indexOf(n) < 0) people.push(n);
+        });
+        if (t.topic_row_id) rowIds.push(String(t.topic_row_id));
+      });
+      return {
+        topic: g.topic, topics: topics,
+        session: {
+          session_id:        id,
+          started_at:        date + 'T' + from + ':00',
+          ended_at:          date + 'T' + to + ':00',
+          site_name:         rep.site || null,
+          title:             topics[0].topic_title || rep.site || 'Meeting',
+          topic_count:       topics.length,
+          open_action_count: open,
+          participants:      people,
+          topic_row_ids:     rowIds,
+          label:             from + ' – ' + to,
+          block:             null,
+        },
+      };
+    });
+  }
+
   async function getSessions(opts) {
     opts = opts || {};
     if (!api.useMocks && api.timelineSource === 'aurora' && api.orgBaseUrl) {
       return api.orgRequest('/sessions', { params: { date: opts.date, user: opts.user } });
     }
     await api.delay();
+    /* Derived from the day's report fixture rather than returned empty.
+       An empty list is not a safe default here the way it is for a WRITE
+       stub — it silently removes the meeting picker, Today's meeting
+       groups, the ?session= deep link and the whole Generate-report
+       entry point, so four separate surfaces look "finished and empty"
+       instead of unverifiable. Read-only, so there is nothing to refuse.
+
+       One session per topic mirrors the real grouping closely enough for
+       the UI: the backend buckets topic rows by the session id parsed out
+       of source_s3_key, and the fixture's topics are one-per-recording. */
+    var sessions = _mockSessions(opts.date, opts.user).map(function (s) { return s.session; });
     return {
       date: opts.date, user: opts.user, gap_minutes: null,
-      sessions: [], excluded: { non_work: 0, redacted: 0 },
+      sessions: sessions, excluded: { non_work: 0, redacted: 0 },
     };
   }
 
@@ -527,11 +592,22 @@
        here matches what they just came from. */
     var day = (((window.FieldSight || {}).fixtures || {}).reports || {})[opts.date] || {};
     var rep = day[opts.user] || {};
+    /* Scoped to the requested session, exactly as _assemble_session_report
+       does — a preview that quietly returned the whole day would let a
+       report be reviewed against content it does not contain. Falls back
+       to the full day only when no session id was supplied. */
+    var pairs = _mockSessions(opts.date, opts.user);
+    var hit = opts.sessionId
+      ? pairs.filter(function (p) { return p.session.session_id === opts.sessionId; })
+      : pairs;
+    var topics = hit.length
+      ? hit.reduce(function (acc, p) { return acc.concat(p.topics); }, [])
+      : (rep.topics || []);
+    var people = [];
     /* The fixture carries participants per TOPIC, the way extraction does;
        the session's attendee list is their union, which is also what the
        backend's _session_participants builds. */
-    var people = [];
-    (rep.topics || []).forEach(function (t) {
+    topics.forEach(function (t) {
       (t.participants || []).forEach(function (n) {
         if (people.indexOf(n) < 0) people.push(n);
       });
@@ -539,12 +615,12 @@
     return {
       sessionId:    opts.sessionId,
       date:         opts.date,
-      title:        rep.executive_summary ? (rep.site || 'Session report') : null,
+      title:        (hit.length && hit[0].session.title) || rep.site || 'Session report',
       siteName:     rep.site || null,
       participants: people,
-      topics:       rep.topics || [],
+      topics:       topics,
       fieldDefaults: {
-        title:     rep.site || '',
+        title:     (hit.length && hit[0].session.title) || rep.site || '',
         attendees: people,
         date:      opts.date,
         site:      rep.site || '',

@@ -691,8 +691,14 @@
     var StatCard = window.FieldSight.StatCard;
     var report = props.report || {};
 
-    var topics  = (report.topics || []).length;
-    var safetyCount = (report.topics || []).reduce(function (acc, t) {
+    /* Counted over the topics ACTUALLY ON SCREEN. With a meeting selected in
+       the session picker the list narrows to that meeting, and a strip still
+       reading the whole day's "4 Topics" above a one-topic list is not a
+       header — it is a contradiction, and it undermines the filter it sits
+       above. props.topics is the already-scoped list when there is one. */
+    var counted = props.topics || report.topics || [];
+    var topics  = counted.length;
+    var safetyCount = counted.reduce(function (acc, t) {
       var tagged = (t.category === 'safety') || ((t.safety_flags || []).length > 0);
       return acc + (tagged ? 1 : 0);
     }, 0);
@@ -710,6 +716,14 @@
     // ("nothing recorded today"), not a missing metric.
     var meta = report._report_metadata || {};
 
+    /* Recordings and Recorded time are counted per DAY off the recordings
+       table; there is no per-session split of them. When the view is scoped
+       to one meeting they become unavailable rather than wrong — showing the
+       day's totals beside a one-meeting topic count would attribute the whole
+       day's recording to that meeting. '—' already means "metric unavailable"
+       everywhere else in this strip, so it needs no new vocabulary. */
+    var dayOnly = !props.sessionScoped;
+
     return React.createElement(KpiStrip, null,
       React.createElement(StatCard, {
         value: topics, label: 'Topics',
@@ -718,11 +732,11 @@
         value: safetyCount, label: 'Safety', tone: safetyCount > 0 ? 'danger' : 'neutral',
       }),
       React.createElement(StatCard, {
-        value: meta.recordings_processed != null ? meta.recordings_processed : '—',
+        value: (dayOnly && meta.recordings_processed != null) ? meta.recordings_processed : '—',
         label: 'Recordings',
       }),
       React.createElement(StatCard, {
-        value: fmtRecordedTime(meta.duration_seconds),
+        value: dayOnly ? fmtRecordedTime(meta.duration_seconds) : '—',
         label: 'Recorded',
       }),
     );
@@ -2218,8 +2232,19 @@
         site: site,
       }),
       React.createElement(ViewToggle),
-      React.createElement(ReportKpis, { report: report }),
-      React.createElement(ExecutiveSummaryCard, {
+      React.createElement(ReportKpis, {
+        report: report,
+        /* The visible list, not the day — see ReportKpis. */
+        topics: visibleTopics,
+        sessionScoped: !!selectedSessionId,
+      }),
+      /* The executive summary narrates the whole DAY — it is written once,
+         over every topic, and there is no per-meeting version of it. Left
+         standing under a one-meeting view it describes four meetings above a
+         list showing one, which is the same contradiction the KPI strip had.
+         Hidden rather than trimmed: a summary cannot be filtered down to the
+         sentences that happen to mention this session without rewriting it. */
+      selectedSessionId ? null : React.createElement(ExecutiveSummaryCard, {
         bullets: report.executive_summary,
       }),
       (showSessionPicker || excludedNote) ? React.createElement('div', {
