@@ -11379,3 +11379,20 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   margin-top: 14px; padding-top: 12px;
   border-top: 1px solid var(--border-subtle);
 }
+
+/* ==========================================================================
+   SessionReportModal — photo evidence in the review step
+   ========================================================================== */
+
+/* Thumbnails, not a gallery. The reviewer is checking that the right photo
+   sits under the right claim before the report is generated; they open the
+   Photos tab when they need to look properly. */
+.fs-srm__preview-photos {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin: 8px 0 0;
+}
+.fs-srm__preview-photo {
+  max-width: 140px; height: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 4px);
+}
