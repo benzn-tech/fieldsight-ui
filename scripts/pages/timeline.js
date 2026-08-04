@@ -45,8 +45,54 @@
     return window.FS.api.folderName(u.name);
   }
 
+  /* Coerced: a caller without an `isAdmin` field used to make this return
+     `undefined`. Equivalent inside an `if`, but it is a predicate — callers
+     (and tests) should be able to compare it. */
   function isAdminLike(user) {
-    return user && (user.role === 'admin' || user.role === 'gm' || user.isAdmin);
+    return !!(user && (user.role === 'admin' || user.role === 'gm' || user.isAdmin));
+  }
+
+  /* Can this caller reach a multi-person view at all, from where they are?
+     The question the "back to overview" control actually needs answered —
+     it used to ask isAdminLike, which silently excluded pm and site_manager
+     and left them with NO way out of a person's day once they opened one.
+
+     It is not the same question as isAdminLike:
+       • admin/gm     — yes, with or without a site (no site → the cross-site
+                        user list; with one → that site's day).
+       • pm / site_mgr — only WITH a site anchored. Without one the resolver
+                        below forces them back to self, so a siteless "back"
+                        would bounce them straight into the view they just
+                        tried to leave.
+       • worker       — never; they have no overview to return to. */
+  function canSeeOverview(caller, site) {
+    if (!caller || caller.role === 'worker') return false;
+    return isAdminLike(caller) || !!site;
+  }
+
+  /* Whose day does this URL mean? Pure, so the landing rule is testable
+     without mounting the page.
+
+       ?user=X     → that person (explicit; how "Open" navigates)
+       ?view=team  → the multi-person view (explicit; how the team control
+                     and the back control navigate)
+       neither     → the caller's OWN day
+
+     `selfDefaulted` distinguishes "we put you here" from "you asked for
+     this", which is what licenses the empty-day handover to the team view:
+     an explicitly requested empty day still renders its own empty state,
+     because redirecting away from a page someone asked for is disorienting.
+
+     Workers are pinned to themselves whatever the URL says — they have no
+     team view to be sent to, so no marker is needed. */
+  function resolveTimelineScope(caller, params, selfFolder) {
+    var p = params || {};
+    if (caller && caller.role === 'worker') {
+      return { user: selfFolder, selfDefaulted: false };
+    }
+    if (p.user) return { user: p.user, selfDefaulted: false };
+    if (p.view === 'team') return { user: null, selfDefaulted: false };
+    return { user: selfFolder, selfDefaulted: true };
   }
 
   /* ---------- life-conversation separation: optimistic overrides --------- */
@@ -596,16 +642,29 @@
          directions of the same bidirectional control different visibility
          rules. Both directions now share one URL contract: drop ?user=,
          keep date + site. */
-      (user && isAdminLike((window.AuthMock && window.AuthMock.currentUser) || {}))
+      (user && canSeeOverview((window.AuthMock && window.AuthMock.currentUser) || {}, site))
         ? React.createElement('button', {
             type:      'button',
             className: 'fs-btn fs-btn--tertiary fs-btn--sm',
             style:     { marginTop: '6px' },
             onClick:   function () {
-              window.FS.Router.navigate('/timeline?date=' + (date || '')
+              /* view=team is what makes this an EXPLICIT choice. Dropping
+                 ?user= alone is no longer enough: the resolver now treats
+                 "no user" as "show me my own day", so a bare back link
+                 would land the caller straight back on themselves. */
+              window.FS.Router.navigate('/timeline?view=team&date=' + (date || '')
                 + (site ? '&site=' + encodeURIComponent(site) : ''));
             },
-          }, site ? '← All people on this site' : '← Back to overview')
+          },
+            /* Same destination, two different journeys — the label has to say
+               which one this is. On your OWN day (where own-day-first now
+               lands you by default) the team view is somewhere you have not
+               been, so "back" would be a lie; on someone else's it is
+               genuinely where you came from. Derived from the folder rather
+               than a new prop so the control stays self-contained. */
+            (user === callerFolder())
+              ? (site ? 'View everyone on this site →' : 'View the team →')
+              : (site ? '← All people on this site' : '← Back to overview'))
         : null,
     );
   }
@@ -1415,8 +1474,27 @@
       site = null;
     }
 
-    if (caller.role === 'worker') user = callerFolder();
-    if (!user && !site && !isAdminLike(caller)) user = callerFolder();
+    /* Whose day are we on?
+         ?user=X     → that person (explicit; how "Open" navigates)
+         ?view=team  → the multi-person view (explicit; how "back" navigates)
+         neither     → YOUR OWN day.
+
+       The default used to be the team view for anyone with a site anchored,
+       which made "see what I recorded" — the single most common thing a
+       recorder opens this page for — cost an extra click and a scan down a
+       list of colleagues to find yourself. Own-day-first inverts that; the
+       team view is one labelled control away, and `view=team` keeps it a
+       real URL so it survives refresh, bookmarks and shared links.
+
+       A caller whose own day turns out to be EMPTY falls through to the team
+       view in the fetch effect below (managers often record nothing
+       themselves). That fallback is deliberately state-only, not a redirect:
+       the URL stays "no explicit choice", so moving to a date where they DID
+       record shows their own day again rather than stranding them on the
+       team view. */
+    var _scope        = resolveTimelineScope(caller, params, callerFolder());
+    user              = _scope.user;
+    var selfDefaulted = _scope.selfDefaulted;
 
     /* Switching projects resets the active person — a user picked for
        one site rarely maps onto another. Persists the choice via the
@@ -1576,6 +1654,18 @@
         return undefined;
       }
 
+      /* Own-day-first fallback. `selfDefaulted` marks the case where nobody
+         asked for this person — the resolver put the caller on their own day
+         because no ?user= and no view=team was given. If that day turns out
+         to hold nothing, showing an empty page would be a worse landing than
+         the team view the default replaced, so hand over to it.
+
+         Only ever applies to the implicit default: an explicit ?user= (an
+         empty day someone deliberately opened) still renders its own empty
+         state, because silently redirecting away from a page you asked for
+         is disorienting. */
+      var canFallBackToTeam = selfDefaulted && canSeeOverview(caller, site);
+
       setState({ status: 'loading' });
       Promise.all([
         window.FS.api.timeline.getTimeline({ date: date, user: user }),
@@ -1610,6 +1700,16 @@
 
         var hasReport  = !!(report && !report._notFound && !report.available_users);
         var hasMeeting = !!meeting;
+
+        /* Nothing of the caller's own on this date, and they were only here
+           by default — show the team instead of an empty page (see
+           canFallBackToTeam above). Checked against BOTH sources: a day with
+           no daily report but a meeting recording is still the caller's day
+           and must not hand over. */
+        if (canFallBackToTeam && !hasReport && !hasMeeting) {
+          setState({ status: 'ok', aggregated: true, selfEmpty: true });
+          return;
+        }
 
         /* Default to daily if it exists, otherwise meeting. The toggle
            UI surfaces only when both are present (§5.5). */
@@ -1819,12 +1919,28 @@
        every user on the site (AggregatedDayView) instead of a single
        report. The fetch effect above short-circuits to a minimal
        ok-state for this case; AggregatedDayView does its own fetching. */
-    if (site && !user) {
+    /* `state.aggregated` as well as `!user`: the own-day-first fallback keeps
+       `user` set to the caller (nothing asked it to change) and signals the
+       handover through state, so the URL stays free of an explicit choice and
+       a date where they DID record shows their own day again. */
+    if (site && (!user || state.aggregated)) {
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: null,
           site: site,
         }),
+        state.selfEmpty
+          ? React.createElement('div', {
+              className: 'fs-timeline-page__self-empty-note',
+              style: {
+                fontSize: '13px', color: 'var(--text-tertiary)',
+                margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: '8px',
+              },
+            },
+              React.createElement('span', null,
+                'You have no recordings on this date — showing the team instead.'),
+            )
+          : null,
         React.createElement(AggregatedDayView, {
           site: site, date: date,
           onSelect: props.onSelect, selectedItem: props.selectedItem,
@@ -3493,6 +3609,10 @@
     module.exports = {
       applyTopicOverrides: applyTopicOverrides,
       partitionTopics: partitionTopics,
+      /* own-day-first landing + the way back out of a person's day */
+      canSeeOverview: canSeeOverview,
+      isAdminLike: isAdminLike,
+      resolveTimelineScope: resolveTimelineScope,
       reconcileTopicOverrides: reconcileTopicOverrides,
       diffWords: diffWords,
       formatEditTime: formatEditTime,
