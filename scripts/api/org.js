@@ -519,7 +519,37 @@
         { method: 'POST', params: { date: opts.date, user: opts.user } });
     }
     await api.delay();
-    return { sessionId: opts.sessionId, title: null, topics: [], fieldDefaults: {} };
+    /* The preview is READ-ONLY, so unlike generate/status below it has no
+       reason to refuse offline — and an empty stub made the whole review
+       step unverifiable and undemoable: no topics means no actions, no
+       photos, and nothing to review. Serve the day's own report fixture,
+       the same object the timeline page renders, so what the reviewer sees
+       here matches what they just came from. */
+    var day = (((window.FieldSight || {}).fixtures || {}).reports || {})[opts.date] || {};
+    var rep = day[opts.user] || {};
+    /* The fixture carries participants per TOPIC, the way extraction does;
+       the session's attendee list is their union, which is also what the
+       backend's _session_participants builds. */
+    var people = [];
+    (rep.topics || []).forEach(function (t) {
+      (t.participants || []).forEach(function (n) {
+        if (people.indexOf(n) < 0) people.push(n);
+      });
+    });
+    return {
+      sessionId:    opts.sessionId,
+      date:         opts.date,
+      title:        rep.executive_summary ? (rep.site || 'Session report') : null,
+      siteName:     rep.site || null,
+      participants: people,
+      topics:       rep.topics || [],
+      fieldDefaults: {
+        title:     rep.site || '',
+        attendees: people,
+        date:      opts.date,
+        site:      rep.site || '',
+      },
+    };
   }
 
   async function generateSessionReport(opts) {

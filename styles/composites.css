@@ -73,10 +73,20 @@
      once the row's height stopped being fixed by the title's single line. */
   align-items: flex-start;
   gap: 10px;
+  /* The meta column does not shrink (flex-shrink: 0 below, deliberately —
+     wrapping "2026-04-29 15:30" mid-date is worse than any alternative).
+     In a narrow middle column that left the title whatever was over: 74px
+     of a 433px card, one word per line. Letting the ROW wrap moves the
+     whole meta group onto its own line instead, and the title gets the
+     full width — which is the only arrangement where both stay readable. */
+  flex-wrap: wrap;
 }
 
 .fs-task-card__main {
-  flex: 1;
+  /* Grow into the space, but never below a readable measure — that basis is
+     what makes the row wrap rather than crushing the title. min-width stays
+     0 so a long unbroken token still wraps instead of overflowing. */
+  flex: 1 1 14rem;
   min-width: 0;
 }
 
@@ -11378,4 +11388,21 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   display: flex; justify-content: flex-end; gap: 8px;
   margin-top: 14px; padding-top: 12px;
   border-top: 1px solid var(--border-subtle);
+}
+
+/* ==========================================================================
+   SessionReportModal — photo evidence in the review step
+   ========================================================================== */
+
+/* Thumbnails, not a gallery. The reviewer is checking that the right photo
+   sits under the right claim before the report is generated; they open the
+   Photos tab when they need to look properly. */
+.fs-srm__preview-photos {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin: 8px 0 0;
+}
+.fs-srm__preview-photo {
+  max-width: 140px; height: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 4px);
 }
