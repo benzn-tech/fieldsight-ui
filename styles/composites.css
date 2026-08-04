@@ -85,15 +85,20 @@
   font-weight: var(--font-weight-medium);
   color: var(--text-primary);
   line-height: 1.35;
-  /* fix/task-title-2-line-wrap — reverted the single-line ellipsis clamp
-     from 0aed4cd (concise-cards): users had to open every card to read
-     the full title. Back to a 2-line clamp (same idiom as
-     .fs-ask-chat__cite-snippet above) so most titles are readable
-     in-place; card height isn't fixed anywhere, so it grows naturally. */
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  /* No clamp. The history here is a slow walk toward "just show the text":
+     0aed4cd clamped to a single line with an ellipsis, fix/task-title-2-line-wrap
+     raised that to two — and two is still short of what these titles actually
+     are. They are LLM-written action items pulled out of speech, routinely
+     3-4 lines at this width ("Discuss and progress the proposed replacement of
+     Claude and AWS Transcribe with Qwen / ElevenLabs for fieldside AI
+     functions" is a real one), and a truncated action item is not skimmable —
+     it is unreadable, because the part that says WHAT TO DO is at the end.
+     The card's height was never fixed, so it simply grows.
+
+     overflow-wrap guards the one case a clamp used to hide: a long unbroken
+     token (an id, a pasted URL) would otherwise push the meta column out of
+     the card rather than wrapping. */
+  overflow-wrap: anywhere;
 }
 
 .fs-task-card__meta {
