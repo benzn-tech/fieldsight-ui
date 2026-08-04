@@ -33,25 +33,6 @@ const ids = list => list.map(t => t.title);
 
 /* ---- the tiers, in order ------------------------------------------------ */
 
-test('safety comes first, even when everything else favours the other item', () => {
-  // The domain's own hierarchy. There are ~11 safety items in 175, so it
-  // cannot swamp the list.
-  const out = orderOpenItems([
-    item({ title: 'fresh high progress', priority: 'high', ageDays: 0 }),
-    item({ title: 'old low safety', priority: 'low', category: 'safety',
-           ageDays: AGED_AFTER_DAYS + 40 }),
-  ]);
-  assert.deepStrictEqual(ids(out), ['old low safety', 'fresh high progress']);
-});
-
-test('a safety FLAG counts even when the category says otherwise', () => {
-  const out = orderOpenItems([
-    item({ title: 'plain' , priority: 'high' }),
-    item({ title: 'flagged', priority: 'low', hasSafetyFlags: true }),
-  ]);
-  assert.deepStrictEqual(ids(out), ['flagged', 'plain']);
-});
-
 test('live work outranks the aged pile regardless of priority', () => {
   // 106 of 175 open items are past the threshold. Without this tier they
   // ARE the list, which is the reported problem.
@@ -60,6 +41,38 @@ test('live work outranks the aged pile regardless of priority', () => {
     item({ title: 'live low',  priority: 'low',  ageDays: 2 }),
   ]);
   assert.deepStrictEqual(ids(out), ['live low', 'aged high']);
+});
+
+test('an aged safety item does NOT outrank live work', () => {
+  // Safety-first was the intuitive order and the real data refuted it: it
+  // put nine 148-176-day-old rows at the top, and reading them showed why —
+  // the extractor's `safety` category is noisy, so the head of the list was
+  // "Vacuum dust off finished carpet". Stale mislabelled housekeeping
+  // presented as the most important thing on the page is the exact failure
+  // this ordering exists to prevent.
+  const out = orderOpenItems([
+    item({ title: 'old low safety', priority: 'low', category: 'safety',
+           ageDays: AGED_AFTER_DAYS + 40 }),
+    item({ title: 'fresh high progress', priority: 'high', ageDays: 0 }),
+  ]);
+  assert.deepStrictEqual(ids(out), ['fresh high progress', 'old low safety']);
+});
+
+test('safety comes first among items that are all still live', () => {
+  // Where the label is worth acting on, it still leads.
+  const out = orderOpenItems([
+    item({ title: 'live high progress', priority: 'high', ageDays: 3 }),
+    item({ title: 'live low safety', priority: 'low', category: 'safety', ageDays: 3 }),
+  ]);
+  assert.deepStrictEqual(ids(out), ['live low safety', 'live high progress']);
+});
+
+test('a safety FLAG counts even when the category says otherwise', () => {
+  const out = orderOpenItems([
+    item({ title: 'plain' , priority: 'high' }),
+    item({ title: 'flagged', priority: 'low', hasSafetyFlags: true }),
+  ]);
+  assert.deepStrictEqual(ids(out), ['flagged', 'plain']);
 });
 
 test('the aged boundary is strictly greater than the threshold', () => {
