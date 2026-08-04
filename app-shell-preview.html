@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="styles/tokens.css?v=5" />
   <link rel="stylesheet" href="styles/app-shell.css?v=11" />
   <link rel="stylesheet" href="styles/components.css?v=11" />
-  <link rel="stylesheet" href="styles/composites.css?v=104" />
+  <link rel="stylesheet" href="styles/composites.css?v=105" />
 
   <style>
     /* Ensure full-bleed with no scroll */
@@ -229,6 +229,7 @@
   <!-- fix/mine-team-attribution — shared Mine/Team predicate; loads before
        today-adapter.js + tasks.js (below), which both call it. -->
   <script src="scripts/api/mine-team.js?v=1"></script>
+  <script src="scripts/api/today-ordering.js?v=1"></script>
   <!--   4. Today adapter (PLAN Phase D sketch — feeds mock-data.js shim) -->
   <!-- Today's section model (spec §14) — overdue / today / next 3 days.
        Pure; loaded before today-adapter.js and pages/today.js. -->
@@ -237,7 +238,7 @@
        assigns window.FS.api wholesale, so anything registering earlier is
        silently wiped. -->
   <script src="scripts/api/my-work-grouping.js?v=1"></script>
-  <script src="scripts/api/today-adapter.js?v=12"></script>
+  <script src="scripts/api/today-adapter.js?v=13"></script>
   <!-- Sprint 4.2 — Tasks aggregator (cross-day join: timeline + actions) -->
   <script src="scripts/api/tasks-aggregator.js?v=11"></script>
   <!-- Sprint 6.0 — Compliance aggregator (cross-day fan-out for /safety + /quality) -->
@@ -309,7 +310,7 @@
   <!-- Mock data shim (weather only) + page registry + pages -->
   <script type="text/babel" src="scripts/mock-data.js?v=4"></script>
   <script type="text/babel" src="scripts/pages/_page-registry.js?v=1"></script>
-  <script type="text/babel" src="scripts/pages/today.js?v=54"></script>
+  <script type="text/babel" src="scripts/pages/today.js?v=55"></script>
   <script type="text/babel" src="scripts/pages/timeline.js?v=56"></script>
   <script type="text/babel" src="scripts/pages/reports.js?v=5"></script>
   <script type="text/babel" src="scripts/pages/sites.js?v=14"></script>
