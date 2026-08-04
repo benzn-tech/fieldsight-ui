@@ -16,8 +16,33 @@
      pixelsPerDay   number   — set by the page (24 / 6 / 2 typical)
      tier           'day' | 'week' | 'month'
 
+   --------------------------------------------------------------------------
+   WHY `from`/`to` ARE VALIDATED RATHER THAN TRUSTED
+
+   This component took the whole app down on prod. The page handed it
+   `from = null, to = null` for a site with no programme, and `dateRangeISO`
+   walked into `addDaysISO(null, 1)` → `null.split('-')` → TypeError. There is
+   no error boundary above it, so React unmounted the entire tree: white
+   screen, no nav, no way back.
+
+   The coercion that made it reachable is worth stating, because it is the
+   opposite of the intuition. `while (c <= to)` with ONE null operand is
+   false — the loop never runs and the function returns [] quietly. With BOTH
+   null, `null <= null` compares 0 <= 0 and is TRUE, so it enters the loop and
+   throws on the first step. The half-broken input was safe; the fully broken
+   one crashed.
+
+   So the range is checked for what it must be — two ISO dates in order —
+   rather than for truthiness, and an invalid range renders nothing instead of
+   throwing. Rendering nothing is not the fix for the page's problem (a page
+   with no dates should say so, and `pages/programme.js` now does); it is the
+   guarantee that a bad range can never again take the app with it.
+
    Exported to:
-     window.FieldSight.GanttStrip
+     window.FieldSight.GanttStrip   (browser)
+     module.exports                 (node:test — the strip's date maths had no
+                                     coverage at all before this, because the
+                                     file could not be required)
    ========================================================================== */
 
 /* global React, window */
@@ -25,12 +50,29 @@
 (function () {
   'use strict';
 
+  var ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+  /* A range is usable only if BOTH ends are ISO dates and they are in order.
+     Anything else — null, undefined, '', a Date object, a timestamp, or an
+     end before its start — is not a range this component can walk. */
+  function isUsableRange(from, to) {
+    return typeof from === 'string' && ISO_DATE.test(from)
+        && typeof to === 'string'   && ISO_DATE.test(to)
+        && from <= to;
+  }
+
   function dateRangeISO(from, to) {
+    if (!isUsableRange(from, to)) return [];
     var dates = [];
     var c = from;
+    var addDays = (window.FS && window.FS.api && window.FS.api.addDaysISO) || null;
+    if (!addDays) return [];
+    /* Bounded by construction: `c` strictly increases and `to` is a fixed ISO
+       string, so the loop terminates. The guard above is what makes that
+       true — it was not true when `from` and `to` could both be null. */
     while (c <= to) {
       dates.push(c);
-      c = window.FS.api.addDaysISO(c, 1);
+      c = addDays(c, 1);
     }
     return dates;
   }
@@ -95,6 +137,11 @@
     var markers    = strip.markers;
     var totalWidth = strip.totalWidth;
 
+    /* After the hook, never before it — a conditional return above useMemo
+       changes the hook order between renders, which is the bug #179 already
+       had to fix once in ProgrammeRightDetail. */
+    if (!isUsableRange(from, to)) return null;
+
     return React.createElement('div', {
       className: 'fs-gantt-strip',
       style:     { width: totalWidth + 'px' },
@@ -110,6 +157,14 @@
     );
   }
 
-  if (!window.FieldSight) window.FieldSight = {};
-  window.FieldSight.GanttStrip = React.memo(GanttStrip);
+  /* Guarded, so the date maths above can be required under node:test. The
+     unconditional attach this replaced is why none of it had coverage. */
+  if (typeof window !== 'undefined' && typeof React !== 'undefined') {
+    if (!window.FieldSight) window.FieldSight = {};
+    window.FieldSight.GanttStrip = React.memo(GanttStrip);
+  }
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { dateRangeISO: dateRangeISO, isUsableRange: isUsableRange };
+  }
 })();
