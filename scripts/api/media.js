@@ -80,6 +80,32 @@
       + '/pictures/' + opts.date + '/' + opts.filename;
   }
 
+  /* Resolve a topic's related_photos filenames to presigned URLs in one go,
+     as { filename: url }. Two surfaces need this — the email preview and the
+     session-report preview — and both want the same tolerance: ONE photo that
+     will not presign (deleted object, an ACL the caller does not clear) must
+     cost only itself, not the whole strip. So a rejected key is simply absent
+     from the map, and callers render what came back.
+
+     Filenames are deduped first: a photo can evidence more than one topic and
+     presigning it twice is a wasted round trip against the same key. */
+  async function photoUrls(opts) {
+    var names = [];
+    (opts.filenames || []).forEach(function (f) {
+      if (f && names.indexOf(f) < 0) names.push(f);
+    });
+    if (!names.length || !opts.userDisplayName || !opts.date) return {};
+    var rows = await Promise.all(names.map(function (f) {
+      return presignedUrl(photoKey({
+        userDisplayName: opts.userDisplayName, date: opts.date, filename: f,
+      })).then(function (u) { return { f: f, url: (u && u.url) || u }; })
+        .catch(function () { return null; });
+    }));
+    var out = {};
+    rows.forEach(function (r) { if (r && r.url) out[r.f] = r.url; });
+    return out;
+  }
+
   /* Q7 — DELETE /api/org/media/keyframe { s3_key }. Removes an
      auto-generated video keyframe (backend rejects any key whose basename
      doesn't match _kf_s\d{6}\.jpg and authorizes via the topic's
@@ -118,6 +144,7 @@
     presignedUrl:   presignedUrl,
     getUrl:         getUrl,
     photoKey:       photoKey,
+    photoUrls:      photoUrls,
     deleteKeyframe: deleteKeyframe,
   };
 
