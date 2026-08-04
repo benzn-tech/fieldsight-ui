@@ -22,14 +22,24 @@
      • age spans six months, and 106 of the 175 open items — 61% — are
        more than LEFTOVER_THRESHOLD_DAYS old.
 
-   That last number is why age is a TIER and not just a tiebreak. Sorting
-   purely by "oldest first" would fill the top of every band with items
-   nobody has touched since February; sorting purely by "newest first"
-   would bury work that is genuinely slipping. So the aged set is
-   demoted as a group — the page already marks it with its own chip and
-   offers a filter for it — and within each group the oldest comes first,
-   because among items that are all still live, the one that has waited
-   longest is the one closest to being forgotten.
+   That last number is why age is a TIER and not just a tiebreak, and why
+   it is the FIRST tier. Sorting purely by "oldest first" would fill the
+   top of every band with items nobody has touched since February;
+   sorting purely by "newest first" would bury work that is genuinely
+   slipping. So the aged set is demoted as a group — the page already
+   marks it with its own chip and offers a filter for it — and within
+   each group the oldest comes first, because among items that are all
+   still live, the one that has waited longest is the one closest to
+   being forgotten.
+
+   Safety sits BELOW that demotion, which is not where it started.
+   Safety-first was the intuitive order, and running the real open items
+   through it refuted the intuition: nine of the top ten were 148-176
+   days old, and reading them showed why. The extractor's `safety`
+   category is noisy — the head of the list was "Vacuum dust off
+   finished carpet" and "Provide key for door access". Stale mislabelled
+   housekeeping presented as the most important thing on the page is the
+   exact failure this ordering exists to fix.
 
    The rules are lexicographic and unweighted on purpose. A weighted
    score would need numbers nobody can defend and would reshuffle the
@@ -82,16 +92,26 @@
   }
 
   function cmp(a, b) {
-    /* 1. Safety first. Not a preference — it is the domain's own
-          hierarchy, and there are only ~11 such items, so it cannot
-          swamp the list. */
-    var sa = isSafety(a) ? 0 : 1, sb = isSafety(b) ? 0 : 1;
-    if (sa !== sb) return sa - sb;
+    /* 1. Live work before the aged pile. 61% of open items are older than
+          the threshold; without this tier they ARE the list.
 
-    /* 2. Live work before the aged pile. 61% of open items are older than
-          the threshold; without this tier they are the list. */
+          This sits above safety, which is not where it started. Safety-first
+          was the intuitive order and the real data refuted it: ranking the
+          open items that way put nine 148-to-176-day-old rows at the top,
+          and reading them showed why — the extractor's `safety` category is
+          noisy, so the head of the list was "Vacuum dust off finished
+          carpet" and "Provide key for door access". Stale mislabelled
+          housekeeping presented as the most important thing on the page is
+          the exact failure this ordering exists to fix. Demoting age first
+          puts the one recent safety item on top, then the actual
+          outstanding engineering work. */
     var ga = isAged(a) ? 1 : 0, gb = isAged(b) ? 1 : 0;
     if (ga !== gb) return ga - gb;
+
+    /* 2. Safety first WITHIN a group — the domain's own hierarchy, applied
+          where the items are all still live enough to act on. */
+    var sa = isSafety(a) ? 0 : 1, sb = isSafety(b) ? 0 : 1;
+    if (sa !== sb) return sa - sb;
 
     /* 3. Priority — the one extraction field that is both populated and
           discriminating. */
