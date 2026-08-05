@@ -15,7 +15,7 @@ const assert = require('node:assert');
 global.window = global.window || {};
 global.document = global.document || {};
 
-const { buildPreviewModel, renderEmailHtml, renderEmailText, actionLine } =
+const { buildPreviewModel, renderEmailHtml, renderEmailText, actionLine, skipSummary } =
   require('../scripts/composites/email-preview-modal.js');
 
 function topic(over) {
@@ -170,4 +170,36 @@ test('and none when none embedded — which is the state that must be reported',
   assert.strictEqual((html.match(/<img/g) || []).length, 0);
   assert.ok(html.includes('Redo the wall'), 'the text still copies in full');
   assert.strictEqual(m.totalPhotos, 2, 'totalPhotos is what "all of them were lost" compares against');
+});
+
+
+/* ---- why a photo was dropped, not just how many -------------------------- */
+
+/*
+ * The first version of this reported a COUNT. "None of the 1 photo could be
+ * included" is true and useless: a photo the browser could not fetch and a
+ * photo it fetched but refused to let the page read are different faults with
+ * different fixes, and telling them apart by guessing cost two wrong ones.
+ */
+
+test('a fetch failure and a read refusal do not read the same', () => {
+  assert.notStrictEqual(skipSummary({ load: 1 }), skipSummary({ taint: 1 }));
+});
+
+test('each reason names its own mechanism', () => {
+  assert.match(skipSummary({ load: 2 }), /could not be fetched/);
+  assert.match(skipSummary({ taint: 3 }), /would not let the page read/);
+  assert.match(skipSummary({ size: 1 }), /too large/);
+});
+
+test('mixed causes are all reported, not just the first', () => {
+  const s = skipSummary({ load: 1, taint: 2 });
+  assert.match(s, /fetched/);
+  assert.match(s, /read/);
+});
+
+test('an unrecorded cause says so rather than inventing one', () => {
+  assert.match(skipSummary(null), /unknown/);
+  assert.match(skipSummary({}), /unknown/);
+  assert.match(skipSummary({ unknown: 1 }), /unrecorded/);
 });
