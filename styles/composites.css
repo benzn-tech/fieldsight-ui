@@ -11471,3 +11471,8 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color: var(--text-secondary);
   margin: 0;
 }
+
+/* The queue's home on the timeline. Margin only — the cards carry their own
+   frame, and a second border around a list of bordered cards reads as a
+   nesting that is not there. */
+.fs-timeline-page__threads { margin: 0 0 20px; }
