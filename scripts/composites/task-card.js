@@ -261,6 +261,21 @@
             props.aged ? React.createElement(Badge, {
               tone: 'neutral', variant: 'outline', size: 'sm',
             }, '90+ days') : null,
+            /* How many days this item's subject has been raised on, once
+               someone confirmed it was the same job as an earlier one. This
+               is the chip that has to earn the ordering: it sits above
+               priority in the sort, so the card owes the reader the reason —
+               "raised 3 times" is checkable, "high" is not.
+
+               Only from 2, because "raised 1 time" is every item that was
+               ever mentioned and says nothing. Info tone rather than
+               neutral: unlike "90+ days", which marks something to discount,
+               this marks something to look at. */
+            props.timesRaised >= 2 ? React.createElement(Badge, {
+              tone: 'info', variant: 'subtle', size: 'sm',
+              title: 'This subject came up on ' + props.timesRaised
+                     + ' different days and is still open',
+            }, 'raised ' + props.timesRaised + '×') : null,
             /* Q1 — tier-aware Today/Tasks: informational only, no review
                controls (those stay on Timeline). `=== 'non_work'` (never
                `!== 'work'`) so a missing/other value still counts as

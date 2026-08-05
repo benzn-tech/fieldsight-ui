@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="styles/tokens.css?v=5" />
   <link rel="stylesheet" href="styles/app-shell.css?v=11" />
   <link rel="stylesheet" href="styles/components.css?v=11" />
-  <link rel="stylesheet" href="styles/composites.css?v=105" />
+  <link rel="stylesheet" href="styles/composites.css?v=107" />
 
   <style>
     /* Ensure full-bleed with no scroll */
@@ -62,7 +62,7 @@
   <script type="text/babel" src="scripts/components/avatar.js?v=2"></script>
 
   <!-- Layer 5 composites (depend on L4 atoms above) -->
-  <script type="text/babel" src="scripts/composites/task-card.js?v=14"></script>
+  <script type="text/babel" src="scripts/composites/task-card.js?v=15"></script>
   <!-- T4 — useMultiSelect hook + MultiSelectBulkBar, shared by /today
        Leftover, /safety, /quality. Loaded before those pages below. -->
   <script type="text/babel" src="scripts/composites/multi-select-list.js?v=1"></script>
@@ -157,6 +157,7 @@
   <script type="text/babel" src="scripts/composites/programme-task-card.js?v=1"></script>
   <!-- Sprint 11 (Task 6) — programme suggestion review queue -->
   <script type="text/babel" src="scripts/composites/suggestion-review.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/thread-review.js?v=1"></script>
   <!-- Sprint 8.9.2 — Demo tour overlay (?demo=1 trigger) -->
   <script type="text/babel" src="scripts/composites/demo-tour.js?v=3"></script>
   <!-- Sprint 8.11.1 — First-run onboarding overlay -->
@@ -211,7 +212,7 @@
   <script src="scripts/mock/templates.fixture.js?v=1"></script>
   <!--   3. Per-endpoint api modules (read fixtures via FS.api.*) -->
   <script src="scripts/api/sites.js?v=5"></script>
-  <script src="scripts/api/org.js?v=19"></script>
+  <script src="scripts/api/org.js?v=20"></script>
   <!-- compliance-resolutions — JS twin of src/content_hash.py (parity guard);
        loads before compliance-aggregator.js, which rebuilds the resolved-mark
        lookup with it. -->
@@ -234,7 +235,7 @@
   <!-- fix/mine-team-attribution — shared Mine/Team predicate; loads before
        today-adapter.js + tasks.js (below), which both call it. -->
   <script src="scripts/api/mine-team.js?v=1"></script>
-  <script src="scripts/api/today-ordering.js?v=2"></script>
+  <script src="scripts/api/today-ordering.js?v=3"></script>
   <!--   4. Today adapter (PLAN Phase D sketch — feeds mock-data.js shim) -->
   <!-- Today's section model (spec §14) — overdue / today / next 3 days.
        Pure; loaded before today-adapter.js and pages/today.js. -->
@@ -243,7 +244,7 @@
        assigns window.FS.api wholesale, so anything registering earlier is
        silently wiped. -->
   <script src="scripts/api/my-work-grouping.js?v=1"></script>
-  <script src="scripts/api/today-adapter.js?v=13"></script>
+  <script src="scripts/api/today-adapter.js?v=14"></script>
   <!-- Sprint 4.2 — Tasks aggregator (cross-day join: timeline + actions) -->
   <script src="scripts/api/tasks-aggregator.js?v=11"></script>
   <!-- Sprint 6.0 — Compliance aggregator (cross-day fan-out for /safety + /quality) -->
@@ -315,8 +316,8 @@
   <!-- Mock data shim (weather only) + page registry + pages -->
   <script type="text/babel" src="scripts/mock-data.js?v=4"></script>
   <script type="text/babel" src="scripts/pages/_page-registry.js?v=1"></script>
-  <script type="text/babel" src="scripts/pages/today.js?v=55"></script>
-  <script type="text/babel" src="scripts/pages/timeline.js?v=59"></script>
+  <script type="text/babel" src="scripts/pages/today.js?v=56"></script>
+  <script type="text/babel" src="scripts/pages/timeline.js?v=60"></script>
   <script type="text/babel" src="scripts/pages/reports.js?v=5"></script>
   <script type="text/babel" src="scripts/pages/sites.js?v=14"></script>
   <script type="text/babel" src="scripts/pages/activity.js?v=5"></script>

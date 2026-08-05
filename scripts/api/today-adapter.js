@@ -499,6 +499,19 @@
              safety item whatever the extractor called it. */
           category:       t.category || null,
           hasSafetyFlags: (t.safety_flags || []).length > 0,
+          /* How many DAYS this item's subject was raised on, once someone
+             confirmed it was the same job as an earlier one. Null when the
+             topic belongs to no thread, which is almost every topic — the
+             backend sends no block rather than a 1, because a 1 would claim
+             the subject has been raised once AND tracked.
+
+             Threaded down onto the action item because the card is where it
+             has to be explainable: "this is at the top because the site has
+             raised it three times" is an argument, "high priority" is a
+             label. See api/today-ordering.js for why the count outranks the
+             priority it sits above. */
+          timesRaised:    (t.thread && t.thread.times_raised) || null,
+          threadId:       (t.thread && t.thread.id) || null,
           kind:        'task',
           /* feat/today-rolling-open-items — the report date this item
              was extracted from. today.js's rolling loader fans out
