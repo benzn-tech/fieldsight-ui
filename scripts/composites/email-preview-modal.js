@@ -188,6 +188,20 @@
 
   /* Fetch → downscale → data URI. Resolves to null for anything that cannot
      be read, so one unreadable photo never fails the copy. */
+  /* {reason: count} -> a phrase a person can act on, and that tells ME which
+     failure it was without a screen-share. Deliberately names the mechanism
+     rather than apologising: "the browser would not let the page read them"
+     is the sentence that distinguishes a CORS problem from a dead URL. */
+  function skipSummary(why) {
+    if (!why) return 'reason unknown';
+    var parts = [];
+    if (why.load)  parts.push(why.load + ' could not be fetched');
+    if (why.taint) parts.push(why.taint + ' the browser would not let the page read');
+    if (why.size)  parts.push(why.size + ' too large to attach');
+    if (why.unknown) parts.push(why.unknown + ' for an unrecorded reason');
+    return parts.length ? parts.join('; ') : 'reason unknown';
+  }
+
   function loadDownscaled(url) {
     return new Promise(function (resolve) {
       var img = new Image();
@@ -204,6 +218,19 @@
          cache-busting query parameter is not available here anyway. These
          are PRESIGNED S3 URLs and the signature covers the query string, so
          an extra parameter turns them into a 403. */
+      /* Resolves { data } on success, or { reason } on failure — never a
+         bare null. The two ways this fails need completely different fixes
+         and used to be indistinguishable:
+
+           'load'  the CORS request itself did not complete — the image
+                   never arrived. Points at the URL or the bucket rule.
+           'taint' it arrived, but without usable CORS headers, so
+                   toDataURL refuses. Points at the response, not the fetch.
+
+         Reported once already as "the paste has no images", and two
+         plausible causes were investigated and refuted before anyone knew
+         which of these it was. The cost of not knowing was two wrong fixes;
+         the cost of recording it is one string. */
       img.onload = function () {
         try {
           var scale = Math.min(1, PHOTO_MAX_PX / Math.max(img.width, img.height));
@@ -211,12 +238,12 @@
           c.width = Math.round(img.width * scale);
           c.height = Math.round(img.height * scale);
           c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-          resolve(c.toDataURL('image/jpeg', PHOTO_QUALITY));
+          resolve({ data: c.toDataURL('image/jpeg', PHOTO_QUALITY) });
         } catch (e) {
-          resolve(null);           /* tainted canvas → skip this one */
+          resolve({ reason: 'taint', detail: (e && e.name) || 'error' });
         }
       };
-      img.onerror = function () { resolve(null); };
+      img.onerror = function () { resolve({ reason: 'load' }); };
       img.src = url;
     });
   }
@@ -241,6 +268,14 @@
     var skipRef = React.useState(0);
     var skipped = skipRef[0];
     var setSkipped = skipRef[1];
+    /* Why they were skipped, as {reason: count}. Kept beside the count
+       because "2 photos were dropped" and "2 photos were dropped because the
+       browser refused to read them" send someone to entirely different
+       places — and the first version reported only the count, which cost two
+       wrong fixes before anyone knew which failure this was. */
+    var reasonRef = React.useState(null);
+    var skipReason = reasonRef[0];
+    var setSkipReason = reasonRef[1];
 
     /* Preview images use the presigned URL directly — no canvas, no CORS
        dependency — so the modal shows photos even if the embed path later
@@ -264,18 +299,35 @@
       setSkipped(0);
       var names = Object.keys(photoSrc);
       Promise.all(names.map(function (f) {
-        return loadDownscaled(photoSrc[f]).then(function (d) { return { f: f, data: d }; });
+        return loadDownscaled(photoSrc[f]).then(function (r) {
+          return { f: f, data: r && r.data, reason: r && r.reason, detail: r && r.detail };
+        });
       })).then(function (rows) {
-        var embed = {}, used = 0, dropped = 0;
+        var embed = {}, used = 0, dropped = 0, why = {};
         rows.forEach(function (r) {
-          if (!r.data) { dropped++; return; }
+          if (!r.data) {
+            dropped++;
+            why[r.reason || 'unknown'] = (why[r.reason || 'unknown'] || 0) + 1;
+            return;
+          }
           /* base64 payload length is a close enough proxy for bytes. */
           var size = r.data.length * 0.75;
-          if (used + size > TOTAL_PHOTO_BUDGET_BYTES) { dropped++; return; }
+          if (used + size > TOTAL_PHOTO_BUDGET_BYTES) {
+            dropped++;
+            why.size = (why.size || 0) + 1;
+            return;
+          }
           used += size;
           embed[r.f] = r.data;
         });
         setSkipped(dropped);
+        setSkipReason(why);
+        /* Also to the console, because the note in the modal disappears the
+           moment someone closes it to go and paste. */
+        if (dropped) {
+          window.console && console.warn('[FieldSight] copy dropped '
+            + dropped + ' photo(s):', why, rows.filter(function (r) { return !r.data; }));
+        }
         var html = renderEmailHtml(model, embed);
         var text = renderEmailText(model);
         if (!navigator.clipboard || !window.ClipboardItem) {
@@ -386,7 +438,7 @@
                 ? 'None of the ' + model.totalPhotos + ' photo'
                   + (model.totalPhotos === 1 ? '' : 's')
                   + ' could be included — the text copied in full, but you '
-                  + 'will need to attach them yourself.'
+                  + 'will need to attach them yourself. (' + skipSummary(skipReason) + ')'
                 : skipped + ' photo' + (skipped === 1 ? '' : 's')
                   + ' could not be included (unreadable, or past the size a '
                   + 'mail client will accept). The text copied in full.')
@@ -412,6 +464,7 @@
       buildPreviewModel: buildPreviewModel,
       renderEmailHtml: renderEmailHtml,
       renderEmailText: renderEmailText,
+      skipSummary: skipSummary,
       actionLine: actionLine,
     };
   }
