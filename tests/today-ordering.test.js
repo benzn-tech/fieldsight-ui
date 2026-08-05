@@ -171,3 +171,61 @@ test('the aged threshold matches today.js\'s LEFTOVER_THRESHOLD_DAYS', () => {
   assert.ok(m, 'LEFTOVER_THRESHOLD_DAYS not found in today.js');
   assert.strictEqual(Number(m[1]), AGED_AFTER_DAYS);
 });
+
+/* ---- how often the site has raised it ------------------------------------ */
+
+test('a subject the site keeps raising outranks a higher-priority one', () => {
+  // Priority is the extractor's guess and 44% of open items carry 'high', so
+  // it barely separates anything. "Raised on three different days and still
+  // open" is not a guess -- it is the site's own behaviour, recorded.
+  const out = orderOpenItems([
+    item({ title: 'high, mentioned once', priority: 'high' }),
+    item({ title: 'low, raised 3 times', priority: 'low', timesRaised: 3 }),
+  ]);
+  assert.deepStrictEqual(ids(out), ['low, raised 3 times', 'high, mentioned once']);
+});
+
+test('more raisings come first', () => {
+  const out = orderOpenItems([
+    item({ title: 'twice', timesRaised: 2 }),
+    item({ title: 'four times', timesRaised: 4 }),
+    item({ title: 'never threaded' }),
+  ]);
+  assert.deepStrictEqual(ids(out), ['four times', 'twice', 'never threaded']);
+});
+
+test('it does not rescue an item from the aged pile', () => {
+  // Repetition says the site keeps mentioning it; it does not say the
+  // six-month-old version is today's work. The age tier still leads.
+  const out = orderOpenItems([
+    item({ title: 'aged, raised 5 times', ageDays: AGED_AFTER_DAYS + 30, timesRaised: 5 }),
+    item({ title: 'live, never raised again', ageDays: 3 }),
+  ]);
+  assert.deepStrictEqual(ids(out), ['live, never raised again', 'aged, raised 5 times']);
+});
+
+test('safety still leads a much-repeated non-safety item', () => {
+  const out = orderOpenItems([
+    item({ title: 'repeated progress', timesRaised: 6 }),
+    item({ title: 'safety', category: 'safety' }),
+  ]);
+  assert.deepStrictEqual(ids(out), ['safety', 'repeated progress']);
+});
+
+test('an unthreaded item is neutral, not last', () => {
+  // Most items carry no count. They must fall through to priority rather
+  // than being ranked against each other on a fact none of them has.
+  const out = orderOpenItems([
+    item({ title: 'unthreaded low', priority: 'low' }),
+    item({ title: 'unthreaded high', priority: 'high' }),
+  ]);
+  assert.deepStrictEqual(ids(out), ['unthreaded high', 'unthreaded low']);
+});
+
+test('a corrupt count cannot invert the tier', () => {
+  const out = orderOpenItems([
+    item({ title: 'negative', priority: 'low', timesRaised: -5 }),
+    item({ title: 'plain high', priority: 'high' }),
+  ]);
+  assert.deepStrictEqual(ids(out), ['plain high', 'negative']);
+});

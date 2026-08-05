@@ -79,6 +79,15 @@
     return !!item.hasSafetyFlags;
   }
 
+  /* Days this subject was raised on. Absent for an unthreaded item, which
+     is most of them; 0 keeps those neutral rather than ranking them against
+     each other on a fact none of them has. Never negative, so a corrupt
+     value cannot invert the tier. */
+  function raisedCount(item) {
+    var n = item && item.timesRaised;
+    return (typeof n === 'number' && isFinite(n) && n > 0) ? n : 0;
+  }
+
   function isAged(item) {
     return !!item && item.ageDays > AGED_AFTER_DAYS;
   }
@@ -113,24 +122,42 @@
     var sa = isSafety(a) ? 0 : 1, sb = isSafety(b) ? 0 : 1;
     if (sa !== sb) return sa - sb;
 
-    /* 3. Priority — the one extraction field that is both populated and
+    /* 3. How many times the site has raised this subject, most first.
+
+          Above priority on purpose. Priority is the extractor's guess and
+          44% of open items carry 'high', so it barely separates anything.
+          "Raised on three different days and still open" is not a guess —
+          it is the site's own behaviour, recorded, and it is the strongest
+          evidence available here that something is not getting done.
+
+          It also survives the question a reader will ask. "Why is this at
+          the top" has an answer they can check: because it keeps coming
+          back. No relabelling of priority can offer that.
+
+          Only threaded subjects carry a count, which is a small minority,
+          so for most pairs this tier is a no-op and the comparison falls
+          straight through to priority. */
+    var ra = raisedCount(a), rb = raisedCount(b);
+    if (ra !== rb) return rb - ra;
+
+    /* 4. Priority — the one extraction field that is both populated and
           discriminating. */
     var pa = priorityRank(a), pb = priorityRank(b);
     if (pa !== pb) return pa - pb;
 
-    /* 4. Oldest first WITHIN a group: among items that are all still
+    /* 5. Oldest first WITHIN a group: among items that are all still
           live and equally urgent, the one that has waited longest is the
           one closest to being forgotten. */
     var aa = age(a), ab = age(b);
     if (aa !== ab) return ab - aa;
 
-    /* 5. Ownership breaks a tie; it never outranks safety or priority.
+    /* 6. Ownership breaks a tie; it never outranks safety or priority.
           Someone else's high-priority safety item still beats my own
           low-priority one, which is the whole point of showing both. */
     var ma = a && a.isMine ? 0 : 1, mb = b && b.isMine ? 0 : 1;
     if (ma !== mb) return ma - mb;
 
-    /* 6. A stable, content-derived last resort, so the list does not
+    /* 7. A stable, content-derived last resort, so the list does not
           reshuffle between renders of identical data. Never store this —
           an order nobody stated must not become data. */
     return String((a && a.title) || '').localeCompare(String((b && b.title) || ''));

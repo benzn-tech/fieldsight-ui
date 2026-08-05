@@ -2332,6 +2332,7 @@
                    aged items so they stay distinguishable at a glance now
                    that they render inline rather than in their own drawer. */
                 aged:          isAgedTask(task),
+                timesRaised:   task.timesRaised,
                 /* §E-time — parent topic's time_range, when present. */
                 timeRange:     task.timeRange,
                 /* fix/today-batch-select-expand — Mine cards participate
@@ -2388,6 +2389,7 @@
             /* feat/leftover-inline-filter — same "90+ days" chip on aged
                Team items as on aged Mine items. */
             aged:       isAgedTask(task),
+            timesRaised: task.timesRaised,
             timeRange:  task.timeRange,
             /* fix/today-batch-select-expand — Team cards participate in
                Batch Select too, same as the Mine branch above. */
