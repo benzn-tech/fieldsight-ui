@@ -150,3 +150,24 @@ test('a whole-day hand-off says so instead of naming a meeting', () => {
   const m = buildPreviewModel({ topics: [topic()], date: '2026-08-05', siteName: 'UC PK' });
   assert.ok(m.subject.includes('All day'));
 });
+
+/* ---- when no photo survives, say so ------------------------------------- */
+
+test('the copied HTML has an img for every photo that embedded', () => {
+  const m = buildPreviewModel({ topics: [topic({ related_photos: ['a.jpg', 'b.jpg'] })] });
+  const html = renderEmailHtml(m, { 'a.jpg': 'data:image/jpeg;base64,AA',
+                                    'b.jpg': 'data:image/jpeg;base64,BB' });
+  assert.strictEqual((html.match(/<img/g) || []).length, 2);
+});
+
+test('and none when none embedded — which is the state that must be reported', () => {
+  // The bug this pins: the copy succeeds, the text is complete, and the
+  // photos are simply gone. Before the fix the button still said "Copied ✓",
+  // so the sender had no way to know the evidence had not travelled with the
+  // claim it was evidence for.
+  const m = buildPreviewModel({ topics: [topic({ related_photos: ['a.jpg', 'b.jpg'] })] });
+  const html = renderEmailHtml(m, {});
+  assert.strictEqual((html.match(/<img/g) || []).length, 0);
+  assert.ok(html.includes('Redo the wall'), 'the text still copies in full');
+  assert.strictEqual(m.totalPhotos, 2, 'totalPhotos is what "all of them were lost" compares against');
+});
