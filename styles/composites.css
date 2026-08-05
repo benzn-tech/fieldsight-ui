@@ -11406,3 +11406,68 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm, 4px);
 }
+
+/* ==========================================================================
+   ThreadReview — "is this the same job?"
+   ========================================================================== */
+
+/* The card answers one question, so the two things being compared are the
+   only things with visual weight. The score is deliberately quiet: it is the
+   reason the question is being asked, not the thing being decided. */
+.fs-thread-review { list-style: none; margin: 0; padding: 0; }
+
+.fs-thread-review__item {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md, 6px);
+  padding: 14px 16px;
+  margin: 0 0 12px;
+  background: var(--surface-panel);
+}
+
+.fs-thread-review__pair { display: flex; flex-direction: column; gap: 2px; }
+
+.fs-thread-review__when {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text-tertiary);
+}
+
+.fs-thread-review__title {
+  font-size: 14px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  /* These are LLM-written subject lines and routinely run long; truncating
+     one is truncating half the question. */
+  overflow-wrap: anywhere;
+}
+
+/* The arrow carries the direction of the claim — the earlier subject, then
+   what may be a restatement of it. aria-hidden in the markup: it is
+   decoration over an order the dates already state. */
+.fs-thread-review__arrow {
+  color: var(--text-tertiary);
+  font-size: 14px;
+  line-height: 1;
+  margin: 6px 0 4px;
+}
+
+.fs-thread-review__gap { color: var(--text-tertiary); }
+
+.fs-thread-review__actions {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+/* Pushes the buttons right while staying in the flex flow, so a narrow
+   column wraps them under the score rather than off the card. */
+.fs-thread-review__score {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.fs-thread-review__empty {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0;
+}
