@@ -440,6 +440,48 @@
     };
   }
 
+  // -------- recurring-item threading: the review queue --------
+  /* The matcher proposes which earlier SUBJECT a topic restates; confirming
+     is what actually links them, and it is a person's call. A wrong link
+     silently closes or escalates the wrong work and nobody finds out, so
+     these three endpoints are the only path to a thread.
+
+     Live-gated like the session-report family: off the gate these are WRITES
+     with a real consequence, so the mock refuses rather than pretending a
+     link was made. The list is a read and returns an empty queue, which is
+     the truth — a browser with no backend has no proposals. */
+  function threadsLive() {
+    return !api.useMocks && api.timelineSource === 'aurora' && !!api.orgBaseUrl;
+  }
+
+  async function getThreadSuggestions(opts) {
+    opts = opts || {};
+    if (threadsLive()) {
+      return api.orgRequest('/threads/suggestions',
+                            opts.site ? { params: { site: opts.site } } : undefined);
+    }
+    await api.delay();
+    return { suggestions: [] };
+  }
+
+  async function confirmThreadSuggestion(id) {
+    if (threadsLive()) {
+      return api.orgRequest('/threads/suggestions/' + encodeURIComponent(id) + '/confirm',
+                            { method: 'POST' });
+    }
+    await api.delay();
+    return { status: 'unavailable', _notAvailable: true };
+  }
+
+  async function rejectThreadSuggestion(id) {
+    if (threadsLive()) {
+      return api.orgRequest('/threads/suggestions/' + encodeURIComponent(id) + '/reject',
+                            { method: 'POST' });
+    }
+    await api.delay();
+    return { status: 'unavailable', _notAvailable: true };
+  }
+
   // -------- strategic rollup (feat 4c) --------
   /* GET /api/org/rollup/portfolio → { sites: [{ site_id (ORG UUID),
      open_safety, open_high_safety, open_actions, total_actions,
@@ -677,6 +719,9 @@
     getSessionReportPreview: getSessionReportPreview,
     generateSessionReport: generateSessionReport,
     getSessionReportStatus: getSessionReportStatus,
+    getThreadSuggestions: getThreadSuggestions,
+    confirmThreadSuggestion: confirmThreadSuggestion,
+    rejectThreadSuggestion: rejectThreadSuggestion,
     getSiteMembers: getSiteMembers,
     getSiteContributors: getSiteContributors,
     getPortfolioRollup: getPortfolioRollup,
