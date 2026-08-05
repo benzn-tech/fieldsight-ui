@@ -2266,6 +2266,10 @@
       selectedSessionId ? null : React.createElement(ExecutiveSummaryCard, {
         bullets: report.executive_summary,
       }),
+      /* Above the picker, below the summary: a subject that came up again is
+         context for reading the day, not a task buried under it. Renders
+         nothing when the queue is empty, which is almost always. */
+      React.createElement(ThreadReviewSection, { site: site }),
       (showSessionPicker || excludedNote) ? React.createElement('div', {
         className: 'fs-session-picker-wrap',
       },
@@ -2520,6 +2524,59 @@
         deepLink:   props.deepLink,
       }),
     );
+  }
+
+  /* Recurring-item threading — the review queue, where the day's recordings
+     already are.
+
+     Self-fetching rather than lifted into TimelineMiddleColumn's state: the
+     page has no other reason to know about proposals, and threading them
+     through would put a loading flag and an error branch into a component
+     that is already the largest on the page.
+
+     RENDERS NOTHING when there is nothing to review, which is almost always.
+     The matcher is off by default and most topics are a new subject, so a
+     permanent section — or a nav item — would be a standing reminder of a
+     queue that is empty. A queue is only useful while it is short; the same
+     reasoning is why the backend refuses to re-propose a rejected link. */
+  function ThreadReviewSection(props) {
+    var Queue = (window.FieldSight || {}).ThreadReview;
+    var s_rows = React.useState(null);
+    var rows = s_rows[0], setRows = s_rows[1];
+
+    React.useEffect(function () {
+      var org = ((window.FS || {}).api || {}).org || {};
+      if (!Queue || !org.getThreadSuggestions) return undefined;
+      var cancelled = false;
+      Promise.resolve(org.getThreadSuggestions({ site: props.site }))
+        .then(function (res) {
+          if (cancelled) return;
+          /* A benign envelope is not an empty queue — it means we could not
+             ask. Either way there is nothing to show, but they must not be
+             conflated in a way that would later read as "reviewed". */
+          if (!res || res._accessDenied || res._notFound) { setRows([]); return; }
+          setRows(res.suggestions || []);
+        })
+        .catch(function () { if (!cancelled) setRows([]); });
+      return function () { cancelled = true; };
+    }, [props.site]);
+
+    if (!Queue || !rows || !rows.length) return null;
+
+    return React.createElement('section', { className: 'fs-timeline-page__threads' },
+      React.createElement('div', { className: 'fs-timeline-page__section-label' },
+        'Came up again · ' + rows.length),
+      React.createElement(Queue, {
+        suggestions: rows,
+        /* Drop the row locally; the backend has already recorded the
+           decision, and re-fetching would cost a round trip to learn
+           something we just did. */
+        onResolved: function (id) {
+          setRows(function (cur) {
+            return (cur || []).filter(function (r) { return r.id !== id; });
+          });
+        },
+      }));
   }
 
   /* Delivery-C Tier-2 — a per-session "Generate report" control beside the mailto
