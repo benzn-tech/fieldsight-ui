@@ -194,6 +194,20 @@
       /* Required for canvas to stay untainted; the lake bucket's CORS rule
          is what makes it work. */
       img.crossOrigin = 'anonymous';
+      /* This only works because the PREVIEW image carries crossOrigin too.
+         It did not, and that is what broke copying: the preview fetched the
+         URL with no CORS headers requested, and the request here — same URL,
+         now with crossOrigin='anonymous' — was served from that cache entry,
+         failed the CORS check and tainted the canvas. toDataURL threw, every
+         photo was skipped, and the paste came out as text.
+
+         Exactly the reported symptom: photos visible in the preview, absent
+         from what was pasted. The bucket's CORS rule was correct the whole
+         time, which is why inspecting the response headers found nothing.
+
+         The obvious fix — a cache-busting query param — is not available
+         here: these are PRESIGNED S3 URLs and the signature covers the query
+         string, so an extra parameter turns them into a 403. */
       img.onload = function () {
         try {
           var scale = Math.min(1, PHOTO_MAX_PX / Math.max(img.width, img.height));
@@ -286,8 +300,15 @@
 
     if (!props.open) return null;
 
+    /* "Copied ✓" on a copy that contained no photos is the same failure the
+       backend had an hour before this was written: a quiet success and a
+       quiet failure that look identical. The button promised photos, so when
+       none survived it has to say so — the footnote below is not enough,
+       because the person has already clicked away to paste. */
+    var allPhotosLost = model.totalPhotos > 0 && skipped >= model.totalPhotos;
     var copyLabel = copyState === 'copying' ? 'Preparing…'
-      : copyState === 'copied' ? 'Copied ✓'
+      : copyState === 'copied'
+        ? (allPhotosLost ? 'Copied — text only' : 'Copied ✓')
       : copyState === 'error' ? 'Copy failed — try again'
       : (model.totalPhotos ? 'Copy with photos' : 'Copy');
 
@@ -316,6 +337,32 @@
                       ? h('img', {
                           key: pi, src: photoSrc[f], alt: f,
                           className: 'fs-email-preview__photo',
+                          /* The preview does not need CORS -- but the COPY
+                             does, and this request is the one that populates
+                             the cache. Asking for it here means the single
+                             cache entry is usable by both, instead of the
+                             copy re-requesting a URL the browser may hand
+                             back from a CORS-less entry.
+
+                             This is a SUSPECT, not a confirmed cause: it
+                             could not be tested from here, because the
+                             bucket's CORS rule allows only the two Amplify
+                             origins and a local page is refused outright.
+                             So it degrades rather than betting -- onError
+                             drops the attribute and reloads, which is
+                             exactly what the preview did before. The worst
+                             case is one wasted request; a blank preview is
+                             not on the table. */
+                          crossOrigin: 'anonymous',
+                          onError: function (e) {
+                            var el = e.target;
+                            if (el.crossOrigin) {
+                              el.crossOrigin = null;
+                              el.src = photoSrc[f];      /* retry plain */
+                              return;
+                            }
+                            el.style.display = 'none';
+                          },
                           /* A photo that will not load must leave no trace. A
                              broken-image icon in a PREVIEW reads as "the app is
                              broken", when the truth is narrower: this one file
@@ -324,7 +371,6 @@
                              copy path already skips what it cannot read, so
                              hiding it here keeps the two views honest with each
                              other. */
-                          onError: function (e) { e.target.style.display = 'none'; },
                         })
                       : h('span', { key: pi, className: 'fs-email-preview__photo-pending' },
                           'loading photo…');
@@ -338,9 +384,17 @@
         h('p', { className: 'fs-email-preview__footer' }, model.footer),
         skipped > 0
           ? h('p', { className: 'fs-email-preview__note' },
-              skipped + ' photo' + (skipped === 1 ? '' : 's')
-              + ' could not be included (unreadable, or past the size a mail '
-              + 'client will accept). The text copied in full.')
+              allPhotosLost
+                /* Say the whole truth. "2 photos could not be included"
+                   reads like an edge case when it is actually every photo,
+                   and someone who trusts it will send evidence-free. */
+                ? 'None of the ' + model.totalPhotos + ' photo'
+                  + (model.totalPhotos === 1 ? '' : 's')
+                  + ' could be included — the text copied in full, but you '
+                  + 'will need to attach them yourself.'
+                : skipped + ' photo' + (skipped === 1 ? '' : 's')
+                  + ' could not be included (unreadable, or past the size a '
+                  + 'mail client will accept). The text copied in full.')
           : null,
       ),
       h('footer', { className: 'fs-email-preview__actions' },
