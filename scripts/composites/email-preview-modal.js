@@ -298,8 +298,30 @@
       setCopyState('copying');
       setSkipped(0);
       var names = Object.keys(photoSrc);
+      /* Re-presign before reading pixels, rather than reusing the URLs the
+         preview effect fetched.
+
+         Those are S3 presigned URLs with a 900-second life, taken once when
+         the modal opened. The preview <img> holds a DECODED image, so it
+         keeps showing the photo long after its URL has expired — but the
+         copy has to fetch the bytes again, and a fetch on an expired URL is
+         a 403. Which produces exactly the reported symptom: the photo is
+         right there on screen and absent from what gets pasted.
+
+         media.photoUrls goes through the TTL cache, which re-fetches within
+         two minutes of expiry, so this is usually free. When it cannot
+         resolve one, the old URL is still tried — it may have life left, and
+         a stale attempt beats not attempting. */
+      var media = (((window.FS || {}).api) || {}).media;
+      var refreshed = (media && media.photoUrls && props.userFolder && names.length)
+        ? Promise.resolve(media.photoUrls({
+            userDisplayName: props.userFolder, date: props.date, filenames: names,
+          })).catch(function () { return {}; })
+        : Promise.resolve({});
+
+      refreshed.then(function (fresh) {
       Promise.all(names.map(function (f) {
-        return loadDownscaled(photoSrc[f]).then(function (r) {
+        return loadDownscaled(fresh[f] || photoSrc[f]).then(function (r) {
           return { f: f, data: r && r.data, reason: r && r.reason, detail: r && r.detail };
         });
       })).then(function (rows) {
@@ -344,6 +366,7 @@
         setCopyState('copied');
         window.setTimeout(function () { setCopyState('idle'); }, 2500);
       }).catch(function () { setCopyState('error'); });
+      });
     }
 
     if (!props.open) return null;
