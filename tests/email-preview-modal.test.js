@@ -182,20 +182,12 @@ test('and none when none embedded — which is the state that must be reported',
  * different fixes, and telling them apart by guessing cost two wrong ones.
  */
 
-test('a fetch failure and a read refusal do not read the same', () => {
-  assert.notStrictEqual(skipSummary({ load: 1 }), skipSummary({ taint: 1 }));
-});
-
-test('each reason names its own mechanism', () => {
-  assert.match(skipSummary({ load: 2 }), /could not be fetched/);
-  assert.match(skipSummary({ taint: 3 }), /would not let the page read/);
-  assert.match(skipSummary({ size: 1 }), /too large/);
-});
-
-test('mixed causes are all reported, not just the first', () => {
-  const s = skipSummary({ load: 1, taint: 2 });
-  assert.match(s, /fetched/);
-  assert.match(s, /read/);
+test('a photo with no reachable link says exactly that', () => {
+  // Only one cause survives now that nothing is read off a canvas: the URL
+  // could not be resolved. 'taint' and 'size' belonged to the base64 path and
+  // went with it — a reason string for a mechanism that no longer exists
+  // would send the next person somewhere that cannot be the problem.
+  assert.match(skipSummary({ load: 2 }), /no reachable link/);
 });
 
 test('an unrecorded cause says so rather than inventing one', () => {

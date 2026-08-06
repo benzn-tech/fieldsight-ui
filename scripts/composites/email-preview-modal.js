@@ -28,13 +28,14 @@
    Every mail client picks the richest one it supports, so a plain-text
    reader still gets a readable list rather than markup.
 
-   Photos are DOWNSCALED before embedding (PHOTO_MAX_PX / PHOTO_QUALITY).
-   Site photos run ~1.3 MB each and base64 inflates by a third: five of them
-   raw is ~8 MB of clipboard HTML, which Outlook and Gmail both choke on.
-   Downscaled they are ~100 KB, which is the difference between a feature and
-   a hang. Reading pixels needs the lake bucket's CORS rule (GET/HEAD from the
-   Amplify origins) — WITHOUT it canvas taints and toDataURL throws, so a
-   photo that cannot be read is skipped rather than failing the whole copy.
+   Photos travel as https URLs rather than base64. Reading pixels back off a
+   canvas needs CORS, taints on any slip, and produces `data:` sources that
+   Gmail and Outlook strip out of pasted HTML anyway — four fixes down that
+   road never put a photo in an email. A remote <img> is fetched by the mail
+   client while the draft is open, which is the behaviour that works. The
+   URLs are presigned and live 900 seconds, so the fetch has to happen while
+   composing; for photos that must outlive the paste, the Word report is the
+   way.
 
    Props:
      open        boolean
@@ -59,14 +60,6 @@
 (function () {
   'use strict';
 
-  /* Long edge in CSS pixels. 900 keeps a wall crack legible at the size a
-     mail client renders an inline image, without carrying phone-camera
-     resolution nobody looks at in an email. */
-  var PHOTO_MAX_PX = 900;
-  var PHOTO_QUALITY = 0.7;
-  /* Hard ceiling on what goes on the clipboard. Past this, clients start
-     failing the paste outright — better to send fewer photos and say so. */
-  var TOTAL_PHOTO_BUDGET_BYTES = 3 * 1024 * 1024;
 
   function esc(s) {
     return String(s == null ? '' : s)
@@ -188,67 +181,17 @@
 
   /* Fetch → downscale → data URI. Resolves to null for anything that cannot
      be read, so one unreadable photo never fails the copy. */
-  /* {reason: count} -> a phrase a person can act on, and that tells ME which
-     failure it was without a screen-share. Deliberately names the mechanism
-     rather than apologising: "the browser would not let the page read them"
-     is the sentence that distinguishes a CORS problem from a dead URL. */
+  /* {reason: count} -> a phrase a person can act on. Only one cause can
+     reach it now that nothing is read off a canvas: a photo whose URL could
+     not be resolved at all. Kept as a map so a new cause has somewhere to
+     go rather than being folded into a count. */
   function skipSummary(why) {
     if (!why) return 'reason unknown';
     var parts = [];
-    if (why.load)  parts.push(why.load + ' could not be fetched');
-    if (why.taint) parts.push(why.taint + ' the browser would not let the page read');
-    if (why.size)  parts.push(why.size + ' too large to attach');
+    if (why.load) parts.push(why.load + ' had no reachable link');
     if (why.unknown) parts.push(why.unknown + ' for an unrecorded reason');
     return parts.length ? parts.join('; ') : 'reason unknown';
   }
-
-  function loadDownscaled(url) {
-    return new Promise(function (resolve) {
-      var img = new Image();
-      /* Required for canvas to stay untainted; the lake bucket's CORS rule
-         is what makes it work. */
-      img.crossOrigin = 'anonymous';
-      /* This does NOT depend on the preview also asking for CORS. That was
-         assumed and then measured, against a local image served with the
-         same headers the bucket sends: a no-crossOrigin load first taints,
-         a crossOrigin load after it comes back CLEAN. Chrome keys the cache
-         by CORS mode, so the two requests never share an entry.
-
-         Worth knowing before reaching for the usual escape hatch: a
-         cache-busting query parameter is not available here anyway. These
-         are PRESIGNED S3 URLs and the signature covers the query string, so
-         an extra parameter turns them into a 403. */
-      /* Resolves { data } on success, or { reason } on failure — never a
-         bare null. The two ways this fails need completely different fixes
-         and used to be indistinguishable:
-
-           'load'  the CORS request itself did not complete — the image
-                   never arrived. Points at the URL or the bucket rule.
-           'taint' it arrived, but without usable CORS headers, so
-                   toDataURL refuses. Points at the response, not the fetch.
-
-         Reported once already as "the paste has no images", and two
-         plausible causes were investigated and refuted before anyone knew
-         which of these it was. The cost of not knowing was two wrong fixes;
-         the cost of recording it is one string. */
-      img.onload = function () {
-        try {
-          var scale = Math.min(1, PHOTO_MAX_PX / Math.max(img.width, img.height));
-          var c = document.createElement('canvas');
-          c.width = Math.round(img.width * scale);
-          c.height = Math.round(img.height * scale);
-          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-          resolve({ data: c.toDataURL('image/jpeg', PHOTO_QUALITY) });
-        } catch (e) {
-          resolve({ reason: 'taint', detail: (e && e.name) || 'error' });
-        }
-      };
-      img.onerror = function () { resolve({ reason: 'load' }); };
-      img.src = url;
-    });
-  }
-
-  window.FieldSight = window.FieldSight || {};
 
   function EmailPreviewModal(props) {
     var fs = window.FieldSight;
@@ -294,24 +237,48 @@
       return function () { cancelled = true; };
     }, [props.open, props.userFolder, props.date, model]);
 
+    /* Photos travel as https URLs, not base64.
+
+       Four attempts went the other way -- downscale each photo onto a canvas,
+       read it back as a data: URI, embed that in the clipboard HTML -- and the
+       paste kept arriving without images. Each attempt fixed a real defect in
+       that path (a refuted cache-taint theory, a silent success label, an
+       unrecorded failure reason, a stale presign) and none of them produced a
+       photo in an email, which is the only outcome that counts.
+
+       That path was wrong at the root, for two reasons that no amount of
+       fixing reaches:
+
+         * It has a long failure chain -- CORS, canvas tainting, toDataURL,
+           a size budget, presign expiry -- and every link fails silently
+           into "text only".
+         * Gmail and Outlook strip `data:` image sources out of pasted HTML.
+           Even a perfect data URI can arrive and be discarded at the far end.
+
+       An <img src="https://..."> has neither problem. Nothing is read back,
+       so canvas and CORS stop mattering entirely; and a mail client fetches
+       a remote image while composing, which is the behaviour that actually
+       puts a picture in a message.
+
+       The cost, stated plainly: these are presigned URLs with a 900-second
+       life. The client has to fetch them while the draft is open, which is
+       the normal case -- someone pastes and sends within a minute. If it
+       does not, the recipient gets a missing image rather than a wrong one,
+       and the Word report remains the way to send photos that must outlive
+       the paste. */
     function onCopy() {
       setCopyState('copying');
       setSkipped(0);
-      var names = Object.keys(photoSrc);
-      /* Re-presign before reading pixels, rather than reusing the URLs the
-         preview effect fetched.
+      setSkipReason(null);
 
-         Those are S3 presigned URLs with a 900-second life, taken once when
-         the modal opened. The preview <img> holds a DECODED image, so it
-         keeps showing the photo long after its URL has expired — but the
-         copy has to fetch the bytes again, and a fetch on an expired URL is
-         a 403. Which produces exactly the reported symptom: the photo is
-         right there on screen and absent from what gets pasted.
+      var names = [];
+      model.groups.forEach(function (g) {
+        g.photos.forEach(function (f) { if (names.indexOf(f) < 0) names.push(f); });
+      });
 
-         media.photoUrls goes through the TTL cache, which re-fetches within
-         two minutes of expiry, so this is usually free. When it cannot
-         resolve one, the old URL is still tried — it may have life left, and
-         a stale attempt beats not attempting. */
+      /* Re-presign first: the URLs the preview fetched may have aged out
+         while the modal sat open, and the copy is where that starts to
+         matter. Falls back to what the preview used. */
       var media = (((window.FS || {}).api) || {}).media;
       var refreshed = (media && media.photoUrls && props.userFolder && names.length)
         ? Promise.resolve(media.photoUrls({
@@ -320,40 +287,21 @@
         : Promise.resolve({});
 
       refreshed.then(function (fresh) {
-      Promise.all(names.map(function (f) {
-        return loadDownscaled(fresh[f] || photoSrc[f]).then(function (r) {
-          return { f: f, data: r && r.data, reason: r && r.reason, detail: r && r.detail };
-        });
-      })).then(function (rows) {
-        var embed = {}, used = 0, dropped = 0, why = {};
-        rows.forEach(function (r) {
-          if (!r.data) {
-            dropped++;
-            why[r.reason || 'unknown'] = (why[r.reason || 'unknown'] || 0) + 1;
-            return;
-          }
-          /* base64 payload length is a close enough proxy for bytes. */
-          var size = r.data.length * 0.75;
-          if (used + size > TOTAL_PHOTO_BUDGET_BYTES) {
-            dropped++;
-            why.size = (why.size || 0) + 1;
-            return;
-          }
-          used += size;
-          embed[r.f] = r.data;
+        var srcs = {}, dropped = 0;
+        names.forEach(function (f) {
+          var u = fresh[f] || photoSrc[f];
+          if (u) srcs[f] = u; else dropped++;
         });
         setSkipped(dropped);
-        setSkipReason(why);
-        /* Also to the console, because the note in the modal disappears the
-           moment someone closes it to go and paste. */
         if (dropped) {
-          window.console && console.warn('[FieldSight] copy dropped '
-            + dropped + ' photo(s):', why, rows.filter(function (r) { return !r.data; }));
+          setSkipReason({ load: dropped });
+          window.console && console.warn(
+            '[FieldSight] copy: no URL for ' + dropped + ' photo(s)');
         }
-        var html = renderEmailHtml(model, embed);
+
+        var html = renderEmailHtml(model, srcs);
         var text = renderEmailText(model);
         if (!navigator.clipboard || !window.ClipboardItem) {
-          /* Old browser: plain text only, still better than nothing. */
           return navigator.clipboard
             ? navigator.clipboard.writeText(text)
             : Promise.reject(new Error('no clipboard'));
@@ -366,7 +314,6 @@
         setCopyState('copied');
         window.setTimeout(function () { setCopyState('idle'); }, 2500);
       }).catch(function () { setCopyState('error'); });
-      });
     }
 
     if (!props.open) return null;
@@ -480,6 +427,7 @@
     );
   }
 
+  if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.EmailPreviewModal = EmailPreviewModal;
 
   if (typeof module !== 'undefined' && module.exports) {
