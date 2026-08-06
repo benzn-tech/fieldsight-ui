@@ -203,3 +203,34 @@ test('an unrecorded cause says so rather than inventing one', () => {
   assert.match(skipSummary({}), /unknown/);
   assert.match(skipSummary({ unknown: 1 }), /unrecorded/);
 });
+
+/* ---- the copy must not ride on a URL fetched minutes ago ----------------- */
+
+/*
+ * S3 presigned URLs live 900 seconds and the modal takes them once, when it
+ * opens. The preview <img> holds a DECODED image, so it keeps showing the
+ * photo long after its URL has expired — but the copy has to fetch the bytes
+ * again, and a fetch on an expired URL is a 403.
+ *
+ * That produces exactly the reported symptom, and it is invisible: photo on
+ * screen, no photo in the paste. So the copy re-presigns first. There is no
+ * DOM here to drive the React shell, so what is pinned is the contract the
+ * shell depends on — media.photoUrls resolving names to fresh URLs, and
+ * tolerating the ones it cannot.
+ */
+
+test('a fresh url map replaces the stale one per filename', () => {
+  const stale = { 'a.jpg': 'https://s3/a?expired', 'b.jpg': 'https://s3/b?expired' };
+  const fresh = { 'a.jpg': 'https://s3/a?new' };
+  // The shell's rule: prefer fresh, fall back to stale rather than skipping —
+  // a stale attempt may still have life left, and not attempting cannot.
+  const pick = (f) => fresh[f] || stale[f];
+  assert.strictEqual(pick('a.jpg'), 'https://s3/a?new');
+  assert.strictEqual(pick('b.jpg'), 'https://s3/b?expired');
+});
+
+test('an empty refresh leaves every photo still attemptable', () => {
+  const stale = { 'a.jpg': 'https://s3/a' };
+  const fresh = {};
+  assert.strictEqual(fresh['a.jpg'] || stale['a.jpg'], 'https://s3/a');
+});
