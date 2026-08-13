@@ -2208,6 +2208,19 @@
   display: flex;
   gap: 10px;
   align-items: flex-start;
+  /* The naming panel is a third child that must sit BELOW the chip + text,
+     not squeeze between them (flex-basis:100% on the panel does the break). */
+  flex-wrap: wrap;
+}
+
+/* Chip + its naming caret. A column so the caret sits under the chip and the
+   chip keeps its full click-to-jump target. */
+.fs-transcript-list__speaker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
 }
 
 /* A2-2 — Ask citation transcript-line deep link. Rounds the corners for
@@ -2258,6 +2271,101 @@
   padding: 16px;
   color: var(--text-tertiary);
   font-size: 13px;
+}
+
+/* --- speaker naming (spec 2026-08-14-speaker-naming-ui) ----------------- */
+
+/* `tentative` is the system's guess at who this is, and a wrong CONFIDENT
+   name is the exact failure the whole backend layer is shaped to avoid — the
+   UI is the last place it can still be introduced. So: italic, faded, and a
+   literal marker, never a form a reader would quote. Opacity rather than a
+   colour token on purpose — the chip's own fg/bg are fixed palette hex set
+   inline (see SPEAKER_PALETTE), so a semantic colour here would fight them in
+   one theme or the other. */
+.fs-transcript-list__chip-label--tentative {
+  font-style: italic;
+  font-weight: var(--font-weight-regular);
+  opacity: 0.72;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+.fs-transcript-list__tentative-mark {
+  margin-left: 2px;
+  font-style: normal;
+}
+
+.fs-transcript-list__name-toggle {
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0 6px;
+  line-height: 1;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  border-radius: var(--radius-sm);
+}
+.fs-transcript-list__name-toggle:hover { color: var(--text-primary); }
+.fs-transcript-list__name-toggle:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+.fs-transcript-list__name-panel {
+  flex-basis: 100%;
+  order: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+
+.fs-transcript-list__name-input {
+  flex: 1 1 160px;
+  min-width: 140px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--surface-app);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+}
+
+.fs-transcript-list__name-save,
+.fs-transcript-list__name-remove,
+.fs-transcript-list__name-cancel {
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: var(--surface-app);
+  color: var(--text-primary);
+}
+.fs-transcript-list__name-save {
+  border-color: transparent;
+  background: var(--color-primary-900);
+  color: #FFFFFF;
+}
+.fs-transcript-list__name-remove { color: var(--text-danger); }
+
+.fs-transcript-list__name-hint {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.fs-transcript-list__unmatched,
+.fs-transcript-list__notice {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  padding: 6px 8px;
+  border-left: 2px solid var(--border-default);
 }
 
 
