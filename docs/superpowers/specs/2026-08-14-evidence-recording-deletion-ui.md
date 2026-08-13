@@ -55,7 +55,32 @@ POST {orgBaseUrl}/recordings/undelete
 ```
 
 Response `200`: `{ "batch_id": "e3c1…", "restored": 8 }`
-`404` if the batch does not exist or the caller cannot see it.
+
+- `404` — the batch does not exist, or the caller's company cannot see it.
+- `403 "not permitted to restore this batch"` — the batch exists but the caller does not hold
+  §3 authority over every folder in it. **A worker cannot undo an admin's delete of a
+  colleague's recordings, even inside their own company.** Handle it distinctly from 404;
+  "not found" would be a lie and would send someone hunting for a missing batch id.
+
+`restored` counts **redaction rows** — one per hidden topic, plus the recording tombstone,
+plus the day's report-rollup rows. It is not a count of recordings. Do not render
+"8 recordings restored"; either say nothing numeric or count the recordings you sent.
+
+### 1.3 There is no read endpoint for deletions — plan around it
+
+There is no `GET` that lists tombstones or batches. Two consequences the UI has to be
+designed around, not discovered:
+
+- **The list self-updates, so refetch rather than splicing.** Once a session's topics are
+  hidden, `build_day_sessions` drops the whole session, so `getSessions` simply stops
+  returning it. Refetch after a successful delete and the row disappears on its own.
+  Removing rows locally will drift from the server the moment a delete is partially refused.
+- **`batch_id` exists only in the delete response.** Nothing can look it up afterwards. If
+  undo is to survive a page reload, persist it yourself (localStorage keyed by folder+date
+  is enough). Otherwise say plainly in the UI that undo is available "for now" — because
+  once that value is gone, recovery is a DB query by a human, per the backend runbook.
+- A "Deleted items" / recycle-bin screen is **not buildable today**. It needs a new backend
+  endpoint; ask for one rather than faking it.
 
 ---
 
@@ -74,29 +99,34 @@ parse of `topics.source_s3_key`, so no new lookup and no string surgery is neede
 **`folder`** is the user folder (`window.FS.api.folderName(user)`), the same value
 `getSessions` takes as `user`.
 
-### 2.1 A session with `session_id: null` cannot be deleted — do not offer the control
+### 2.1 Every `getSessions` row is deletable — the other states show up as ABSENCE
 
-`session_ref` returns three states, and the UI is already required to tell them apart:
+`session_ref` has three states, but `build_day_sessions` `continue`s past everything that
+is not an extraction key, so **`GET /sessions` never returns a row with `session_id: null`**:
 
-| backend state | `session_id` | what it means |
-|---|---|---|
-| extraction | the session base | a real recording — **deletable** |
-| report | `null` | a day-level rollup, no session granularity exists in the data (the UI renders it as "Whole day") — **not deletable** |
-| unknown | `null` | unrecognised key — **not deletable** |
+| backend state | what `GET /sessions` does |
+|---|---|
+| extraction | returns the row, `session_id` = the session base — **deletable** |
+| report (a whole-day rollup, no session granularity exists) | **omits it** |
+| unknown / unrecognised key | **omits it** |
 
-The endpoint requires `sessionBase` and returns a per-item error without it. That guard
-exists because an omitted `sessionBase` used to degrade the tombstone prefix to the whole
-day, hiding recordings the customer never selected while reporting success. **Do not send
-a recording without one**, and do not render a checkbox on a row that has no `session_id` —
-show the row disabled with a short reason instead of letting the user select something the
-server will refuse.
+So the consequence is not a row to disable, it is a day that looks empty. A day whose topics
+are all report-sourced returns **zero sessions** while the customer can plainly see photos
+and audio on the other tabs. Say why — "this day has no per-recording breakdown" — rather
+than rendering an empty checklist, which reads as a bug.
+
+(If you build the list from `/timeline` instead of `/sessions`, null-session rows *do* exist
+there and must not get a checkbox. The endpoint requires `sessionBase`: an omitted one used
+to widen the tombstone prefix to the whole day, hiding recordings the customer never
+selected while reporting success. Never send a recording without one.)
 
 ---
 
 ## 3. Authorization — partial success is the normal case, not an error case
 
 The caller may delete a recording only if it is in **their own folder**, or they are
-**admin / gm / platform_admin**. A `pm` who can legitimately *view* a worker's day is
+**admin / gm / platform_admin** (the roles whose user scope is `ALL`). A `pm`,
+`regional_manager` or `site_manager` who can legitimately *view* a worker's day is
 **refused** — deleting is stronger than viewing.
 
 Authorization is **per recording**. One refused entry does not fail the request: it comes
@@ -136,6 +166,21 @@ hidden", not "failed". Do not render zero as an error on a recording the user ju
 **A first-time delete returning `topics_hidden: 0` is worth surfacing though.** It means the
 recording produced no topics — possible, but also what a wrong identifier looks like.
 
+**A media link issued BEFORE the delete keeps working for up to 15 minutes.** Presigned URLs
+are signed S3 links; the object is deliberately not deleted, so an already-handed-out URL
+plays until it expires (`PRESIGNED_URL_EXPIRY = 900`). What the delete stops is *issuing new
+ones*: the presign endpoint answers `404` for a deleted session's key. If anyone is likely to
+be watching a clip at the moment it is deleted, one line in the confirm dialog is honest.
+
+**`reason` is stored but not readable back.** It lands in the audit row and no endpoint
+returns it. Collect it if you want the audit trail; do not build UI that expects to display
+it later.
+
+**There is no server-side cap on `recordings[]`,** which means the real limit is the API
+Gateway 29-second timeout. Each recording costs a topic query plus inserts. Chunk a large
+selection into requests of ~20, or cap the selection — a batch UI that lets someone select
+200 days of recordings will time out and report failure for work the server actually did.
+
 ---
 
 ## 5. Suggested shape — decide freely, these are the constraints not the design
@@ -156,11 +201,22 @@ undone, and that already-sent emails are unaffected.
 If you would rather hang selection off the Audio tab or a dedicated page, that is your call —
 the constraints in §2–§4 are what actually matter.
 
+One more thing the shape has to account for: **the other tabs self-clean, but only on
+refetch.** Photos / Audio / Video / Transcripts all filter deleted sessions server-side, so
+they come back correct — but each composite fetches lazily and independently, so a tab the
+user already had open still shows the old list. Either refetch the sibling tabs after a
+delete or make them refetch on activation.
+
 ## 6. Mock mode
 
 `window.FS.api.useMocks` must **refuse** both calls rather than fake a `batch_id`. A write
-stub that returns success makes an unverifiable feature look finished; the read stubs in
-`org.js` return real-shaped data precisely because they are reads and this one is not.
+stub that returns success makes an unverifiable feature look finished.
+
+Follow the **threads** pattern in `org.js` — `return { status: 'unavailable', _notAvailable:
+true }` — not the `createOrgSite` / `updateOrgSite` / `updateProfile` pattern, which
+synthesises a plausible object off the gate. (An earlier draft of this spec claimed org.js
+refuses on every write; it does not. Only the threads family does, and it is the right one
+to copy here.)
 
 ---
 
@@ -174,7 +230,10 @@ review caught it.
 2. **Search** — search a phrase you know is in that recording
 3. **Ask / RAG** — ask a question only that recording answers
 4. The **daily report** page for that day
-5. **Media playback**, and a presigned URL you had open before the delete → must `404`, not `403`
+5. **Media playback** — ask for a *new* presigned URL for the deleted session's key: the
+   endpoint must answer `404`, not `403` (a 403 would confirm the object exists). A URL
+   issued *before* the delete is a signed S3 link and keeps working for up to 15 minutes —
+   that is expected, not a leak, so do not use an already-open tab as the test.
 6. The **nightly report email** for that day
 
 Then prove nothing was destroyed:
@@ -187,14 +246,36 @@ Then undelete and re-check the same six — what comes back must be exactly what
 
 ## 8. Environments
 
-| | org gateway base | unauthenticated response |
-|---|---|---|
-| test | `https://wdsgobb7b0.execute-api.ap-southeast-2.amazonaws.com/test/api/org` | `403 {"message":"Forbidden"}` |
-| prod | `https://ys94qy2tk0.execute-api.ap-southeast-2.amazonaws.com/prod/api/org` | `401` |
+| | `orgBaseUrl` (what `env.js` holds) |
+|---|---|
+| test | `https://wdsgobb7b0.execute-api.ap-southeast-2.amazonaws.com/prod/api` |
+| prod | `https://ys94qy2tk0.execute-api.ap-southeast-2.amazonaws.com/prod/api` |
 
-The two differ only in the authorizer's rejection style — both route through
-`/api/org/{proxy+}`, so no gateway change was needed for the new paths and none is needed
-for yours. Test the flow on **test** first; the flag is on there.
+**The stage is named `prod` on BOTH gateways** — the test gateway has no `/test/` stage.
+`orgRequest` prefixes `/org` itself, so `orgBaseUrl` stops at `/api`. Both reject an
+unauthenticated call with `401 {"message":"Unauthorized"}`.
+
+(An earlier draft of this spec gave the test base as `…/test/api/org` and reported a `403`
+there as "test's authorizer rejection style". That 403 was API Gateway saying the *stage*
+does not exist. It fooled me because I checked it against `/me` on the same wrong stage —
+a control that shared the defect. A frontend session pointed at `/test/` would get 403 on
+everything and could spend hours "fixing" auth headers.)
+
+Both new paths route through the existing `/api/org/{proxy+}` resource, so no gateway change
+was needed and none is needed for yours.
+
+### 8.1 Two env gates that will make this look dead on `dev`
+
+Check these on the branch you are testing, or the feature will appear broken for reasons
+that have nothing to do with your code:
+
+- **`timelineSource` must be `'aurora'`** — `getSessions` only calls the real backend when
+  `api.timelineSource === 'aurora' && api.orgBaseUrl`. The default in `env.example.js` is
+  `'report'`, which silently serves fixtures. You would be deleting mock sessions.
+- **`orgWrites` must be `true`** if you route the new calls through the repo's `orgWrite()`
+  convention — it defaults to `false`, which turns writes into no-ops.
+
+Test the flow on **test** first; `ENABLE_USER_DELETION` is on there.
 
 ## 9. If the endpoints ever answer `403` with `ENABLE_USER_DELETION` in the body
 
