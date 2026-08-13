@@ -73,10 +73,20 @@
      once the row's height stopped being fixed by the title's single line. */
   align-items: flex-start;
   gap: 10px;
+  /* The meta column does not shrink (flex-shrink: 0 below, deliberately —
+     wrapping "2026-04-29 15:30" mid-date is worse than any alternative).
+     In a narrow middle column that left the title whatever was over: 74px
+     of a 433px card, one word per line. Letting the ROW wrap moves the
+     whole meta group onto its own line instead, and the title gets the
+     full width — which is the only arrangement where both stay readable. */
+  flex-wrap: wrap;
 }
 
 .fs-task-card__main {
-  flex: 1;
+  /* Grow into the space, but never below a readable measure — that basis is
+     what makes the row wrap rather than crushing the title. min-width stays
+     0 so a long unbroken token still wraps instead of overflowing. */
+  flex: 1 1 14rem;
   min-width: 0;
 }
 
@@ -85,15 +95,20 @@
   font-weight: var(--font-weight-medium);
   color: var(--text-primary);
   line-height: 1.35;
-  /* fix/task-title-2-line-wrap — reverted the single-line ellipsis clamp
-     from 0aed4cd (concise-cards): users had to open every card to read
-     the full title. Back to a 2-line clamp (same idiom as
-     .fs-ask-chat__cite-snippet above) so most titles are readable
-     in-place; card height isn't fixed anywhere, so it grows naturally. */
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  /* No clamp. The history here is a slow walk toward "just show the text":
+     0aed4cd clamped to a single line with an ellipsis, fix/task-title-2-line-wrap
+     raised that to two — and two is still short of what these titles actually
+     are. They are LLM-written action items pulled out of speech, routinely
+     3-4 lines at this width ("Discuss and progress the proposed replacement of
+     Claude and AWS Transcribe with Qwen / ElevenLabs for fieldside AI
+     functions" is a real one), and a truncated action item is not skimmable —
+     it is unreadable, because the part that says WHAT TO DO is at the end.
+     The card's height was never fixed, so it simply grows.
+
+     overflow-wrap guards the one case a clamp used to hide: a long unbroken
+     token (an id, a pasted URL) would otherwise push the meta column out of
+     the card rather than wrapping. */
+  overflow-wrap: anywhere;
 }
 
 .fs-task-card__meta {
@@ -11322,3 +11337,137 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-zone-split__dates { color: var(--text-tertiary); flex-shrink: 0; }
 .fs-zone-split__overrun { font-size: 12px; color: var(--accent-warning, #b8860b); margin: 8px 0; }
 .fs-zone-split__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* ==========================================================================
+   EmailPreviewModal — the hand-off, shown before it leaves
+   ========================================================================== */
+
+.fs-email-preview {
+  font-size: 14px;
+  color: var(--text-primary);
+  /* The modal body scrolls, the actions footer does not — a long day must
+     not push Copy off the bottom of the screen. */
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.fs-email-preview__subject,
+.fs-email-preview__intro { margin: 0 0 12px; }
+
+.fs-email-preview__group {
+  margin: 0 0 18px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.fs-email-preview__group:last-of-type { border-bottom: 0; }
+
+.fs-email-preview__topic { font-weight: var(--font-weight-semibold); }
+.fs-email-preview__time  { font-weight: 400; color: var(--text-tertiary); }
+
+.fs-email-preview__items { margin: 4px 0 8px; padding-left: 20px; }
+.fs-email-preview__items li { margin: 0 0 3px; overflow-wrap: anywhere; }
+
+.fs-email-preview__photos { display: flex; flex-wrap: wrap; gap: 8px; }
+.fs-email-preview__photo {
+  max-width: 200px; height: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 4px);
+}
+.fs-email-preview__photo-pending {
+  font-size: 12px; color: var(--text-tertiary);
+}
+
+.fs-email-preview__footer,
+.fs-email-preview__note,
+.fs-email-preview__empty {
+  font-size: 12px; color: var(--text-tertiary);
+}
+.fs-email-preview__note { color: var(--text-secondary); }
+
+.fs-email-preview__actions {
+  display: flex; justify-content: flex-end; gap: 8px;
+  margin-top: 14px; padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* ==========================================================================
+   SessionReportModal — photo evidence in the review step
+   ========================================================================== */
+
+/* Thumbnails, not a gallery. The reviewer is checking that the right photo
+   sits under the right claim before the report is generated; they open the
+   Photos tab when they need to look properly. */
+.fs-srm__preview-photos {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin: 8px 0 0;
+}
+.fs-srm__preview-photo {
+  max-width: 140px; height: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm, 4px);
+}
+
+/* ==========================================================================
+   ThreadReview — "is this the same job?"
+   ========================================================================== */
+
+/* The card answers one question, so the two things being compared are the
+   only things with visual weight. The score is deliberately quiet: it is the
+   reason the question is being asked, not the thing being decided. */
+.fs-thread-review { list-style: none; margin: 0; padding: 0; }
+
+.fs-thread-review__item {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md, 6px);
+  padding: 14px 16px;
+  margin: 0 0 12px;
+  background: var(--surface-panel);
+}
+
+.fs-thread-review__pair { display: flex; flex-direction: column; gap: 2px; }
+
+.fs-thread-review__when {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--text-tertiary);
+}
+
+.fs-thread-review__title {
+  font-size: 14px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-primary);
+  /* These are LLM-written subject lines and routinely run long; truncating
+     one is truncating half the question. */
+  overflow-wrap: anywhere;
+}
+
+/* The arrow carries the direction of the claim — the earlier subject, then
+   what may be a restatement of it. aria-hidden in the markup: it is
+   decoration over an order the dates already state. */
+.fs-thread-review__arrow {
+  color: var(--text-tertiary);
+  font-size: 14px;
+  line-height: 1;
+  margin: 6px 0 4px;
+}
+
+.fs-thread-review__gap { color: var(--text-tertiary); }
+
+.fs-thread-review__actions {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+/* Pushes the buttons right while staying in the flex flow, so a narrow
+   column wraps them under the score rather than off the card. */
+.fs-thread-review__score {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.fs-thread-review__empty {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0;
+}
