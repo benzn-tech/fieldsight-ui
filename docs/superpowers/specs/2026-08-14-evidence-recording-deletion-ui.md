@@ -26,7 +26,8 @@ URLs, the daily report page, and the nightly report email.
 ### 1.1 Delete
 
 ```
-POST {orgBaseUrl}/recordings/delete
+orgRequest('/recordings/delete', { method: 'POST', body: … })
+full path: POST {orgBaseUrl}/org/recordings/delete
 {
   "recordings": [
     { "folder": "Ben_UCPK2", "date": "2026-08-14", "sessionBase": "sid9f8c1e2a…" }
@@ -50,7 +51,8 @@ Response `200`:
 ### 1.2 Undelete
 
 ```
-POST {orgBaseUrl}/recordings/undelete
+orgRequest('/recordings/undelete', { method: 'POST', body: … })
+full path: POST {orgBaseUrl}/org/recordings/undelete
 { "batchId": "e3c1…" }
 ```
 
@@ -89,7 +91,8 @@ designed around, not discovered:
 `sessionBase` is exactly the `session_id` field returned by
 
 ```
-GET {orgBaseUrl}/sessions?date=YYYY-MM-DD&user={folder}
+orgRequest('/sessions', { params: { date, user } })
+full path: GET {orgBaseUrl}/org/sessions?date=YYYY-MM-DD&user={folder}
 ```
 
 which `scripts/api/org.js:getSessions` already wraps. Backend-side both come from the same
@@ -273,7 +276,10 @@ that have nothing to do with your code:
   `api.timelineSource === 'aurora' && api.orgBaseUrl`. The default in `env.example.js` is
   `'report'`, which silently serves fixtures. You would be deleting mock sessions.
 - **`orgWrites` must be `true`** if you route the new calls through the repo's `orgWrite()`
-  convention — it defaults to `false`, which turns writes into no-ops.
+  convention. Note this one differs from the bullet above: `env.example.js` already ships
+  `orgWrites: true`, so a copied example file is fine. The `false` is the CODE default in
+  `scripts/api/index.js` for when `env.js` omits the key — a hand-rolled env silently
+  no-ops every write. Do not go looking for a `false` in `env.example.js`; it is not there.
 
 Test the flow on **test** first; `ENABLE_USER_DELETION` is on there.
 
