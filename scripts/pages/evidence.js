@@ -151,6 +151,16 @@
     var photos    = refPhotos[0];
     var setPhotos = refPhotos[1];
 
+    /* Recordings cache — same lazy shape as photos. Bumping `recReload`
+       re-runs the fan-out after a delete or a restore, because the topics
+       those recordings own vanish from (and come back to) every read path. */
+    var refRecs = React.useState({ status: 'idle', perDay: [] });
+    var recordings    = refRecs[0];
+    var setRecordings = refRecs[1];
+    var refRecReload = React.useState(0);
+    var recReload    = refRecReload[0];
+    var bumpRecReload = refRecReload[1];
+
     /* Fable review #4 (batch IB-2 revision) — mirror the aggregators' A2
        rule: sm/pm (non-admin, non-worker) NEVER get forced to self-only,
        whether or not a site is anchored. With an anchored site they widen
@@ -318,6 +328,98 @@
       return function () { cancelled = true; };
     }, [activeTab, state.status, state.dates && state.dates.join(','), activeSite]);
 
+    /* Recordings fan-out. Same (dates × folders) cross-product the photos
+       effect uses, but it fetches TWO things per pair:
+
+         getSessions  — the selectable unit. `session_id` IS the backend's
+                        `session_base` (session_scope.session_ref), which is
+                        exactly what POST /recordings/delete addresses, so no
+                        translation is needed and none should be invented.
+         getTimeline  — the topics, so the confirm step can NAME what is
+                        about to go rather than showing a count. `topic
+                        .session_id` carries the same session_base, so the
+                        join is local.
+
+       A failed timeline call leaves `topics: null`, NOT `[]`. The modal
+       renders those differently on purpose: "could not read" and "contains
+       nothing" are different statements and only one is safe to confirm. */
+    React.useEffect(function () {
+      if (state.status !== 'ok') return undefined;
+      if (activeTab !== 'recordings') return undefined;
+      if (recordings.status === 'ok' && recReload === recordings.tick) return undefined;
+      var cancelled = false;
+      var tick = recReload;
+      setRecordings({ status: 'loading', perDay: [], tick: tick });
+
+      var foldersPromise = state.user
+        ? Promise.resolve([state.user])
+        : (activeSite
+            ? window.FS.api.sites.getSiteUsers(activeSite).then(function (res) {
+                return ((res && res.users) || []).map(deriveFolder).filter(Boolean);
+              }).catch(allUsersFoldersPromise)
+            : allUsersFoldersPromise());
+
+      foldersPromise.then(function (folders) {
+        var thunks = [];
+        (state.dates || []).forEach(function (d) {
+          folders.forEach(function (f) {
+            thunks.push(function () {
+              return Promise.all([
+                window.FS.api.org.getSessions({ date: d, user: f })
+                  .catch(function () { return null; }),
+                window.FS.api.timeline.getTimeline({ date: d, user: f })
+                  .catch(function () { return null; }),
+              ]).then(function (pair) {
+                return { date: d, folder: f, sess: pair[0], report: pair[1] };
+              });
+            });
+          });
+        });
+        return window.FS.api.pooledAll(thunks, 8);
+      }).then(function (pairs) {
+        if (cancelled) return;
+        var perDay = {};
+        (pairs || []).forEach(function (p) {
+          if (!p || !p.sess || p.sess._notFound || p.sess._accessDenied) return;
+          var list = (p.sess.sessions || []);
+          if (!list.length) return;
+          var report = p.report;
+          var usable = report && !report._notFound && !report._accessDenied
+                       && !report.available_users;
+          var topics = usable ? (report.topics || []) : null;
+          var rows = list.map(function (s) {
+            var base = s.session_id || null;
+            return {
+              date:        p.date,
+              folder:      p.folder,
+              sessionBase: base,
+              label:       s.label || (base ? 'Recording' : 'Whole day'),
+              topicCount:  s.topic_count || 0,
+              /* null = unknown (report unreadable), [] = genuinely none. */
+              topics: (topics == null || base == null) ? null
+                : topics.filter(function (t) { return t && t.session_id === base; }),
+            };
+          });
+          if (!perDay[p.date]) perDay[p.date] = { date: p.date, rows: [] };
+          perDay[p.date].rows = perDay[p.date].rows.concat(rows);
+        });
+        var out = Object.keys(perDay).sort().reverse().map(function (d) {
+          return perDay[d];
+        });
+        setRecordings({ status: 'ok', perDay: out, tick: tick });
+      }).catch(function () {
+        if (cancelled) return;
+        setRecordings({ status: 'error', perDay: [], tick: tick });
+      });
+
+      return function () { cancelled = true; };
+    }, [activeTab, state.status, state.dates && state.dates.join(','), activeSite,
+        recReload, state.user]);
+
+    React.useEffect(function () {
+      setRecordings({ status: 'idle', perDay: [] });
+    }, [activeSite]);
+
     function loadMore() { setDaysToLoad(function (n) { return n + LOAD_STEP; }); }
 
     /* A newly picked range restarts pagination from the top — the old
@@ -335,6 +437,8 @@
       daysToLoad:   daysToLoad,
       loadMore:     loadMore,
       photos:       photos,
+      recordings:   recordings,
+      reloadRecordings: function () { bumpRecReload(function (n) { return n + 1; }); },
       view:         view,
       setView:      handleViewChange,
     };
@@ -378,6 +482,259 @@
             date:            day.date,
           }),
         );
+      }),
+    );
+  }
+
+  /* ---------- Section: Recordings (select + delete) -------------------- */
+
+  /* Deleting recordings. The unit is the recording/session, not evidence:
+     EMIT_EVIDENCE is false on PROD so `topics.evidence` is NULL for every prod
+     topic and there would be nothing to select (backend spec §5).
+
+     What the backend does is a reversible, audited redaction — nothing is
+     erased. The copy here deliberately says "deleted" instead; that is a
+     product decision taken 2026-08-14 for internal testing. The mechanism is
+     documented in scripts/api/recording-deletion.js so a later reader is not
+     misled by the wording on screen. */
+  function RecordingsTab() {
+    var ctx = React.useContext(EvidenceContext);
+    var rd  = window.FS.recordingDeletion;
+    var Modal = window.FieldSight.RecordingDeleteModal;
+    var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
+    var callerCtx = { role: caller.role, folder: callerFolder() };
+
+    var refSel = React.useState({});          /* key → row */
+    var selected    = refSel[0];
+    var setSelected = refSel[1];
+    var refBusy = React.useState(false);
+    var busy    = refBusy[0];
+    var setBusy = refBusy[1];
+    var refConfirm = React.useState(false);
+    var confirming    = refConfirm[0];
+    var setConfirming = refConfirm[1];
+    var refResult = React.useState(null);
+    var result    = refResult[0];
+    var setResult = refResult[1];
+    /* Read once per render pass rather than held in state: the window closes
+       on wall-clock time, and state would keep offering an expired entry until
+       something else happened to re-render. */
+    var refLedgerTick = React.useState(0);
+    var setLedgerTick = refLedgerTick[1];
+
+    var recs = ctx.recordings;
+    /* Load-order guard. A missing api/recording-deletion.js would otherwise
+       throw from inside the row map with a stack that points at this file and
+       not at the script tag — the failure mode CLAUDE.md warns about, where a
+       green `node --test` says nothing about whether a module is reachable. */
+    if (!rd || !Modal) {
+      return React.createElement('div', { className: 'fs-evidence__empty' },
+        'Recording deletion did not load. Check the script tags for '
+        + 'api/recording-deletion.js and composites/recording-delete-modal.js.');
+    }
+    if (recs.status === 'idle' || recs.status === 'loading') {
+      return React.createElement('div', { className: 'fs-evidence__loading' },
+        'Loading recordings…');
+    }
+    if (recs.status === 'error') {
+      return React.createElement('div', { className: 'fs-evidence__empty' },
+        'Could not load recordings.');
+    }
+
+    var now = Date.now();
+    var batches = rd.activeBatches(now);
+
+    function keyOf(r) { return r.folder + '|' + r.date + '|' + r.sessionBase; }
+    var selectedRows = Object.keys(selected).map(function (k) { return selected[k]; });
+
+    function toggle(row) {
+      var k = keyOf(row);
+      setSelected(function (prev) {
+        var next = Object.assign({}, prev);
+        if (next[k]) delete next[k]; else next[k] = row;
+        return next;
+      });
+    }
+
+    function runDelete() {
+      setBusy(true);
+      setResult(null);
+      window.FS.api.org.deleteRecordings(rd.toRequest(selectedRows))
+        .then(function (res) {
+          if (res && res._notAvailable) {
+            setResult({ error: 'Deleting is not available in this environment.' });
+            return;
+          }
+          if (res && (res._accessDenied || res._notFound)) {
+            setResult({ error: (res.error || 'You do not have permission to delete these.') });
+            return;
+          }
+          var summary = rd.summariseResult(res, selectedRows);
+          if (summary.batchId) {
+            rd.appendBatch({
+              batchId: summary.batchId,
+              count: summary.deleted,
+              topicsHidden: summary.topicsHidden,
+              labels: selectedRows.map(function (r) { return r.date + ' ' + (r.label || ''); }),
+            }, now);
+          }
+          setResult({ summary: summary });
+          setSelected({});
+          ctx.reloadRecordings();
+        })
+        .catch(function () { setResult({ error: 'The delete request failed.' }); })
+        .then(function () { setBusy(false); setConfirming(false); });
+    }
+
+    /* `restored` is the count of redaction ROWS the batch reverted — one
+       tombstone per recording PLUS one per hidden topic. It is deliberately
+       not relabelled "topics": that is a different number and printing this
+       one under that word would be a quiet lie. Shown against what the delete
+       recorded, because the spec's own acceptance is "one revert restores
+       exactly what one delete hid, counted the same way". */
+    function runRestore(batch) {
+      setBusy(true);
+      var expected = (batch.count || 0) + (batch.topicsHidden || 0);
+      window.FS.api.org.undeleteRecordings(batch.batchId).then(function (res) {
+        if (res && (res._notAvailable || res._accessDenied || res._notFound)) {
+          setResult({ error: 'Could not restore that batch.' });
+          return;
+        }
+        rd.removeBatch(batch.batchId);
+        setLedgerTick(function (n) { return n + 1; });
+        setResult({ restored: (res && res.restored) || 0, expected: expected });
+        ctx.reloadRecordings();
+      }).catch(function () {
+        setResult({ error: 'The restore request failed.' });
+      }).then(function () { setBusy(false); });
+    }
+
+    var anyRows = recs.perDay.some(function (d) { return d.rows.length; });
+
+    return React.createElement('div', { className: 'fs-evidence__sections' },
+
+      result
+        ? React.createElement('div', {
+            className: 'fs-rec-result' + (result.error ? ' fs-rec-result--error' : ''),
+          },
+            result.error ? result.error
+              : result.restored != null
+                ? (result.restored === result.expected
+                    ? ('Restored · ' + result.restored + ' entries put back, '
+                       + 'matching what the delete removed')
+                    /* A mismatch is shown, not smoothed over. It means part of
+                       the batch had already been reverted, or something else
+                       touched those rows — either way the user should know the
+                       counts did not line up. */
+                    : ('Restored · ' + result.restored + ' entries put back, '
+                       + 'but the delete recorded ' + result.expected
+                       + ' — check the recordings below'))
+                : rd.summaryLine(result.summary),
+            /* The rows that hid nothing and the rows that were refused are
+               named, not folded into the count. A delete that matched nothing
+               and read as success is the failure this whole surface is
+               shaped to avoid. */
+            (result.summary && result.summary.nothingHidden.length)
+              ? React.createElement('div', { className: 'fs-rec-result__detail' },
+                  'Nothing to remove: ' + result.summary.nothingHidden.join(', '))
+              : null,
+            (result.summary && result.summary.failed.length)
+              ? React.createElement('div', { className: 'fs-rec-result__detail' },
+                  result.summary.failed.map(function (f, i) {
+                    return React.createElement('div', { key: i },
+                      f.label + ' — ' + f.error);
+                  }))
+              : null,
+          )
+        : null,
+
+      batches.length
+        ? React.createElement('div', { className: 'fs-rec-restore' },
+            React.createElement('div', { className: 'fs-rec-restore__title' },
+              'Recent deletions'),
+            batches.map(function (b) {
+              return React.createElement('div', {
+                key: b.batchId, className: 'fs-rec-restore__row',
+              },
+                React.createElement('span', null,
+                  b.count + ' recording' + (b.count === 1 ? '' : 's')
+                    + ' · ' + b.topicsHidden + ' topic'
+                    + (b.topicsHidden === 1 ? '' : 's')
+                    + ' · ' + rd.hoursLeft(b, now) + 'h left to restore'),
+                React.createElement('button', {
+                  type: 'button', className: 'fs-btn fs-btn--tertiary fs-btn--sm',
+                  disabled: busy,
+                  onClick: function () { runRestore(b); },
+                }, 'Restore'),
+              );
+            }),
+          )
+        : null,
+
+      !anyRows
+        ? React.createElement('div', { className: 'fs-evidence__empty' },
+            'No recordings in the selected range.')
+        : recs.perDay.map(function (day) {
+            return React.createElement('div', {
+              key: day.date, className: 'fs-evidence__section',
+            },
+              React.createElement('div', { className: 'fs-evidence__section-header' },
+                React.createElement('span', { className: 'fs-evidence__section-date' },
+                  fmtDate(day.date)),
+                React.createElement('span', { className: 'fs-evidence__section-count' },
+                  day.rows.length + ' recording' + (day.rows.length === 1 ? '' : 's')),
+              ),
+              day.rows.map(function (r) {
+                var deletable = rd.canDelete(r, callerCtx);
+                var k = keyOf(r);
+                return React.createElement('label', {
+                  key: k,
+                  className: 'fs-rec-row' + (deletable ? '' : ' fs-rec-row--locked'),
+                },
+                  deletable
+                    ? React.createElement('input', {
+                        type: 'checkbox',
+                        className: 'fs-rec-row__check',
+                        checked: !!selected[k],
+                        onChange: function () { toggle(r); },
+                      })
+                    : React.createElement('span', { className: 'fs-rec-row__check-spacer' }),
+                  React.createElement('span', { className: 'fs-rec-row__label' },
+                    r.label),
+                  React.createElement('span', { className: 'fs-rec-row__meta' },
+                    r.sessionBase
+                      ? (r.topicCount + ' topic' + (r.topicCount === 1 ? '' : 's'))
+                      /* A report-sourced day is one S3 key for the whole day —
+                         there is no per-recording granularity in the data, so
+                         we do not invent a boundary the user could select. */
+                      : 'Whole day — no separate recordings'),
+                );
+              }),
+            );
+          }),
+
+      selectedRows.length
+        ? React.createElement('div', { className: 'fs-rec-bulkbar' },
+            React.createElement('span', null,
+              selectedRows.length + ' selected'),
+            React.createElement('button', {
+              type: 'button', className: 'fs-btn fs-btn--tertiary fs-btn--sm',
+              onClick: function () { setSelected({}); },
+            }, 'Clear'),
+            React.createElement('button', {
+              type: 'button', className: 'fs-btn fs-btn--danger fs-btn--sm',
+              disabled: busy,
+              onClick: function () { setConfirming(true); },
+            }, 'Delete'),
+          )
+        : null,
+
+      React.createElement(Modal, {
+        open: confirming,
+        rows: selectedRows,
+        busy: busy,
+        onConfirm: runDelete,
+        onCancel: function () { setConfirming(false); },
       }),
     );
   }
@@ -485,6 +842,7 @@
       { key: 'audio',       label: 'Audio' },
       { key: 'video',       label: 'Video' },
       { key: 'transcripts', label: 'Transcripts' },
+      { key: 'recordings',  label: 'Recordings' },
     ];
 
     var body;
@@ -503,6 +861,9 @@
         body = React.createElement(MediaPerDayTab, {
           component: fs.TranscriptList,
         });
+        break;
+      case 'recordings':
+        body = React.createElement(RecordingsTab, null);
         break;
       case 'photos':
       default:

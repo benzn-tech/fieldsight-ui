@@ -11584,3 +11584,170 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
    frame, and a second border around a list of bordered cards reads as a
    nesting that is not there. */
 .fs-timeline-page__threads { margin: 0 0 20px; }
+
+
+/* =========================================================================
+   Recording deletion (/evidence → Recordings)
+   Backend spec: fieldsight-pipeline 2026-08-14-user-deletes-a-recording.
+   ========================================================================= */
+
+.fs-rec-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  min-height: 44px;   /* field default touch target */
+}
+.fs-rec-row:hover { background: var(--surface-panel-muted); }
+/* A row nobody may delete is not a row with a hidden checkbox — it keeps the
+   same alignment so the list does not look ragged, and it does not pretend to
+   be interactive. */
+.fs-rec-row--locked { cursor: default; }
+.fs-rec-row--locked:hover { background: none; }
+
+.fs-rec-row__check { width: 16px; height: 16px; flex-shrink: 0; }
+.fs-rec-row__check-spacer { width: 16px; flex-shrink: 0; }
+
+.fs-rec-row__label {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.fs-rec-row__meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.fs-rec-bulkbar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-top: 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  font-size: 12px;
+  color: var(--text-primary);
+  z-index: 2;
+}
+
+.fs-rec-restore {
+  padding: 10px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+  margin-bottom: 12px;
+}
+.fs-rec-restore__title {
+  font-size: 11px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+.fs-rec-restore__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 4px 0;
+}
+
+.fs-rec-result {
+  padding: 10px 12px;
+  border-left: 3px solid var(--border-strong);
+  background: var(--surface-panel);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+.fs-rec-result--error { border-left-color: var(--text-danger); }
+.fs-rec-result__detail {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* --- the confirm modal --- */
+
+.fs-rec-delete__lead {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.fs-rec-delete__list {
+  max-height: 40vh;
+  overflow-y: auto;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 8px;
+}
+
+.fs-rec-delete__row + .fs-rec-delete__row {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+.fs-rec-delete__row-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+}
+.fs-rec-delete__row-date {
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+}
+.fs-rec-delete__row-label { color: var(--text-primary); }
+
+.fs-rec-delete__topics {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fs-rec-delete__topic { line-height: 1.5; }
+.fs-rec-delete__topic--more { color: var(--text-tertiary); list-style: none; }
+
+/* "could not read" and "contains nothing" render differently on purpose —
+   only one of them is safe to confirm against. */
+.fs-rec-delete__topics-unknown {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-danger);
+}
+.fs-rec-delete__topics-none {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.fs-rec-delete__warn {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--text-danger);
+}
+.fs-rec-delete__restore {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.fs-rec-delete__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}

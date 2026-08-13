@@ -736,10 +736,37 @@
     return { _notAvailable: true };
   }
 
+  // -------- recording deletion (pipeline spec 2026-08-14-user-deletes-a-recording) --------
+  /* Hide a batch of recordings and everything derived from them. Reversible:
+     the backend writes audited `redactions` rows, it does not erase anything
+     (see scripts/api/recording-deletion.js for the full mechanism note).
+
+     Per-recording results, INCLUDING zeros — a delete that matched nothing and
+     reported success is the worst outcome available here, so the caller must
+     read `results`, never just the status code. */
+  async function deleteRecordings(body) {
+    if (orgWrite()) {
+      return api.orgRequest('/recordings/delete', { method: 'POST', body: body });
+    }
+    await api.delay();
+    return { _notAvailable: true };
+  }
+
+  async function undeleteRecordings(batchId) {
+    if (orgWrite()) {
+      return api.orgRequest('/recordings/undelete',
+        { method: 'POST', body: { batchId: batchId } });
+    }
+    await api.delay();
+    return { _notAvailable: true };
+  }
+
   window.FS.api.org = {
     getMe: getMe,
     setSpeakerName: setSpeakerName,
     removeSpeakerName: removeSpeakerName,
+    deleteRecordings: deleteRecordings,
+    undeleteRecordings: undeleteRecordings,
     updateProfile: updateProfile,
     getOrgSites: getOrgSites, createOrgSite: createOrgSite, updateOrgSite: updateOrgSite, geocodeAddress: geocodeAddress,
     archiveSite: archiveSite, unarchiveSite: unarchiveSite,
