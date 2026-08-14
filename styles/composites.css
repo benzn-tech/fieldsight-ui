@@ -2314,18 +2314,60 @@
   flex-basis: 100%;
   order: 3;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding: 8px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   background: var(--surface-panel);
 }
 
+.fs-transcript-list__name-title {
+  font-size: 12px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.fs-transcript-list__name-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fs-transcript-list__name-choice {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  min-height: 36px;
+  font-size: 12px;
+}
+.fs-transcript-list__name-choice:hover { background: var(--surface-panel-muted); }
+.fs-transcript-list__name-choice--on { background: var(--surface-selected); }
+.fs-transcript-list__name-choice input { flex-shrink: 0; }
+
+.fs-transcript-list__name-choice-name {
+  color: var(--text-primary);
+  flex: 1;
+}
+/* Where the suggestion came from. Load-bearing for the `heard` group — those
+   names are what the model heard, not what anyone confirmed, and one click is
+   now all it takes to assert one. */
+.fs-transcript-list__name-choice-src {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.fs-transcript-list__name-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .fs-transcript-list__name-input {
-  flex: 1 1 160px;
-  min-width: 140px;
+  width: 100%;
   padding: 6px 8px;
   font: inherit;
   font-size: 12px;
@@ -2351,6 +2393,13 @@
   border-color: transparent;
   background: var(--color-primary-900);
   color: #FFFFFF;
+}
+/* Save is disabled until something is actually chosen — nothing is
+   pre-selected, so an enabled-looking button with no choice behind it would
+   invite a click that does nothing. */
+.fs-transcript-list__name-save[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .fs-transcript-list__name-remove { color: var(--text-danger); }
 

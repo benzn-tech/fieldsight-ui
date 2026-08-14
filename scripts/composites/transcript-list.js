@@ -99,57 +99,139 @@
     return lastAtOrBefore !== null ? lastAtOrBefore : 0;
   }
 
-  /* The naming form. Mounted only while its row's panel is open, so the input
-     is uncontrolled with a defaultValue — it remounts fresh each time. */
+  var SOURCE_LABEL = {
+    used:   'already used here',
+    wearer: 'wearing the recorder',
+    /* "heard", not "participant". These come from the extraction's own
+       participant list, which is what the MODEL heard — a misheard or invented
+       name is one click away here, where before it needed typing. Saying where
+       it came from is what keeps the click honest. */
+    heard:  'heard in this conversation',
+  };
+
+  /* The naming form. Choices, not a text box: the same person typed two ways is
+     two people to the propagation layer, and the second spelling silently names
+     nothing. Mounted only while its row's panel is open, so it remounts fresh.
+
+     NOTHING is pre-selected unless this turn already carries a name. Picking is
+     always a deliberate act — see the note on `heard` above. */
   function NamePanel(props) {
+    var current = props.segment.speaker_name || '';
+    var refChoice = React.useState(current || null);
+    var choice    = refChoice[0];
+    var setChoice = refChoice[1];
+    var refCustom = React.useState('');
+    var custom    = refCustom[0];
+    var setCustom = refCustom[1];
+    /* A separate flag rather than a sentinel value in `choice`. A sentinel has
+       to be a string that no real name can equal, and every such string is a
+       guess about what people are called. */
+    var refMode = React.useState(false);
+    var customMode    = refMode[0];
+    var setCustomMode = refMode[1];
     var inputRef = React.useRef(null);
-    var listId = 'fs-spk-names';
+
+    function pick(name) { setChoice(name); setCustomMode(false); }
+    function pickCustom() { setChoice(null); setCustomMode(true); }
 
     React.useEffect(function () {
-      if (inputRef.current && inputRef.current.focus) inputRef.current.focus();
-    }, []);
+      if (customMode && inputRef.current && inputRef.current.focus) {
+        inputRef.current.focus();
+      }
+    }, [customMode]);
+
+    var candidates = props.candidates || [];
 
     function save() {
-      props.onSave(inputRef.current ? inputRef.current.value : '');
+      props.onSave(customMode ? custom : (choice || ''));
     }
 
-    return React.createElement('div', { className: 'fs-transcript-list__name-panel' },
-      React.createElement('input', {
-        ref: inputRef,
-        type: 'text',
-        className: 'fs-transcript-list__name-input',
-        defaultValue: props.segment.speaker_name || '',
-        placeholder: 'Who is speaking?',
-        list: props.names && props.names.length ? listId : undefined,
-        'aria-label': 'Name for this passage',
-        onKeyDown: function (e) {
-          if (e.key === 'Enter') { e.preventDefault(); save(); }
-          if (e.key === 'Escape') { e.preventDefault(); props.onCancel(); }
+    var canSave = customMode ? !!String(custom).trim() : !!choice;
+
+    return React.createElement('div', {
+      className: 'fs-transcript-list__name-panel',
+      role: 'group',
+      'aria-label': 'Who is speaking',
+      onKeyDown: function (e) {
+        if (e.key === 'Escape') { e.preventDefault(); props.onCancel(); }
+      },
+    },
+      React.createElement('div', { className: 'fs-transcript-list__name-title' },
+        'Who is speaking?'),
+
+      React.createElement('div', { className: 'fs-transcript-list__name-choices' },
+        candidates.map(function (c) {
+          return React.createElement('label', {
+            key: c.name,
+            className: 'fs-transcript-list__name-choice'
+              + (!customMode && choice === c.name
+                   ? ' fs-transcript-list__name-choice--on' : ''),
+          },
+            React.createElement('input', {
+              type: 'radio', name: 'fs-spk-choice',
+              checked: !customMode && choice === c.name,
+              onChange: function () { pick(c.name); },
+            }),
+            React.createElement('span', {
+              className: 'fs-transcript-list__name-choice-name',
+            }, c.name),
+            React.createElement('span', {
+              className: 'fs-transcript-list__name-choice-src',
+            }, SOURCE_LABEL[c.source] || ''),
+          );
+        }),
+
+        React.createElement('label', {
+          className: 'fs-transcript-list__name-choice'
+            + (customMode ? ' fs-transcript-list__name-choice--on' : ''),
         },
-      }),
-      (props.names && props.names.length)
-        ? React.createElement('datalist', { id: listId },
-            props.names.map(function (n) {
-              return React.createElement('option', { key: n, value: n });
-            }))
+          React.createElement('input', {
+            type: 'radio', name: 'fs-spk-choice',
+            checked: customMode,
+            onChange: pickCustom,
+          }),
+          React.createElement('span', {
+            className: 'fs-transcript-list__name-choice-name',
+          }, candidates.length ? 'Someone else…' : 'Type a name…'),
+        ),
+      ),
+
+      customMode
+        ? React.createElement('input', {
+            ref: inputRef,
+            type: 'text',
+            className: 'fs-transcript-list__name-input',
+            value: custom,
+            placeholder: 'Their name',
+            'aria-label': 'Name for this passage',
+            onChange: function (e) { setCustom(e.target.value); },
+            onKeyDown: function (e) {
+              if (e.key === 'Enter' && canSave) { e.preventDefault(); save(); }
+            },
+          })
         : null,
-      React.createElement('button', {
-        type: 'button',
-        className: 'fs-transcript-list__name-save',
-        onClick: save,
-      }, 'Save'),
-      props.onRemove
-        ? React.createElement('button', {
-            type: 'button',
-            className: 'fs-transcript-list__name-remove',
-            onClick: props.onRemove,
-          }, 'Remove this name')
-        : null,
-      React.createElement('button', {
-        type: 'button',
-        className: 'fs-transcript-list__name-cancel',
-        onClick: props.onCancel,
-      }, 'Cancel'),
+
+      React.createElement('div', { className: 'fs-transcript-list__name-actions' },
+        React.createElement('button', {
+          type: 'button',
+          className: 'fs-transcript-list__name-save',
+          disabled: !canSave,
+          onClick: save,
+        }, 'Save'),
+        props.onRemove
+          ? React.createElement('button', {
+              type: 'button',
+              className: 'fs-transcript-list__name-remove',
+              onClick: props.onRemove,
+            }, 'Remove this name')
+          : null,
+        React.createElement('button', {
+          type: 'button',
+          className: 'fs-transcript-list__name-cancel',
+          onClick: props.onCancel,
+        }, 'Cancel'),
+      ),
+
       /* Naming propagates within THIS meeting only. Future meetings are
          backend Phase 5 and are not built — do not imply it in copy. */
       React.createElement('span', { className: 'fs-transcript-list__name-hint' },
@@ -392,7 +474,14 @@
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
     var namingOn = !!(sn && state.namingAvailable && sn.roleMayName(caller.role)
                       && window.FS.api.org && window.FS.api.org.setSpeakerName);
-    var knownNames = sn ? sn.namesInSession(state.segments) : [];
+    /* used → wearer → heard, deduped. `participants` is the extraction's own
+       heard-name list, which until now this component used ONLY as a
+       positional guess; it is a much better suggestion source than a guess. */
+    var candidates = sn ? sn.nameCandidates({
+      segments:     state.segments,
+      participants: props.participants,
+      userFolder:   user,
+    }) : [];
 
     return React.createElement('div', { className: 'fs-transcript-list' },
 
@@ -477,8 +566,8 @@
 
           openIndex === i
             ? React.createElement(NamePanel, {
-                segment: s,
-                names:   knownNames,
+                segment:    s,
+                candidates: candidates,
                 onSave:  function (name) { submitName(s, i, name); },
                 onRemove: s.speaker_name
                   ? function () { removeName(s, s.speaker_name); } : null,

@@ -131,8 +131,53 @@
     return Object.keys(seen).sort();
   }
 
+  /* folder → display name. `Jarley_Trainor` → `Jarley Trainor`.
+     Collapses repeats and trims, because a member with a NULL last_name gets a
+     folder ending in `_` (fieldsight-display-name-trailing-space) and
+     "Ben UCPK " is not a name anyone would pick from a list. */
+  function folderToName(folder) {
+    return String(folder || '').replace(/_+/g, ' ').trim();
+  }
+
+  /* The choices offered for "who is speaking", in the order they are offered.
+
+     Picking beats typing here: the same person typed twice two different ways
+     is two people to the propagation layer, and the second spelling silently
+     names nothing. So the names already used in this meeting come first.
+
+     `heard` comes from the extraction's `participants` — names the MODEL heard
+     in the conversation. They are the most useful suggestions and the least
+     trustworthy: a misheard or invented name is now one click away, where
+     before it needed typing. The caller must label the group as heard rather
+     than confirmed, and must not pre-select anything. Ordering it last is part
+     of that.
+
+     Deduped case-insensitively, first group wins, so a name that is both used
+     and heard is offered once, as used. */
+  function nameCandidates(opts) {
+    opts = opts || {};
+    var out = [];
+    var seen = {};
+
+    function add(name, source) {
+      var clean = String(name == null ? '' : name).trim();
+      if (!clean) return;
+      var k = clean.toLowerCase();
+      if (seen[k]) return;
+      seen[k] = true;
+      out.push({ name: clean, source: source });
+    }
+
+    namesInSession(opts.segments).forEach(function (n) { add(n, 'used'); });
+    add(folderToName(opts.userFolder), 'wearer');
+    (opts.participants || []).forEach(function (p) { add(p, 'heard'); });
+    return out;
+  }
+
   var mod = {
     MIN_TURN_SECONDS: MIN_TURN_SECONDS,
+    folderToName: folderToName,
+    nameCandidates: nameCandidates,
     NAMING_ROLES: NAMING_ROLES,
     sessionRefForSegment: sessionRefForSegment,
     canName: canName,

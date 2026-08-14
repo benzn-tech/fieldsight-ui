@@ -151,6 +151,49 @@ test('a pm is recognised under the name the UI actually holds', () => {
   assert.strictEqual(sn.roleMayName('general_manager'), false);
 });
 
+test('a folder becomes a name a person would recognise', () => {
+  assert.strictEqual(sn.folderToName('Jarley_Trainor'), 'Jarley Trainor');
+  /* A member with a NULL last_name gets a trailing underscore in the folder
+     (fieldsight-display-name-trailing-space). "Ben UCPK " is not a name
+     anyone would pick out of a list. */
+  assert.strictEqual(sn.folderToName('Ben_UCPK_'), 'Ben UCPK');
+  assert.strictEqual(sn.folderToName('A__B'), 'A B');
+  assert.strictEqual(sn.folderToName(null), '');
+});
+
+test('the choices are ordered used → wearer → heard, deduped across groups', () => {
+  const segs = [
+    Object.assign({}, SEAM_SEGMENT, { speaker_name: 'Ben L' }),
+    SEAM_SEGMENT,
+  ];
+  const got = sn.nameCandidates({
+    segments: segs,
+    participants: ['Sam Wright', 'ben l', 'Jarley Trainor', '  '],
+    userFolder: 'Jarley_Trainor',
+  });
+
+  assert.deepStrictEqual(got, [
+    /* Already used in this meeting comes first: the same person typed two
+       ways is two people to the propagation layer. */
+    { name: 'Ben L', source: 'used' },
+    { name: 'Jarley Trainor', source: 'wearer' },
+    { name: 'Sam Wright', source: 'heard' },
+  ]);
+  /* 'ben l' is the same person as 'Ben L' and must not appear twice, and the
+     wearer must not repeat as a heard participant. */
+  assert.strictEqual(got.filter((c) => c.name.toLowerCase() === 'ben l').length, 1);
+  assert.strictEqual(got.filter((c) => c.name === 'Jarley Trainor').length, 1);
+  /* Blank participants are dropped rather than offered as an empty radio. */
+  assert.ok(got.every((c) => c.name.trim()));
+});
+
+test('the choice list degrades to nothing rather than to junk', () => {
+  assert.deepStrictEqual(sn.nameCandidates({}), []);
+  assert.deepStrictEqual(sn.nameCandidates({ segments: [], participants: [] }), []);
+  /* A folder with nothing in it must not become a blank option. */
+  assert.deepStrictEqual(sn.nameCandidates({ userFolder: '___' }), []);
+});
+
 test('names already used in the meeting are offered as suggestions', () => {
   const segs = [
     Object.assign({}, SEAM_SEGMENT, { speaker_name: 'Ben L' }),
