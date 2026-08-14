@@ -345,7 +345,13 @@
        nothing" are different statements and only one is safe to confirm. */
     React.useEffect(function () {
       if (state.status !== 'ok') return undefined;
-      if (activeTab !== 'recordings') return undefined;
+      /* Audio and Video both render selectable session blocks off this
+         fan-out. Photos deliberately does not: deleting a photo is a
+         different mechanism (topic_photos CASCADEs from its topic, and
+         PhotoGrid already has its own keyframe delete), and one Delete
+         button meaning two things across tabs is a real source of
+         mis-clicks. */
+      if (activeTab !== 'audio' && activeTab !== 'video') return undefined;
       if (recordings.status === 'ok' && recReload === recordings.tick) return undefined;
       var cancelled = false;
       var tick = recReload;
@@ -395,6 +401,11 @@
               sessionBase: base,
               label:       s.label || (base ? 'Recording' : 'Whole day'),
               topicCount:  s.topic_count || 0,
+              /* started_at is authoritative (parsed from the session key);
+                 ended_at is cosmetic and may be null — see
+                 recording-deletion.sessionWindow. */
+              started_at:  s.started_at || null,
+              ended_at:    s.ended_at || null,
               /* null = unknown (report unreadable), [] = genuinely none. */
               topics: (topics == null || base == null) ? null
                 : topics.filter(function (t) { return t && t.session_id === base; }),
@@ -404,6 +415,16 @@
           perDay[p.date].rows = perDay[p.date].rows.concat(rows);
         });
         var out = Object.keys(perDay).sort().reverse().map(function (d) {
+          /* Chronological within the day, so `sessionWindow` can use the NEXT
+             session's start as a boundary when a session has no known end.
+             Sorted on the ISO STRING — fixed-width ISO sorts lexicographically
+             exactly as it sorts chronologically, and it is null-safe without
+             inventing a sentinel date (same rule the backend sorts by). */
+          perDay[d].rows.sort(function (a, b) {
+            var an = a.started_at == null, bn = b.started_at == null;
+            if (an !== bn) return an ? 1 : -1;
+            return String(a.started_at || '').localeCompare(String(b.started_at || ''));
+          });
           return perDay[d];
         });
         setRecordings({ status: 'ok', perDay: out, tick: tick });
@@ -497,7 +518,8 @@
      product decision taken 2026-08-14 for internal testing. The mechanism is
      documented in scripts/api/recording-deletion.js so a later reader is not
      misled by the wording on screen. */
-  function RecordingsTab() {
+  function DeletableMediaTab(props) {
+    var Component = props.component;
     var ctx = React.useContext(EvidenceContext);
     var rd  = window.FS.recordingDeletion;
     var Modal = window.FieldSight.RecordingDeleteModal;
@@ -684,30 +706,58 @@
                 React.createElement('span', { className: 'fs-evidence__section-count' },
                   day.rows.length + ' recording' + (day.rows.length === 1 ? '' : 's')),
               ),
-              day.rows.map(function (r) {
+              /* One block per recording. A recording IS a contiguous time
+                 block — one press-record → stop — so the block heading is its
+                 span, and the media inside it is that span's media.
+
+                 The SELECTABLE unit is the whole block. Individual clips are
+                 not offered a checkbox, because the endpoint cannot address a
+                 time range inside a recording (there is no such arm, and a
+                 topic's only time field is LLM free text that the pipeline
+                 forbids using to decide membership). Offering a control that
+                 must then refuse is the failure mode this codebase keeps
+                 hitting; a separate spec covers doing it for real. */
+              day.rows.map(function (r, i) {
                 var deletable = rd.canDelete(r, callerCtx);
                 var k = keyOf(r);
-                return React.createElement('label', {
+                var win = rd.sessionWindow(r, day.rows[i + 1]);
+                return React.createElement('div', {
                   key: k,
-                  className: 'fs-rec-row' + (deletable ? '' : ' fs-rec-row--locked'),
+                  className: 'fs-rec-block' + (selected[k] ? ' fs-rec-block--selected' : ''),
                 },
-                  deletable
-                    ? React.createElement('input', {
-                        type: 'checkbox',
-                        className: 'fs-rec-row__check',
-                        checked: !!selected[k],
-                        onChange: function () { toggle(r); },
-                      })
-                    : React.createElement('span', { className: 'fs-rec-row__check-spacer' }),
-                  React.createElement('span', { className: 'fs-rec-row__label' },
-                    r.label),
-                  React.createElement('span', { className: 'fs-rec-row__meta' },
-                    r.sessionBase
-                      ? (r.topicCount + ' topic' + (r.topicCount === 1 ? '' : 's'))
-                      /* A report-sourced day is one S3 key for the whole day —
-                         there is no per-recording granularity in the data, so
-                         we do not invent a boundary the user could select. */
-                      : 'Whole day — no separate recordings'),
+                  React.createElement('label', {
+                    className: 'fs-rec-row' + (deletable ? '' : ' fs-rec-row--locked'),
+                  },
+                    deletable
+                      ? React.createElement('input', {
+                          type: 'checkbox',
+                          className: 'fs-rec-row__check',
+                          checked: !!selected[k],
+                          onChange: function () { toggle(r); },
+                        })
+                      : React.createElement('span', { className: 'fs-rec-row__check-spacer' }),
+                    React.createElement('span', { className: 'fs-rec-row__label' },
+                      r.label),
+                    React.createElement('span', { className: 'fs-rec-row__meta' },
+                      r.sessionBase
+                        ? (r.topicCount + ' topic' + (r.topicCount === 1 ? '' : 's')
+                           /* `ended_at` is cosmetic and can be absent. When we
+                              fall back to the next recording's start, say so —
+                              it decides which clips appear under which heading,
+                              never what gets deleted (that is addressed by
+                              sessionBase, which is exact). */
+                           + (win.inferredEnd ? ' · end time not recorded' : ''))
+                        /* A report-sourced day is one S3 key for the whole day —
+                           there is no per-recording granularity in the data, so
+                           we do not invent a boundary the user could select. */
+                        : 'Whole day — no separate recordings'),
+                  ),
+                  React.createElement('div', { className: 'fs-rec-block__media' },
+                    React.createElement(Component, {
+                      date: r.date, user: r.folder,
+                      start: win.start, end: win.end,
+                    }),
+                  ),
                 );
               }),
             );
@@ -842,18 +892,21 @@
       { key: 'audio',       label: 'Audio' },
       { key: 'video',       label: 'Video' },
       { key: 'transcripts', label: 'Transcripts' },
-      { key: 'recordings',  label: 'Recordings' },
     ];
 
     var body;
     switch (ctx.activeTab) {
+      /* Audio and Video group the day into per-recording blocks and carry the
+         delete controls. Transcripts stays a plain per-day list: deleting from
+         a transcript would read as removing a passage, and the endpoint's unit
+         is the whole recording. */
       case 'audio':
-        body = React.createElement(MediaPerDayTab, {
+        body = React.createElement(DeletableMediaTab, {
           component: fs.AudioPlaylist,
         });
         break;
       case 'video':
-        body = React.createElement(MediaPerDayTab, {
+        body = React.createElement(DeletableMediaTab, {
           component: fs.VideoPlayer,
         });
         break;
@@ -861,9 +914,6 @@
         body = React.createElement(MediaPerDayTab, {
           component: fs.TranscriptList,
         });
-        break;
-      case 'recordings':
-        body = React.createElement(RecordingsTab, null);
         break;
       case 'photos':
       default:

@@ -148,6 +148,41 @@ test('an empty result set says zero rather than nothing at all', () => {
   assert.strictEqual(rd.summaryLine(s), '0 recordings deleted · 0 topics removed');
 });
 
+test('the clock time is read off the string, never through a Date', () => {
+  assert.strictEqual(rd.clockTime('2026-04-29T11:49:00'), '11:49:00');
+  assert.strictEqual(rd.clockTime('2026-04-29T11:49:00+12:00'), '11:49:00');
+  assert.strictEqual(rd.clockTime(null), null);
+  assert.strictEqual(rd.clockTime('2026-04-29'), null);
+});
+
+test('an unknown session end is inferred from the next start, and admits it', () => {
+  const a = { started_at: '2026-04-29T09:00:00', ended_at: '2026-04-29T09:42:00' };
+  const b = { started_at: '2026-04-29T11:49:00', ended_at: null };
+  const c = { started_at: '2026-04-29T14:05:00', ended_at: null };
+
+  /* A known end is used as-is and claims nothing. */
+  assert.deepStrictEqual(rd.sessionWindow(a, b),
+    { start: '09:00:00', end: '09:42:00', inferredEnd: false });
+
+  /* `ended_at` is cosmetic and may be absent — the backend renders "?" there
+     rather than guessing, so a fallback must be flagged as one. */
+  assert.deepStrictEqual(rd.sessionWindow(b, c),
+    { start: '11:49:00', end: '14:05:00', inferredEnd: true });
+
+  /* Last of the day: run to midnight rather than invent a duration. */
+  assert.deepStrictEqual(rd.sessionWindow(c, null),
+    { start: '14:05:00', end: '23:59:59', inferredEnd: true });
+
+  /* A neighbour that starts BEFORE this one is not a usable boundary. */
+  assert.deepStrictEqual(
+    rd.sessionWindow(c, { started_at: '2026-04-29T08:00:00' }),
+    { start: '14:05:00', end: '23:59:59', inferredEnd: true });
+
+  /* No start at all: refuse to produce a window rather than one from 00:00. */
+  assert.deepStrictEqual(rd.sessionWindow({ started_at: null }, c),
+    { start: null, end: null, inferredEnd: true });
+});
+
 test('the restore ledger survives a reload and expires on read', () => {
   const store = fakeStore();
   rd.appendBatch({ batchId: 'b-1', count: 2, topicsHidden: 7, labels: ['a', 'b'] }, NOW, store);

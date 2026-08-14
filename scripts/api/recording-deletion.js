@@ -132,6 +132,43 @@
     return parts.join(' · ');
   }
 
+  // -------- the time window a recording occupies --------
+
+  /* "2026-04-29T11:49:00" → "11:49:00". The media endpoints compare against
+     the wall-clock time parsed out of the filename, and `started_at` comes
+     from that same parse (session_scope.session_start), so the two are in the
+     same space and no conversion is wanted. Deliberately NOT via `new Date()`:
+     BUG-19 — parsing an ISO string and reading it back shifts the day in NZ. */
+  function clockTime(iso) {
+    var m = /T(\d{2}:\d{2}:\d{2})/.exec(String(iso || ''));
+    return m ? m[1] : null;
+  }
+
+  /* The [start, end] a session's media is shown under.
+
+     `started_at` is authoritative — the backend derives it from the session
+     key itself. `ended_at` is COSMETIC and may be absent; the backend's own
+     label renders "?" for a genuinely unknown end rather than guessing, and
+     this must not guess harder than the backend does.
+
+     So when the end is unknown we fall back to the NEXT session's start and
+     return `inferredEnd: true`, and the UI says so. The inference only decides
+     which audio rows appear under which heading — the delete still addresses
+     the whole session by `sessionBase`, which is exact — so a wrong boundary
+     mislabels a row, it never deletes the wrong thing. */
+  function sessionWindow(session, nextSession) {
+    var start = clockTime(session && session.started_at);
+    var end = clockTime(session && session.ended_at);
+    if (end) return { start: start, end: end, inferredEnd: false };
+    var next = clockTime(nextSession && nextSession.started_at);
+    if (next && start && next > start) {
+      return { start: start, end: next, inferredEnd: true };
+    }
+    /* Last session of the day, or an unparseable neighbour: run to midnight
+       rather than inventing a duration. */
+    return { start: start, end: start ? '23:59:59' : null, inferredEnd: true };
+  }
+
   // -------- the local restore ledger --------
 
   function _storage(store) {
@@ -202,6 +239,8 @@
     LEDGER_KEY: LEDGER_KEY,
     LEDGER_CAP: LEDGER_CAP,
     DELETE_ROLES: DELETE_ROLES,
+    clockTime: clockTime,
+    sessionWindow: sessionWindow,
     isSelectable: isSelectable,
     canDelete: canDelete,
     toRequest: toRequest,

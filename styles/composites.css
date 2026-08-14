@@ -11591,6 +11591,22 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
    Backend spec: fieldsight-pipeline 2026-08-14-user-deletes-a-recording.
    ========================================================================= */
 
+/* One recording = one contiguous time block. The heading carries the span and
+   the checkbox; the block body holds that span's clips. */
+.fs-rec-block {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  padding: 4px 6px 8px;
+  margin-bottom: 10px;
+}
+/* --surface-selected is the canonical selected-row background; reaching for
+   --color-accent-50 directly reads as salmon on dark. */
+.fs-rec-block--selected {
+  background: var(--surface-selected);
+  border-color: var(--border-strong);
+}
+.fs-rec-block__media { padding: 0 6px; }
+
 .fs-rec-row {
   display: flex;
   align-items: center;
