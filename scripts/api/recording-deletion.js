@@ -52,7 +52,13 @@
   var LEDGER_KEY = 'fs_deleted_batches_v1';
   var LEDGER_CAP = 10;
 
-  /* Same list the backend's `_can_delete_folder` accepts on the role arm. */
+  /* Same list the backend's `_can_delete_folder` accepts on the role arm.
+
+     No `pm` here, and that is correct — the backend does not accept it for
+     deletion either. Worth stating because the neighbouring speaker-naming
+     list DOES carry pm and had to spell it twice: the UI never sees the org
+     role `pm`, since session-bridge.js:104 renames it to `project_manager`.
+     Adding either spelling here would widen deletion beyond the backend. */
   var DELETE_ROLES = ['admin', 'gm', 'platform_admin'];
 
   /* A recording the endpoint can actually address. */

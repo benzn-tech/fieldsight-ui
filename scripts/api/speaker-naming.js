@@ -44,8 +44,16 @@
   var MIN_TURN_SECONDS = 3;
 
   /* Both write routes 403 for anyone else (lambda_org_api). Gating the UI on
-     the same list means a worker is never offered a control that refuses. */
-  var NAMING_ROLES = ['admin', 'gm', 'pm', 'site_manager', 'platform_admin'];
+     the same list means a worker is never offered a control that refuses.
+
+     `project_manager` is here because the UI never sees the org role `pm`:
+     scripts/auth/session-bridge.js:104 renames it on the way into
+     AuthMock.currentUser, since roles.js has no 'pm' slug and an unmapped role
+     gets zero permissions. Matching only the backend's spelling meant every pm
+     account was silently denied a control the backend would have accepted —
+     no error, just an absent caret. Both spellings, and a test pinning it. */
+  var NAMING_ROLES = ['admin', 'gm', 'pm', 'project_manager',
+                      'site_manager', 'platform_admin'];
 
   var SID_RE = /sid[0-9a-f]{32}/i;
   var DATE_RE = /\d{4}-\d{2}-\d{2}/;

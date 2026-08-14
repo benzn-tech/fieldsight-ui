@@ -137,6 +137,20 @@ test('only the roles the write routes accept are offered the control', () => {
     .forEach((r) => assert.strictEqual(sn.roleMayName(r), false, String(r)));
 });
 
+test('a pm is recognised under the name the UI actually holds', () => {
+  /* The UI never sees the org role `pm`: session-bridge.js:104 renames it to
+     `project_manager` on the way into AuthMock.currentUser, because roles.js
+     has no 'pm' slug. Matching only the backend's spelling denied every pm
+     account a control the backend would have accepted — silently, since an
+     absent caret looks exactly like a feature that is switched off. */
+  assert.strictEqual(sn.roleMayName('project_manager'), true);
+  /* The remap only touches pm — these reach the UI unchanged, so a second
+     spelling for them would be inventing a role nobody sends. */
+  ['admin', 'gm', 'site_manager', 'platform_admin']
+    .forEach((r) => assert.strictEqual(sn.roleMayName(r), true, r));
+  assert.strictEqual(sn.roleMayName('general_manager'), false);
+});
+
 test('names already used in the meeting are offered as suggestions', () => {
   const segs = [
     Object.assign({}, SEAM_SEGMENT, { speaker_name: 'Ben L' }),
