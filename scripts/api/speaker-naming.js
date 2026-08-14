@@ -139,6 +139,39 @@
     return String(folder || '').replace(/_+/g, ' ').trim();
   }
 
+  /* Which of these known people are named in this transcript.
+
+     The roster is the org's own member list, so nothing here is invented — the
+     worst case is a suggestion nobody wanted, never a name that does not exist.
+     That is the whole reason this reads a roster instead of pulling capitalised
+     words out of the text: "the model heard a name" and "this person exists"
+     are different claims, and only the second one is safe to offer as a click.
+
+     Matching is per token, because a transcript says "Ben", not "Ben Lin".
+     Latin tokens need a word boundary and three characters — without that,
+     "Al" matches "also" and "Mark" matches "marked". Tokens with no Latin
+     letters (Chinese names, for one) have no spaces to bound and are matched as
+     substrings at two characters. Nothing is ASCII-normalised anywhere here:
+     stripping to ASCII deletes non-Latin names outright, which this codebase
+     has now shipped twice. */
+  function mentionedNames(members, text) {
+    var hay = String(text || '');
+    if (!hay) return [];
+    var lower = hay.toLowerCase();
+    return (members || []).filter(function (name) {
+      var tokens = String(name || '').split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+      return tokens.some(function (t) {
+        var hasLatin = /\p{Script=Latin}/u.test(t);
+        if (hasLatin) {
+          if (t.length < 3) return false;
+          var esc = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          return new RegExp('(?<![\\p{L}\\p{N}])' + esc + '(?![\\p{L}\\p{N}])', 'iu').test(hay);
+        }
+        return t.length >= 2 && lower.indexOf(t.toLowerCase()) !== -1;
+      });
+    });
+  }
+
   /* The choices offered for "who is speaking", in the order they are offered.
 
      Picking beats typing here: the same person typed twice two different ways
@@ -168,15 +201,25 @@
       out.push({ name: clean, source: source });
     }
 
+    var members = opts.members || [];
     namesInSession(opts.segments).forEach(function (n) { add(n, 'used'); });
     add(folderToName(opts.userFolder), 'wearer');
+    /* Real people who are actually named in this transcript — the answer the
+       user is most often reaching for, and the only group that is both
+       specific to this conversation AND guaranteed to exist. */
+    mentionedNames(members, opts.text).forEach(function (n) { add(n, 'mentioned'); });
     (opts.participants || []).forEach(function (p) { add(p, 'heard'); });
+    /* Everyone else on the roster, so a person who is present but never says a
+       name is still one click away rather than a typing exercise. The caller
+       keeps this group collapsed — it is the long tail, not a suggestion. */
+    members.forEach(function (m) { add(m, 'team'); });
     return out;
   }
 
   var mod = {
     MIN_TURN_SECONDS: MIN_TURN_SECONDS,
     folderToName: folderToName,
+    mentionedNames: mentionedNames,
     nameCandidates: nameCandidates,
     NAMING_ROLES: NAMING_ROLES,
     sessionRefForSegment: sessionRefForSegment,

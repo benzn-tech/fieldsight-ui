@@ -2294,21 +2294,35 @@
   font-style: normal;
 }
 
-.fs-transcript-list__name-toggle {
-  border: none;
-  background: none;
-  cursor: pointer;
-  padding: 0 6px;
-  line-height: 1;
-  font-size: 11px;
-  color: var(--text-tertiary);
-  border-radius: var(--radius-sm);
+/* The chip itself opens the naming panel. It replaced a 11px caret that was
+   too small to find, let alone hit with a glove on — and it costs nothing,
+   because the click-to-jump gesture it used to carry was never wired by any
+   mount. Given an affordance so it does not read as a static label. */
+.fs-transcript-list__chip--nameable {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
 }
-.fs-transcript-list__name-toggle:hover { color: var(--text-primary); }
-.fs-transcript-list__name-toggle:focus-visible {
+.fs-transcript-list__chip--nameable:hover {
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3);
+}
+.fs-transcript-list__chip:focus-visible {
   outline: 2px solid var(--border-focus);
   outline-offset: 1px;
 }
+
+.fs-transcript-list__name-more,
+.fs-transcript-list__name-jump {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-link);
+  cursor: pointer;
+  text-align: left;
+}
+.fs-transcript-list__name-more:hover,
+.fs-transcript-list__name-jump:hover { text-decoration: underline; }
 
 .fs-transcript-list__name-panel {
   flex-basis: 100%;

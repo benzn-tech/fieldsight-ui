@@ -161,6 +161,46 @@ test('a folder becomes a name a person would recognise', () => {
   assert.strictEqual(sn.folderToName(null), '');
 });
 
+test('a roster name counts as mentioned only on a real word match', () => {
+  const roster = ['Ben Lin', 'Alan Poole', 'Mark Reid', 'Sam Wright', '张伟'];
+  const text = 'Ben said the slab is fine. We also marked it up. 张伟 checked the rebar.';
+  const got = sn.mentionedNames(roster, text);
+
+  /* First name only is how a transcript actually says it. */
+  assert.ok(got.includes('Ben Lin'));
+  /* Non-Latin names have no spaces to bound and are matched as substrings —
+     and are NOT ASCII-normalised, which would delete them outright. */
+  assert.ok(got.includes('张伟'));
+  /* "also" must not summon Alan, and "marked" must not summon Mark. Without
+     the word boundary both of these fire. */
+  assert.ok(!got.includes('Alan Poole'), '"also" must not match "Alan"');
+  assert.ok(!got.includes('Mark Reid'), '"marked" must not match "Mark"');
+  /* Simply absent. */
+  assert.ok(!got.includes('Sam Wright'));
+
+  assert.deepStrictEqual(sn.mentionedNames(roster, ''), []);
+  assert.deepStrictEqual(sn.mentionedNames([], text), []);
+});
+
+test('mentioned beats heard, and the roster tail comes last', () => {
+  const got = sn.nameCandidates({
+    segments: [],
+    members: ['Ben Lin', 'Sam Wright', 'Ana Poole'],
+    text: 'Ben walked the deck with Ana this morning.',
+    participants: ['Sam Wright'],
+    userFolder: 'Jarley_Trainor',
+  });
+  assert.deepStrictEqual(got, [
+    { name: 'Jarley Trainor', source: 'wearer' },
+    { name: 'Ben Lin', source: 'mentioned' },
+    { name: 'Ana Poole', source: 'mentioned' },
+    { name: 'Sam Wright', source: 'heard' },
+  ]);
+  /* Sam is on the roster too, but was already offered as heard — the roster
+     tail must not repeat anyone. */
+  assert.strictEqual(got.filter((c) => c.name === 'Sam Wright').length, 1);
+});
+
 test('the choices are ordered used → wearer → heard, deduped across groups', () => {
   const segs = [
     Object.assign({}, SEAM_SEGMENT, { speaker_name: 'Ben L' }),

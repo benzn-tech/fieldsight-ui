@@ -100,13 +100,16 @@
   }
 
   var SOURCE_LABEL = {
-    used:   'already used here',
-    wearer: 'wearing the recorder',
+    used:      'already used here',
+    wearer:    'wearing the recorder',
+    mentioned: 'named in this transcript',
     /* "heard", not "participant". These come from the extraction's own
        participant list, which is what the MODEL heard — a misheard or invented
        name is one click away here, where before it needed typing. Saying where
-       it came from is what keeps the click honest. */
-    heard:  'heard in this conversation',
+       it came from is what keeps the click honest. `mentioned` above does not
+       need the same hedge: those are roster names, so the person exists. */
+    heard:     'heard in this conversation',
+    team:      '',
   };
 
   /* The naming form. Choices, not a text box: the same person typed two ways is
@@ -140,7 +143,16 @@
       }
     }, [customMode]);
 
-    var candidates = props.candidates || [];
+    var all = props.candidates || [];
+    /* The roster tail is the long list, not a suggestion. Keeping it collapsed
+       is what stops the panel from becoming a company directory the user has
+       to read past to reach the four names that actually apply here. */
+    var primary = all.filter(function (c) { return c.source !== 'team'; });
+    var tail    = all.filter(function (c) { return c.source === 'team'; });
+    var refAll = React.useState(false);
+    var showAll    = refAll[0];
+    var setShowAll = refAll[1];
+    var candidates = showAll ? primary.concat(tail) : primary;
 
     function save() {
       props.onSave(customMode ? custom : (choice || ''));
@@ -194,7 +206,26 @@
             className: 'fs-transcript-list__name-choice-name',
           }, candidates.length ? 'Someone else…' : 'Type a name…'),
         ),
+
+        (!showAll && tail.length)
+          ? React.createElement('button', {
+              type: 'button',
+              className: 'fs-transcript-list__name-more',
+              onClick: function () { setShowAll(true); },
+            }, 'Show ' + tail.length + ' more from your team')
+          : null,
       ),
+
+      /* Only rendered when a caller actually wires onJump. No mount does today
+         — this keeps the prop's contract without giving the chip a second,
+         invisible meaning. */
+      props.onJump
+        ? React.createElement('button', {
+            type: 'button',
+            className: 'fs-transcript-list__name-jump',
+            onClick: props.onJump,
+          }, 'Jump to ' + props.segment.time_label)
+        : null,
 
       customMode
         ? React.createElement('input', {
@@ -272,6 +303,15 @@
 
     var windowRef = React.useRef('');
 
+    /* The org's own member list, used to turn "a name was said in this
+       conversation" into a real person with a real spelling. Fetched only once
+       the backend has said the naming feature is on, so a mount that will never
+       show the control does not spend a request — /evidence renders one of
+       these per day in range. */
+    var refMembers = React.useState([]);
+    var members    = refMembers[0];
+    var setMembers = refMembers[1];
+
     React.useEffect(function () {
       var cancelled = false;
       /* A naming re-fetch must NOT blank the list back to "Loading…" — that
@@ -329,6 +369,23 @@
       });
       return function () { cancelled = true; };
     }, [date, user, start, end, reloadTick]);
+
+    React.useEffect(function () {
+      if (!state.namingAvailable) return undefined;
+      var org = window.FS.api.org;
+      if (!org || !org.getMembers) return undefined;
+      var cancelled = false;
+      org.getMembers().then(function (res) {
+        if (cancelled || !res || res._accessDenied || res._notFound) return;
+        setMembers((res.members || []).map(function (m) {
+          return m && m.name;
+        }).filter(Boolean));
+      }).catch(function () {
+        /* No roster is a smaller list of suggestions, not a broken panel —
+           `used`, `wearer` and `heard` still stand on their own. */
+      });
+      return function () { cancelled = true; };
+    }, [state.namingAvailable]);
 
     /* A2-2 — precision spotlight, same shape as SafetyFlagRow /
        TopicCard (rootRef + flashing state + useEffect keyed on the
@@ -481,6 +538,10 @@
       segments:     state.segments,
       participants: props.participants,
       userFolder:   user,
+      members:      members,
+      /* The transcript's own words, so a roster name that is actually said
+         here outranks one that merely exists. */
+      text: state.segments.map(function (x) { return (x && x.text) || ''; }).join(' '),
     }) : [];
 
     return React.createElement('div', { className: 'fs-transcript-list' },
@@ -522,12 +583,26 @@
             + (flashIndex === i ? ' fs-transcript-list__row--flash' : ''),
         },
           React.createElement('div', { className: 'fs-transcript-list__speaker' },
+            /* The chip IS the naming trigger. It used to call `props.onJump`,
+               which no mount has ever passed — timeline.js and evidence.js both
+               render this component without it — so the gesture the original
+               spec was protecting did not exist. When a caller does pass
+               onJump, it is offered as a row inside the panel instead of as a
+               hidden click, so the prop keeps working without a second
+               invisible meaning for the same target. */
             React.createElement('button', {
               type:    'button',
-              className: 'fs-transcript-list__chip',
+              className: 'fs-transcript-list__chip'
+                + (offerNaming ? ' fs-transcript-list__chip--nameable' : ''),
               style:   { color: palette.fg, background: palette.bg },
-              onClick: function () { if (props.onJump) props.onJump(s); },
-              title:   'Jump to ' + s.time_label,
+              'aria-expanded': offerNaming ? (openIndex === i) : undefined,
+              onClick: function () {
+                if (offerNaming) { setOpenIndex(openIndex === i ? null : i); return; }
+                if (props.onJump) props.onJump(s);
+              },
+              title: offerNaming
+                ? (s.speaker_name ? 'Change who is speaking' : 'Say who is speaking')
+                : ('Jump to ' + s.time_label),
             },
               React.createElement('span', {
                 className: 'fs-transcript-list__chip-label'
@@ -546,28 +621,13 @@
               }, s.time_label),
             ),
 
-            /* Separate from the chip on purpose: the chip is already the
-               click-to-jump gesture and naming must not steal it. */
-            offerNaming
-              ? React.createElement('button', {
-                  type: 'button',
-                  className: 'fs-transcript-list__name-toggle',
-                  'aria-expanded': openIndex === i,
-                  'aria-label': s.speaker_name
-                    ? 'Change who is speaking' : 'Say who is speaking',
-                  title: s.speaker_name
-                    ? 'Change who is speaking' : 'Say who is speaking',
-                  onClick: function () {
-                    setOpenIndex(openIndex === i ? null : i);
-                  },
-                }, '▾')
-              : null,
           ),
 
           openIndex === i
             ? React.createElement(NamePanel, {
                 segment:    s,
                 candidates: candidates,
+                onJump:  props.onJump ? function () { props.onJump(s); } : null,
                 onSave:  function (name) { submitName(s, i, name); },
                 onRemove: s.speaker_name
                   ? function () { removeName(s, s.speaker_name); } : null,
