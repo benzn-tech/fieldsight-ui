@@ -2362,9 +2362,11 @@
 .fs-transcript-list__name-choice--on { background: var(--surface-selected); }
 .fs-transcript-list__name-choice input { flex-shrink: 0; }
 
+/* The source label sits right after the name, not flushed to the far edge.
+   `flex: 1` here pushed it across the whole detail pane, so at desk width the
+   name and the reason for it were 600px apart and read as unrelated. */
 .fs-transcript-list__name-choice-name {
   color: var(--text-primary);
-  flex: 1;
 }
 /* Where the suggestion came from. Load-bearing for the `heard` group — those
    names are what the model heard, not what anyone confirmed, and one click is
