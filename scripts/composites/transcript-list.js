@@ -372,6 +372,13 @@
 
     React.useEffect(function () {
       if (!state.namingAvailable) return undefined;
+      /* A role that cannot name also cannot list members — /members 403s for a
+         worker — so fetching the roster for them is a request whose only
+         possible outcome is a denial. Verified live on TEST: signed in as a
+         worker, getMembers returned _accessDenied. */
+      var sn0 = window.FS.speakerNaming;
+      var role = ((window.AuthMock && window.AuthMock.currentUser) || {}).role;
+      if (!sn0 || !sn0.roleMayName(role)) return undefined;
       var org = window.FS.api.org;
       if (!org || !org.getMembers) return undefined;
       var cancelled = false;

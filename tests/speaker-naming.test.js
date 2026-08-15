@@ -182,6 +182,20 @@ test('a roster name counts as mentioned only on a real word match', () => {
   assert.deepStrictEqual(sn.mentionedNames([], text), []);
 });
 
+test('a Latin name inside Chinese text is still a mention', () => {
+  /* Verbatim from a real TEST transcript (2026-08-13, Ben_UCPK2). These
+     recordings are routinely Chinese with Latin names embedded, and there are
+     no spaces: the characters either side of "Sam" are 和 and 见, which ARE
+     letters. Bounding on \p{L} rejected every one of these — silently. The
+     boundary has to be "not another LATIN letter". */
+  const zh = '我下午1点钟，马上1点钟，我要去和Sam见面。本来一点半的会议，现在改成1点了。';
+  assert.deepStrictEqual(sn.mentionedNames(['Sam Wright'], zh), ['Sam Wright']);
+  /* And the reason the boundary exists at all still holds in the same text. */
+  assert.deepStrictEqual(sn.mentionedNames(['Mark Reid'], '这个已经marked过了'), []);
+  /* A name butted against another Latin word is still not a mention. */
+  assert.deepStrictEqual(sn.mentionedNames(['Sam Wright'], 'Samsung 的设备'), []);
+});
+
 test('mentioned beats heard, and the roster tail comes last', () => {
   const got = sn.nameCandidates({
     segments: [],

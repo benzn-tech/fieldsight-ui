@@ -148,12 +148,18 @@
      are different claims, and only the second one is safe to offer as a click.
 
      Matching is per token, because a transcript says "Ben", not "Ben Lin".
-     Latin tokens need a word boundary and three characters — without that,
-     "Al" matches "also" and "Mark" matches "marked". Tokens with no Latin
-     letters (Chinese names, for one) have no spaces to bound and are matched as
-     substrings at two characters. Nothing is ASCII-normalised anywhere here:
-     stripping to ASCII deletes non-Latin names outright, which this codebase
-     has now shipped twice. */
+
+     A Latin token needs three characters and a boundary, or "Mark" matches
+     "marked". But the boundary is "not another LATIN letter", NOT "not a
+     letter" — these transcripts are frequently Chinese with Latin names inside
+     them, and in `我要去和Sam见面` the neighbours are Han characters, which are
+     letters. Bounding on \p{L} rejected every name embedded in Chinese text,
+     silently, and that is how this codebase has twice shipped a Latin-centric
+     text rule that erases non-Latin content. Found by opening the page.
+
+     Tokens with no Latin letters have no spaces to bound at all and match as
+     substrings from two characters. Nothing is ASCII-normalised anywhere here;
+     normalising deletes the Chinese outright. */
   function mentionedNames(members, text) {
     var hay = String(text || '');
     if (!hay) return [];
@@ -161,11 +167,12 @@
     return (members || []).filter(function (name) {
       var tokens = String(name || '').split(/[^\p{L}\p{N}]+/u).filter(Boolean);
       return tokens.some(function (t) {
-        var hasLatin = /\p{Script=Latin}/u.test(t);
-        if (hasLatin) {
+        if (/\p{Script=Latin}/u.test(t)) {
           if (t.length < 3) return false;
           var esc = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          return new RegExp('(?<![\\p{L}\\p{N}])' + esc + '(?![\\p{L}\\p{N}])', 'iu').test(hay);
+          return new RegExp(
+            '(?<![\\p{Script=Latin}\\p{N}])' + esc + '(?![\\p{Script=Latin}\\p{N}])',
+            'iu').test(hay);
         }
         return t.length >= 2 && lower.indexOf(t.toLowerCase()) !== -1;
       });
