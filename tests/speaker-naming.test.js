@@ -258,3 +258,31 @@ test('names already used in the meeting are offered as suggestions', () => {
   assert.deepStrictEqual(sn.namesInSession(segs), ['Ana P', 'Ben L']);
   assert.deepStrictEqual(sn.namesInSession([]), []);
 });
+
+test('the role list is not the whole rule: your own recording counts', () => {
+  /* Mirrors the backend's `_may_correct_speakers`. Until 2026-08-14 the UI asked only about
+     the role, so a worker — the tier that means "your own recordings and nobody else's" —
+     had no way to say who was speaking in their own meeting. */
+  const own = { role: 'worker', callerFolder: 'Ben_UCPK2', folder: 'Ben_UCPK2' };
+  assert.strictEqual(sn.mayName(own), true);
+
+  /* Someone else's recording is still refused, whatever the viewer can READ. A
+     regional_manager has SITE scope — it can open a colleague's day — and is deliberately
+     absent from the role list, so "the transcript loaded" must not be the test. */
+  assert.strictEqual(
+    sn.mayName({ role: 'regional_manager', callerFolder: 'Ben_UCPK2', folder: 'Someone_Else' }),
+    false);
+  assert.strictEqual(
+    sn.mayName({ role: 'worker', callerFolder: 'Ben_UCPK2', folder: 'Someone_Else' }),
+    false);
+
+  /* The role arm is unchanged and does not need ownership. */
+  assert.strictEqual(
+    sn.mayName({ role: 'site_manager', callerFolder: 'Ben_UCPK2', folder: 'Someone_Else' }),
+    true);
+
+  /* An unknown folder on either side is not a match — two blanks must never be "equal". */
+  assert.strictEqual(sn.mayName({ role: 'worker', callerFolder: null, folder: null }), false);
+  assert.strictEqual(sn.mayName({ role: 'worker', callerFolder: '', folder: '' }), false);
+  assert.strictEqual(sn.mayName({}), false);
+});

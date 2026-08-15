@@ -77,8 +77,24 @@
     return typeof seg.chunk_start === 'number';
   }
 
+  /* The ROLE arm only. Still exported because it is also the right gate for the member
+     roster: /members 403s for a worker, so fetching it for one is a request whose only
+     possible outcome is a denial. */
   function roleMayName(role) {
     return NAMING_ROLES.indexOf(String(role || '')) !== -1;
+  }
+
+  /* The whole rule, mirroring the backend: the role list OR your own recording.
+
+     The second arm exists because the person who pressed record is the person who knows who
+     was in the room, and until 2026-08-14 they were the one person who could not say so.
+     Compare against the caller's OWN folder — not against "the transcript loaded", which is
+     a different question: `regional_manager` can READ a colleague's day and still must not
+     name in it. Backend counterpart: `_may_correct_speakers` in lambda_org_api.py. */
+  function mayName(opts) {
+    opts = opts || {};
+    if (roleMayName(opts.role)) return true;
+    return !!(opts.callerFolder && opts.folder && opts.callerFolder === opts.folder);
   }
 
   /* The POST body. `consent_given` is hard-false here BY DESIGN: consent is a
@@ -232,6 +248,7 @@
     sessionRefForSegment: sessionRefForSegment,
     canName: canName,
     roleMayName: roleMayName,
+    mayName: mayName,
     correctionBody: correctionBody,
     featureAvailable: featureAvailable,
     displayLabel: displayLabel,
