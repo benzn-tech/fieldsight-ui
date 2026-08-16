@@ -607,6 +607,13 @@
                       && sn.mayName({ role: caller.role, callerFolder: callerFolder,
                                       folder: user })
                       && window.FS.api.org && window.FS.api.org.setSpeakerName);
+    /* The turns the voiceprint could not reach, lent the name their cohort agreed on.
+       Display only — nothing here is written back, and each one renders as a `?` the user
+       overwrites with the same click that names anything else. Without this, a single
+       person shows up as two: on 2026-08-13 18:10 the voiceprint reached 4 of spk_0's 26
+       turns and the other 22 kept reading `spk_0`. */
+    var inferred = sn ? sn.inferredNames(state.segments) : {};
+
     /* used → wearer → heard, deduped. `participants` is the extraction's own
        heard-name list, which until now this component used ONLY as a
        positional guess; it is a much better suggestion source than a guess. */
@@ -641,15 +648,33 @@
         ? React.createElement('div', { className: 'fs-transcript-list__notice' }, notice)
         : null,
 
+      /* Say that some of these names were not heard, they were assumed. A `?` on a chip
+         tells you a name is unconfirmed; it does not tell you the rule behind it, and a
+         reader who does not know the rule cannot judge when to distrust it. */
+      Object.keys(inferred).length
+        ? React.createElement('div', { className: 'fs-transcript-list__unmatched' },
+            Object.keys(inferred).length + ' short passage'
+              + (Object.keys(inferred).length === 1 ? ' is' : 's are')
+              + ' too brief to match by voice, and carry the name of the rest of that '
+              + 'speaker’s turns. Marked ? — click any of them to correct it.')
+        : null,
+
       state.segments.map(function (s, i) {
         var palette = SPEAKER_PALETTE[labelToIdx[s.speaker] % SPEAKER_PALETTE.length];
         var nameHint = participantHint[s.speaker];
         var pending  = optimistic[i];
-        var label    = pending || sn.displayLabel(s, nameHint);
+        /* Precedence: what you just did → what the server says → what the label's own
+           cohort implies → the positional guess → the raw label. The inferred name beats
+           `participantHint` because it descends from a human assertion plus this file's
+           diarisation, where the hint is only "the Nth speaker is probably the Nth
+           participant". */
+        var lent     = inferred[i];
+        var label    = pending || sn.displayLabel(s, lent || nameHint);
         /* Tentative is the system's guess, not the user's assertion, and must
            never render in a form a reader would quote. So is the optimistic
-           label, which is our own guess until the re-fetch lands. */
-        var unresolved = !!pending || sn.isTentative(s);
+           label, which is our own guess until the re-fetch lands — and so is a lent
+           name, which is the only one of the three that nothing was measured for. */
+        var unresolved = !!pending || !!lent || sn.isTentative(s);
         var offerNaming = namingOn && sn.canName(s);
 
         return React.createElement('div', {
@@ -683,9 +708,12 @@
               React.createElement('span', {
                 className: 'fs-transcript-list__chip-label'
                   + (unresolved ? ' fs-transcript-list__chip-label--tentative' : ''),
-                title: unresolved
-                  ? 'Unconfirmed — the system\'s guess at who this is'
-                  : undefined,
+                title: lent
+                  ? ('Too short to match by voice — assumed to be ' + lent
+                     + ' because the rest of this speaker\'s turns are. Click to correct.')
+                  : (unresolved
+                      ? 'Unconfirmed — the system\'s guess at who this is'
+                      : undefined),
               }, label, unresolved
                 ? React.createElement('span', {
                     className: 'fs-transcript-list__tentative-mark',

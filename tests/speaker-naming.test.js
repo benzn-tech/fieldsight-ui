@@ -304,3 +304,67 @@ test('the role list is not the whole rule: your own recording counts', () => {
   assert.strictEqual(sn.mayName({ role: 'worker', callerFolder: '', folder: '' }), false);
   assert.strictEqual(sn.mayName({}), false);
 });
+
+// ---- lending a name to the turns the voiceprint could not reach ----------
+
+function seg(o) {
+  return Object.assign({ speaker: 'spk_0', duration: 1, chunk_start: 0,
+    source_filename: 'f1_2026-08-13_18-10-00_sid0123456789abcdef0123456789abcdef_c0000.json',
+  }, o);
+}
+
+test('a unanimous label lends its name to the turns too short to match', () => {
+  /* The real shape, from 2026-08-13 18:10: spk_0 has many turns, only a few long enough to
+     embed. Propagation named every eligible one — all agreeing — and the rest stayed
+     spk_0, so one person read as two. */
+  const segs = [
+    seg({ duration: 8.2, speaker_name: 'Ivy', speaker_state: 'confirmed' }),
+    seg({ duration: 0.6 }),
+    seg({ duration: 3.1, speaker_name: 'Ivy', speaker_state: 'tentative' }),
+    seg({ duration: 2.2 }),
+    seg({ speaker: 'spk_1', duration: 0.3 }),
+  ];
+  const got = sn.inferredNames(segs);
+  assert.deepStrictEqual(got, { 1: 'Ivy', 3: 'Ivy' });
+  /* Turns the server already named are never overwritten — the server's answer wins. */
+  assert.strictEqual(got[0], undefined);
+  assert.strictEqual(got[2], undefined);
+  /* A label with no name of its own borrows nothing. */
+  assert.strictEqual(got[4], undefined);
+});
+
+test('a label carrying two names infers nothing at all', () => {
+  /* Two names under one diarisation label means the separation is wrong there. The honest
+     response to a contradiction is to infer nothing, not to pick the majority. */
+  const segs = [
+    seg({ duration: 5, speaker_name: 'Ivy', speaker_state: 'confirmed' }),
+    seg({ duration: 5, speaker_name: 'Sam', speaker_state: 'confirmed' }),
+    seg({ duration: 0.5 }),
+  ];
+  assert.deepStrictEqual(sn.inferredNames(segs), {});
+});
+
+test('the same label in a different file is a different person', () => {
+  /* spk_N is per-file (BUG 8.6). Lending across files is the bug this feature's own
+     colour-mapping was written to avoid. */
+  const segs = [
+    seg({ duration: 5, speaker_name: 'Ivy', speaker_state: 'confirmed' }),
+    seg({ duration: 0.5, source_filename: 'OTHER_2026-08-13_18-20-00_sidaaaa.json' }),
+  ];
+  assert.deepStrictEqual(sn.inferredNames(segs), {});
+});
+
+test('turns with no filename are grouped with nothing', () => {
+  /* Otherwise every unidentifiable turn pools together and lends itself a name. */
+  const segs = [
+    seg({ duration: 5, speaker_name: 'Ivy', source_filename: undefined }),
+    seg({ duration: 0.5, source_filename: undefined }),
+  ];
+  assert.deepStrictEqual(sn.inferredNames(segs), {});
+});
+
+test('nothing named means nothing inferred', () => {
+  assert.deepStrictEqual(sn.inferredNames([seg({}), seg({ duration: 9 })]), {});
+  assert.deepStrictEqual(sn.inferredNames([]), {});
+  assert.deepStrictEqual(sn.inferredNames(null), {});
+});

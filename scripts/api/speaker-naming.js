@@ -155,6 +155,56 @@
     return !!(seg && seg.speaker_name && seg.speaker_state !== 'confirmed');
   }
 
+  /* Fill the gaps the voiceprint cannot reach.
+
+     Measured on a real three-way conversation (2026-08-13 18:10): `spk_0` has 26 turns in
+     one file, four of them ≥ 3 s. Propagation named all four — 4 of 4 eligible, it did
+     everything it could — and the other 22 stayed `spk_0` because they are 0–2.6 s and
+     cannot be embedded at all. Reading down the transcript, one person appeared as two.
+
+     So: within ONE file and ONE diarisation label, if the turns the voiceprint DID reach
+     agree on a name, lend that name to the turns it could not. Rendered `tentative` by the
+     caller — a `?`, never a fact — and never written back. The user corrects it by clicking,
+     which is the same gesture as naming.
+
+     Three constraints, each load-bearing:
+
+     * **Same `source_filename`.** `spk_0` in one file and `spk_0` in the next are not the
+       same person — the diarisation labels are per-file (BUG 8.6), and this component's own
+       header says so.
+     * **Unanimous.** Two different names under one label means the separation is wrong
+       there, and the honest response to a contradiction is to infer nothing.
+     * **A segment with no filename is grouped with nothing.** Otherwise every unidentifiable
+       turn would pool together and lend each other names.
+
+     What this is NOT: proof. The backend declined these turns because it could not hear
+     enough to embed them, not because it judged them to be someone else — but if the
+     diarisation itself is wrong here, this spreads the error further, in `?` clothing. That
+     is the trade the `?` is paying for. */
+  function inferredNames(segments) {
+    var segs = segments || [];
+    var groups = {};
+    segs.forEach(function (s, i) {
+      if (!s || !s.source_filename || !s.speaker) return;
+      var k = s.source_filename + ' ' + s.speaker;
+      (groups[k] = groups[k] || []).push(i);
+    });
+    var out = {};
+    Object.keys(groups).forEach(function (k) {
+      var idxs = groups[k];
+      var names = {};
+      idxs.forEach(function (i) {
+        if (segs[i].speaker_name) names[segs[i].speaker_name] = true;
+      });
+      var distinct = Object.keys(names);
+      if (distinct.length !== 1) return;
+      idxs.forEach(function (i) {
+        if (!segs[i].speaker_name) out[i] = distinct[0];
+      });
+    });
+    return out;
+  }
+
   /* Names already used in this meeting — offered as suggestions so a second
      correction spells the person the same way as the first. */
   function namesInSession(segments) {
@@ -273,6 +323,7 @@
     displayLabel: displayLabel,
     isTentative: isTentative,
     namesInSession: namesInSession,
+    inferredNames: inferredNames,
   };
 
   if (typeof window !== 'undefined') {
