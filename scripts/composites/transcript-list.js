@@ -406,27 +406,50 @@
 
     React.useEffect(function () {
       if (!state.namingAvailable) return undefined;
-      /* A role that cannot name also cannot list members — /members 403s for a
-         worker — so fetching the roster for them is a request whose only
-         possible outcome is a denial. Verified live on TEST: signed in as a
-         worker, getMembers returned _accessDenied. */
-      var sn0 = window.FS.speakerNaming;
-      var role = ((window.AuthMock && window.AuthMock.currentUser) || {}).role;
-      if (!sn0 || !sn0.roleMayName(role)) return undefined;
       var org = window.FS.api.org;
-      if (!org || !org.getMembers) return undefined;
+      if (!org) return undefined;
       var cancelled = false;
-      org.getMembers().then(function (res) {
-        if (cancelled || !res || res._accessDenied || res._notFound) return;
-        setMembers((res.members || []).map(function (m) {
-          return m && m.name;
-        }).filter(Boolean));
-      }).catch(function () {
-        /* No roster is a smaller list of suggestions, not a broken panel —
-           `used`, `wearer` and `heard` still stand on their own. */
-      });
+
+      /* SITE members first, company members only as the fallback.
+
+         `GET /members` needs ALL scope — admin/gm/platform_admin — so it 403s for a
+         worker AND for pm AND for site_manager, three roles that may name. That left the
+         suggestion list empty for everyone except admins, which is most people.
+         `GET /sites/{id}/members` has no role gate at all, only `_allowed_site_ids`, so
+         anyone who can reach the site can read its members. Verified live on TEST as a
+         worker: /members 403, /sites/{id}/members returned the roster.
+
+         It is also the better list on its own merits — the people on this site, not the
+         whole company — and it means the browser never holds a directory it had no
+         reason to. */
+      var siteId = (window.FS && window.FS.siteContext)
+        ? window.FS.siteContext.get() : null;
+
+      function useRoster(names) {
+        if (!cancelled && names && names.length) setMembers(names);
+      }
+      function company() {
+        if (!org.getMembers) return;
+        org.getMembers().then(function (res) {
+          if (!res || res._accessDenied || res._notFound) return;
+          useRoster((res.members || []).map(function (m) { return m && m.name; })
+            .filter(Boolean));
+        }).catch(function () { /* fewer suggestions, not a broken panel */ });
+      }
+
+      if (siteId && org.getSiteMembers) {
+        org.getSiteMembers(siteId).then(function (res) {
+          if (cancelled) return;
+          if (!res || res._accessDenied || res._notFound) { company(); return; }
+          var names = (res.users || []).map(function (m) { return m && m.name; })
+            .filter(Boolean);
+          if (names.length) useRoster(names); else company();
+        }).catch(company);
+      } else {
+        company();
+      }
       return function () { cancelled = true; };
-    }, [state.namingAvailable]);
+    }, [state.namingAvailable, user]);
 
     /* A2-2 — precision spotlight, same shape as SafetyFlagRow /
        TopicCard (rootRef + flashing state + useEffect keyed on the
