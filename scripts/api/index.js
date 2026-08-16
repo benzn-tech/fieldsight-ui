@@ -98,6 +98,16 @@
        'aurora' only takes effect when orgBaseUrl is non-empty (kill switch). */
     timelineSource: env.timelineSource || 'report',
     orgWrites: env.orgWrites !== undefined ? !!env.orgWrites : false,
+    /* "Came up again" — the queue that asks a person whether this topic
+       restates an earlier one (recurring-item threading). Held back from
+       customers 2026-08-16 while it is exercised on dev only.
+
+       Defaults to FALSE, and that direction is the point: a missing or
+       misspelled variable hides the feature rather than exposing it. This
+       repo's standing failure is a switch whose middle segment goes missing
+       and silently takes the DEFAULT — so the default has to be the safe
+       answer, not the convenient one. */
+    threadReview: env.threadReview !== undefined ? !!env.threadReview : false,
     /* D5 (visibility spec) — legacy report-gateway read fallback (/timeline,
        /dates, /site-users). Default ON during Phase 2 rollout; flip to false
        (env.legacyReadFallback = false) to retire the legacy read paths once
