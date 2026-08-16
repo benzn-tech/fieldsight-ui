@@ -68,13 +68,31 @@
     return f;
   }
 
-  /* A turn we may offer to name. Short turns are refused by the backend
-     (roughly a fifth of them are under 3 s, by its own comment). */
+  /* A turn we may offer to name.
+
+     There is NO duration floor here, and there was one until 2026-08-16. The spec advised
+     hiding the control below 3 s "so the user is not invited to make a gesture the backend
+     will decline" — but the backend does not decline it. `lambda_voiceprint_writer` has no
+     duration check at all; the turn the user asserted is written `source='correction'`
+     whatever its length. The 3 s floor gates PROPAGATION only
+     (`lambda_speaker_embed.py:342`): a short turn names itself and spreads to nothing.
+
+     The cost of getting that wrong was not small. Measured on a real three-way conversation
+     (2026-08-13, 18:10): 81 turns, of which the floor offered 10. A real conversation is
+     made of short turns — "yeah", "on level three" — and a monologue is not, so the rule
+     silently switched the feature off for exactly the recordings with more than one person
+     in them, which are the only ones worth naming. */
   function canName(seg) {
     if (!seg) return false;
     if (!sessionRefForSegment(seg)) return false;
-    if (typeof seg.duration !== 'number' || !(seg.duration >= MIN_TURN_SECONDS)) return false;
-    return typeof seg.chunk_start === 'number';
+    return typeof seg.chunk_start === 'number' && typeof seg.duration === 'number';
+  }
+
+  /* True when naming this turn will name ONLY this turn. Not a refusal — the caller says so
+     in the panel, so a single named turn reads as the expected outcome rather than as
+     propagation having failed. */
+  function namesThisTurnOnly(seg) {
+    return !!seg && typeof seg.duration === 'number' && seg.duration < MIN_TURN_SECONDS;
   }
 
   /* The ROLE arm only. Still exported because it is also the right gate for the member
@@ -247,6 +265,7 @@
     NAMING_ROLES: NAMING_ROLES,
     sessionRefForSegment: sessionRefForSegment,
     canName: canName,
+    namesThisTurnOnly: namesThisTurnOnly,
     roleMayName: roleMayName,
     mayName: mayName,
     correctionBody: correctionBody,

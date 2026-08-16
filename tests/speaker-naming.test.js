@@ -85,12 +85,30 @@ test('the session reference carries both a date and a sid', () => {
   assert.strictEqual(sn.sessionRefForSegment(null), null);
 });
 
-test('a turn under 3 s is never offered for naming', () => {
+test('a short turn is still offered — the floor gates propagation, not naming', () => {
+  /* Was `a turn under 3 s is never offered for naming`, on the spec's advice not to invite
+     "a gesture the backend will decline". The backend does not decline it:
+     lambda_voiceprint_writer has no duration check and writes the asserted turn whatever
+     its length. The 3 s floor is on PROPAGATION (lambda_speaker_embed.py:342).
+
+     Measured cost of the old rule, on a real three-way conversation (2026-08-13 18:10):
+     81 turns, 10 offered. Conversations are made of short turns; monologues are not, so it
+     switched the feature off for the recordings that actually have someone to name. */
   assert.strictEqual(sn.canName(SEAM_SEGMENT), true);
-  assert.strictEqual(sn.canName(Object.assign({}, SEAM_SEGMENT, { duration: 2.9 })), false);
-  assert.strictEqual(sn.canName(Object.assign({}, SEAM_SEGMENT, { duration: 3 })), true);
-  /* Legacy: long enough, but there is no session to write against. */
+  assert.strictEqual(sn.canName(Object.assign({}, SEAM_SEGMENT, { duration: 0.3 })), true);
+  assert.strictEqual(sn.canName(Object.assign({}, SEAM_SEGMENT, { duration: 2.9 })), true);
+
+  /* The user is told which of the two outcomes to expect, rather than being refused. */
+  assert.strictEqual(
+    sn.namesThisTurnOnly(Object.assign({}, SEAM_SEGMENT, { duration: 2.9 })), true);
+  assert.strictEqual(sn.namesThisTurnOnly(SEAM_SEGMENT), false);
+
+  /* Legacy: long enough, but there is no session to write against — still refused, and for
+     a reason that has nothing to do with duration. */
   assert.strictEqual(sn.canName(LEGACY_SEGMENT), false);
+  /* A segment with no in-file coordinates cannot be addressed at all. */
+  assert.strictEqual(
+    sn.canName(Object.assign({}, SEAM_SEGMENT, { chunk_start: undefined })), false);
 });
 
 test('chunk_start of 0 is a real offset, not a missing one', () => {

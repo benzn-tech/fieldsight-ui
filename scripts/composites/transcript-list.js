@@ -264,9 +264,15 @@
       ),
 
       /* Naming propagates within THIS meeting only. Future meetings are
-         backend Phase 5 and are not built — do not imply it in copy. */
+         backend Phase 5 and are not built — do not imply it in copy.
+
+         Under 3 s the backend names the turn but spreads it to nothing, so say which of the
+         two is about to happen. Saying it beats hiding the control: on a real three-way
+         conversation the floor left 10 of 81 turns nameable. */
       React.createElement('span', { className: 'fs-transcript-list__name-hint' },
-        'Applies to this meeting.'),
+        window.FS.speakerNaming.namesThisTurnOnly(props.segment)
+          ? 'Too short to match other passages — names this line only.'
+          : 'Applies to this meeting.'),
     );
   }
 
@@ -361,8 +367,36 @@
             speakers: res.speaker_count,
           },
         });
-        /* The server's answer has arrived and supersedes the guess. */
-        setOptimistic({});
+        /* Has the thing we are waiting for actually landed? Checked here, where the fresh
+           segments are, rather than by trusting a timer. */
+        var p = pendingRef.current;
+        if (p) {
+          var names = (res.speaker_segments || []).map(function (x) {
+            return x && x.speaker_name;
+          });
+          var present = names.indexOf(p.name) !== -1;
+          var done = p.mode === 'remove' ? !present : present;
+          if (done) {
+            pendingRef.current = null;
+            setOptimistic({});
+            setNotice(null);
+          } else if (p.attempt < REFETCH_BACKOFF_MS.length) {
+            p.attempt += 1;
+            scheduleRefetch();
+          } else {
+            /* Out of attempts. The write was accepted — say that, and say the rest is
+               unknown, rather than dropping the optimistic label and implying it failed. */
+            pendingRef.current = null;
+            setOptimistic({});
+            setNotice(p.mode === 'remove'
+              ? 'Removal accepted, but the name is still showing. Reopen this transcript '
+                + 'shortly.'
+              : 'Saved, but the name has not come back yet. Reopen this transcript shortly.');
+          }
+        } else {
+          /* The server's answer has arrived and supersedes the guess. */
+          setOptimistic({});
+        }
       }).catch(function (err) {
         if (cancelled) return;
         setState({ status: 'error', error: err, segments: [] });
@@ -421,11 +455,27 @@
 
     /* 202 = queued. Clustering typically takes a few seconds and there is no
        push, so re-fetch once on a timer. The optimistic label holds the gap. */
-    var REFETCH_DELAY_MS = 2000;
+    /* The write returns 202: clustering runs outside the VPC and there is no push, so the
+       only way to see the result is to ask again.
+
+       This used to be ONE re-fetch at a fixed 2 s. When the work took longer — which it
+       routinely does — that single attempt saw the old answer, gave up, and the name then
+       appeared only when something ELSE re-rendered the list. From the outside that reads as
+       "saving takes one to two minutes", when what actually took a minute was the user
+       switching tabs. A fixed delay is a guess about someone else's latency; polling until
+       the answer changes is not.
+
+       Backoff, ~1 minute total, and it stops the moment the name shows up. */
+    var REFETCH_BACKOFF_MS = [1500, 2500, 4000, 6000, 10000, 15000, 20000];
+
+    /* What we are waiting to see. Checked against NAMES rather than against the clicked
+       index: propagation renames other turns too, and the index is not stable. */
+    var pendingRef = React.useRef(null);
 
     function scheduleRefetch() {
-      setTimeout(function () { setReloadTick(function (n) { return n + 1; }); },
-        REFETCH_DELAY_MS);
+      var attempt = (pendingRef.current && pendingRef.current.attempt) || 0;
+      var delay = REFETCH_BACKOFF_MS[Math.min(attempt, REFETCH_BACKOFF_MS.length - 1)];
+      setTimeout(function () { setReloadTick(function (n) { return n + 1; }); }, delay);
     }
 
     function submitName(seg, index, name) {
@@ -456,6 +506,8 @@
           setOptimistic({});
           return;
         }
+        pendingRef.current = { name: trimmed, mode: 'set', attempt: 0 };
+        setNotice('Naming…');
         scheduleRefetch();
       }).catch(function () {
         setNotice('Could not save that name.');
@@ -484,6 +536,8 @@
             : (res.error || 'You do not have permission to remove this name.'));
           return;
         }
+        pendingRef.current = { name: name, mode: 'remove', attempt: 0 };
+        setNotice('Removing…');
         scheduleRefetch();
       }).catch(function () {
         setNotice('Could not remove that name.');
