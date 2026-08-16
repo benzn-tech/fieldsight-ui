@@ -465,8 +465,15 @@
        switching tabs. A fixed delay is a guess about someone else's latency; polling until
        the answer changes is not.
 
-       Backoff, ~1 minute total, and it stops the moment the name shows up. */
-    var REFETCH_BACKOFF_MS = [1500, 2500, 4000, 6000, 10000, 15000, 20000];
+       The delays are measured, not guessed. TEST CloudWatch, 2026-08-16: the embedder runs
+       4.4–10.7 s (n=6) and the writer 60–690 ms, so end to end is roughly 5–13 s. The old
+       single 2 s attempt therefore missed EVERY time — it fired 2.4 s before the fastest
+       run had finished, which is why it looked like nothing was saved.
+
+       First poll at 4 s because polling earlier than the observed floor cannot succeed.
+       Cumulative 4, 7, 11, 17, 27, 42, 62 s — the common case lands on the first or second,
+       and it stops the moment the name shows up. */
+    var REFETCH_BACKOFF_MS = [4000, 3000, 4000, 6000, 10000, 15000, 20000];
 
     /* What we are waiting to see. Checked against NAMES rather than against the clicked
        index: propagation renames other turns too, and the index is not stable. */
