@@ -635,7 +635,14 @@
        overwrites with the same click that names anything else. Without this, a single
        person shows up as two: on 2026-08-13 18:10 the voiceprint reached 4 of spk_0's 26
        turns and the other 22 kept reading `spk_0`. */
-    var inferred = sn ? sn.inferredNames(state.segments) : {};
+    /* Gated on the FEATURE, not merely on the data. Without this it fires
+       whenever a segment happens to carry `speaker_name` — and a residual name
+       returned while the backend switch is off would grow a "?" chip and a
+       banner in an environment where the feature is supposed to be absent. The
+       switch has to be able to turn the whole thing off, including the parts
+       that only need data to run. */
+    var inferred = (sn && state.namingAvailable)
+      ? sn.inferredNames(state.segments) : {};
 
     /* used → wearer → heard, deduped. `participants` is the extraction's own
        heard-name list, which until now this component used ONLY as a

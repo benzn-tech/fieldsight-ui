@@ -18,6 +18,8 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const sn = require('../scripts/api/speaker-naming.js');
 
@@ -361,6 +363,29 @@ test('turns with no filename are grouped with nothing', () => {
     seg({ duration: 0.5, source_filename: undefined }),
   ];
   assert.deepStrictEqual(sn.inferredNames(segs), {});
+});
+
+test('a file/label pair cannot collide with a differently-split one', () => {
+  /* The grouping used to join file and label into one string. A separator has
+     to be a character neither operand can contain, and picking one is a guess:
+     these two rows are different (file, label) pairs whose naive concatenation
+     is identical. If they group together, "Ivy" leaks onto another file's
+     speaker. */
+  const a = seg({ source_filename: 'a.jso', speaker: 'nspk_1',
+                  duration: 9, speaker_name: 'Ivy', speaker_state: 'confirmed' });
+  const b = seg({ source_filename: 'a.json', speaker: 'spk_1', duration: 0.4 });
+  assert.deepStrictEqual(sn.inferredNames([a, b]), {},
+    'a different file+label pair must not inherit the name');
+});
+
+test('the module is text, not binary', () => {
+  /* Twice in one session a raw NUL byte reached this file where a short
+     separator string was intended. It parses, every test passes, and the only
+     symptom is that git and grep classify the module as binary and quietly
+     stop matching in it. Cheaper to assert than to rediscover. */
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', 'scripts/api/speaker-naming.js'));
+  assert.strictEqual(src.indexOf(0), -1, 'speaker-naming.js contains a NUL byte');
 });
 
 test('nothing named means nothing inferred', () => {

@@ -183,23 +183,34 @@
      is the trade the `?` is paying for. */
   function inferredNames(segments) {
     var segs = segments || [];
-    var groups = {};
+    /* Nested by file, then by label — NOT a single key joined with a separator.
+       Two reasons, and the second is the one that earned the rewrite. Joining
+       needs a character that can appear in neither operand, and every such
+       character is a guess: `a.jso` + `nspk_1` and `a.json` + `spk_1` collide
+       the moment the separator is empty or wrong. And twice in this file's
+       history the separator was emitted as a raw NUL byte instead of the
+       intended character, which parses fine, passes every test, and makes git
+       and grep treat the whole module as binary. A structure with no separator
+       cannot have either failure. */
+    var byFile = {};
     segs.forEach(function (s, i) {
       if (!s || !s.source_filename || !s.speaker) return;
-      var k = s.source_filename + ' ' + s.speaker;
-      (groups[k] = groups[k] || []).push(i);
+      var byLabel = byFile[s.source_filename] || (byFile[s.source_filename] = {});
+      (byLabel[s.speaker] || (byLabel[s.speaker] = [])).push(i);
     });
     var out = {};
-    Object.keys(groups).forEach(function (k) {
-      var idxs = groups[k];
-      var names = {};
-      idxs.forEach(function (i) {
-        if (segs[i].speaker_name) names[segs[i].speaker_name] = true;
-      });
-      var distinct = Object.keys(names);
-      if (distinct.length !== 1) return;
-      idxs.forEach(function (i) {
-        if (!segs[i].speaker_name) out[i] = distinct[0];
+    Object.keys(byFile).forEach(function (file) {
+      Object.keys(byFile[file]).forEach(function (label) {
+        var idxs = byFile[file][label];
+        var names = {};
+        idxs.forEach(function (i) {
+          if (segs[i].speaker_name) names[segs[i].speaker_name] = true;
+        });
+        var distinct = Object.keys(names);
+        if (distinct.length !== 1) return;
+        idxs.forEach(function (i) {
+          if (!segs[i].speaker_name) out[i] = distinct[0];
+        });
       });
     });
     return out;
