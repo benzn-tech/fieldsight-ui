@@ -340,3 +340,48 @@ recognised next time, which is currently false. If you show a profile surface at
 `humanSamples` counts only what a person vouched for, as against what the clustering
 suggested; a profile made only of inference is meant to stay tentative, so the two numbers are
 not interchangeable.
+
+---
+
+## Addendum, 2026-08-17 (second) — the "Out of scope" list has two claims that are no longer true
+
+Still nothing to build in this PR's scope. But a spec is read as a description of the system,
+and two of these lines now describe a system that does not exist.
+
+### `match` is wired, and it is a request rather than a schedule
+
+*"Automatic naming of new meetings from stored voiceprints… is not built — the `match` op has
+no caller anywhere."* There is now a caller:
+
+    POST /api/org/sessions/{session}/speaker-match     -> 202
+    { "user": "<folder>" }
+    -> { requestIds, sessionBase, siteId, turnsQueued, runs, mode, willWriteNames }
+
+It is deliberately **on demand** and not a schedule, because naming at finalize would only
+ever help future meetings and the reason to want this at all is the archive. Which also
+retires the next line: *"backfilling names onto already-processed sessions"* is precisely what
+it does.
+
+**`willWriteNames` is the field that matters to copy.** It is `true` only when
+`SPEAKER_IDENTITY_MODE == "on"`, and `on` is prohibited until a matching margin has been
+calibrated — which has not happened. In `shadow` the endpoint still answers 202, computes
+every score, and **writes nothing**. Any UI that offers this must read `willWriteNames` rather
+than the 202, or it will tell the user their meeting was named when nothing was written.
+
+### A match can name turns even when the company has no voiceprint at all
+
+Two different mechanisms ride on that one request, and only one of them needs a profile:
+
+- **voice matching** needs stored profiles, and today there are none — enrolment is refused
+  on real site audio (see the first addendum);
+- **label inheritance** does not. It spreads names the session *already holds*, from
+  somebody's correction, to the turns too short to embed.
+
+Until 2026-08-17 the second silently did not run when the first had nothing to work with, so
+"match this session" did nothing at all in the only state the system is ever in. That is
+fixed. The consequence for the viewer is that **a match on a session with zero profiles can
+still increase the number of named turns**, and all of those arrive `tentative`.
+
+So the honest copy for the result of a match is a count of turns named, read back from the
+transcript — not "we recognised N people", which is a claim about voice matching that today
+is always zero.
