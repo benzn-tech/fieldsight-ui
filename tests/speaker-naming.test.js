@@ -216,7 +216,13 @@ test('a Latin name inside Chinese text is still a mention', () => {
   assert.deepStrictEqual(sn.mentionedNames(['Sam Wright'], 'Samsung 的设备'), []);
 });
 
-test('mentioned beats heard, and the roster tail comes last', () => {
+test('heard beats mentioned, and the roster tail comes last', () => {
+  /* Was `mentioned beats heard`. Reversed 2026-08-19 on measurement: of 308
+     prod topics, 128 carry `participants` and 38 name two or more people, and
+     the names are real — ["Neil Blunden","Mike"], ["Jack","Andre"]. The
+     extraction has the audio, the speaker boundaries and the whole transcript;
+     the roster has none of those, and cannot contain a subcontractor or a
+     visitor at all. Ranking the roster first buried the better source. */
   const got = sn.nameCandidates({
     segments: [],
     members: ['Ben Lin', 'Sam Wright', 'Ana Poole'],
@@ -225,17 +231,17 @@ test('mentioned beats heard, and the roster tail comes last', () => {
     userFolder: 'Jarley_Trainor',
   });
   assert.deepStrictEqual(got, [
+    { name: 'Sam Wright', source: 'heard' },
     { name: 'Jarley Trainor', source: 'wearer' },
     { name: 'Ben Lin', source: 'mentioned' },
     { name: 'Ana Poole', source: 'mentioned' },
-    { name: 'Sam Wright', source: 'heard' },
   ]);
   /* Sam is on the roster too, but was already offered as heard — the roster
      tail must not repeat anyone. */
   assert.strictEqual(got.filter((c) => c.name === 'Sam Wright').length, 1);
 });
 
-test('the choices are ordered used → wearer → heard, deduped across groups', () => {
+test('the choices are ordered used → heard → wearer, deduped across groups', () => {
   const segs = [
     Object.assign({}, SEAM_SEGMENT, { speaker_name: 'Ben L' }),
     SEAM_SEGMENT,
@@ -250,11 +256,15 @@ test('the choices are ordered used → wearer → heard, deduped across groups',
     /* Already used in this meeting comes first: the same person typed two
        ways is two people to the propagation layer. */
     { name: 'Ben L', source: 'used' },
-    { name: 'Jarley Trainor', source: 'wearer' },
     { name: 'Sam Wright', source: 'heard' },
+    /* The wearer was also heard speaking, so `heard` claims the slot — first
+       group wins, and here that is the better label anyway: the extraction
+       placed him in the conversation, the folder only says whose device it
+       was. He is offered once either way, which is what matters. */
+    { name: 'Jarley Trainor', source: 'heard' },
   ]);
   /* 'ben l' is the same person as 'Ben L' and must not appear twice, and the
-     wearer must not repeat as a heard participant. */
+     wearer must not repeat under a second source. */
   assert.strictEqual(got.filter((c) => c.name.toLowerCase() === 'ben l').length, 1);
   assert.strictEqual(got.filter((c) => c.name === 'Jarley Trainor').length, 1);
   /* Blank participants are dropped rather than offered as an empty radio. */
@@ -392,4 +402,56 @@ test('nothing named means nothing inferred', () => {
   assert.deepStrictEqual(sn.inferredNames([seg({}), seg({ duration: 9 })]), {});
   assert.deepStrictEqual(sn.inferredNames([]), {});
   assert.deepStrictEqual(sn.inferredNames(null), {});
+});
+
+// ---- the extraction's own answer, and its failure mode --------------------
+
+test('a diarisation label is never offered as a person', () => {
+  /* When the conversation does not make names clear, the extraction emits the
+     labels in place of names. Prod carries ["spk_0","spk_1","spk_2"] on four
+     2026-08-12 topics. Offering "spk_0" as somebody to assign would write it
+     into the transcript as an identity — a label is the absence of an answer,
+     not a short one. */
+  ['spk_0', 'spk0', 'Speaker 2', 'speaker_1', 'SPK 12']
+    .forEach((v) => assert.strictEqual(sn.isSpeakerLabel(v), true, v));
+  /* And nothing that could be a person. */
+  ['Mike', 'Neil Blunden', 'Speaker Mike', 'Jack', '', null, undefined]
+    .forEach((v) => assert.strictEqual(sn.isSpeakerLabel(v), false, String(v)));
+
+  const got = sn.nameCandidates({
+    segments: [], userFolder: 'Ben_UCPK2',
+    participants: ['spk_0', 'Mike', 'spk_1'],
+  });
+  assert.deepStrictEqual(got.map((c) => c.name), ['Mike', 'Ben UCPK2'],
+    'the labels must not reach the picker');
+});
+
+test('the extraction beats the roster, because the roster cannot hold a visitor', () => {
+  /* Ordering measured, not assumed: of 308 prod topics 128 carry participants
+     and 38 name two or more people — ["Neil Blunden","Mike"], ["Jack","Andre"].
+     Those are exactly the answer this panel asks for, and a subcontractor or a
+     visitor can never be in the member list at all. Ranking the roster first
+     buried the better source under the worse one. */
+  const got = sn.nameCandidates({
+    segments: [],
+    participants: ['Neil Blunden', 'Mike'],
+    members: ['Ana Poole'],
+    text: 'Ana Poole walked the deck this morning.',
+    userFolder: 'Ben_UCPK2',
+  });
+  assert.deepStrictEqual(got, [
+    { name: 'Neil Blunden', source: 'heard' },
+    { name: 'Mike', source: 'heard' },
+    { name: 'Ben UCPK2', source: 'wearer' },
+    { name: 'Ana Poole', source: 'mentioned' },
+  ]);
+});
+
+test('a label never wins as a positional hint either', () => {
+  /* participantHint overlays participants[i] onto the i-th speaker. With a
+     label in that array the chip would read "spk_1" while sitting on spk_0 —
+     a wrong label presented as a name. */
+  const seg = { speaker: 'spk_0', duration: 5, chunk_start: 0 };
+  assert.strictEqual(sn.displayLabel(seg, 'spk_1'), 'spk_0');
+  assert.strictEqual(sn.displayLabel(seg, 'Mike'), 'Mike');
 });

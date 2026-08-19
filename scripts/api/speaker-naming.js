@@ -58,6 +58,22 @@
   var SID_RE = /sid[0-9a-f]{32}/i;
   var DATE_RE = /\d{4}-\d{2}-\d{2}/;
 
+  /* A diarisation label wearing a name's clothes.
+
+     When the conversation does not make the names clear, the extraction emits
+     the speaker labels in the participants array instead — prod carries
+     `["spk_0", "spk_1", "spk_2"]` on four topics from 2026-08-12. Those are not
+     names; they are the absence of an answer, and offering one as a person to
+     assign would write "spk_0" into the transcript as somebody's identity.
+
+     Matches the shapes the transcriber actually produces (`spk_0`,
+     `speaker_1`, `Speaker 2`) and nothing that could be a person. */
+  var SPEAKER_LABEL_RE = /^(?:spk|speaker)[\s_-]*\d+$/i;
+
+  function isSpeakerLabel(name) {
+    return SPEAKER_LABEL_RE.test(String(name == null ? '' : name).trim());
+  }
+
   /* The path segment the write routes locate the session by. Requires BOTH
      tokens; returns null when either is missing (legacy recordings), and the
      caller treats null as "this feature does not apply here". */
@@ -146,6 +162,10 @@
   function displayLabel(seg, hint) {
     if (!seg) return '';
     if (seg.speaker_name) return seg.speaker_name;
+    /* Same exposure as the candidate list: a hint of "spk_1" overlaid on
+       `spk_0` reads as a name and is not one. Fall through to the segment's
+       own label, which at least admits what it is. */
+    if (isSpeakerLabel(hint)) return seg.speaker;
     return hint || seg.speaker;
   }
 
@@ -280,15 +300,17 @@
      is two people to the propagation layer, and the second spelling silently
      names nothing. So the names already used in this meeting come first.
 
-     `heard` comes from the extraction's `participants` — names the MODEL heard
-     in the conversation. They are the most useful suggestions and the least
-     trustworthy: a misheard or invented name is now one click away, where
-     before it needed typing. The caller must label the group as heard rather
-     than confirmed, and must not pre-select anything. Ordering it last is part
-     of that.
+     `heard` — the extraction's own `participants` — is SECOND, and was last
+     until 2026-08-19. It was demoted on the theory that a model-heard name is
+     the least trustworthy suggestion. Measuring it inverted that: of 308 prod
+     topics, 128 carry participants and 38 name two or more people, and the
+     names are exactly the answer this panel is asking for —
+     `["Neil Blunden", "Mike"]`, `["Jack", "Andre"]`. The extraction has the
+     audio, the speaker boundaries and the whole transcript; the roster has none
+     of those and cannot name a subcontractor or a visitor at all. Ranking the
+     roster above it buried the better answer under the worse one.
 
-     Deduped case-insensitively, first group wins, so a name that is both used
-     and heard is offered once, as used. */
+     Deduped case-insensitively, first group wins. */
   function nameCandidates(opts) {
     opts = opts || {};
     var out = [];
@@ -305,12 +327,20 @@
 
     var members = opts.members || [];
     namesInSession(opts.segments).forEach(function (n) { add(n, 'used'); });
+    /* The extraction's own answer to this exact question, ahead of the roster.
+       Filtered, because when the names are not clear the model emits the
+       diarisation labels in their place — prod carries
+       `["spk_0", "spk_1", "spk_2"]` — and offering "spk_0" as a person's NAME
+       is worse than offering nothing. A label is the absence of an answer. */
+    (opts.participants || []).forEach(function (p) {
+      if (isSpeakerLabel(p)) return;
+      add(p, 'heard');
+    });
     add(folderToName(opts.userFolder), 'wearer');
-    /* Real people who are actually named in this transcript — the answer the
-       user is most often reaching for, and the only group that is both
-       specific to this conversation AND guaranteed to exist. */
+    /* Roster members actually named in this transcript. Below `heard` because
+       the roster cannot contain a subcontractor or a visitor, and those are the
+       people a site conversation most often needs named. */
     mentionedNames(members, opts.text).forEach(function (n) { add(n, 'mentioned'); });
-    (opts.participants || []).forEach(function (p) { add(p, 'heard'); });
     /* Everyone else on the roster, so a person who is present but never says a
        name is still one click away rather than a typing exercise. The caller
        keeps this group collapsed — it is the long tail, not a suggestion. */
@@ -332,6 +362,7 @@
     correctionBody: correctionBody,
     featureAvailable: featureAvailable,
     displayLabel: displayLabel,
+    isSpeakerLabel: isSpeakerLabel,
     isTentative: isTentative,
     namesInSession: namesInSession,
     inferredNames: inferredNames,
