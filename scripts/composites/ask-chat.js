@@ -52,10 +52,15 @@
   /* One line saying what the answer was built from.
 
      Composed HERE from the numbers the backend computed, and never asked of the
-     model. The same `basis` dict is rendered as this line on screen and as a
-     spoken clause by SP-Ask; a model asked to phrase it would drift between the
-     two and would sooner or later say "three meetings" over a single excerpt,
-     which nothing downstream could catch.
+     model — a model asked to phrase it would sooner or later say "three
+     meetings" over a single excerpt, and nothing downstream could catch that.
+
+     An earlier version of this comment said SP-Ask rendered the same dict as a
+     spoken clause. It did not: the voice response was built from scratch and
+     dropped `basis` at the boundary. The backend now carries it (pipeline
+     #633), the device does not speak it yet, and this is the only renderer
+     there is — written in the present tense on purpose, unlike the sentence it
+     replaced.
 
      `widened` is the case that has to speak up. The person asked about
      yesterday and is being shown the 27th — answering from another day without
