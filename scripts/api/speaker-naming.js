@@ -1,0 +1,376 @@
+/* ==========================================================================
+   api/speaker-naming.js — the rules behind naming a passage in a transcript
+   --------------------------------------------------------------------------
+   Spec: docs/specs/2026-08-14-speaker-naming-ui.md
+   Backend: fieldsight-pipeline PRs #487-#496.
+
+   These are pure functions so the render path (composites/transcript-list.js)
+   and the tests read the SAME rules — three of them are corrections the spec
+   marks with a warning because getting them wrong fails silently:
+
+   1. `end_sec` is `chunk_start + duration`, NEVER `chunk_start + (end - start)`.
+      `start`/`end` are absolute clock seconds resolved through the batch map,
+      which re-inserts the silence batching removed. For a turn straddling a
+      batch seam, `end - start` is larger than the real in-file span by that
+      whole gap and the backend analyses the wrong audio window. NOTHING
+      validates it: the request returns 202 and writes a row either way.
+
+   2. The session reference in the URL is not the session list's `session_id`.
+      The POST route searches the path segment for BOTH a `YYYY-MM-DD` date
+      AND a `sid<32 hex>` token; a bare `session_id` carries no date and 400s
+      every time. `source_filename` carries both, and is what we have in hand
+      on a segment, so it is what we send.
+
+   3. A legacy (RealPTT-era) transcript filename has no `sid`, and the backend
+      overlay + both write routes decline for it. `sessionRefForSegment`
+      returns null there, which is what suppresses the affordance — a correct
+      refusal, not a bug to hunt.
+
+   Feature detection is the presence of the `unmatchedNames` KEY on the
+   transcripts response (§"Feature detection"). The GET route is not gated on
+   the switch and does not 403 for workers, so a feature-detect that expects
+   the read to fail would never fire.
+
+   Exported to:
+     window.FS.speakerNaming   (browser)
+     module.exports            (node --test)
+   ========================================================================== */
+
+(function () {
+  'use strict';
+
+  /* voiceprint_utils.DEFAULT_MIN_TURN_S — the backend declines to propagate
+     from a turn shorter than this, so we do not invite the gesture. */
+  var MIN_TURN_SECONDS = 3;
+
+  /* Both write routes 403 for anyone else (lambda_org_api). Gating the UI on
+     the same list means a worker is never offered a control that refuses.
+
+     `project_manager` is here because the UI never sees the org role `pm`:
+     scripts/auth/session-bridge.js:104 renames it on the way into
+     AuthMock.currentUser, since roles.js has no 'pm' slug and an unmapped role
+     gets zero permissions. Matching only the backend's spelling meant every pm
+     account was silently denied a control the backend would have accepted —
+     no error, just an absent caret. Both spellings, and a test pinning it. */
+  var NAMING_ROLES = ['admin', 'gm', 'pm', 'project_manager',
+                      'site_manager', 'platform_admin'];
+
+  var SID_RE = /sid[0-9a-f]{32}/i;
+  var DATE_RE = /\d{4}-\d{2}-\d{2}/;
+
+  /* A diarisation label wearing a name's clothes.
+
+     When the conversation does not make the names clear, the extraction emits
+     the speaker labels in the participants array instead — prod carries
+     `["spk_0", "spk_1", "spk_2"]` on four topics from 2026-08-12. Those are not
+     names; they are the absence of an answer, and offering one as a person to
+     assign would write "spk_0" into the transcript as somebody's identity.
+
+     Matches the shapes the transcriber actually produces (`spk_0`,
+     `speaker_1`, `Speaker 2`) and nothing that could be a person. */
+  var SPEAKER_LABEL_RE = /^(?:spk|speaker)[\s_-]*\d+$/i;
+
+  function isSpeakerLabel(name) {
+    return SPEAKER_LABEL_RE.test(String(name == null ? '' : name).trim());
+  }
+
+  /* The path segment the write routes locate the session by. Requires BOTH
+     tokens; returns null when either is missing (legacy recordings), and the
+     caller treats null as "this feature does not apply here". */
+  function sessionRefForSegment(seg) {
+    var f = seg && seg.source_filename;
+    if (!f || typeof f !== 'string') return null;
+    if (!SID_RE.test(f) || !DATE_RE.test(f)) return null;
+    return f;
+  }
+
+  /* A turn we may offer to name.
+
+     There is NO duration floor here, and there was one until 2026-08-16. The spec advised
+     hiding the control below 3 s "so the user is not invited to make a gesture the backend
+     will decline" — but the backend does not decline it. `lambda_voiceprint_writer` has no
+     duration check at all; the turn the user asserted is written `source='correction'`
+     whatever its length. The 3 s floor gates PROPAGATION only
+     (`lambda_speaker_embed.py:342`): a short turn names itself and spreads to nothing.
+
+     The cost of getting that wrong was not small. Measured on a real three-way conversation
+     (2026-08-13, 18:10): 81 turns, of which the floor offered 10. A real conversation is
+     made of short turns — "yeah", "on level three" — and a monologue is not, so the rule
+     silently switched the feature off for exactly the recordings with more than one person
+     in them, which are the only ones worth naming. */
+  function canName(seg) {
+    if (!seg) return false;
+    if (!sessionRefForSegment(seg)) return false;
+    return typeof seg.chunk_start === 'number' && typeof seg.duration === 'number';
+  }
+
+  /* True when naming this turn will name ONLY this turn. Not a refusal — the caller says so
+     in the panel, so a single named turn reads as the expected outcome rather than as
+     propagation having failed. */
+  function namesThisTurnOnly(seg) {
+    return !!seg && typeof seg.duration === 'number' && seg.duration < MIN_TURN_SECONDS;
+  }
+
+  /* The ROLE arm only. Still exported because it is also the right gate for the member
+     roster: /members 403s for a worker, so fetching it for one is a request whose only
+     possible outcome is a denial. */
+  function roleMayName(role) {
+    return NAMING_ROLES.indexOf(String(role || '')) !== -1;
+  }
+
+  /* The whole rule, mirroring the backend: the role list OR your own recording.
+
+     The second arm exists because the person who pressed record is the person who knows who
+     was in the room, and until 2026-08-14 they were the one person who could not say so.
+     Compare against the caller's OWN folder — not against "the transcript loaded", which is
+     a different question: `regional_manager` can READ a colleague's day and still must not
+     name in it. Backend counterpart: `_may_correct_speakers` in lambda_org_api.py. */
+  function mayName(opts) {
+    opts = opts || {};
+    if (roleMayName(opts.role)) return true;
+    return !!(opts.callerFolder && opts.folder && opts.callerFolder === opts.folder);
+  }
+
+  /* The POST body. `consent_given` is hard-false here BY DESIGN: consent is a
+     different act from naming — it stores a voiceprint, which is biometric
+     data, and the consent required is the consent of the person whose voice
+     it is. Phase 1 ships no consent UI (spec §Consent). Do not add a flag to
+     this function; add a deliberate surface with real wording instead. */
+  function correctionBody(seg, opts) {
+    opts = opts || {};
+    return {
+      user: opts.user || '',
+      source_filename: seg.source_filename,
+      start_sec: seg.chunk_start,
+      end_sec: seg.chunk_start + seg.duration,
+      display_name: String(opts.displayName || '').trim(),
+      consent_given: false,
+      consented_by: null,
+    };
+  }
+
+  /* Presence of the KEY, not its value: 0 unmatched names is still a
+     feature-is-on signal. The key appears only when the backend mode is not
+     `off` and the payload has at least one speaker segment. */
+  function featureAvailable(res) {
+    return !!res && Object.prototype.hasOwnProperty.call(res, 'unmatchedNames');
+  }
+
+  /* Precedence: a name a person asserted beats a positional guess. If the
+     guess won, a real correction would be invisible — which is the failure
+     the whole backend layer exists to avoid. */
+  function displayLabel(seg, hint) {
+    if (!seg) return '';
+    if (seg.speaker_name) return seg.speaker_name;
+    /* Same exposure as the candidate list: a hint of "spk_1" overlaid on
+       `spk_0` reads as a name and is not one. Fall through to the segment's
+       own label, which at least admits what it is. */
+    if (isSpeakerLabel(hint)) return seg.speaker;
+    return hint || seg.speaker;
+  }
+
+  /* `tentative` is the SYSTEM's guess, not the user's assertion, and must
+     never render in a form a reader would quote. */
+  function isTentative(seg) {
+    return !!(seg && seg.speaker_name && seg.speaker_state !== 'confirmed');
+  }
+
+  /* Fill the gaps the voiceprint cannot reach.
+
+     Measured on a real three-way conversation (2026-08-13 18:10): `spk_0` has 26 turns in
+     one file, four of them ≥ 3 s. Propagation named all four — 4 of 4 eligible, it did
+     everything it could — and the other 22 stayed `spk_0` because they are 0–2.6 s and
+     cannot be embedded at all. Reading down the transcript, one person appeared as two.
+
+     So: within ONE file and ONE diarisation label, if the turns the voiceprint DID reach
+     agree on a name, lend that name to the turns it could not. Rendered `tentative` by the
+     caller — a `?`, never a fact — and never written back. The user corrects it by clicking,
+     which is the same gesture as naming.
+
+     Three constraints, each load-bearing:
+
+     * **Same `source_filename`.** `spk_0` in one file and `spk_0` in the next are not the
+       same person — the diarisation labels are per-file (BUG 8.6), and this component's own
+       header says so.
+     * **Unanimous.** Two different names under one label means the separation is wrong
+       there, and the honest response to a contradiction is to infer nothing.
+     * **A segment with no filename is grouped with nothing.** Otherwise every unidentifiable
+       turn would pool together and lend each other names.
+
+     What this is NOT: proof. The backend declined these turns because it could not hear
+     enough to embed them, not because it judged them to be someone else — but if the
+     diarisation itself is wrong here, this spreads the error further, in `?` clothing. That
+     is the trade the `?` is paying for. */
+  function inferredNames(segments) {
+    var segs = segments || [];
+    /* Nested by file, then by label — NOT a single key joined with a separator.
+       Two reasons, and the second is the one that earned the rewrite. Joining
+       needs a character that can appear in neither operand, and every such
+       character is a guess: `a.jso` + `nspk_1` and `a.json` + `spk_1` collide
+       the moment the separator is empty or wrong. And twice in this file's
+       history the separator was emitted as a raw NUL byte instead of the
+       intended character, which parses fine, passes every test, and makes git
+       and grep treat the whole module as binary. A structure with no separator
+       cannot have either failure. */
+    var byFile = {};
+    segs.forEach(function (s, i) {
+      if (!s || !s.source_filename || !s.speaker) return;
+      var byLabel = byFile[s.source_filename] || (byFile[s.source_filename] = {});
+      (byLabel[s.speaker] || (byLabel[s.speaker] = [])).push(i);
+    });
+    var out = {};
+    Object.keys(byFile).forEach(function (file) {
+      Object.keys(byFile[file]).forEach(function (label) {
+        var idxs = byFile[file][label];
+        var names = {};
+        idxs.forEach(function (i) {
+          if (segs[i].speaker_name) names[segs[i].speaker_name] = true;
+        });
+        var distinct = Object.keys(names);
+        if (distinct.length !== 1) return;
+        idxs.forEach(function (i) {
+          if (!segs[i].speaker_name) out[i] = distinct[0];
+        });
+      });
+    });
+    return out;
+  }
+
+  /* Names already used in this meeting — offered as suggestions so a second
+     correction spells the person the same way as the first. */
+  function namesInSession(segments) {
+    var seen = {};
+    (segments || []).forEach(function (s) {
+      if (s && s.speaker_name) seen[s.speaker_name] = true;
+    });
+    return Object.keys(seen).sort();
+  }
+
+  /* folder → display name. `Jarley_Trainor` → `Jarley Trainor`.
+     Collapses repeats and trims, because a member with a NULL last_name gets a
+     folder ending in `_` (fieldsight-display-name-trailing-space) and
+     "Ben UCPK " is not a name anyone would pick from a list. */
+  function folderToName(folder) {
+    return String(folder || '').replace(/_+/g, ' ').trim();
+  }
+
+  /* Which of these known people are named in this transcript.
+
+     The roster is the org's own member list, so nothing here is invented — the
+     worst case is a suggestion nobody wanted, never a name that does not exist.
+     That is the whole reason this reads a roster instead of pulling capitalised
+     words out of the text: "the model heard a name" and "this person exists"
+     are different claims, and only the second one is safe to offer as a click.
+
+     Matching is per token, because a transcript says "Ben", not "Ben Lin".
+
+     A Latin token needs three characters and a boundary, or "Mark" matches
+     "marked". But the boundary is "not another LATIN letter", NOT "not a
+     letter" — these transcripts are frequently Chinese with Latin names inside
+     them, and in `我要去和Sam见面` the neighbours are Han characters, which are
+     letters. Bounding on \p{L} rejected every name embedded in Chinese text,
+     silently, and that is how this codebase has twice shipped a Latin-centric
+     text rule that erases non-Latin content. Found by opening the page.
+
+     Tokens with no Latin letters have no spaces to bound at all and match as
+     substrings from two characters. Nothing is ASCII-normalised anywhere here;
+     normalising deletes the Chinese outright. */
+  function mentionedNames(members, text) {
+    var hay = String(text || '');
+    if (!hay) return [];
+    var lower = hay.toLowerCase();
+    return (members || []).filter(function (name) {
+      var tokens = String(name || '').split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+      return tokens.some(function (t) {
+        if (/\p{Script=Latin}/u.test(t)) {
+          if (t.length < 3) return false;
+          var esc = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          return new RegExp(
+            '(?<![\\p{Script=Latin}\\p{N}])' + esc + '(?![\\p{Script=Latin}\\p{N}])',
+            'iu').test(hay);
+        }
+        return t.length >= 2 && lower.indexOf(t.toLowerCase()) !== -1;
+      });
+    });
+  }
+
+  /* The choices offered for "who is speaking", in the order they are offered.
+
+     Picking beats typing here: the same person typed twice two different ways
+     is two people to the propagation layer, and the second spelling silently
+     names nothing. So the names already used in this meeting come first.
+
+     `heard` — the extraction's own `participants` — is SECOND, and was last
+     until 2026-08-19. It was demoted on the theory that a model-heard name is
+     the least trustworthy suggestion. Measuring it inverted that: of 308 prod
+     topics, 128 carry participants and 38 name two or more people, and the
+     names are exactly the answer this panel is asking for —
+     `["Neil Blunden", "Mike"]`, `["Jack", "Andre"]`. The extraction has the
+     audio, the speaker boundaries and the whole transcript; the roster has none
+     of those and cannot name a subcontractor or a visitor at all. Ranking the
+     roster above it buried the better answer under the worse one.
+
+     Deduped case-insensitively, first group wins. */
+  function nameCandidates(opts) {
+    opts = opts || {};
+    var out = [];
+    var seen = {};
+
+    function add(name, source) {
+      var clean = String(name == null ? '' : name).trim();
+      if (!clean) return;
+      var k = clean.toLowerCase();
+      if (seen[k]) return;
+      seen[k] = true;
+      out.push({ name: clean, source: source });
+    }
+
+    var members = opts.members || [];
+    namesInSession(opts.segments).forEach(function (n) { add(n, 'used'); });
+    /* The extraction's own answer to this exact question, ahead of the roster.
+       Filtered, because when the names are not clear the model emits the
+       diarisation labels in their place — prod carries
+       `["spk_0", "spk_1", "spk_2"]` — and offering "spk_0" as a person's NAME
+       is worse than offering nothing. A label is the absence of an answer. */
+    (opts.participants || []).forEach(function (p) {
+      if (isSpeakerLabel(p)) return;
+      add(p, 'heard');
+    });
+    add(folderToName(opts.userFolder), 'wearer');
+    /* Roster members actually named in this transcript. Below `heard` because
+       the roster cannot contain a subcontractor or a visitor, and those are the
+       people a site conversation most often needs named. */
+    mentionedNames(members, opts.text).forEach(function (n) { add(n, 'mentioned'); });
+    /* Everyone else on the roster, so a person who is present but never says a
+       name is still one click away rather than a typing exercise. The caller
+       keeps this group collapsed — it is the long tail, not a suggestion. */
+    members.forEach(function (m) { add(m, 'team'); });
+    return out;
+  }
+
+  var mod = {
+    MIN_TURN_SECONDS: MIN_TURN_SECONDS,
+    folderToName: folderToName,
+    mentionedNames: mentionedNames,
+    nameCandidates: nameCandidates,
+    NAMING_ROLES: NAMING_ROLES,
+    sessionRefForSegment: sessionRefForSegment,
+    canName: canName,
+    namesThisTurnOnly: namesThisTurnOnly,
+    roleMayName: roleMayName,
+    mayName: mayName,
+    correctionBody: correctionBody,
+    featureAvailable: featureAvailable,
+    displayLabel: displayLabel,
+    isSpeakerLabel: isSpeakerLabel,
+    isTentative: isTentative,
+    namesInSession: namesInSession,
+    inferredNames: inferredNames,
+  };
+
+  if (typeof window !== 'undefined') {
+    if (!window.FS) window.FS = {};
+    window.FS.speakerNaming = mod;
+  }
+  if (typeof module !== 'undefined' && module.exports) module.exports = mod;
+})();

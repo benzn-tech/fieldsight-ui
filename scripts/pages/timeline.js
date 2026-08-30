@@ -2541,12 +2541,25 @@
      reasoning is why the backend refuses to re-propose a rejected link. */
   function ThreadReviewSection(props) {
     var Queue = (window.FieldSight || {}).ThreadReview;
+    /* Held back from customers 2026-08-16: the queue asks a person to judge
+       whether one topic restates an earlier one, and that judgement is being
+       exercised on dev before anyone outside sees it. `FS_THREAD_REVIEW` is
+       false everywhere it is not explicitly set, so prod hides it by default
+       rather than by remembering to.
+
+       Read inside the component, not at module load: the flag arrives with
+       /env.js and reading it at parse time would capture whatever was there
+       before that ran. */
+    var enabled = !!(((window.FS || {}).api || {}).threadReview);
     var s_rows = React.useState(null);
     var rows = s_rows[0], setRows = s_rows[1];
 
     React.useEffect(function () {
       var org = ((window.FS || {}).api || {}).org || {};
-      if (!Queue || !org.getThreadSuggestions) return undefined;
+      /* Gated here as well as at the render below, so a hidden feature also
+         stops ASKING. Rendering nothing while still polling the endpoint every
+         time the site changes is a feature that is only invisible. */
+      if (!enabled || !Queue || !org.getThreadSuggestions) return undefined;
       var cancelled = false;
       Promise.resolve(org.getThreadSuggestions({ site: props.site }))
         .then(function (res) {
@@ -2559,9 +2572,9 @@
         })
         .catch(function () { if (!cancelled) setRows([]); });
       return function () { cancelled = true; };
-    }, [props.site]);
+    }, [props.site, enabled]);
 
-    if (!Queue || !rows || !rows.length) return null;
+    if (!enabled || !Queue || !rows || !rows.length) return null;
 
     return React.createElement('section', { className: 'fs-timeline-page__threads' },
       React.createElement('div', { className: 'fs-timeline-page__section-label' },
