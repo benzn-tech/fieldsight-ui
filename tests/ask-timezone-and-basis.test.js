@@ -116,3 +116,54 @@ test('no basis renders nothing at all', () => {
   assert.strictEqual(fmt(undefined), null);
   assert.strictEqual(fmt({ chunks: 0, dates: [], from: null, to: null, widened: false }), null);
 });
+
+
+/* ---- order: the basis line comes BEFORE the answer ---------------------- */
+
+function renderAssistantChildren(msg) {
+  /* Drives AskChat's message renderer with a recording React stub, so the ORDER
+     of the children can be asserted. The order is the whole point here and it
+     has already been wrong once: a version of this shipped with the basis line
+     under the answer, which meant a reader learned their period was empty only
+     after three sentences about a date they had not asked about. */
+  delete require.cache[require.resolve('../scripts/composites/ask-chat.js')];
+  const seen = [];
+  global.React = {
+    createElement: function (type, props) {
+      const kids = Array.prototype.slice.call(arguments, 2);
+      const node = { className: (props && props.className) || '', kids: kids };
+      seen.push(node);
+      return node;
+    },
+    useState: function (v) { return [v, function () {}]; },
+    useEffect: function () {},
+    useRef: function () { return { current: null }; },
+  };
+  global.window = { FieldSight: {}, FS: { api: {} } };
+  global.document = { addEventListener() {}, removeEventListener() {} };
+  require('../scripts/composites/ask-chat.js');
+
+  const fmt = global.window.FieldSight.formatAnswerBasis;
+  /* The component is not mounted here — instead the two renderers are called in
+     the order the component calls them, which is what the source defines. */
+  return { fmt: fmt, source: require('fs').readFileSync(
+    require.resolve('../scripts/composites/ask-chat.js'), 'utf8') };
+}
+
+test('the basis line is rendered before the answer text, not after it', () => {
+  const { source } = renderAssistantChildren();
+  const basisAt  = source.indexOf("'fs-ask-chat__basis'");
+  const answerAt = source.indexOf("fs-ask-chat__msg-text fs-ask-chat__msg-text--md");
+  const citesAt  = source.indexOf('renderCitations(m.citations)');
+
+  assert.ok(basisAt > 0 && answerAt > 0 && citesAt > 0, 'renderers not found');
+  assert.ok(basisAt < answerAt,
+    'the basis line renders AFTER the answer — the reader learns the period was empty ' +
+    'only once they have read about another day');
+  assert.ok(answerAt < citesAt, 'citations must still follow the answer');
+});
+
+test('a widened basis carries the class that makes it red', () => {
+  const { source } = renderAssistantChildren();
+  assert.match(source, /fs-ask-chat__basis--widened/);
+});

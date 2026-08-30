@@ -296,6 +296,19 @@
                (it HTML-escapes first, then emits only a fixed tag set, so
                dangerouslySetInnerHTML carries no LLM-supplied markup). User
                messages are the person's own typed question → keep plain. */
+            /* FIRST, above the answer — not after it, and not at the end of the
+               prose. The reader asked about a period; if that period is empty
+               they learn it before they read a word about another day.
+               A version of this sat under the answer and it was wrong for the
+               same reason the model's closing caveat was: by the time you reach
+               it you have already read three sentences about a date you did not
+               ask about (user, 2026-08-31). */
+            m.role === 'assistant' && formatAnswerBasis(m.basis)
+              ? React.createElement('div', {
+                  className: 'fs-ask-chat__basis'
+                    + (m.basis && m.basis.widened ? ' fs-ask-chat__basis--widened' : ''),
+                }, formatAnswerBasis(m.basis))
+              : null,
             m.role === 'assistant' && window.FieldSight.renderMarkdown
               ? React.createElement('div', {
                   className: 'fs-ask-chat__msg-text fs-ask-chat__msg-text--md',
@@ -303,15 +316,6 @@
                 })
               : React.createElement('div', { className: 'fs-ask-chat__msg-text' },
                   m.text),
-            /* Above the citations and below the answer: it qualifies the whole
-               answer, so it must be readable before the reader decides whether
-               to trust it — and it is one line, not a card. */
-            m.role === 'assistant' && formatAnswerBasis(m.basis)
-              ? React.createElement('div', {
-                  className: 'fs-ask-chat__basis'
-                    + (m.basis && m.basis.widened ? ' fs-ask-chat__basis--widened' : ''),
-                }, formatAnswerBasis(m.basis))
-              : null,
             m.role === 'assistant' ? renderCitations(m.citations) : null,
             m.role === 'assistant' && m.model
               ? React.createElement('div', { className: 'fs-ask-chat__model' },
