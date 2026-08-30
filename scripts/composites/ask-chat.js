@@ -49,6 +49,39 @@
     return { date: parts[1], user: parts[2] };
   }
 
+  /* One line saying what the answer was built from.
+
+     Composed HERE from the numbers the backend computed, and never asked of the
+     model. The same `basis` dict is rendered as this line on screen and as a
+     spoken clause by SP-Ask; a model asked to phrase it would drift between the
+     two and would sooner or later say "three meetings" over a single excerpt,
+     which nothing downstream could catch.
+
+     `widened` is the case that has to speak up. The person asked about
+     yesterday and is being shown the 27th — answering from another day without
+     saying so is the original defect wearing a date.
+
+     Returns null when there is no basis (an older backend, or the legacy
+     non-RAG path). A line reading "based on nothing" is worse than no line. */
+  function formatAnswerBasis(basis) {
+    if (!basis || !basis.chunks) return null;
+    var dates = basis.dates || [];
+    var n = basis.chunks;
+    var tail = ' · ' + n + ' excerpt' + (n === 1 ? '' : 's');
+    if (basis.widened) {
+      return 'Nothing in the period asked about — based on ' + basis.from + ' instead' + tail;
+    }
+    if (!basis.from && !basis.to) {
+      return 'Based on all records you can see' + tail;
+    }
+    if (basis.from === basis.to) {
+      return 'Based on ' + basis.from + tail;
+    }
+    var span = 'Based on ' + basis.from + ' to ' + basis.to;
+    if (dates.length > 1) span += ' · ' + dates.length + ' days';
+    return span + tail;
+  }
+
   /* Render the citations block under an assistant answer. Every field is passed
      as a React text child (auto-escaped) — the snippet/topic/site come from
      retrieved chunk text (transcripts) and must never reach innerHTML. */
@@ -198,6 +231,9 @@
           text:      res.answer || '',
           citations: res.citations || [],
           model:     res.model,
+          /* What the backend actually searched. Absent on the legacy path and
+             on older deploys, which formatAnswerBasis renders as no line. */
+          basis:     res.basis || null,
         }]); });
       }).catch(function (err) {
         setMsgs(function (m) { return m.concat([{
@@ -262,6 +298,15 @@
                 })
               : React.createElement('div', { className: 'fs-ask-chat__msg-text' },
                   m.text),
+            /* Above the citations and below the answer: it qualifies the whole
+               answer, so it must be readable before the reader decides whether
+               to trust it — and it is one line, not a card. */
+            m.role === 'assistant' && formatAnswerBasis(m.basis)
+              ? React.createElement('div', {
+                  className: 'fs-ask-chat__basis'
+                    + (m.basis && m.basis.widened ? ' fs-ask-chat__basis--widened' : ''),
+                }, formatAnswerBasis(m.basis))
+              : null,
             m.role === 'assistant' ? renderCitations(m.citations) : null,
             m.role === 'assistant' && m.model
               ? React.createElement('div', { className: 'fs-ask-chat__model' },
@@ -311,4 +356,7 @@
 
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.AskChat = AskChat;
+  /* Exported so the wording can be pinned by a test without rendering React,
+     and so SP-Ask's spoken variant can be written against the same dict. */
+  window.FieldSight.formatAnswerBasis = formatAnswerBasis;
 })();
