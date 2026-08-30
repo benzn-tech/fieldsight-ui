@@ -3302,6 +3302,26 @@
   font-family: var(--font-mono);
 }
 
+/* What the answer was searched over. Sits between the answer and its
+   citations because it qualifies the whole answer, not any one source. */
+.fs-ask-chat__basis {
+  margin-top: 8px;
+  padding: 3px 8px;
+  align-self: flex-start;
+  border: 1px solid var(--border-subtle, var(--border-default));
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+/* Widened: the person asked about one period and is reading another. Carries
+   colour because it is a correction to the question, not a footnote. */
+.fs-ask-chat__basis--widened {
+  color: var(--color-warning-700, var(--text-secondary));
+  border-color: var(--color-warning-300, var(--border-default));
+}
+
 /* Citation cards under an assistant answer */
 .fs-ask-chat__citations {
   margin-top: 8px;
