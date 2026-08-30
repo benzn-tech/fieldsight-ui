@@ -1,8 +1,13 @@
 /* ==========================================================================
    FieldSight API · Ask Agent — BACKEND-CONTEXT §4.12
    --------------------------------------------------------------------------
-   POST /api/ask  body { date, user, question, scope?, topic_id? }
-     → { answer, citations, model, ... }
+   POST /api/ask  body { date, user, question, scope?, topic_id?, tz? }
+     → { answer, citations, model, basis?, ... }
+
+   `tz` is an IANA zone id and is what makes "yesterday" / "last week" mean
+   anything: the server anchors the range on the caller's calendar day and
+   returns `basis {from, to, widened}` when it resolved one. Omit it and the
+   search runs unfiltered, silently.
 
    Stateless on the server (BACKEND-CONTEXT §10) — multi-turn must be
    reconstructed client-side and resent each call.
@@ -10,6 +15,18 @@
 
 (function () {
   'use strict';
+
+  /* Undefined rather than a guess when the browser will not say. The server
+     treats a missing zone and an unusable one identically -- no anchor, no
+     range -- so a hardcoded fallback would only make a wrong day look like a
+     real one. */
+  function timeZone() {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+    } catch (e) {
+      return undefined;
+    }
+  }
 
   async function ask(opts) {
     opts = opts || {};
@@ -31,6 +48,20 @@
           question: opts.question,
           scope:    opts.scope,
           topic_id: opts.topic_id,
+          /* The browser's IANA zone, and a zone id rather than a date or an
+             offset: the backend anchors "yesterday" / "last week" on the
+             CALLER'S calendar day, and NZ and AU do not start daylight saving
+             on the same date, so a date computed anywhere else is wrong for
+             one market several weeks a year.
+
+             Only this field makes the anchor reachable. Without it the server
+             resolves no day, produces no range, and searches unfiltered --
+             which is exactly the pre-existing behaviour, so the feature is
+             not broken, it is silently absent. Verified against prod on
+             2026-08-30: with tz the response carries
+             basis {from, to, widened}; the gateway forwards the field only
+             when the client sends it, and no client did. */
+          tz:       timeZone(),
         },
       });
     }
