@@ -175,6 +175,39 @@
     return !!(seg && seg.speaker_name && seg.speaker_state !== 'confirmed');
   }
 
+  /* Is the participants[] -> diarisation-label overlay a GUESS?
+
+     The overlay pairs the i-th name in `participants` with the i-th speaker
+     label. Nothing anywhere guarantees those two orders agree: `participants`
+     is whatever the extraction model listed, and the labels are ordered by
+     first appearance in the audio. The code that builds the overlay has
+     described itself as "a positional guess" in a comment since it was
+     written, and then rendered its output identically to a name a person
+     actually asserted.
+
+     There is exactly ONE arrangement where position cannot be wrong: one name
+     and one speaker. Then there is only one way to pair them, and the overlay
+     is as good as `participants` itself.
+
+     Everything else is a guess, and the two that matter are both real:
+
+       * one name, two speakers -- prod 2026-08-27 11:39, speaker_count 2 and
+         participants ["Ben"]. The name went onto whoever spoke first. That may
+         well be right; nothing checked.
+       * two names, two speakers -- a coin flip, and the failure is silent and
+         confident: A's words attributed to B, with no mark on screen saying so.
+
+     Callers pass this into the same `unresolved` flag the voiceprint's own
+     guesses use, so a positional name gets the "?" and the tooltip rather than
+     being quotable as fact. */
+  function hintIsAmbiguous(participants, labelCount) {
+    var names = (participants || []).filter(function (p) {
+      return p && !isSpeakerLabel(p);
+    });
+    if (!names.length) return false;          /* no overlay at all */
+    return !(names.length === 1 && labelCount === 1);
+  }
+
   /* Fill the gaps the voiceprint cannot reach.
 
      Measured on a real three-way conversation (2026-08-13 18:10): `spk_0` has 26 turns in
@@ -364,6 +397,7 @@
     displayLabel: displayLabel,
     isSpeakerLabel: isSpeakerLabel,
     isTentative: isTentative,
+    hintIsAmbiguous: hintIsAmbiguous,
     namesInSession: namesInSession,
     inferredNames: inferredNames,
   };
