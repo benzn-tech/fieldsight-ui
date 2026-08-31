@@ -71,6 +71,67 @@
     };
   }
 
-  window.FS.api.ask = { ask: ask };
+  /* POST /api/ask/corroborate  body { question, answer }
+       → { corroborations, dropped, truncated, timed_out }
+
+     The SECOND pass. `/ask` is capped by API Gateway's 29s integration timeout
+     (the backend template says so in the comment explaining why that path runs
+     haiku), so an external lookup plus a reconcile call cannot ride along on
+     the request that already spends its budget on embed + rag-search +
+     synthesis. The grounded answer lands first; this fills in underneath.
+
+     `caller_sub` is deliberately NOT sent. The proxy injects it from the
+     Cognito authorizer -- that is what stops a caller asking as someone else --
+     and `/ask` never returns it, so there would be nothing to echo.
+
+     Rejects like any other request. The caller is expected to render the
+     failure rather than swallow it: with the flag on and the route broken,
+     rendering nothing is indistinguishable from working-and-empty, which is a
+     shape this repo has shipped three times. */
+  async function corroborate(opts) {
+    opts = opts || {};
+    if (!window.FS.api.useMocks) {
+      var askBaseUrl = (window.FS.api.orgBaseUrl) || undefined;
+      return window.FS.api.request('/ask/corroborate', {
+        method:  'POST',
+        baseUrl: askBaseUrl,
+        body:    { question: opts.question, answer: opts.answer },
+      });
+    }
+    await window.FS.api.delay(900);
+    /* A read stub serves the shape it would really return, and this one is
+       shaped to exercise every branch the renderer has -- including the two
+       that are easy to leave untested because they look like nothing:
+       `not_found` and `no_checkable_claim`. An empty mock would claim the
+       feature is finished and the data absent. */
+    return {
+      corroborations: [
+        { entity: 'Naylor Love', kind: 'company', state: 'corroborated',
+          claim: 'CEO is Rick Herd',
+          summary: 'Company leadership pages list Rick Herd as Chief Executive.',
+          sources: [{ title: 'Naylor Love — Leadership', url: 'https://www.naylorlove.co.nz/about/', published: '2026-03-11' }],
+          retrieved_at: '2026-08-31T09:12:04Z' },
+        { entity: 'NZS 3604', kind: 'standard', state: 'conflicts',
+          claim: 'covers buildings up to 12m in height',
+          summary: 'The standard states a 10m maximum for the light timber framing scope.',
+          sources: [{ title: 'NZS 3604:2011 scope', url: 'https://www.standards.govt.nz/', published: null }],
+          retrieved_at: '2026-08-31T09:12:04Z' },
+        { entity: 'Tenpeak', kind: 'company', state: 'not_found',
+          claim: 'is the main contractor on Pod 3',
+          summary: null, sources: [],
+          retrieved_at: '2026-08-31T09:12:04Z' },
+        { entity: 'WorkSafe', kind: 'authority', state: 'no_checkable_claim',
+          claim: null,
+          summary: 'Mentioned in the answer, but the answer asserts nothing about it that an external source could confirm.',
+          sources: [], retrieved_at: '2026-08-31T09:12:04Z' },
+      ],
+      dropped:   [{ entity: 'the Downtown claim', reason: 'commercial_context' }],
+      truncated: false,
+      timed_out: false,
+      _query:    opts,
+    };
+  }
+
+  window.FS.api.ask = { ask: ask, corroborate: corroborate };
 
 })();

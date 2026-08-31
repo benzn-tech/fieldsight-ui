@@ -11873,3 +11873,102 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   gap: 8px;
   margin-top: 16px;
 }
+
+/* ==========================================================================
+   Ask · external corroboration — the second pass
+   --------------------------------------------------------------------------
+   What the OPEN WEB says, under an answer that says what the customer's own
+   recordings say. Those are two different kinds of statement and the styling's
+   whole job is to keep them apart: the answer is evidence about their site,
+   this is evidence about the world, and this is the half that can be wrong in
+   a way a site manager cannot detect.
+
+   Separation is carried by the inset rule, the muted ground, the label, the
+   source host and the date -- NOT by colour alone, which is the first thing
+   lost to a printout or a colour-blind reader.
+
+   Every colour here is a SEMANTIC token (--text-*, --surface-*, --border-*).
+   Never a palette-scale token (--color-danger-100 etc): those are fixed hex
+   and do not flip, which is how this repo has twice shipped a light-on-white
+   or invisible element in one theme while the other looked fine.
+   ========================================================================== */
+
+.fs-ask-corrob {
+  margin-top: 10px;
+  padding: 10px 10px 8px;
+  border-top: 1px solid var(--border-default);
+  background: var(--surface-panel-muted);
+  border-radius: var(--radius-sm, 4px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fs-ask-corrob__label {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.fs-ask-corrob--pending .fs-ask-corrob__label,
+.fs-ask-corrob--failed  .fs-ask-corrob__label { text-transform: none; letter-spacing: 0; }
+
+.fs-ask-corrob__list { list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 8px; }
+
+.fs-ask-corrob__item {
+  padding: 7px 9px;
+  border: 1px solid var(--border-subtle);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-panel);
+  display: flex; flex-direction: column; gap: 4px;
+}
+
+/* The left edge encodes state, and the text label repeats it — a stripe on its
+   own is not a legend anybody can read. */
+.fs-ask-corrob__item--ok       { border-left-color: var(--text-success); }
+.fs-ask-corrob__item--conflict { border-left-color: var(--text-danger); }
+.fs-ask-corrob__item--none     { border-left-color: var(--border-default); }
+.fs-ask-corrob__item--moot     { border-left-color: var(--border-subtle); }
+
+.fs-ask-corrob__head { display: flex; align-items: baseline; gap: 8px; }
+.fs-ask-corrob__entity { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+
+.fs-ask-corrob__state {
+  margin-left: auto;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+.fs-ask-corrob__state--ok       { color: var(--text-success); }
+.fs-ask-corrob__state--conflict { color: var(--text-danger); font-weight: 700; }
+.fs-ask-corrob__state--none     { color: var(--text-tertiary); }
+/* Deliberately the quietest of the four. "The entity exists but the answer
+   asserts nothing checkable about it" must never read as a tick — that is the
+   exact trust inflation this feature was written to avoid. */
+.fs-ask-corrob__state--moot     { color: var(--text-tertiary); font-style: italic; }
+
+.fs-ask-corrob__summary { font-size: 12.5px; line-height: 1.5; color: var(--text-secondary); }
+
+.fs-ask-corrob__conflict { font-size: 12.5px; line-height: 1.55; color: var(--text-secondary);
+  display: flex; flex-direction: column; gap: 2px; }
+.fs-ask-corrob__side { font-weight: 600; color: var(--text-primary); }
+
+.fs-ask-corrob__sources { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.fs-ask-corrob__source {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--border-default);
+}
+.fs-ask-corrob__source:hover { color: var(--text-secondary); }
+.fs-ask-corrob__source:focus-visible { outline: 2px solid var(--border-focus, currentColor);
+  outline-offset: 2px; }
+
+/* A cap the reader cannot see reads as "everything was checked". */
+.fs-ask-corrob__note { font-size: 11px; color: var(--text-tertiary); font-style: italic; }
