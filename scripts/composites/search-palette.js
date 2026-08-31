@@ -275,19 +275,28 @@
       if (el) el.scrollIntoView({ block: 'nearest' });
     }, [selIdx]);
 
-    /* Minor A (Fable review) — global Escape, works even when focus has
-       moved off the search input (e.g. into AskChat's own input).
-       Mirrors the document-level Escape pattern in app-shell.js
-       WeatherIndicator. askMode → back to search; else → close palette. */
+    /* ONE Escape, and it closes. Document-level so it works wherever focus has
+       gone — the search input, AskChat's own input, a result row.
+
+       It used to back out of askMode first and close on the second press. That
+       is a staircase, and from the answer view it meant two presses to leave
+       with nothing on screen saying so: "I have to hit Escape several times"
+       (user, 2026-08-31). Escape closes a dialog; that is what every hand
+       expects, and going back to the results is a click rather than a
+       keystroke.
+
+       This is also now the ONLY Escape handler in this component. The input's
+       own `onKeyDown` used to call `onClose()` as well, so the two raced and
+       neither could be reasoned about from one place. */
     React.useEffect(function () {
       function onKey(e) {
         if (e.key !== 'Escape') return;
-        if (askMode) setAskMode(null);
-        else onClose();
+        e.preventDefault();
+        onClose();
       }
       document.addEventListener('keydown', onKey);
       return function () { document.removeEventListener('keydown', onKey); };
-    }, [askMode, onClose]);
+    }, [onClose]);
 
     var trimmedQuery = query.trim();
 
@@ -387,14 +396,13 @@
          the now-hidden results list (Enter could re-select an invisible
          row, or re-set askMode without re-sending — AskChat's
          initialQuestion is mount-only). Escape isn't handled here either:
-         it bubbles to the document-level effect below, which backs out of
-         askMode instead of closing the whole palette. */
+         it bubbles to the document-level effect below, which closes. */
       if (askMode) return;
 
       switch (e.key) {
-        case 'Escape':
-          onClose();
-          break;
+        /* No 'Escape' case: the document-level handler above owns it, and owns
+           it alone. Two handlers calling onClose() for the same key is how a
+           close becomes un-reasonable-about from either one. */
         case 'ArrowDown':
           e.preventDefault();
           setSelIdx(function (i) { return Math.min(i + 1, flatItems.length - 1); });
