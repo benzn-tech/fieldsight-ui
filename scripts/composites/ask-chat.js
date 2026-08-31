@@ -151,7 +151,22 @@
 
     var items = res.corroborations || [];
     var dropped = res.dropped || [];
-    if (!items.length && !dropped.length && !res.truncated) return null;
+
+    /* `timed_out` has to be in this condition. The backend returns it with
+       EVERYTHING else empty on five separate paths -- gate allowed nothing and
+       the clock ran out, search failed, reconcile failed, or either step
+       started with less than a useful timeout left. Without it here the whole
+       block returns null and a timeout renders as nothing at all, which is the
+       exact swallowed-failure shape this component's own rule forbids: with the
+       flag on and the upstream broken, "render nothing" is indistinguishable
+       from working-and-empty.
+
+       This was written into the design and then violated four lines later by
+       an early return that only knew about the three fields it had at the
+       time. */
+    if (!items.length && !dropped.length && !res.truncated && !res.timed_out) {
+      return null;
+    }
 
     return React.createElement('div', { className: 'fs-ask-corrob' },
       React.createElement('div', { className: 'fs-ask-corrob__label' },
@@ -166,10 +181,29 @@
          "everything was checked". `dropped` is the privacy gate refusing to
          send something; `truncated` is the three-entity limit. They are
          different facts and are said separately. */
+      /* "Not checked", and NOT a reason invented here.
+
+         An earlier version of this line said "not sent — commercially
+         sensitive" for every dropped entity. The backend drops for several
+         different reasons and only some of them are that: the gate refuses a
+         kind outside the allowlist, a string shaped like a person's name, a
+         clause-narrowed standard, digits on a non-standard — and separately,
+         `no usable state` means the entity WAS sent and the reconcile step
+         could not place it, so even "not sent" was false for that one.
+
+         The visible line now says only what is true for all of them. The
+         reasons are real and worth having, so they go in the tooltip verbatim
+         rather than being mapped into a second vocabulary this side would then
+         have to keep in sync with the gate's. */
       dropped.length
-        ? React.createElement('div', { className: 'fs-ask-corrob__note' },
-            dropped.length + ' item' + (dropped.length === 1 ? '' : 's') +
-            ' not sent — commercially sensitive')
+        ? React.createElement('div', {
+            className: 'fs-ask-corrob__note',
+            title: dropped.map(function (d) {
+              return (d.entity || '?') + ' — ' + (d.reason || 'no reason given');
+            }).join('\n'),
+          },
+            dropped.length + ' thing' + (dropped.length === 1 ? '' : 's') +
+            ' not checked')
         : null,
 
       res.truncated
