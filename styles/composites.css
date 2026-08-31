@@ -16,7 +16,7 @@
      Keyframe              Used by                          Override
      ────────────────────  ───────────────────────────────  ──────────────
      fs-task-checkoff      .fs-task-card--checking-off      animation:none; opacity:0
-     fs-ask-pending        .fs-ask-chat__pending-dot        animation:none; opacity:0.6
+     fs-ask-pending        .fs-ask-chat__pending-dot        animation:none; opacity:0.6; transform:none
      (fs-btn-spin)         .fs-btn__spinner [components.css] animation-duration: 1.6s
 
    When adding a new keyframe, extend this list AND add its override
@@ -3394,25 +3394,44 @@
 /* Pending dots animation */
 .fs-ask-chat__msg--pending {
   display: inline-flex;
-  gap: 4px;
+  gap: 9px;
   align-items: center;
 }
-.fs-ask-chat__pending-dot {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--text-tertiary);
-  animation: fs-ask-pending 1.2s var(--easing-in-out) infinite;
+.fs-ask-chat__pending-dots {
+  display: inline-flex;
+  gap: 5px;
+  /* Room for the bounce, so the dots do not clip against the message box. */
+  padding: 4px 0;
+  align-items: flex-end;
 }
-.fs-ask-chat__pending-dot:nth-child(2) { animation-delay: 0.15s; }
-.fs-ask-chat__pending-dot:nth-child(3) { animation-delay: 0.30s; }
+.fs-ask-chat__pending-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent-600, var(--text-secondary));
+  animation: fs-ask-pending 1.1s var(--easing-in-out) infinite;
+}
+.fs-ask-chat__pending-dot:nth-child(2) { animation-delay: 0.14s; }
+.fs-ask-chat__pending-dot:nth-child(3) { animation-delay: 0.28s; }
 
+/* Says what it is doing, not just that it is alive. The wait is p90 8.6s --
+   long enough that three silent dots read as a stall. */
+.fs-ask-chat__pending-label {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* Up and down, not in and out. A bounce reads as work in progress; a pulse
+   reads as a status light, and a status light that does not change reads as
+   stuck. */
 @keyframes fs-ask-pending {
-  0%, 80%, 100% { opacity: 0.3; transform: scale(0.85); }
-  40%           { opacity: 1;   transform: scale(1);    }
+  0%, 70%, 100% { transform: translateY(0);     opacity: 0.45; }
+  35%           { transform: translateY(-5px);  opacity: 1;    }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .fs-ask-chat__pending-dot { animation: none; opacity: 0.6; }
+  /* Static frame, and the LABEL carries the meaning instead -- which is the
+     reason the label exists rather than being decoration on the dots. */
+  .fs-ask-chat__pending-dot { animation: none; opacity: 0.6; transform: none; }
 }
 
 .fs-ask-chat__form {

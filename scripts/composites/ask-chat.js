@@ -174,10 +174,23 @@
       if (props.initialQuestion) send(props.initialQuestion);
     }, []);
 
-    /* Auto-scroll the message list to the bottom whenever it grows. */
+    /* Put the QUESTION at the top of the view, not the last line of the answer.
+       This used to be `scrollTop = scrollHeight`, which lands the reader at the
+       bottom of a long answer and makes them scroll back up to find out what
+       they asked (user, 2026-08-31). The answer is read downward from the
+       question, so that is where the view starts.
+       Falls back to the old behaviour when there is no user message to anchor
+       on — a first render, or a route that seeds an answer with no question. */
     React.useEffect(function () {
       var el = listRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
+      if (!el) return;
+      var asked = el.querySelectorAll('[data-role="user"]');
+      var last = asked.length ? asked[asked.length - 1] : null;
+      if (last && typeof last.offsetTop === 'number') {
+        el.scrollTop = Math.max(0, last.offsetTop - el.offsetTop);
+      } else {
+        el.scrollTop = el.scrollHeight;
+      }
     }, [msgs.length, busy]);
 
     /* When scope keys change (e.g. user switched topics), drop history
@@ -289,6 +302,10 @@
         msgs.map(function (m, i) {
           return React.createElement('div', {
             key: i,
+            /* Marks the anchor the scroll effect looks for. The question is
+               where reading starts, so it is the thing that gets put at the top
+               — not the last line of the answer. */
+            'data-role': m.role,
             className: 'fs-ask-chat__msg fs-ask-chat__msg--' + m.role
               + (m.error ? ' fs-ask-chat__msg--error' : ''),
           },
@@ -331,12 +348,21 @@
           );
         }),
 
+        /* The wait is p90 8.6s — long enough that three silent dots read as a
+           stall. The dots say "alive"; the line says what it is doing, so a
+           reader who looks away and back knows the request did not die. */
         busy ? React.createElement('div', {
           className: 'fs-ask-chat__msg fs-ask-chat__msg--assistant fs-ask-chat__msg--pending',
+          role:         'status',
+          'aria-live':  'polite',
         },
-          React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
-          React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
-          React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
+          React.createElement('span', { className: 'fs-ask-chat__pending-dots', 'aria-hidden': 'true' },
+            React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
+            React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
+            React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
+          ),
+          React.createElement('span', { className: 'fs-ask-chat__pending-label' },
+            'Looking through your records…'),
         ) : null,
       ),
 
