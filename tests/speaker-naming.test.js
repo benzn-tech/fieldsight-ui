@@ -455,3 +455,50 @@ test('a label never wins as a positional hint either', () => {
   assert.strictEqual(sn.displayLabel(seg, 'spk_1'), 'spk_0');
   assert.strictEqual(sn.displayLabel(seg, 'Mike'), 'Mike');
 });
+
+/* ---- the positional overlay is a guess, and says so --------------------- */
+
+test('one name and one speaker is the only unambiguous pairing', () => {
+  // Nothing to get wrong: there is a single way to pair them.
+  assert.equal(sn.hintIsAmbiguous(['Ben'], 1), false);
+});
+
+test('one name and two speakers is a guess', () => {
+  /* prod 2026-08-27 11:39 exactly: speaker_count 2, participants ["Ben"].
+     The name went onto whoever happened to speak first. That may well be
+     right; nothing checked, and the chip said it like a fact. */
+  assert.equal(sn.hintIsAmbiguous(['Ben'], 2), true);
+});
+
+test('two names and two speakers is a coin flip', () => {
+  /* The expensive case. `participants` is ordered by the extraction model and
+     the labels by first appearance in the audio; when they disagree, A's words
+     are attributed to B silently and confidently. */
+  assert.equal(sn.hintIsAmbiguous(['Ben', 'Sam'], 2), true);
+});
+
+test('no names means no overlay and nothing to flag', () => {
+  /* prod 2026-08-27 09:41 and 10:30 both carry participants []. There is no
+     name on the chip at all, so marking anything tentative would be noise. */
+  assert.equal(sn.hintIsAmbiguous([], 3), false);
+  assert.equal(sn.hintIsAmbiguous(undefined, 1), false);
+});
+
+test('participants made only of diarisation labels is not an overlay at all', () => {
+  /* Four prod topics from 2026-08-12 carry ["spk_0","spk_1","spk_2"] — the
+     extraction saying it could not tell, not three people. isSpeakerLabel
+     already stops those reaching the chip, so no name is displayed and there
+     is nothing to mark as uncertain. */
+  assert.equal(sn.hintIsAmbiguous(['spk_0', 'spk_1'], 2), false);
+});
+
+test('one real name among the labels is still placed by position', () => {
+  /* This assertion was written the other way round first, and the
+     implementation was right.
+
+     `["spk_0", "Ben"]` puts "Ben" on the SECOND speaker — not because anything
+     established that, but because "Ben" is second in the array. Dropping the
+     label from the count does not make the surviving name's position reliable;
+     it is one name against two speakers, which is the case above. */
+  assert.equal(sn.hintIsAmbiguous(['spk_0', 'Ben'], 2), true);
+});
