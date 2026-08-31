@@ -912,6 +912,27 @@
 
 .fs-action-item-row__meta-item--audit { color: var(--color-success-700); }
 
+/* "Said 3x" — the same commitment reached us from several recordings on this
+   day, so the list shows one row instead of three.
+
+   This line is not decoration. Without it the reader is handed a list two
+   items shorter than what was actually said, with nothing on screen accounting
+   for the difference — which is worse than not collapsing at all, because the
+   rows do not visibly merge, they disappear.
+
+   Semantic tokens only. The --audit rule directly above uses
+   --color-success-700, which is a palette-scale token and does NOT flip with
+   the theme; that is a latent contrast bug in dark mode, and copying it here
+   would make two. */
+.fs-action-item-row__meta-item--mentions {
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 0 5px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+}
+
 .fs-action-item-row__priority { flex-shrink: 0; }
 
 .fs-action-item-row--checked .fs-action-item-row__text {
