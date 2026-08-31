@@ -286,6 +286,28 @@
                 title:     closer.at ? new Date(closer.at).toString() : undefined,
               }, closerCaption)
             : null,
+
+          /* One commitment said in several recordings on the same day arrives
+             here as ONE row, and the recordings it was also said in arrive
+             with an empty action_items list. Without this line the reader is
+             shown a list shorter than what was said, with nothing accounting
+             for the difference -- which is worse than not collapsing, because
+             the rows do not visibly merge, they disappear.
+
+             Absent and 1 are the same thing and neither renders: every
+             ordinary row would otherwise read "said once", which is true but
+             says nothing, and would drown the rows where the count matters.
+
+             The backend sends `mention_count` only when the collapse is on
+             (ENABLE_TODO_COLLAPSE); older deploys omit it entirely and this
+             renders nothing, which is correct for them. */
+          (action.mention_count > 1)
+            ? React.createElement('span', {
+                className: 'fs-action-item-row__meta-item fs-action-item-row__meta-item--mentions',
+                title: 'Said in ' + action.mention_count +
+                       ' separate recordings on this day',
+              }, 'Said ' + action.mention_count + '×')
+            : null,
         ),
       ),
       action.priority
