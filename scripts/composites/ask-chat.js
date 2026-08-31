@@ -49,6 +49,141 @@
     return { date: parts[1], user: parts[2] };
   }
 
+  /* ---- external corroboration (the second pass) -------------------------
+
+     Everything below renders what the OPEN WEB says. The answer above it
+     renders what the customer's own recordings say. Those are two different
+     kinds of statement, and the whole job of this block is to stop the reader
+     hearing them as one: the answer is evidence about their site, this is
+     evidence about the world, and this is the half that can be wrong in ways
+     a site manager has no way to detect.
+
+     Hence: its own labelled divider, its own surface, the source domain on
+     every claim, and the retrieval date. Not colour alone -- colour is the
+     first thing lost to a screenshot, a printout, or a colour-blind reader. */
+
+  /* Module-scope so ids stay unique across every AskChat on the page. There
+     are four mounts (three on Timeline, one in the search palette) and a
+     per-instance counter would hand two of them the same id. */
+  var _midSeq = 0;
+
+  var CORROB_STATE = {
+    corroborated:       { label: 'Confirmed',   mod: 'ok'      },
+    conflicts:          { label: 'Disagrees',   mod: 'conflict'},
+    not_found:          { label: 'Not found',   mod: 'none'    },
+    no_checkable_claim: { label: 'Nothing to check', mod: 'moot' },
+  };
+
+  /* Show the host, not the raw URL. A reader judges "is this a source I trust"
+     from the domain; the full URL is noise at this size and wraps badly. */
+  function sourceHost(url) {
+    try { return new URL(url).hostname.replace(/^www\./, ''); }
+    catch (e) { return url || ''; }
+  }
+
+  function renderCorroborationItem(c, i) {
+    var meta = CORROB_STATE[c.state] || CORROB_STATE.no_checkable_claim;
+    return React.createElement('li', {
+      key: i,
+      className: 'fs-ask-corrob__item fs-ask-corrob__item--' + meta.mod,
+    },
+      React.createElement('div', { className: 'fs-ask-corrob__head' },
+        React.createElement('span', { className: 'fs-ask-corrob__entity' }, c.entity),
+        React.createElement('span', {
+          className: 'fs-ask-corrob__state fs-ask-corrob__state--' + meta.mod,
+        }, meta.label)
+      ),
+
+      /* `conflicts` is the state this feature exists for, and the easiest one
+         to lose to a renderer that prints every result as a summary. It gets
+         both sides, attributed, on separate lines -- never merged into prose
+         where the disagreement can read as elaboration. */
+      c.state === 'conflicts'
+        ? React.createElement('div', { className: 'fs-ask-corrob__conflict' },
+            React.createElement('div', null,
+              React.createElement('span', { className: 'fs-ask-corrob__side' }, 'The recording:'),
+              ' ', c.claim || '—'),
+            React.createElement('div', null,
+              React.createElement('span', { className: 'fs-ask-corrob__side' }, 'The web:'),
+              ' ', c.summary || '—')
+          )
+        : (c.summary
+            ? React.createElement('div', { className: 'fs-ask-corrob__summary' }, c.summary)
+            : null),
+
+      (c.sources && c.sources.length)
+        ? React.createElement('div', { className: 'fs-ask-corrob__sources' },
+            c.sources.map(function (s, j) {
+              return React.createElement('a', {
+                key: j, href: s.url, target: '_blank', rel: 'noopener noreferrer',
+                className: 'fs-ask-corrob__source',
+                title: s.title || s.url,
+              }, sourceHost(s.url) + (s.published ? ' · ' + s.published : ''));
+            })
+          )
+        : null
+    );
+  }
+
+  /* `res` is the corroborate response, or one of two sentinels:
+       { _pending: true }  -- request in flight
+       { _failed: true }   -- request rejected or timed out
+
+     A failure renders a muted LINE, never nothing. With the flag on and the
+     route broken, "render nothing" is indistinguishable from
+     working-and-empty -- a shape this repo has shipped three separate times
+     (swallowed 403s on the fire-and-forget write, the legacy gateway's 403
+     shown as an empty state, 1078 uploads with zero log lines). The answer
+     itself still never acquires an error banner: an optional enrichment
+     failing is not the answer failing. */
+  function renderCorroboration(res) {
+    if (!res) return null;
+
+    if (res._pending) {
+      return React.createElement('div', { className: 'fs-ask-corrob fs-ask-corrob--pending' },
+        React.createElement('div', { className: 'fs-ask-corrob__label' }, 'Checking the web…'));
+    }
+    if (res._failed) {
+      return React.createElement('div', { className: 'fs-ask-corrob fs-ask-corrob--failed' },
+        React.createElement('div', { className: 'fs-ask-corrob__label' },
+          'Web check unavailable'));
+    }
+
+    var items = res.corroborations || [];
+    var dropped = res.dropped || [];
+    if (!items.length && !dropped.length && !res.truncated) return null;
+
+    return React.createElement('div', { className: 'fs-ask-corrob' },
+      React.createElement('div', { className: 'fs-ask-corrob__label' },
+        'From the open web — not from your recordings'),
+
+      items.length
+        ? React.createElement('ul', { className: 'fs-ask-corrob__list' },
+            items.map(renderCorroborationItem))
+        : null,
+
+      /* Both of these are caps, and a cap the reader cannot see reads as
+         "everything was checked". `dropped` is the privacy gate refusing to
+         send something; `truncated` is the three-entity limit. They are
+         different facts and are said separately. */
+      dropped.length
+        ? React.createElement('div', { className: 'fs-ask-corrob__note' },
+            dropped.length + ' item' + (dropped.length === 1 ? '' : 's') +
+            ' not sent — commercially sensitive')
+        : null,
+
+      res.truncated
+        ? React.createElement('div', { className: 'fs-ask-corrob__note' },
+            'Only the first ' + items.length + ' were checked')
+        : null,
+
+      res.timed_out
+        ? React.createElement('div', { className: 'fs-ask-corrob__note' },
+            'The check ran out of time')
+        : null
+    );
+  }
+
   /* One line saying what the answer was built from.
 
      Composed HERE from the numbers the backend computed, and never asked of the
@@ -181,6 +316,26 @@
       setMsgs([]);
     }, [date, user, scope, topic_id]);
 
+    /* Attach a corroboration result to the answer it belongs to.
+
+       Matching on id and not on position: the log is append-only today, but a
+       later feature that inserts or removes a message would silently move
+       every block one seat over, and nothing would fail loudly. A miss is a
+       no-op -- the panel may have been reset (a date change clears `msgs`)
+       while the request was in flight, and a late arrival must not resurrect
+       a message that is gone. */
+    function patchCorrob(mid, value) {
+      setMsgs(function (m) {
+        var hit = false;
+        var next = m.map(function (msg) {
+          if (msg.id !== mid) return msg;
+          hit = true;
+          return Object.assign({}, msg, { corrob: value });
+        });
+        return hit ? next : m;
+      });
+    }
+
     function send(question) {
       if (!question || busy) return;
       var userMsg = { role: 'user', text: question };
@@ -226,15 +381,38 @@
         topic_id: topic_id,
         question: question,
       }).then(function (res) {
+        var answerText = res.answer || '';
+        var wantsCorrob = !!(((window.FS || {}).api || {}).externalCorroboration)
+                          && !!answerText;
+        /* A per-message id, because the corroboration arrives later and has to
+           find its own answer again. Position is not an identity here: two
+           questions can be in flight, and matching on text attaches the block
+           to the wrong one as soon as somebody asks the same thing twice. */
+        var mid = ++_midSeq;
         setMsgs(function (m) { return m.concat([{
+          id:        mid,
           role:      'assistant',
-          text:      res.answer || '',
+          text:      answerText,
           citations: res.citations || [],
           model:     res.model,
           /* What the backend actually searched. Absent on the legacy path and
              on older deploys, which formatAnswerBasis renders as no line. */
           basis:     res.basis || null,
+          corrob:    wantsCorrob ? { _pending: true } : null,
         }]); });
+
+        /* The second pass. Fired after the answer is already on screen and
+           awaited by nothing the answer depends on -- /ask spends its whole
+           29s API Gateway budget on embed + rag-search + synthesis, so this
+           could not have ridden along even if we wanted it to.
+
+           Fired HERE and not inside a setMsgs updater: React may invoke an
+           updater twice, and a request sent from inside one is a request sent
+           twice. */
+        if (!wantsCorrob) return;
+        window.FS.api.ask.corroborate({ question: question, answer: answerText })
+          .then(function (cr) { patchCorrob(mid, cr); })
+          .catch(function () { patchCorrob(mid, { _failed: true }); });
       }).catch(function (err) {
         setMsgs(function (m) { return m.concat([{
           role:  'assistant',
@@ -308,6 +486,11 @@
                 }, formatAnswerBasis(m.basis))
               : null,
             m.role === 'assistant' ? renderCitations(m.citations) : null,
+
+            /* Below the citations, deliberately: citations point back into the
+               customer's own recordings, and this points out of them. Reading
+               order carries the same separation the styling does. */
+            m.role === 'assistant' ? renderCorroboration(m.corrob) : null,
             m.role === 'assistant' && m.model
               ? React.createElement('div', { className: 'fs-ask-chat__model' },
                   m.model)
