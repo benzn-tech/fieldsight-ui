@@ -125,7 +125,13 @@
           summary: 'Mentioned in the answer, but the answer asserts nothing about it that an external source could confirm.',
           sources: [], retrieved_at: '2026-08-31T09:12:04Z' },
       ],
-      dropped:   [{ entity: 'the Downtown claim', reason: 'commercial_context' }],
+      /* The reasons the real gate emits, verbatim (src/corroboration_gate.py).
+         They are prose written for a log line, not codes -- a mock that
+         invented tidier ones would hide that from whoever styles this next. */
+      dropped: [
+        { entity: 'the Downtown claim', reason: "kind 'project' is not in the allowlist" },
+        { entity: 'Rick Herd', reason: "shaped like a person's name" },
+      ],
       truncated: false,
       timed_out: false,
       _query:    opts,
