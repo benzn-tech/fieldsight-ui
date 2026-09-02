@@ -67,23 +67,43 @@
      saying so is the original defect wearing a date.
 
      Returns null when there is no basis (an older backend, or the legacy
-     non-RAG path). A line reading "based on nothing" is worse than no line. */
-  function formatAnswerBasis(basis) {
+     non-RAG path). A line reading "based on nothing" is worse than no line.
+
+     THE LINE FOLLOWS THE QUESTION'S LANGUAGE, and the widened case is why it
+     has to. The backend prompt tells the model NOT to say the period was empty
+     when it is answering on screen, because this line says it first and saying
+     it twice states one fact in two voices. For a question asked in Chinese
+     that left the explanation nowhere: the model was silenced and the only
+     thing that spoke was English, so the answer arrived about a date the reader
+     had not asked for with nothing they could read to say why
+     (user, 2026-09-02).
+
+     The question, not the browser locale — the locale is the device's language
+     and this is the asker's. Same rule the backend's metric renderer uses. */
+  var CJK = /[㐀-䶿一-鿿豈-﫿]/;
+  function askedInChinese(question) { return CJK.test(question || ''); }
+
+  function formatAnswerBasis(basis, zh) {
     if (!basis || !basis.chunks) return null;
     var dates = basis.dates || [];
     var n = basis.chunks;
-    var tail = ' · ' + n + ' excerpt' + (n === 1 ? '' : 's');
+    var tail = zh ? ' · ' + n + ' 段摘录'
+                  : ' · ' + n + ' excerpt' + (n === 1 ? '' : 's');
     if (basis.widened) {
-      return 'Nothing in the period asked about — based on ' + basis.from + ' instead' + tail;
+      return zh
+        ? '所问的时间段没有记录 — 改为基于 ' + basis.from + tail
+        : 'Nothing in the period asked about — based on ' + basis.from + ' instead' + tail;
     }
     if (!basis.from && !basis.to) {
-      return 'Based on all records you can see' + tail;
+      return (zh ? '基于你能看到的全部记录' : 'Based on all records you can see') + tail;
     }
     if (basis.from === basis.to) {
-      return 'Based on ' + basis.from + tail;
+      return (zh ? '基于 ' : 'Based on ') + basis.from + tail;
     }
-    var span = 'Based on ' + basis.from + ' to ' + basis.to;
-    if (dates.length > 1) span += ' · ' + dates.length + ' days';
+    var span = zh
+      ? '基于 ' + basis.from + ' 至 ' + basis.to
+      : 'Based on ' + basis.from + ' to ' + basis.to;
+    if (dates.length > 1) span += ' · ' + dates.length + (zh ? ' 天' : ' days');
     return span + tail;
   }
 
@@ -252,6 +272,11 @@
           /* What the backend actually searched. Absent on the legacy path and
              on older deploys, which formatAnswerBasis renders as no line. */
           basis:     res.basis || null,
+          /* Captured from the question at send time, not read off the answer:
+             the model's reply language is not reliable (measured on prod, a
+             Chinese question came back in English 2 runs out of 3), and the
+             basis line must not inherit that coin flip. */
+          zh:        askedInChinese(question),
         }]); });
       }).catch(function (err) {
         setMsgs(function (m) { return m.concat([{
@@ -320,11 +345,11 @@
                same reason the model's closing caveat was: by the time you reach
                it you have already read three sentences about a date you did not
                ask about (user, 2026-08-31). */
-            m.role === 'assistant' && formatAnswerBasis(m.basis)
+            m.role === 'assistant' && formatAnswerBasis(m.basis, m.zh)
               ? React.createElement('div', {
                   className: 'fs-ask-chat__basis'
                     + (m.basis && m.basis.widened ? ' fs-ask-chat__basis--widened' : ''),
-                }, formatAnswerBasis(m.basis))
+                }, formatAnswerBasis(m.basis, m.zh))
               : null,
             m.role === 'assistant' && window.FieldSight.renderMarkdown
               ? React.createElement('div', {
