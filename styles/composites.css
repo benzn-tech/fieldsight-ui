@@ -12029,3 +12029,74 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color: var(--text-secondary);
 }
 .fs-topic-detail__assignee .fs-select { max-width: 190px; }
+
+/* --- Today · the order control -------------------------------------------
+   Deliberately the same chip vocabulary as .fs-today__age-filter above: both
+   rows sit one under the other and control the same list, so two different
+   chip shapes would read as two different mechanisms. What differs is
+   grouping — the order chips are mutually exclusive and carry a leading
+   "Order" label, because a set of chips with no label reads as filters. */
+.fs-today__sort-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 4px 0 8px;
+  padding: 0 4px;
+}
+.fs-today__sort-label {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-right: 2px;
+}
+.fs-today__sort-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out);
+}
+.fs-today__sort-btn:hover {
+  color: var(--text-primary);
+  background: var(--surface-panel-muted);
+}
+.fs-today__sort-btn--active {
+  color: var(--text-primary);
+  background: var(--surface-selected);
+  border-color: var(--color-accent-400);
+}
+.fs-today__sort-btn:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+/* The divider between the dated rows and the rest, in due-date order.
+   It carries a count because the count IS the information: on prod roughly
+   three quarters of open items resolve to no date, and a reader has to be
+   able to see how much of the list the sort could not order. Rendered once
+   per project group (renderMaybeGrouped always buckets by project). */
+.fs-today__due-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 4px 6px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.fs-today__due-divider::before,
+.fs-today__due-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
