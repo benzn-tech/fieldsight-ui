@@ -32,6 +32,7 @@
     user_name:   'Jarley Trainor',
     device:      'Benl1',
     site:        'SB1108 Ellesmere College',
+    site_id:     '098f5d81-fa41-4fbd-883c-7839b592c7f6',   /* ORG site UUID — what getSiteMembers takes */
 
     executive_summary: [
       'Morning safety brief covered fall protection on Block C; eight crew signed off and one trip hazard flagged near gate 2.',
@@ -78,14 +79,16 @@
         risk_level:         'high',
         location:           'Block C, level 2',
         who_raised:         'Jarley Trainor',
-        recommended_action: 'Quarantine board, replace before next shift.',
+        recommended_id:          '0f3e3adf-da6f-4c55-807a-54b1de600021',
+action:      'Quarantine board, replace before next shift.',
       },
       {
         observation:        'Trip hazard near gate 2 — coiled hose left across walkway',
         risk_level:         'medium',
         location:           'Gate 2',
         who_raised:         'Jack Gibson',
-        recommended_action: 'Reroute hose along fence line.',
+        recommended_id:          'fd041bab-87aa-4b85-8448-e8b503fa722c',
+action:      'Reroute hose along fence line.',
       },
     ],
 
@@ -106,12 +109,14 @@
         ],
         action_items: [
           {
+            id:          'cd155836-49f7-44d7-8b7e-e36505140733',
             action:      'Order replacement scaffold boards from supplier',
             responsible: 'Jack Gibson',
             deadline:    'Today 08:30',
             priority:    'high',
           },
           {
+            id:          '55c48cd4-b3e5-43d8-8a5e-7991fbc1998f',
             action:      'Reroute hose at gate 2',
             responsible: 'Sarah Chen',
             deadline:    'Today 09:00',
@@ -122,12 +127,14 @@
           {
             observation:        'Loose scaffold board, level 2 Block C',
             risk_level:         'high',
-            recommended_action: 'Quarantine and replace before next shift.',
+            recommended_id:          'b1bde1dd-7510-48cb-89f1-97e2dee935bb',
+action:      'Quarantine and replace before next shift.',
           },
           {
             observation:        'Coiled hose creating trip hazard at gate 2',
             risk_level:         'medium',
-            recommended_action: 'Route along fence line.',
+            recommended_id:          '85a8d029-948e-47bf-8ae7-c7b1da85149f',
+action:      'Route along fence line.',
           },
         ],
         related_photos: ['Benl1_2026-04-29_07-12-04.jpg', 'Benl1_2026-04-29_07-19-22.jpg'],
@@ -148,12 +155,14 @@
         ],
         action_items: [
           {
+            id:          '72c2e901-25a4-4656-8339-7271c78089a3',
             action:      'Confirm crane inspection sign-off paperwork',
             responsible: 'David Barillaro',
             deadline:    'Today 09:30',
             priority:    'high',
           },
           {
+            id:          '06ba6f30-0c87-48c5-8f10-a2ef8b03c31c',
             action:      'Coordinate rebar offload with crane crew',
             responsible: 'Jarley Trainor',
             deadline:    'Today 15:30',
@@ -179,18 +188,21 @@
         ],
         action_items: [
           {
+            id:          '3e639a40-6a6e-4bf1-872b-09a57d8a32e6',
             action:      'Pour concrete — Block 4 footing',
             responsible: 'Jarley Trainor',
             deadline:    'Today 11:30',
             priority:    'high',
           },
           {
+            id:          'b956e76d-60e5-4766-8793-d6ce179c42bb',
             action:      'Slump test — Block 4 footing',
             responsible: 'Jarley Trainor',
             deadline:    'Today 11:45',
             priority:    'medium',
           },
           {
+            id:          'a66d8ab2-83c0-49fa-8d26-8e8e7d067d9c',
             action:      'Strip forms — south footing',
             responsible: 'Ben Lin',
             deadline:    'Today 14:00',
@@ -216,12 +228,14 @@
         ],
         action_items: [
           {
+            id:          '8caf8780-f483-42b4-8efd-e9349694fe0f',
             action:      'Secure tarps along Block C west elevation',
             responsible: 'Sarah Chen',
             deadline:    'Today 14:00',
             priority:    'high',
           },
           {
+            id:          '99b1c4ad-88dd-4e2d-8523-285d6de1b446',
             action:      'Walk perimeter and tie off loose edge-protection panels',
             responsible: 'Ben Lin',
             deadline:    'Today 14:00',
@@ -232,7 +246,8 @@
           {
             observation:        'Gusty conditions forecast — risk of windborne debris',
             risk_level:         'medium',
-            recommended_action: 'Reinspect tie-downs every 2h until 18:00.',
+            recommended_id:          'a278e3cf-1d12-48d3-8a01-133453bb0edb',
+action:      'Reinspect tie-downs every 2h until 18:00.',
           },
         ],
         related_photos: [],
@@ -265,6 +280,7 @@
     user_name:   'Jarley Trainor',
     device:      'Benl1',
     site:        'SB1108 Ellesmere College',
+    site_id:     '098f5d81-fa41-4fbd-883c-7839b592c7f6',   /* ORG site UUID — what getSiteMembers takes */
 
     executive_summary: [
       'Three high-risk safety flags raised on Block C scaffold; all activity paused pending re-inspection.',
@@ -301,9 +317,11 @@
         summary: 'Three independent issues identified during morning walk. Decision to cease all access pending external inspection.',
         key_decisions: ['STOP work order issued for Block C until 04-29 re-inspection (Jarley Trainor)'],
         action_items: [
-          { action: 'Issue STOP work notice to all subbies', responsible: 'Jarley Trainor',
+          { id:          '5d281b34-6312-42a0-8d0b-e581cd4eb699',
+ action:      'Issue STOP work notice to all subbies', responsible: 'Jarley Trainor',
             deadline: 'Today 08:30', priority: 'high' },
-          { action: 'Book independent scaffold inspector for 04-29 07:00', responsible: 'Jack Gibson',
+          { id:          '92332c12-fb91-4c76-88c0-30ff8921689a',
+ action:      'Book independent scaffold inspector for 04-29 07:00', responsible: 'Jack Gibson',
             deadline: 'Today 12:00', priority: 'high' },
         ],
         safety_flags: [
@@ -327,6 +345,7 @@
     user_name:   'David Barillaro',
     device:      'Benl2',
     site:        'SB1108 Ellesmere College',
+    site_id:     '098f5d81-fa41-4fbd-883c-7839b592c7f6',   /* ORG site UUID — what getSiteMembers takes */
 
     executive_summary: [
       'Clean weekend shift — small crew finished form-stripping on the south footing without incident.',
@@ -379,6 +398,7 @@
     user_name:   'Jarley Trainor',
     device:      'Benl1',
     site:        'SB1108 Ellesmere College',
+    site_id:     '098f5d81-fa41-4fbd-883c-7839b592c7f6',   /* ORG site UUID — what getSiteMembers takes */
 
     executive_summary: [
       'Steel deliveries arrived on schedule; offload coordinated with crane crew.',
@@ -407,7 +427,8 @@
         summary: 'Two truckloads of beams offloaded to staging. Tag-line positions briefed.',
         key_decisions: [],
         action_items: [
-          { action: 'Receipt-in steel against PO and certs', responsible: 'David Barillaro',
+          { id:          'a957d549-ad3c-46d8-8fd2-79012ec59ae1',
+ action:      'Receipt-in steel against PO and certs', responsible: 'David Barillaro',
             deadline: 'Today 12:00', priority: 'medium' },
         ],
         safety_flags: [],
@@ -428,6 +449,7 @@
     user_name:   'Sarah Chen',
     device:      'Benl4',
     site:        'SB1108 Ellesmere College',
+    site_id:     '098f5d81-fa41-4fbd-883c-7839b592c7f6',   /* ORG site UUID — what getSiteMembers takes */
 
     executive_summary: [
       'Wind event Mid-afternoon: gusts to 75 km/h. All elevated work suspended for two hours.',
@@ -453,7 +475,8 @@
         summary: 'MetService gust warning issued at 14:25; all elevated work paused. Site reopened at 16:30 after wind dropped.',
         key_decisions: ['Site-wide stand-down for elevated work (Sarah Chen)'],
         action_items: [
-          { action: 'Walk site and tie off any loose tarps', responsible: 'Ben Lin',
+          { id:          'fb8f0048-108c-4fd0-8877-f5d3436b7ee5',
+ action:      'Walk site and tie off any loose tarps', responsible: 'Ben Lin',
             deadline: 'Today 15:00', priority: 'high' },
         ],
         safety_flags: [

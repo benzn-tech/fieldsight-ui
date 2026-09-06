@@ -12005,3 +12005,27 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 
 /* A cap the reader cannot see reads as "everything was checked". */
 .fs-ask-corrob__note { font-size: 11px; color: var(--text-tertiary); font-style: italic; }
+
+/* Owner picker on a Timeline to-do.
+   Sits under the row rather than beside it: the row already carries a
+   checkbox, the text, a due date, a priority badge and a pencil, and a sixth
+   control on that line collapses the text to nothing on a narrow panel — the
+   right rail is ~320px. Semantic tokens only. */
+.fs-topic-detail__assignee {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 6px 28px;      /* 28px lines it up past the checkbox */
+}
+.fs-topic-detail__assignee-label {
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  flex: none;
+}
+.fs-topic-detail__assignee-static {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.fs-topic-detail__assignee .fs-select { max-width: 190px; }
