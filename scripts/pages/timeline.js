@@ -3165,9 +3165,22 @@
        FROM the same findings when present), so this section only needs the
        rest (quality + any other future domain) to avoid showing the same
        row twice. */
-    var findings = (topic.findings || []).filter(function (f) {
-      return f && f.domain !== 'safety';
-    });
+    /* feat/findings-legible — severity and domain are SELECTED by the backend
+       (repositories/findings.py `_COLS`) and have always arrived on this
+       object; this section threw both away, so forty MAJOR findings on prod
+       rendered as the same unlabelled prose as fifty-five severity-`none`
+       ones. Asked what the section was for, nothing on screen could answer.
+
+       Ordering and labelling live in api/findings-view.js so they can be
+       tested; the fallback keeps the old behaviour if that module is ever
+       missing, because a findings section that vanishes is worse than one
+       that is merely plain. */
+    var fv = window.FS && window.FS.api && window.FS.api.findingsView;
+    var findings = fv
+      ? fv.orderFindings(fv.nonSafety(topic.findings))
+      : (topic.findings || []).filter(function (f) {
+          return f && f.domain !== 'safety';
+        });
 
     /* editable-content-correction — UX-only gate (backend patch_content ACL
        is authoritative); site_manager+/PM see it via content:edit,
@@ -3518,11 +3531,32 @@
       findings.length > 0
         ? React.createElement('div', { className: 'fs-topic-detail__section' },
             React.createElement('div', { className: 'fs-topic-detail__section-label' },
-              'Findings'),
+              'Findings',
+              /* "Findings" names the table, not the thing. The count and how
+                 many of them are flagged is what tells a reader in one line
+                 what this section is and which rows want attention. */
+              fv && fv.sectionCaption(findings)
+                ? React.createElement('span', {
+                    className: 'fs-topic-detail__section-caption',
+                  }, fv.sectionCaption(findings))
+                : null),
             findings.map(function (f, i) {
               var rowEditable = canEditContent && !!f.id;
               var caption = [f.entity_name, f.entity_trade].filter(Boolean).join(' · ');
+              var sev = fv ? fv.severityLabel(f) : null;
+              var dom = fv ? fv.domainLabel(f) : null;
               return React.createElement('div', { key: f.id || i, className: 'fs-topic-detail__finding' },
+                (sev || dom)
+                  ? React.createElement('div', { className: 'fs-topic-detail__finding-tags' },
+                      sev ? React.createElement('span', {
+                        className: 'fs-topic-detail__finding-sev'
+                          + ' fs-topic-detail__finding-sev--' + sev.toLowerCase(),
+                      }, sev) : null,
+                      dom ? React.createElement('span', {
+                        className: 'fs-topic-detail__finding-domain',
+                      }, dom) : null,
+                    )
+                  : null,
                 caption ? React.createElement('div', {
                   className: 'fs-topic-detail__finding-caption',
                 }, caption) : null,

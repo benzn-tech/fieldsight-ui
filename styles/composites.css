@@ -1935,6 +1935,60 @@
   color: var(--text-tertiary);
 }
 
+/* feat/findings-legible — the severity and domain the payload always carried.
+
+   The section-label caption sits inline with the uppercase label and must NOT
+   inherit its letter-spacing or transform: it is a sentence, not a label. */
+.fs-topic-detail__section-caption {
+  margin-left: 8px;
+  font-weight: var(--font-weight-regular);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-tertiary);
+}
+
+.fs-topic-detail__finding-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.fs-topic-detail__finding-sev,
+.fs-topic-detail__finding-domain {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: var(--radius-full);
+}
+/* Deliberately NOT safety-red. Per CLAUDE.md, red is bound to the SAFETY
+   domain across the whole app, and every safety finding has already been
+   promoted out of this section into safety_flags — a red chip here would
+   claim a domain these rows are guaranteed not to be. Warning amber carries
+   "major" without borrowing that meaning. */
+.fs-topic-detail__finding-sev--major {
+  color: var(--color-warning-900);
+  background: var(--color-warning-100);
+}
+.fs-topic-detail__finding-sev--minor {
+  color: var(--text-secondary);
+  background: var(--surface-panel-muted);
+}
+.fs-topic-detail__finding-domain {
+  color: var(--text-tertiary);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+}
+/* Status scale tokens are NOT theme-flipped (CLAUDE.md): --color-warning-100
+   is a light pastel that the global light-on-dark text renders unreadable
+   against. Pin the foreground rather than re-paletting the chip. */
+[data-theme="dark"] .fs-topic-detail__finding-sev--major {
+  color: var(--color-neutral-900);
+}
+
 .fs-topic-detail__finding-observation {
   font-size: 13px;
   line-height: 1.5;
