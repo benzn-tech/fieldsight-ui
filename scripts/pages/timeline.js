@@ -3213,6 +3213,29 @@
       return o !== undefined ? o : ((a && a.responsible) || '');
     }
 
+    /* The roster, plus whoever is on the row already if they are not in it.
+
+       Measured on prod: the most common `responsible` on an open item is
+       "Ben" (43 of them), and no member is called that — extraction takes the
+       name out of the conversation, while the roster carries account names
+       like "Ben_UCPK". 5 of 18 users have no last_name at all and 3 have an
+       underscore in the first.
+
+       Without this, opening such an item shows a picker with no matching
+       option, which renders as blank: the control would look like it had lost
+       the assignment it was showing a second earlier. Keeping the current
+       value as an option makes the picker honest about what the row says,
+       even though re-selecting it is the one choice the backend would refuse
+       (it validates against members only) — and refusing to re-select the
+       value that is already set costs nothing. */
+    function optionsFor(current) {
+        var opts = roster.users.map(function (u) { return { value: u.name, label: u.name }; });
+        if (current && !opts.some(function (o) { return o.value === current; })) {
+            opts.unshift({ value: current, label: current + ' (not on this site)' });
+        }
+        return opts;
+    }
+
     function assignTo(a, name) {
       if (!a || !a.id) return;
       var before = assigneeOf(a);
@@ -3415,9 +3438,7 @@
                         size: 'sm',
                         value: assigneeOf(a) || '',
                         placeholder: assigneeOf(a) ? undefined : 'Unassigned',
-                        options: roster.users.map(function (u) {
-                          return { value: u.name, label: u.name };
-                        }),
+                        options: optionsFor(assigneeOf(a)),
                         onChange: function (e) { assignTo(a, e.target.value); },
                       })
                     /* Loading, errored, or no site id — the current owner as
