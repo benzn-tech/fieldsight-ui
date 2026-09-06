@@ -511,6 +511,21 @@
              label. See api/today-ordering.js for why the count outranks the
              priority it sits above. */
           timesRaised:    (t.thread && t.thread.times_raised) || null,
+          /* feat/thread-span — the other three facts the thread block has
+             always carried. `times_raised` alone is not a signal: four days
+             inside one week and four days across three months are opposite
+             situations and the badge rendered them identically. `first_seen`
+             / `last_raised` are the span; `threadOpenItems` is how many items
+             on the whole subject are still open, which separates a festering
+             thread from a well-tracked one.
+
+             `|| null` deliberately NOT used on the count — 0 is a real answer
+             ("everything on this subject is closed except this") and `|| null`
+             would erase it into "unknown". Only undefined becomes null. */
+          threadFirstSeen: (t.thread && t.thread.first_seen) || null,
+          threadLastRaised: (t.thread && t.thread.last_raised) || null,
+          threadOpenItems: (t.thread && t.thread.open_items != null)
+            ? t.thread.open_items : null,
           threadId:       (t.thread && t.thread.id) || null,
           kind:        'task',
           /* feat/today-rolling-open-items — the report date this item

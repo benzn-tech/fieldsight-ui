@@ -328,6 +328,24 @@ action:      'Reinspect tie-downs every 2h until 18:00.',
           { observation: 'Three high-risk findings on Block C scaffold', risk_level: 'high',
             recommended_action: 'No access until cleared by independent inspector.' },
         ],
+        /* feat/thread-span — NO fixture carried a `thread` block, so the
+           "raised N×" badge had never rendered locally either and neither had
+           its tooltip. Same shape as the missing findings above: an absent
+           mock reads as "the feature is finished and the data is absent".
+
+           The block is exactly what repositories/threads.py:facts_for_threads
+           returns and lambda_org_api wraps as `topic.thread` — four facts, of
+           which the frontend read one. The span is deliberately WIDE (June to
+           September): a subject raised four times inside one week and one
+           raised four times across three months are opposite situations, and
+           making them look different is the whole point of the change. */
+        thread: {
+          id:           'th-9f2c41a8-block-c-scaffold',
+          times_raised: 4,
+          first_seen:   '2026-06-12',
+          last_raised:  '2026-09-03',
+          open_items:   3,
+        },
         /* feat/findings-legible — NO fixture carried a non-safety finding, so
            the Findings section had never rendered locally even once and read
            as a feature that did not exist. "An empty mock is not a neutral

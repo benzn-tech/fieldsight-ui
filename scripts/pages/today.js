@@ -2405,6 +2405,9 @@
                    that they render inline rather than in their own drawer. */
                 aged:          isAgedTask(task),
                 timesRaised:   task.timesRaised,
+                threadFirstSeen:  task.threadFirstSeen,
+                threadLastRaised: task.threadLastRaised,
+                threadOpenItems:  task.threadOpenItems,
                 /* §E-time — parent topic's time_range, when present. */
                 timeRange:     task.timeRange,
                 /* fix/today-batch-select-expand — Mine cards participate
@@ -2462,6 +2465,9 @@
                Team items as on aged Mine items. */
             aged:       isAgedTask(task),
             timesRaised: task.timesRaised,
+            threadFirstSeen:  task.threadFirstSeen,
+            threadLastRaised: task.threadLastRaised,
+            threadOpenItems:  task.threadOpenItems,
             timeRange:  task.timeRange,
             /* fix/today-batch-select-expand — Team cards participate in
                Batch Select too, same as the Mine branch above. */

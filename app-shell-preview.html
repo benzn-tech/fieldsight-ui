@@ -62,7 +62,7 @@
   <script type="text/babel" src="scripts/components/avatar.js?v=2"></script>
 
   <!-- Layer 5 composites (depend on L4 atoms above) -->
-  <script type="text/babel" src="scripts/composites/task-card.js?v=15"></script>
+  <script type="text/babel" src="scripts/composites/task-card.js?v=16"></script>
   <!-- T4 — useMultiSelect hook + MultiSelectBulkBar, shared by /today
        Leftover, /safety, /quality. Loaded before those pages below. -->
   <script type="text/babel" src="scripts/composites/multi-select-list.js?v=1"></script>
@@ -245,6 +245,9 @@
        away). Same load-order constraint: after api/index.js, which assigns
        window.FS.api wholesale. -->
   <script src="scripts/api/findings-view.js?v=1"></script>
+  <!-- feat/thread-span — the sentence behind the "raised N×" badge. Same
+       load-order constraint: after api/index.js. -->
+  <script src="scripts/api/thread-span.js?v=1"></script>
   <!--   4. Today adapter (PLAN Phase D sketch — feeds mock-data.js shim) -->
   <!-- Today's section model (spec §14) — overdue / today / next 3 days.
        Pure; loaded before today-adapter.js and pages/today.js. -->
@@ -253,7 +256,7 @@
        assigns window.FS.api wholesale, so anything registering earlier is
        silently wiped. -->
   <script src="scripts/api/my-work-grouping.js?v=1"></script>
-  <script src="scripts/api/today-adapter.js?v=14"></script>
+  <script src="scripts/api/today-adapter.js?v=15"></script>
   <!-- Sprint 4.2 — Tasks aggregator (cross-day join: timeline + actions) -->
   <script src="scripts/api/tasks-aggregator.js?v=11"></script>
   <!-- Sprint 6.0 — Compliance aggregator (cross-day fan-out for /safety + /quality) -->
