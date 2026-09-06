@@ -271,10 +271,23 @@
                ever mentioned and says nothing. Info tone rather than
                neutral: unlike "90+ days", which marks something to discount,
                this marks something to look at. */
+            /* feat/thread-span — the badge text stays short; the SPAN goes in
+               the tooltip. "raised 4×" over one week and over three months
+               were rendering identically, and the fields that separate them
+               (first_seen / last_raised / open_items) were already on the wire
+               and unread. The old sentence remains the floor when the dates
+               are absent — see api/thread-span.js. */
             props.timesRaised >= 2 ? React.createElement(Badge, {
               tone: 'info', variant: 'subtle', size: 'sm',
-              title: 'This subject came up on ' + props.timesRaised
-                     + ' different days and is still open',
+              title: (window.FS && window.FS.api && window.FS.api.threadSpan
+                      && window.FS.api.threadSpan.tooltip({
+                        timesRaised:     props.timesRaised,
+                        firstSeen:       props.threadFirstSeen,
+                        lastRaised:      props.threadLastRaised,
+                        threadOpenItems: props.threadOpenItems,
+                      }))
+                || ('This subject came up on ' + props.timesRaised
+                    + ' different days and is still open'),
             }, 'raised ' + props.timesRaised + '×') : null,
             /* Q1 — tier-aware Today/Tasks: informational only, no review
                controls (those stay on Timeline). `=== 'non_work'` (never

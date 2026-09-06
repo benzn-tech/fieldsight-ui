@@ -1,52 +1,49 @@
 /* ==========================================================================
-   api/today-ordering.js — the order Today's open items are read in.
+   api/today-ordering.js — the orders Today's open items can be read in.
    --------------------------------------------------------------------------
-   Today's Mine/Team lists had NO order at all. They came out in whatever
-   sequence the topics happened to be flattened in, which is transcript
-   order — the order things were SAID, which has nothing to do with the
-   order they should be done. The reported symptom was not being able to
-   tell what mattered.
+   Two orders, both nameable, because the previous one was neither.
 
-   What the ordering can be built on was settled by looking at the data,
-   not by choosing a textbook rule. Of 183 action items in prod:
+   ## What was here before, and why it went
 
-     • deadline is set on 6 of them, and on ZERO of the 175 still open.
-       So earliest-due-date — Jackson's rule, the obvious answer for a
-       list like this — has nothing to sort by and is not implementable
-       here. Neither is anything else that needs a due date: slack time,
-       critical ratio, lateness minimisation.
-     • priority IS populated and does discriminate: 77 high, 83 medium,
-       15 low.
-     • category discriminates too, though safety is rare: 110 progress,
-       54 quality, 11 safety.
-     • age spans six months, and 106 of the 175 open items — 61% — are
-       more than LEFTOVER_THRESHOLD_DAYS old.
+   Seven lexicographic tiers: aged-demotion, safety, times-raised, priority,
+   age, mine-first, title. Nothing was wrong with it as a rule — it was built
+   by looking at prod, and the aged demotion existed because 61 % of open items
+   were older than 90 days and sorting purely by age filled the top of the page
+   with February.
 
-   That last number is why age is a TIER and not just a tiebreak, and why
-   it is the FIRST tier. Sorting purely by "oldest first" would fill the
-   top of every band with items nobody has touched since February;
-   sorting purely by "newest first" would bury work that is genuinely
-   slipping. So the aged set is demoted as a group — the page already
-   marks it with its own chip and offers a filter for it — and within
-   each group the oldest comes first, because among items that are all
-   still live, the one that has waited longest is the one closest to
-   being forgotten.
+   The problem was that NO TIER WAS A PROPERTY THE READER COULD SEE. Two `High`
+   safety items sat at opposite ends because one was 89 days old and the other
+   91. Tier 3 outranked priority and sorted on a number the page never renders.
+   Defensible and unreadable is the worst pair: it looks arbitrary, so it gets
+   distrusted, so the page does.
 
-   Safety sits BELOW that demotion, which is not where it started.
-   Safety-first was the intuitive order, and running the real open items
-   through it refuted the intuition: nine of the top ten were 148-176
-   days old, and reading them showed why. The extractor's `safety`
-   category is noisy — the head of the list was "Vacuum dust off
-   finished carpet" and "Provide key for door access". Stale mislabelled
-   housekeeping presented as the most important thing on the page is the
-   exact failure this ordering exists to fix.
+   Reported as 排序还非常混乱，我没有看懂它是怎么排序的 — and "I cannot see how
+   this is ordered" is a complete description of the defect.
 
-   The rules are lexicographic and unweighted on purpose. A weighted
-   score would need numbers nobody can defend and would reshuffle the
-   list in ways nobody can predict; each rule below can be stated in one
-   sentence and argued with on its own.
+   ## What the frontend actually has
 
-   Registers as FS.api.orderOpenItems (and exports for node --test).
+   Checked against today-adapter.js, not against the table — an earlier draft
+   of this design was written from the database schema and specified a sort on
+   fields that do not exist here:
+
+     date       'YYYY-MM-DD', DAY granularity. There is no timestamp anywhere
+                in the frontend. Prod's created_at (64 distinct values over 349
+                open items, one carrying 26) is invisible from here.
+     deadline   the RAW free text — "Today 08:30", "Week after next Tuesday".
+                NOT a date. `deadline_text` does not exist on the item at all.
+     priority   CAPITALISED by the adapter: 'High' / 'Medium' / 'Low'.
+                A naive === 'high' fails; priorityRank lowercases.
+     id         date-unique, stamped by today.js's rolling loader.
+     ageDays    number, always present on the rolling path.
+
+   ## Why priority is a tiebreak and not a tier
+
+   169 of 349 open items on prod are `High` — 48 %. A field that calls half the
+   list the most important thing on it cannot rank the list. It stays a badge,
+   and it breaks ties inside one day, where the alternative is alphabetical —
+   which is not more legible, only less useful.
+
+   Registers as FS.api.orderOpenItems / FS.api.orderOpenItemsBy.
    ========================================================================== */
 (function () {
   'use strict';
@@ -55,7 +52,11 @@
      imported because today.js is a browser-only page module with no export;
      the pair is asserted in tests/today-ordering.test.js so a change to one
      without the other fails loudly instead of silently splitting the tier
-     boundary from the chip that advertises it. */
+     boundary from the chip that advertises it.
+
+     It NO LONGER DRIVES THE ORDER — newest-first sinks the aged pile without a
+     tier — but it still drives the chip and the "Hide older" filter, so the
+     constant and its cross-file guard both stay. */
   var AGED_AFTER_DAYS = 90;
 
   var PRIORITY_RANK = { high: 0, medium: 1, low: 2 };
@@ -63,123 +64,144 @@
   function priorityRank(item) {
     var p = item && item.priority;
     var r = PRIORITY_RANK[String(p || '').toLowerCase()];
-    /* Unknown or missing sorts WITH medium, not last: an item the
-       extractor did not label is not thereby less important, and pushing
-       it to the bottom would hide exactly the items with the least
-       metadata. */
+    /* Unknown or missing sorts WITH medium, not last: an item the extractor
+       did not label is not thereby less important, and pushing it to the
+       bottom would hide exactly the items with the least metadata. */
     return r === undefined ? PRIORITY_RANK.medium : r;
   }
 
-  /* Safety is the parent topic's category, threaded onto each action item
-     by today-adapter. A topic carrying safety flags counts even when its
-     category is something else — the flag is the stronger statement. */
-  function isSafety(item) {
-    if (!item) return false;
-    if (String(item.category || '').toLowerCase() === 'safety') return true;
-    return !!item.hasSafetyFlags;
+  /* Lexicographic on the ISO string. Correct because the format is fixed-width
+     'YYYY-MM-DD', and deliberately NOT via Date(): BUG-19 — `new Date('2026-09-07')`
+     parses as UTC and drifts a day in NZ, which would reorder the two ends of
+     a month. Missing sorts last under descending: an item with no date is not
+     the newest thing on the page. */
+  function dayKey(item) {
+    var d = item && item.date;
+    return (typeof d === 'string' && d) ? d : '';
   }
 
-  /* Days this subject was raised on. Absent for an unthreaded item, which
-     is most of them; 0 keeps those neutral rather than ranking them against
-     each other on a fact none of them has. Never negative, so a corrupt
-     value cannot invert the tier. */
-  function raisedCount(item) {
-    var n = item && item.timesRaised;
-    return (typeof n === 'number' && isFinite(n) && n > 0) ? n : 0;
+  /* The ONLY source of a date in this frontend. `deadline` is free text and
+     `resolveDeadline` is what turns it into one — its own doc calls an
+     embedded date authoritative and it never guesses a wrong one, returning
+     {absolute: null} instead.
+
+     An earlier draft tried to separate "a real date" from "a parsed guess" and
+     sort only the former. That distinction does not exist here: there is no
+     other date field, and the draft's own example of an unpromotable guess
+     ("Week after next Tuesday (2026-07-28 approx.)") is a case this resolver
+     handles confidently. */
+  function dueKey(item) {
+    if (!item || !item.deadline) return null;
+    var api = window.FS && window.FS.api;
+    if (!api || !api.resolveDeadline) return null;
+    var r = api.resolveDeadline(item.deadline, item.date);
+    if (!r || !r.absolute) return null;
+
+    /* `absolute` is DAY-ONLY; `display` carries the time when the text had
+       one ('2026-04-29 14:00'). Both are fixed-width, so lexicographic order
+       is chronological order on either — but only display can separate two
+       items due the same afternoon.
+
+       This mattered in the browser, not in a test: six fixture items all due
+       2026-04-29 rendered 09:00 below two 14:00s, because everything after
+       the day tied and fell through to the default order. THE CARD SHOWS THE
+       TIME, so an order that ignores it reads as broken no matter what the
+       sort key technically promised.
+
+       `absolute` is still what decides dated-vs-undated (checked above), and
+       still the fallback: display is the raw text when nothing resolved, and
+       sorting on that would place an invention among facts. */
+    var d = r.display;
+    if (typeof d === 'string' && d.slice(0, 10) === r.absolute) return d;
+    return r.absolute;
   }
 
-  function isAged(item) {
-    return !!item && item.ageDays > AGED_AFTER_DAYS;
+  function hasDue(item) { return !!dueKey(item); }
+
+  /* The final tiebreak, and it is load-bearing rather than defensive.
+
+     Two items can share a day AND a title: re-extraction of one meeting
+     produces duplicate action text, which is the entire reason todo_collapse
+     exists on the backend. Without this the comparator is not total, and a
+     non-total comparator reorders itself between renders — the list would
+     shuffle on every redraw for no visible reason. */
+  function idKey(item) {
+    return String((item && item.id) || '');
   }
 
-  /* Missing age sorts as 0 — a brand new item, which is what an item with
-     no report date behind it effectively is. It must not sort as older
-     than everything, which is what a null would do under a bare compare. */
-  function age(item) {
-    var n = item && item.ageDays;
-    return typeof n === 'number' && isFinite(n) ? n : 0;
-  }
+  function cmpSaid(a, b) {
+    /* Newest day first. This is what replaces the aged tier: six-month-old
+       items sink on their own, and the page already carries a chip and a
+       filter for them. */
+    var da = dayKey(a), db = dayKey(b);
+    if (da !== db) return da < db ? 1 : -1;
 
-  function cmp(a, b) {
-    /* 1. Live work before the aged pile. 61% of open items are older than
-          the threshold; without this tier they ARE the list.
-
-          This sits above safety, which is not where it started. Safety-first
-          was the intuitive order and the real data refuted it: ranking the
-          open items that way put nine 148-to-176-day-old rows at the top,
-          and reading them showed why — the extractor's `safety` category is
-          noisy, so the head of the list was "Vacuum dust off finished
-          carpet" and "Provide key for door access". Stale mislabelled
-          housekeeping presented as the most important thing on the page is
-          the exact failure this ordering exists to fix. Demoting age first
-          puts the one recent safety item on top, then the actual
-          outstanding engineering work. */
-    var ga = isAged(a) ? 1 : 0, gb = isAged(b) ? 1 : 0;
-    if (ga !== gb) return ga - gb;
-
-    /* 2. Safety first WITHIN a group — the domain's own hierarchy, applied
-          where the items are all still live enough to act on. */
-    var sa = isSafety(a) ? 0 : 1, sb = isSafety(b) ? 0 : 1;
-    if (sa !== sb) return sa - sb;
-
-    /* 3. How many times the site has raised this subject, most first.
-
-          Above priority on purpose. Priority is the extractor's guess and
-          44% of open items carry 'high', so it barely separates anything.
-          "Raised on three different days and still open" is not a guess —
-          it is the site's own behaviour, recorded, and it is the strongest
-          evidence available here that something is not getting done.
-
-          It also survives the question a reader will ask. "Why is this at
-          the top" has an answer they can check: because it keeps coming
-          back. No relabelling of priority can offer that.
-
-          Only threaded subjects carry a count, which is a small minority,
-          so for most pairs this tier is a no-op and the comparison falls
-          straight through to priority. */
-    var ra = raisedCount(a), rb = raisedCount(b);
-    if (ra !== rb) return rb - ra;
-
-    /* 4. Priority — the one extraction field that is both populated and
-          discriminating. */
     var pa = priorityRank(a), pb = priorityRank(b);
     if (pa !== pb) return pa - pb;
 
-    /* 5. Oldest first WITHIN a group: among items that are all still
-          live and equally urgent, the one that has waited longest is the
-          one closest to being forgotten. */
-    var aa = age(a), ab = age(b);
-    if (aa !== ab) return ab - aa;
-
-    /* 6. Ownership breaks a tie; it never outranks safety or priority.
-          Someone else's high-priority safety item still beats my own
-          low-priority one, which is the whole point of showing both. */
-    var ma = a && a.isMine ? 0 : 1, mb = b && b.isMine ? 0 : 1;
-    if (ma !== mb) return ma - mb;
-
-    /* 7. A stable, content-derived last resort, so the list does not
-          reshuffle between renders of identical data. Never store this —
-          an order nobody stated must not become data. */
-    return String((a && a.title) || '').localeCompare(String((b && b.title) || ''));
+    var ia = idKey(a), ib = idKey(b);
+    return ia < ib ? -1 : (ia > ib ? 1 : 0);
   }
 
-  /* Returns a NEW ordered array; the caller's list is not mutated (the
-     same list object is held in React state and sorting in place would
-     mutate state behind React's back). */
-  function orderOpenItems(list) {
+  function cmpDue(a, b) {
+    /* Dated before undated. The undated are NOT dropped and NOT silently
+       trailed — the caller renders a counted divider between the two halves
+       (see partitionByDue). Hiding them would turn "sorted by due date" into
+       "hid most of your work", which is the shape this repo shipped when a
+       collapse's merged rows vanished instead of merging. */
+    var ha = hasDue(a) ? 0 : 1, hb = hasDue(b) ? 0 : 1;
+    if (ha !== hb) return ha - hb;
+
+    if (ha === 0) {
+      var ka = dueKey(a), kb = dueKey(b);
+      if (ka !== kb) return ka < kb ? -1 : 1;   /* soonest first */
+    }
+    /* Same date, or both undated — fall through to the default order so the
+       two modes agree wherever the due date has nothing to say. */
+    return cmpSaid(a, b);
+  }
+
+  var COMPARATORS = { said: cmpSaid, due: cmpDue };
+
+  function orderOpenItemsBy(list, mode) {
+    var cmp = COMPARATORS[mode] || cmpSaid;
     return (list || []).slice().sort(cmp);
+  }
+
+  /* Back-compat: the previous single-order entry point. Same default. */
+  function orderOpenItems(list) {
+    return orderOpenItemsBy(list, 'said');
+  }
+
+  /* Split an ALREADY-ORDERED list at the first undated item, so a caller can
+     render the divider between them and put the real count on it.
+
+     Returns {dated, undated}. The count belongs on the divider because a
+     reader has to be able to see how much of the list the sort did not order —
+     roughly three quarters of prod's open items resolve to no date. */
+  function partitionByDue(ordered) {
+    var dated = [], undated = [];
+    (ordered || []).forEach(function (it) {
+      (hasDue(it) ? dated : undated).push(it);
+    });
+    return { dated: dated, undated: undated };
   }
 
   if (typeof window !== 'undefined') {
     if (!window.FS) window.FS = {};
     if (!window.FS.api) window.FS.api = {};
-    window.FS.api.orderOpenItems = orderOpenItems;
+    window.FS.api.orderOpenItems   = orderOpenItems;
+    window.FS.api.orderOpenItemsBy = orderOpenItemsBy;
+    window.FS.api.partitionByDue   = partitionByDue;
   }
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       orderOpenItems: orderOpenItems,
-      compareOpenItems: cmp,
+      orderOpenItemsBy: orderOpenItemsBy,
+      partitionByDue: partitionByDue,
+      compareOpenItems: cmpSaid,
+      compareByDue: cmpDue,
       AGED_AFTER_DAYS: AGED_AFTER_DAYS,
     };
   }

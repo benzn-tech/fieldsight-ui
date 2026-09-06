@@ -689,6 +689,26 @@
      and this number is a duration that can exceed an hour. Returns the em dash
      when the metric is absent, so the caller can pass a missing value straight
      through. */
+  /* Which findings this topic's detail panel shows, and in what order.
+
+     Pulled out of the render as a named function purely so it can be driven
+     from Node. The ordering itself lives in api/findings-view.js and is
+     tested there; what had NO coverage was this SEAM — whether the render
+     calls it at all, and what happens when it is absent. Five existing tests
+     load this file without seeding FS.api, so before this they were every one
+     of them exercising the fallback and nothing exercised the wired path.
+
+     The fallback is deliberate rather than defensive padding: a findings
+     section that vanishes because a script tag moved is worse than one that
+     is merely unordered and unlabelled. */
+  function selectFindings(topic) {
+    var fv = window.FS && window.FS.api && window.FS.api.findingsView;
+    if (fv) return fv.orderFindings(fv.nonSafety(topic && topic.findings));
+    return ((topic && topic.findings) || []).filter(function (f) {
+      return f && f.domain !== 'safety';
+    });
+  }
+
   function fmtRecordedTime(seconds) {
     if (seconds == null) return '—';
     var s = Math.max(0, Math.round(seconds));
@@ -1310,6 +1330,16 @@
                          page-level `user` (undefined in this branch).
                          Wrong value here shows person A's topics next to
                          person B's transcript/audio/photos. */
+                      /* The ORG site UUID, threaded so the right panel can
+                         load this site's member roster for the assignee
+                         picker. Taken from the timeline payload's own top
+                         level, NOT from the page's `site` (a slug) and not
+                         via a name lookup: today-adapter's siteIdByName note
+                         records that these are two different id spaces and
+                         `GET /api/org/sites/{id}/members` accepts only this
+                         one. Absent on the legacy report path, where the
+                         picker degrades to read-only. */
+                      site_id:    (section.report || {}).site_id || null,
                       user:       sectionUser,
                       user_name:  sectionUserName,
                     });
@@ -2144,6 +2174,7 @@
                     topic_id:   topic.topic_id,
                     topic:      topic,
                     date:       date,
+                    site_id:    report.site_id || null,   /* see the note at the daily-section onSelect */
                     user:       user,
                     user_name:  meeting.user_name,
                   });
@@ -2347,6 +2378,7 @@
                   topic_id:   topic.topic_id,
                   topic:      topic,
                   date:       date,
+                  site_id:    report.site_id || null,   /* see the note at the daily-section onSelect */
                   user:       user,
                   user_name:  report.user_name,
                 });
@@ -3153,9 +3185,18 @@
        FROM the same findings when present), so this section only needs the
        rest (quality + any other future domain) to avoid showing the same
        row twice. */
-    var findings = (topic.findings || []).filter(function (f) {
-      return f && f.domain !== 'safety';
-    });
+    /* feat/findings-legible — severity and domain are SELECTED by the backend
+       (repositories/findings.py `_COLS`) and have always arrived on this
+       object; this section threw both away, so forty MAJOR findings on prod
+       rendered as the same unlabelled prose as fifty-five severity-`none`
+       ones. Asked what the section was for, nothing on screen could answer.
+
+       Ordering and labelling live in api/findings-view.js so they can be
+       tested; the fallback keeps the old behaviour if that module is ever
+       missing, because a findings section that vanishes is worse than one
+       that is merely plain. */
+    var fv = window.FS && window.FS.api && window.FS.api.findingsView;
+    var findings = selectFindings(topic);
 
     /* editable-content-correction — UX-only gate (backend patch_content ACL
        is authoritative); site_manager+/PM see it via content:edit,
@@ -3171,6 +3212,96 @@
     var canEditContent = hasContentEditPerm || !!props.isOwnReport;
     var canConfirmGlossary = hasContentEditPerm && isSiteManagerPlus(caller);
     var topicRowId = topic.topic_row_id;   // durable topics.id (backend Task 8)
+
+    /* Assignee roster — the same call and the same four states tasks.js uses
+       (tasks.js ~:908). Copied rather than shared because that one lives
+       inside a page component with no export, and the pair is small enough
+       that a wrong copy is visible.
+
+       `status` exists because LOADING and EMPTY look identical on screen: an
+       empty <Select> reads as "this site has nobody on it", which is a claim.
+       Only 'ok' renders the picker; every other state renders the current
+       assignee as plain text.
+
+       siteId is the ORG UUID from the timeline payload. Null on the legacy
+       report path and on a lookup miss — the picker degrades to read-only,
+       never throws. */
+    var Select = window.FieldSight.Select;
+
+    /* Owner overrides, keyed by durable action_items.id.
+       The timeline payload is cached (api/timeline.js caches by
+       date+user+source), so a saved assignment would not come back on a
+       re-render — without this the picker snaps to the old name the moment
+       React redraws, and the write looks like it failed. Optimistic: set on
+       send, rolled back if the PATCH rejects. */
+    var ownerRef = React.useState({});
+    var owners = ownerRef[0], setOwners = ownerRef[1];
+
+    function assigneeOf(a) {
+      var o = owners[a && a.id];
+      return o !== undefined ? o : ((a && a.responsible) || '');
+    }
+
+    /* The roster, plus whoever is on the row already if they are not in it.
+
+       Measured on prod: the most common `responsible` on an open item is
+       "Ben" (43 of them), and no member is called that — extraction takes the
+       name out of the conversation, while the roster carries account names
+       like "Ben_UCPK". 5 of 18 users have no last_name at all and 3 have an
+       underscore in the first.
+
+       Without this, opening such an item shows a picker with no matching
+       option, which renders as blank: the control would look like it had lost
+       the assignment it was showing a second earlier. Keeping the current
+       value as an option makes the picker honest about what the row says,
+       even though re-selecting it is the one choice the backend would refuse
+       (it validates against members only) — and refusing to re-select the
+       value that is already set costs nothing. */
+    function optionsFor(current) {
+        var opts = roster.users.map(function (u) { return { value: u.name, label: u.name }; });
+        if (current && !opts.some(function (o) { return o.value === current; })) {
+            opts.unshift({ value: current, label: current + ' (not on this site)' });
+        }
+        return opts;
+    }
+
+    function assignTo(a, name) {
+      if (!a || !a.id) return;
+      var before = assigneeOf(a);
+      if (name === before) return;
+      setOwners(function (m) { var n = Object.assign({}, m); n[a.id] = name; return n; });
+      var api = window.FS && window.FS.api && window.FS.api.actions;
+      if (!api || !api.updateAction) { return; }
+      api.updateAction(a.id, { responsible: name }).then(function (res) {
+        /* 403/404 resolve to envelopes rather than throwing (org.js write
+           convention), so a rejection is not always a rejected promise. */
+        if (!res || res._accessDenied || res._notFound || res.error) {
+          setOwners(function (m) { var n = Object.assign({}, m); n[a.id] = before; return n; });
+        }
+      }).catch(function () {
+        setOwners(function (m) { var n = Object.assign({}, m); n[a.id] = before; return n; });
+      });
+    }
+
+    var rosterRef = React.useState({ status: 'idle', users: [] });
+    var roster    = rosterRef[0];
+    var setRoster = rosterRef[1];
+    var rosterSiteId = props.siteId || null;
+    React.useEffect(function () {
+      if (!rosterSiteId) { setRoster({ status: 'idle', users: [] }); return undefined; }
+      var cancelled = false;
+      setRoster({ status: 'loading', users: [] });
+      var org = window.FS && window.FS.api && window.FS.api.org;
+      if (!org || !org.getSiteMembers) { setRoster({ status: 'error', users: [] }); return undefined; }
+      org.getSiteMembers(rosterSiteId).then(function (res) {
+        if (cancelled) return;
+        if (!res || res._accessDenied || res._notFound) { setRoster({ status: 'error', users: [] }); return; }
+        setRoster({ status: 'ok', users: (res.users || []).filter(function (u) { return u && u.name; }) });
+      }).catch(function () {
+        if (!cancelled) setRoster({ status: 'error', users: [] });
+      });
+      return function () { cancelled = true; };
+    }, [rosterSiteId]);
 
     /* Action items + safety flags render via the shared ActionItemRow /
        SafetyFlagRow composites (unmodified — Task 17 is scoped to
@@ -3310,6 +3441,41 @@
                   }),
                   rowEditable ? editToggle(editKey, 'action item text') : null,
                 ),
+
+                /* Who owns it. A SELECT and never a text box: the backend
+                   matches `responsible` verbatim against this site's member
+                   display names and 400s on anything else, so a free-text
+                   field would reject most of what anyone typed.
+
+                   This is a different write from the pencil beside it. That
+                   one is content correction — "the transcript got the words
+                   wrong" — and reaches `PATCH /api/org/content` with a
+                   table+field+value. Assignment is not a correction of what
+                   was said, and it goes to `PATCH /api/org/action-items/{id}`
+                   with the durable row id, which is also what records an
+                   audit row per change. The two were never wired together on
+                   this page, which is why a to-do here could be re-worded but
+                   not re-assigned. */
+                rowEditable ? React.createElement('div', {
+                  className: 'fs-topic-detail__assignee',
+                },
+                  React.createElement('span', {
+                    className: 'fs-topic-detail__assignee-label',
+                  }, 'Owner'),
+                  roster.status === 'ok' && Select
+                    ? React.createElement(Select, {
+                        size: 'sm',
+                        value: assigneeOf(a) || '',
+                        placeholder: assigneeOf(a) ? undefined : 'Unassigned',
+                        options: optionsFor(assigneeOf(a)),
+                        onChange: function (e) { assignTo(a, e.target.value); },
+                      })
+                    /* Loading, errored, or no site id — the current owner as
+                       text. An empty picker would say "nobody works here". */
+                    : React.createElement('span', {
+                        className: 'fs-topic-detail__assignee-static',
+                      }, assigneeOf(a) || '—'),
+                ) : null,
                 rowEditable && editingKey === editKey ? React.createElement(EditableText, {
                   editable: true, table: 'action_items', id: a.id, field: 'text',
                   value: override !== undefined ? override : (a.action || ''),
@@ -3381,11 +3547,32 @@
       findings.length > 0
         ? React.createElement('div', { className: 'fs-topic-detail__section' },
             React.createElement('div', { className: 'fs-topic-detail__section-label' },
-              'Findings'),
+              'Findings',
+              /* "Findings" names the table, not the thing. The count and how
+                 many of them are flagged is what tells a reader in one line
+                 what this section is and which rows want attention. */
+              fv && fv.sectionCaption(findings)
+                ? React.createElement('span', {
+                    className: 'fs-topic-detail__section-caption',
+                  }, fv.sectionCaption(findings))
+                : null),
             findings.map(function (f, i) {
               var rowEditable = canEditContent && !!f.id;
               var caption = [f.entity_name, f.entity_trade].filter(Boolean).join(' · ');
+              var sev = fv ? fv.severityLabel(f) : null;
+              var dom = fv ? fv.domainLabel(f) : null;
               return React.createElement('div', { key: f.id || i, className: 'fs-topic-detail__finding' },
+                (sev || dom)
+                  ? React.createElement('div', { className: 'fs-topic-detail__finding-tags' },
+                      sev ? React.createElement('span', {
+                        className: 'fs-topic-detail__finding-sev'
+                          + ' fs-topic-detail__finding-sev--' + sev.toLowerCase(),
+                      }, sev) : null,
+                      dom ? React.createElement('span', {
+                        className: 'fs-topic-detail__finding-domain',
+                      }, dom) : null,
+                    )
+                  : null,
                 caption ? React.createElement('div', {
                   className: 'fs-topic-detail__finding-caption',
                 }, caption) : null,
@@ -3668,7 +3855,7 @@
       bodyByTab = {
         overview:   React.createElement(OverviewTab, {
           topic: topic, date: sel.date, actionState: refActions[0], userFolder: ownerFolder,
-          isOwnReport: isOwnReport,
+          isOwnReport: isOwnReport, siteId: sel.site_id || null,
         }),
         transcript: TranscriptList ? React.createElement(TranscriptList,
           Object.assign({}, mediaProps, {
@@ -3835,6 +4022,9 @@
       formatContentEdit: formatContentEdit,
       /* live recording KPIs */
       fmtRecordedTime: fmtRecordedTime,
+      /* feat/findings-legible — the seam between this render and
+         api/findings-view.js, which had no Node coverage. */
+      selectFindings: selectFindings,
       /* content-propagate (item #3) */
       findCorrectionPair: findCorrectionPair,
       TopicCorrectionPropagate: TopicCorrectionPropagate,

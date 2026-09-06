@@ -323,7 +323,19 @@
       return { users: users, site: siteId };
     }
     await api.delay();
-    return { users: [], site: siteId };
+    /* A READ stub has nothing to refuse, and `{users: []}` is not a neutral
+       default — it is a claim that this site has nobody on it. Every consumer
+       of this call is a member picker, so the empty array switched all of them
+       off locally while looking finished: the Timeline assignee control could
+       not be exercised at all until this line was found.
+
+       Serve the day's own people instead. Falls back to the whole user
+       fixture, because the mock reports carry a site NAME while this call
+       takes the org UUID, and no fixture maps between them — an approximate
+       roster is what a picker needs, and it is what the real call would
+       return for the only site the fixtures describe. */
+    var users = ((fx().users) || []).filter(function (u) { return u && u.name; });
+    return { users: users, site: siteId };
   }
 
   /* GET /api/org/sites/{id}/contributors?date=YYYY-MM-DD → { folders:[...] }.
