@@ -608,12 +608,18 @@
       }
     });
 
-    /* Best-effort name overlay from participants[]. */
+    /* Best-effort name overlay from participants[] — and "best-effort" is the
+       whole of it: this pairs the i-th name with the i-th label, and nothing
+       makes those two orders agree. `hintAmbiguous` carries that down to the
+       chip so a positional name renders as the guess this comment has always
+       called it. */
     var participantHint = {};
     var participants = props.participants || [];
     Object.keys(labelToIdx).forEach(function (label, i) {
       if (participants[i]) participantHint[label] = participants[i];
     });
+    var hintAmbiguous = sn.hintIsAmbiguous(participants,
+                                           Object.keys(labelToIdx).length);
 
     /* The naming affordance appears only when the backend says the feature is
        on for this environment (the `unmatchedNames` key) AND the caller holds
@@ -704,7 +710,12 @@
            never render in a form a reader would quote. So is the optimistic
            label, which is our own guess until the re-fetch lands — and so is a lent
            name, which is the only one of the three that nothing was measured for. */
-        var unresolved = !!pending || !!lent || sn.isTentative(s);
+        /* A positional name joins the same set. It is the system's guess in
+           exactly the way the other three are, and it was the only one of the
+           four rendering as fact. */
+        var fromHint = !s.speaker_name && !lent && !pending && !!nameHint;
+        var unresolved = !!pending || !!lent || sn.isTentative(s)
+                         || (fromHint && hintAmbiguous);
         var offerNaming = namingOn && sn.canName(s);
 
         return React.createElement('div', {
@@ -741,9 +752,12 @@
                 title: lent
                   ? ('Too short to match by voice — assumed to be ' + lent
                      + ' because the rest of this speaker\'s turns are. Click to correct.')
-                  : (unresolved
-                      ? 'Unconfirmed — the system\'s guess at who this is'
-                      : undefined),
+                  : (fromHint && hintAmbiguous
+                      ? 'Unconfirmed — matched to this speaker by position in the '
+                        + 'participants list, not by voice. Click to correct.'
+                      : (unresolved
+                          ? 'Unconfirmed — the system\'s guess at who this is'
+                          : undefined)),
               }, label, unresolved
                 ? React.createElement('span', {
                     className: 'fs-transcript-list__tentative-mark',

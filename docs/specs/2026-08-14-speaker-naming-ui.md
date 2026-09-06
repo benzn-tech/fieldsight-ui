@@ -281,3 +281,107 @@ compensates; this one does not, so it would analyse the wrong audio — silently
 a filename carrying **both** `sid` and `_off`, which whole-chunk transcription does not
 currently produce. Raised with the backend owner on 2026-08-14; if a correction ever names
 an obviously wrong set of turns, start here.
+
+---
+
+## Addendum, 2026-08-17 — two things shipped after this spec was written
+
+Both change what the viewer must render. Neither changes an endpoint.
+
+### 1. Short turns get named now, and they are the ones you were told not to offer the control on
+
+The section above says to prefer not offering the naming control on a turn whose
+`duration < 3`, because the backend will decline to propagate from it. **That advice stands
+for the control.** What changed is what happens to those turns afterwards.
+
+A tier called *label inheritance* now runs after propagation. It groups the session's turns
+by the transcriber's own speaker label, and for any group that already holds a name from a
+stronger source, it names the group's remaining turns — including the ones under three
+seconds, which propagation cannot reach because they are too short to embed. On the live
+example that produced the change (`Ivy`), one correction named 2 turns directly, propagated
+to 6, and inherited to **22**.
+
+For the viewer:
+
+- **A turn with `duration < 3` may carry `speaker_name`.** Render it. Offering no control
+  there and rendering no name would drop three quarters of the effect of the user's gesture.
+- Inherited names always arrive as **`speaker_state: "tentative"`**, never `confirmed`. The
+  rule at §"tentative must never look like a fact" applies to them unchanged, and it is
+  doing most of its work here: a transcriber label is a weaker claim than a voice match.
+- The transcript payload still exposes only `speaker_name` and `speaker_state`. There is no
+  `source` field on a turn and you do not need one — `state` is the whole confidence signal.
+
+### 2. A profile can exist, be named, and hold nothing — and now says why
+
+`GET /api/org/voiceprints` (manager roles; 404 when the feature switch is `off`) returns per
+profile:
+
+```
+{ id, displayName, status, userId, linkedOn, consentAt,
+  samples, humanSamples,
+  lastAttemptAt, lastAttemptOutcome, lastAttemptDetail }
+```
+
+`samples: 0` is the state that matters: **a named profile with zero samples names nobody in
+any future meeting.** Until tonight that was indistinguishable from a profile whose enrolment
+crashed, which is why the last-attempt fields exist —
+`lastAttemptOutcome: "refused"` with `lastAttemptDetail: "this window does not hold one
+voice"` is a complete explanation, written for a person.
+
+**This is currently the normal outcome, not an edge case.** The enrolment guard is calibrated
+on read speech and refuses essentially every window of real site audio; that is an open
+backend problem
+(`docs/superpowers/specs/2026-08-17-homogeneity-threshold-measured.md`, pipeline repo).
+So the honest thing for the UI to say after a correction is that the name was applied to this
+meeting — which is true and verifiable in the transcript — and **not** that the person will be
+recognised next time, which is currently false. If you show a profile surface at all, show
+`samples` and the refusal reason rather than a green tick.
+
+`humanSamples` counts only what a person vouched for, as against what the clustering
+suggested; a profile made only of inference is meant to stay tentative, so the two numbers are
+not interchangeable.
+
+---
+
+## Addendum, 2026-08-17 (second) — the "Out of scope" list has two claims that are no longer true
+
+Still nothing to build in this PR's scope. But a spec is read as a description of the system,
+and two of these lines now describe a system that does not exist.
+
+### `match` is wired, and it is a request rather than a schedule
+
+*"Automatic naming of new meetings from stored voiceprints… is not built — the `match` op has
+no caller anywhere."* There is now a caller:
+
+    POST /api/org/sessions/{session}/speaker-match     -> 202
+    { "user": "<folder>" }
+    -> { requestIds, sessionBase, siteId, turnsQueued, runs, mode, willWriteNames }
+
+It is deliberately **on demand** and not a schedule, because naming at finalize would only
+ever help future meetings and the reason to want this at all is the archive. Which also
+retires the next line: *"backfilling names onto already-processed sessions"* is precisely what
+it does.
+
+**`willWriteNames` is the field that matters to copy.** It is `true` only when
+`SPEAKER_IDENTITY_MODE == "on"`, and `on` is prohibited until a matching margin has been
+calibrated — which has not happened. In `shadow` the endpoint still answers 202, computes
+every score, and **writes nothing**. Any UI that offers this must read `willWriteNames` rather
+than the 202, or it will tell the user their meeting was named when nothing was written.
+
+### A match can name turns even when the company has no voiceprint at all
+
+Two different mechanisms ride on that one request, and only one of them needs a profile:
+
+- **voice matching** needs stored profiles, and today there are none — enrolment is refused
+  on real site audio (see the first addendum);
+- **label inheritance** does not. It spreads names the session *already holds*, from
+  somebody's correction, to the turns too short to embed.
+
+Until 2026-08-17 the second silently did not run when the first had nothing to work with, so
+"match this session" did nothing at all in the only state the system is ever in. That is
+fixed. The consequence for the viewer is that **a match on a session with zero profiles can
+still increase the number of named turns**, and all of those arrive `tentative`.
+
+So the honest copy for the result of a match is a count of turns named, read back from the
+transcript — not "we recognised N people", which is a claim about voice matching that today
+is always zero.
