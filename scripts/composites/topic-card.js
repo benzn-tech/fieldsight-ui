@@ -142,6 +142,19 @@
     if (decisions.length) counts.push(pluralise(decisions.length, 'decision'));
     if (actions.length)   counts.push(pluralise(actions.length,   'action'));
     if (flags.length)     counts.push(pluralise(flags.length,     'safety flag'));
+    /* feat/findings-legible — the collapsed card counted decisions, actions,
+       flags and photos and said NOTHING about findings, so a topic carrying a
+       major observation looked, from the timeline, like a topic carrying
+       none. Safety-domain findings are excluded because they were already
+       promoted into `flags` above and would otherwise be counted twice.
+
+       Counted, not summarised: the card's job is to say there is something
+       here worth opening. `nonSafety` degrades to the raw list if the module
+       is missing, which over-counts by the safety ones rather than dropping
+       the line entirely — a wrong count is visible, a missing one is not. */
+    var _fv = window.FS && window.FS.api && window.FS.api.findingsView;
+    var observations = _fv ? _fv.nonSafety(topic.findings) : (topic.findings || []);
+    if (observations.length) counts.push(pluralise(observations.length, 'observation'));
     if (photos.length)    counts.push(pluralise(photos.length,    'photo'));
 
     /* Q1 — `=== 'non_work'` (never `!== 'work'`) so a missing/

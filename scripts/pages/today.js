@@ -150,7 +150,7 @@
      list, so Mine/Team is NEVER merged (the old Leftover bug) — each
      section still filters its own bucket by the same isMineTask-derived
      membership it always had. */
-  function visibleTasks(list, hideAged) {
+  function visibleTasks(list, hideAged, mode) {
     var kept = (list || []).filter(function (t) {
       return !hideAged || !isAgedTask(t);
     });
@@ -160,6 +160,8 @@
        tell what mattered. The rules and the data behind them live in
        api/today-ordering.js. Absent (older cached page, module not loaded)
        degrades to the previous unordered behaviour rather than crashing. */
+    var orderBy = window.FS && window.FS.api && window.FS.api.orderOpenItemsBy;
+    if (orderBy) return orderBy(kept, mode || 'said');
     var order = window.FS && window.FS.api && window.FS.api.orderOpenItems;
     return order ? order(kept) : kept;
   }
@@ -709,7 +711,40 @@
   /* Renders `items` either flat (single-project — unchanged layout) or
      grouped into project-headed sections (multi-project). `renderItem`
      is the existing per-row renderer each call site already has. */
-  function renderMaybeGrouped(items, isMultiProject, renderItem) {
+  /* The divider between the rows a due-date sort could order and the rows it
+     could not — inside each project group, with that group's own count.
+
+     Per group and not per page because renderMaybeGrouped ALWAYS buckets by
+     project (see its own comment below), so a page-level divider has nowhere
+     to render and a globally-ordered sequence re-bucketed by project is no
+     longer globally ordered anyway.
+
+     The count is the whole reason this exists. Roughly three quarters of
+     prod's open items resolve to no due date, and letting them trail
+     unmarked turns "sorted by due date" into "hid most of your work" — the
+     shape this repo shipped when a collapse's merged rows vanished instead of
+     merging. Silence about a cap reads as "everything was included".
+
+     Returns rows unchanged unless a divider is actually needed: nothing is
+     drawn when the group is all-dated or all-undated, because a divider with
+     nothing on one side of it is furniture. */
+  function renderRowsWithDueDivider(rows, renderItem, mode) {
+    var part = window.FS && window.FS.api && window.FS.api.partitionByDue;
+    if (mode !== 'due' || !part) return rows.map(renderItem);
+    var split = part(rows);
+    if (!split.dated.length || !split.undated.length) return rows.map(renderItem);
+    return [].concat(
+      split.dated.map(renderItem),
+      [React.createElement('div', {
+        key: '__due-divider',
+        className: 'fs-today__due-divider',
+        role: 'separator',
+      }, 'No due date · ' + split.undated.length)],
+      split.undated.map(renderItem)
+    );
+  }
+
+  function renderMaybeGrouped(items, isMultiProject, renderItem, dueMode) {
     /* #4 — project is ALWAYS a high-level group header (even single-project),
        so a section reads "SB1108 Ellesmere College" with that project's items
        nested under it. Replaces the removed per-card site chip: the chip is
@@ -725,7 +760,7 @@
             React.createElement('span', { className: 'fs-today__project-group-count' }, g.rows.length),
           ),
           React.createElement('div', { className: 'fs-today__project-group-rows' },
-            g.rows.map(renderItem)
+            renderRowsWithDueDivider(g.rows, renderItem, dueMode)
           ),
         );
       })
@@ -1823,6 +1858,19 @@
     var hideAgedRef  = React.useState(readHideAgedPref);
     var hideAged     = hideAgedRef[0];
     var setHideAged  = hideAgedRef[1];
+
+    /* Which order the open lists are read in. Component state, and
+       deliberately NOT persisted — which diverges from hideAged two lines up,
+       on purpose.
+
+       Hiding old work is a standing preference: somebody who does not want to
+       see February wants that every morning. A reading order is a per-visit
+       question — sorting by due date to plan a week should not be how the page
+       greets you tomorrow when you are looking at what came out of a meeting.
+       The default has to serve arrival, and arrival is "what happened". */
+    var sortRef  = React.useState('said');
+    var sortMode = sortRef[0];
+    var setSortMode = sortRef[1];
     function toggleHideAged() {
       setHideAged(function (prev) {
         var next = !prev;
@@ -1858,8 +1906,8 @@
     var earlyData   = (state && state.status === 'ok') ? state.data : null;
     var myAll       = (earlyData && earlyData.myTasks)   || [];
     var teamAll     = (earlyData && earlyData.teamTasks) || [];
-    var myVisible   = visibleTasks(myAll, hideAged);
-    var teamVisible = visibleTasks(teamAll, hideAged);
+    var myVisible   = visibleTasks(myAll, hideAged, sortMode);
+    var teamVisible = visibleTasks(teamAll, hideAged, sortMode);
 
     /* feat/leftover-inline-filter — how many aged items exist across both
        buckets (gates whether the filter control shows at all — nothing
@@ -2227,6 +2275,30 @@
          toggling off (aria-pressed reflects state) brings them straight
          back. One control, one piece of state (hideAged) — no second
          drawer, no per-section toggle. */
+      /* The order, named and pickable.
+         There was always an order — seven lexicographic tiers — but no tier
+         was a property the reader could see, so it read as arbitrary. Naming
+         it is most of the fix; being able to change it is the rest.
+
+         Unconditional, unlike the aged filter above: the aged control hides
+         itself when there is nothing aged to act on, but a list always has an
+         order, and a control that appears only sometimes is one the reader
+         never learns to look for. */
+      React.createElement('div', { className: 'fs-today__sort-row' },
+        React.createElement('span', { className: 'fs-today__sort-label' }, 'Order'),
+        [['said', 'When it was said'], ['due', 'Due date']].map(function (opt) {
+          var active = sortMode === opt[0];
+          return React.createElement('button', {
+            key:            opt[0],
+            type:           'button',
+            className:      'fs-today__sort-btn'
+              + (active ? ' fs-today__sort-btn--active' : ''),
+            onClick:        function () { setSortMode(opt[0]); },
+            'aria-pressed': active,
+          }, opt[1]);
+        }),
+      ),
+
       agedTotal > 0
         ? React.createElement('div', { className: 'fs-today__age-filter-row' },
             React.createElement('button', {
@@ -2333,6 +2405,9 @@
                    that they render inline rather than in their own drawer. */
                 aged:          isAgedTask(task),
                 timesRaised:   task.timesRaised,
+                threadFirstSeen:  task.threadFirstSeen,
+                threadLastRaised: task.threadLastRaised,
+                threadOpenItems:  task.threadOpenItems,
                 /* §E-time — parent topic's time_range, when present. */
                 timeRange:     task.timeRange,
                 /* fix/today-batch-select-expand — Mine cards participate
@@ -2342,7 +2417,7 @@
                 batchSelected:  !!multiSelect.selectedIds[task.id],
                 onBatchToggle:  multiSelect.onItemClick,
               });
-            }),
+            }, sortMode),
           )
         : null,
 
@@ -2390,6 +2465,9 @@
                Team items as on aged Mine items. */
             aged:       isAgedTask(task),
             timesRaised: task.timesRaised,
+            threadFirstSeen:  task.threadFirstSeen,
+            threadLastRaised: task.threadLastRaised,
+            threadOpenItems:  task.threadOpenItems,
             timeRange:  task.timeRange,
             /* fix/today-batch-select-expand — Team cards participate in
                Batch Select too, same as the Mine branch above. */
@@ -2397,7 +2475,7 @@
             batchSelected:  !!multiSelect.selectedIds[task.id],
             onBatchToggle:  multiSelect.onItemClick,
           });
-        }),
+        }, sortMode),
       ) : null,
 
       /* (Sprint 3, P-02) Recent activity removed — the same topics are

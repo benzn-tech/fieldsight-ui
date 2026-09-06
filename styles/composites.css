@@ -1935,6 +1935,60 @@
   color: var(--text-tertiary);
 }
 
+/* feat/findings-legible — the severity and domain the payload always carried.
+
+   The section-label caption sits inline with the uppercase label and must NOT
+   inherit its letter-spacing or transform: it is a sentence, not a label. */
+.fs-topic-detail__section-caption {
+  margin-left: 8px;
+  font-weight: var(--font-weight-regular);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-tertiary);
+}
+
+.fs-topic-detail__finding-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.fs-topic-detail__finding-sev,
+.fs-topic-detail__finding-domain {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: var(--radius-full);
+}
+/* Deliberately NOT safety-red. Per CLAUDE.md, red is bound to the SAFETY
+   domain across the whole app, and every safety finding has already been
+   promoted out of this section into safety_flags — a red chip here would
+   claim a domain these rows are guaranteed not to be. Warning amber carries
+   "major" without borrowing that meaning. */
+.fs-topic-detail__finding-sev--major {
+  color: var(--color-warning-900);
+  background: var(--color-warning-100);
+}
+.fs-topic-detail__finding-sev--minor {
+  color: var(--text-secondary);
+  background: var(--surface-panel-muted);
+}
+.fs-topic-detail__finding-domain {
+  color: var(--text-tertiary);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+}
+/* Status scale tokens are NOT theme-flipped (CLAUDE.md): --color-warning-100
+   is a light pastel that the global light-on-dark text renders unreadable
+   against. Pin the foreground rather than re-paletting the chip. */
+[data-theme="dark"] .fs-topic-detail__finding-sev--major {
+  color: var(--color-neutral-900);
+}
+
 .fs-topic-detail__finding-observation {
   font-size: 13px;
   line-height: 1.5;
@@ -12029,3 +12083,74 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color: var(--text-secondary);
 }
 .fs-topic-detail__assignee .fs-select { max-width: 190px; }
+
+/* --- Today · the order control -------------------------------------------
+   Deliberately the same chip vocabulary as .fs-today__age-filter above: both
+   rows sit one under the other and control the same list, so two different
+   chip shapes would read as two different mechanisms. What differs is
+   grouping — the order chips are mutually exclusive and carry a leading
+   "Order" label, because a set of chips with no label reads as filters. */
+.fs-today__sort-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 4px 0 8px;
+  padding: 0 4px;
+}
+.fs-today__sort-label {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-right: 2px;
+}
+.fs-today__sort-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out),
+              border-color var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out);
+}
+.fs-today__sort-btn:hover {
+  color: var(--text-primary);
+  background: var(--surface-panel-muted);
+}
+.fs-today__sort-btn--active {
+  color: var(--text-primary);
+  background: var(--surface-selected);
+  border-color: var(--color-accent-400);
+}
+.fs-today__sort-btn:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+/* The divider between the dated rows and the rest, in due-date order.
+   It carries a count because the count IS the information: on prod roughly
+   three quarters of open items resolve to no date, and a reader has to be
+   able to see how much of the list the sort could not order. Rendered once
+   per project group (renderMaybeGrouped always buckets by project). */
+.fs-today__due-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 4px 6px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.fs-today__due-divider::before,
+.fs-today__due-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
