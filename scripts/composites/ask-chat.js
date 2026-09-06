@@ -221,33 +221,58 @@
   /* One line saying what the answer was built from.
 
      Composed HERE from the numbers the backend computed, and never asked of the
-     model. The same `basis` dict is rendered as this line on screen and as a
-     spoken clause by SP-Ask; a model asked to phrase it would drift between the
-     two and would sooner or later say "three meetings" over a single excerpt,
-     which nothing downstream could catch.
+     model — a model asked to phrase it would sooner or later say "three
+     meetings" over a single excerpt, and nothing downstream could catch that.
+
+     An earlier version of this comment said SP-Ask rendered the same dict as a
+     spoken clause. It did not: the voice response was built from scratch and
+     dropped `basis` at the boundary. The backend now carries it (pipeline
+     #633), the device does not speak it yet, and this is the only renderer
+     there is — written in the present tense on purpose, unlike the sentence it
+     replaced.
 
      `widened` is the case that has to speak up. The person asked about
      yesterday and is being shown the 27th — answering from another day without
      saying so is the original defect wearing a date.
 
      Returns null when there is no basis (an older backend, or the legacy
-     non-RAG path). A line reading "based on nothing" is worse than no line. */
-  function formatAnswerBasis(basis) {
+     non-RAG path). A line reading "based on nothing" is worse than no line.
+
+     THE LINE FOLLOWS THE QUESTION'S LANGUAGE, and the widened case is why it
+     has to. The backend prompt tells the model NOT to say the period was empty
+     when it is answering on screen, because this line says it first and saying
+     it twice states one fact in two voices. For a question asked in Chinese
+     that left the explanation nowhere: the model was silenced and the only
+     thing that spoke was English, so the answer arrived about a date the reader
+     had not asked for with nothing they could read to say why
+     (user, 2026-09-02).
+
+     The question, not the browser locale — the locale is the device's language
+     and this is the asker's. Same rule the backend's metric renderer uses. */
+  var CJK = /[㐀-䶿一-鿿豈-﫿]/;
+  function askedInChinese(question) { return CJK.test(question || ''); }
+
+  function formatAnswerBasis(basis, zh) {
     if (!basis || !basis.chunks) return null;
     var dates = basis.dates || [];
     var n = basis.chunks;
-    var tail = ' · ' + n + ' excerpt' + (n === 1 ? '' : 's');
+    var tail = zh ? ' · ' + n + ' 段摘录'
+                  : ' · ' + n + ' excerpt' + (n === 1 ? '' : 's');
     if (basis.widened) {
-      return 'Nothing in the period asked about — based on ' + basis.from + ' instead' + tail;
+      return zh
+        ? '所问的时间段没有记录 — 改为基于 ' + basis.from + tail
+        : 'Nothing in the period asked about — based on ' + basis.from + ' instead' + tail;
     }
     if (!basis.from && !basis.to) {
-      return 'Based on all records you can see' + tail;
+      return (zh ? '基于你能看到的全部记录' : 'Based on all records you can see') + tail;
     }
     if (basis.from === basis.to) {
-      return 'Based on ' + basis.from + tail;
+      return (zh ? '基于 ' : 'Based on ') + basis.from + tail;
     }
-    var span = 'Based on ' + basis.from + ' to ' + basis.to;
-    if (dates.length > 1) span += ' · ' + dates.length + ' days';
+    var span = zh
+      ? '基于 ' + basis.from + ' 至 ' + basis.to
+      : 'Based on ' + basis.from + ' to ' + basis.to;
+    if (dates.length > 1) span += ' · ' + dates.length + (zh ? ' 天' : ' days');
     return span + tail;
   }
 
@@ -338,10 +363,23 @@
       if (props.initialQuestion) send(props.initialQuestion);
     }, []);
 
-    /* Auto-scroll the message list to the bottom whenever it grows. */
+    /* Put the QUESTION at the top of the view, not the last line of the answer.
+       This used to be `scrollTop = scrollHeight`, which lands the reader at the
+       bottom of a long answer and makes them scroll back up to find out what
+       they asked (user, 2026-08-31). The answer is read downward from the
+       question, so that is where the view starts.
+       Falls back to the old behaviour when there is no user message to anchor
+       on — a first render, or a route that seeds an answer with no question. */
     React.useEffect(function () {
       var el = listRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
+      if (!el) return;
+      var asked = el.querySelectorAll('[data-role="user"]');
+      var last = asked.length ? asked[asked.length - 1] : null;
+      if (last && typeof last.offsetTop === 'number') {
+        el.scrollTop = Math.max(0, last.offsetTop - el.offsetTop);
+      } else {
+        el.scrollTop = el.scrollHeight;
+      }
     }, [msgs.length, busy]);
 
     /* When scope keys change (e.g. user switched topics), drop history
@@ -433,6 +471,11 @@
              on older deploys, which formatAnswerBasis renders as no line. */
           basis:     res.basis || null,
           corrob:    wantsCorrob ? { _pending: true } : null,
+          /* Captured from the question at send time, not read off the answer:
+             the model's reply language is not reliable (measured on prod, a
+             Chinese question came back in English 2 runs out of 3), and the
+             basis line must not inherit that coin flip. */
+          zh:        askedInChinese(question),
         }]); });
 
         /* The second pass. Fired after the answer is already on screen and
@@ -496,6 +539,10 @@
         msgs.map(function (m, i) {
           return React.createElement('div', {
             key: i,
+            /* Marks the anchor the scroll effect looks for. The question is
+               where reading starts, so it is the thing that gets put at the top
+               — not the last line of the answer. */
+            'data-role': m.role,
             className: 'fs-ask-chat__msg fs-ask-chat__msg--' + m.role
               + (m.error ? ' fs-ask-chat__msg--error' : ''),
           },
@@ -503,6 +550,19 @@
                (it HTML-escapes first, then emits only a fixed tag set, so
                dangerouslySetInnerHTML carries no LLM-supplied markup). User
                messages are the person's own typed question → keep plain. */
+            /* FIRST, above the answer — not after it, and not at the end of the
+               prose. The reader asked about a period; if that period is empty
+               they learn it before they read a word about another day.
+               A version of this sat under the answer and it was wrong for the
+               same reason the model's closing caveat was: by the time you reach
+               it you have already read three sentences about a date you did not
+               ask about (user, 2026-08-31). */
+            m.role === 'assistant' && formatAnswerBasis(m.basis, m.zh)
+              ? React.createElement('div', {
+                  className: 'fs-ask-chat__basis'
+                    + (m.basis && m.basis.widened ? ' fs-ask-chat__basis--widened' : ''),
+                }, formatAnswerBasis(m.basis, m.zh))
+              : null,
             m.role === 'assistant' && window.FieldSight.renderMarkdown
               ? React.createElement('div', {
                   className: 'fs-ask-chat__msg-text fs-ask-chat__msg-text--md',
@@ -510,15 +570,6 @@
                 })
               : React.createElement('div', { className: 'fs-ask-chat__msg-text' },
                   m.text),
-            /* Above the citations and below the answer: it qualifies the whole
-               answer, so it must be readable before the reader decides whether
-               to trust it — and it is one line, not a card. */
-            m.role === 'assistant' && formatAnswerBasis(m.basis)
-              ? React.createElement('div', {
-                  className: 'fs-ask-chat__basis'
-                    + (m.basis && m.basis.widened ? ' fs-ask-chat__basis--widened' : ''),
-                }, formatAnswerBasis(m.basis))
-              : null,
             m.role === 'assistant' ? renderCitations(m.citations) : null,
 
             /* Below the citations, deliberately: citations point back into the
@@ -539,12 +590,21 @@
           );
         }),
 
+        /* The wait is p90 8.6s — long enough that three silent dots read as a
+           stall. The dots say "alive"; the line says what it is doing, so a
+           reader who looks away and back knows the request did not die. */
         busy ? React.createElement('div', {
           className: 'fs-ask-chat__msg fs-ask-chat__msg--assistant fs-ask-chat__msg--pending',
+          role:         'status',
+          'aria-live':  'polite',
         },
-          React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
-          React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
-          React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
+          React.createElement('span', { className: 'fs-ask-chat__pending-dots', 'aria-hidden': 'true' },
+            React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
+            React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
+            React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
+          ),
+          React.createElement('span', { className: 'fs-ask-chat__pending-label' },
+            'Looking through your records…'),
         ) : null,
       ),
 
