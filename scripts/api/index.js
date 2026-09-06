@@ -108,6 +108,10 @@
        and silently takes the DEFAULT — so the default has to be the safe
        answer, not the convenient one. */
     threadReview: env.threadReview !== undefined ? !!env.threadReview : false,
+    /* Second-pass web corroboration under an Ask answer. Off unless the env
+       says otherwise -- an older deploy, or a stack whose backend has no
+       /ask/corroborate route, must render exactly what it renders today. */
+    externalCorroboration: env.externalCorroboration !== undefined ? !!env.externalCorroboration : false,
     /* D5 (visibility spec) — legacy report-gateway read fallback (/timeline,
        /dates, /site-users). Default ON during Phase 2 rollout; flip to false
        (env.legacyReadFallback = false) to retire the legacy read paths once
