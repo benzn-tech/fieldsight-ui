@@ -689,6 +689,26 @@
      and this number is a duration that can exceed an hour. Returns the em dash
      when the metric is absent, so the caller can pass a missing value straight
      through. */
+  /* Which findings this topic's detail panel shows, and in what order.
+
+     Pulled out of the render as a named function purely so it can be driven
+     from Node. The ordering itself lives in api/findings-view.js and is
+     tested there; what had NO coverage was this SEAM — whether the render
+     calls it at all, and what happens when it is absent. Five existing tests
+     load this file without seeding FS.api, so before this they were every one
+     of them exercising the fallback and nothing exercised the wired path.
+
+     The fallback is deliberate rather than defensive padding: a findings
+     section that vanishes because a script tag moved is worse than one that
+     is merely unordered and unlabelled. */
+  function selectFindings(topic) {
+    var fv = window.FS && window.FS.api && window.FS.api.findingsView;
+    if (fv) return fv.orderFindings(fv.nonSafety(topic && topic.findings));
+    return ((topic && topic.findings) || []).filter(function (f) {
+      return f && f.domain !== 'safety';
+    });
+  }
+
   function fmtRecordedTime(seconds) {
     if (seconds == null) return '—';
     var s = Math.max(0, Math.round(seconds));
@@ -3176,11 +3196,7 @@
        missing, because a findings section that vanishes is worse than one
        that is merely plain. */
     var fv = window.FS && window.FS.api && window.FS.api.findingsView;
-    var findings = fv
-      ? fv.orderFindings(fv.nonSafety(topic.findings))
-      : (topic.findings || []).filter(function (f) {
-          return f && f.domain !== 'safety';
-        });
+    var findings = selectFindings(topic);
 
     /* editable-content-correction — UX-only gate (backend patch_content ACL
        is authoritative); site_manager+/PM see it via content:edit,
@@ -4006,6 +4022,9 @@
       formatContentEdit: formatContentEdit,
       /* live recording KPIs */
       fmtRecordedTime: fmtRecordedTime,
+      /* feat/findings-legible — the seam between this render and
+         api/findings-view.js, which had no Node coverage. */
+      selectFindings: selectFindings,
       /* content-propagate (item #3) */
       findCorrectionPair: findCorrectionPair,
       TopicCorrectionPropagate: TopicCorrectionPropagate,
