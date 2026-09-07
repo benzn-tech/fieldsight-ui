@@ -12316,3 +12316,61 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
 }
+
+/* --- Timeline · the dates a day named -------------------------------------
+   A list of 3 rows at the median, 12 at the most, so it is a section inside a
+   day rather than anything that needs its own scroll or header treatment. */
+.fs-mentioned-dates {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.fs-mentioned-dates__row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.fs-mentioned-dates__row:last-child { border-bottom: none; }
+
+/* Fixed width + tabular figures so the dates form a column a reader can scan
+   down. 184 of 239 entries resolve to a real date, so most rows land in the
+   same shape; the unresolved ones ("This afternoon") are wider on purpose —
+   they are the rows the eye should catch as approximate. */
+.fs-mentioned-dates__when {
+  flex: 0 0 auto;
+  min-width: 96px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.fs-mentioned-dates__what {
+  flex: 1 1 auto;
+  color: var(--text-primary);
+}
+.fs-mentioned-dates__who {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* Amber, NOT danger-red. Red is bound to the SAFETY domain across this app
+   (CLAUDE.md) and these rows are deadlines, meetings and deliveries — 4 % of
+   the corpus is literally weather. Status scale tokens are not theme-flipped,
+   so the dark foreground is pinned rather than left to inherit. */
+.fs-mentioned-dates__urgent {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: var(--radius-full);
+  color: var(--color-warning-900);
+  background: var(--color-warning-100);
+}
+[data-theme="dark"] .fs-mentioned-dates__urgent { color: var(--color-neutral-900); }
