@@ -298,17 +298,30 @@
         var total = 0;
         perDay.forEach(function (x) {
           if (!x || !x.report || x.report._notFound || x.report._accessDenied || x.report.available_users) return;
-          var photosForDate = [];
-          (x.report.topics || []).forEach(function (t) {
-            (t.related_photos || []).forEach(function (filename) {
-              photosForDate.push({
-                filename:        filename,
-                topic_id:        t.topic_id,
-                topic_title:     t.topic_title,
-                userDisplayName: x.report.user_name,
+          /* feat/evidence-shows-the-whole-day — the day's photos, bound or
+             not. This used to walk topics only, so a photo taken while nobody
+             was talking reached no screen: 71 of 90 on prod days that HAVE a
+             report. `photo_filenames` is the whole day and a superset of the
+             bound ones; api/evidence-grouping.js does the difference and is
+             where that contract is tested. Falls back to the old
+             topics-only shape when the field is absent. */
+          var eg = window.FS && window.FS.api && window.FS.api.evidenceGrouping;
+          var photosForDate;
+          if (eg && eg.photosForReport) {
+            photosForDate = eg.photosForReport(x.report);
+          } else {
+            photosForDate = [];
+            (x.report.topics || []).forEach(function (t) {
+              (t.related_photos || []).forEach(function (filename) {
+                photosForDate.push({
+                  filename:        filename,
+                  topic_id:        t.topic_id,
+                  topic_title:     t.topic_title,
+                  userDisplayName: x.report.user_name,
+                });
               });
             });
-          });
+          }
           if (photosForDate.length === 0) return;
           rows.push({
             date:        x.date,
