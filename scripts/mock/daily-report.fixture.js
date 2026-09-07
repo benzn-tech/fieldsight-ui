@@ -46,6 +46,23 @@
       'Benl1_2026-04-29_11-31-02.jpg',
       'Benl1_2026-04-29_11-52-40.jpg',
     ],
+    /* Grouped by where he SAID he was. The marquee fixture is a meeting, so
+       this is the shape a WALKTHROUGH sends -- kept here because the grouped
+       branch is otherwise unreachable offline, and a branch no fixture exercises
+       is a branch nobody sees until a customer does.
+
+       Note the null group: photos taken before the first announcement. It is a
+       real answer and gets its own heading; folding it into the first room would
+       be the misattribution the feature exists to avoid. Every filename here
+       also appears in photo_filenames above -- the flat list stays complete. */
+    photo_groups: [
+      { location: null, filenames: ['Benl1_2026-04-29_07-12-04.jpg'] },
+      { location: 'Level 2', filenames: ['Benl1_2026-04-29_07-19-22.jpg',
+                                         'Benl1_2026-04-29_08-46-11.jpg'] },
+      { location: 'Level 3', filenames: ['Benl1_2026-04-29_11-08-44.jpg',
+                                         'Benl1_2026-04-29_11-31-02.jpg',
+                                         'Benl1_2026-04-29_11-52-40.jpg'] },
+    ],
     uploads: { photos: 6 },
     report_type: 'daily',
     user_name:   'Jarley Trainor',
@@ -414,6 +431,16 @@ action:      'Reinspect tie-downs every 2h until 18:00.',
   /* 04-25 — quiet "all clear" Saturday (no safety flags, all actions done) */
   var REPORT_2026_04_25_DAVID = {
     report_date: '2026-04-25',
+    /* Photos but NO groups -- the day nobody announced a location on, which is
+       the ordinary meeting. It exists so the UNGROUPED branch keeps offline
+       coverage: 2026-04-29 grew `photo_groups`, and without this fixture the
+       flat-grid path would be unreachable in the preview and in tests, i.e.
+       exercised for the first time by a customer. */
+    photo_filenames: [
+      'Benl1_2026-04-25_09-02-11.jpg',
+      'Benl1_2026-04-25_09-14-40.jpg',
+    ],
+    uploads: { photos: 2 },
     report_type: 'daily',
     user_name:   'David Barillaro',
     device:      'Benl2',
