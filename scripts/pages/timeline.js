@@ -2121,6 +2121,7 @@
 
     var AskChat            = window.FieldSight.AskChat;
     var MeetingTopicCard   = window.FieldSight.MeetingTopicCard;
+    var PhotoGrid          = window.FieldSight.PhotoGrid;
 
     function ViewToggle() {
       if (!bothExist) return null;
@@ -2399,6 +2400,38 @@
           return React.createElement(RemovedTopic, { key: topic.topic_id, topic: topic });
         }),
       ) : null,
+
+      /* ---- The day's photos, all of them -------------------------------
+         A photo used to be visible ONLY as `topic.related_photos`, i.e. only
+         if it happened to be taken while somebody was talking about something
+         that became a topic. Measured on prod 2026-09-07: 71 of 90 photos on
+         days that HAVE a report were unreachable from any screen — 2026-09-02
+         is one topic and 53 photos, of which 10 were shown.
+
+         The backend now returns `photo_filenames` on the day (the whole day,
+         tombstone-filtered, and withheld from a graded caller viewing someone
+         else's day). The topic-attached ones stay exactly where they are; this
+         section is the door for the rest.
+
+         Renders nothing at all when the field is absent, so an older backend
+         (or a verbatim-history day, which does not carry it) is unchanged. */
+      (PhotoGrid && report.photo_filenames && report.photo_filenames.length)
+        ? React.createElement(React.Fragment, null,
+            React.createElement('div', { className: 'fs-timeline-page__section-label' },
+              'Photos from this day ('
+                + report.photo_filenames.length + ')'),
+            React.createElement(PhotoGrid, {
+              photos:          report.photo_filenames,
+              /* report.user_name, never the page `user` param: the self-view
+                 route has user===null and the photos belong to whoever
+                 recorded the day — the same crux the TopicCard mount above
+                 documents. PhotoGrid maps the display name to the folder. */
+              userDisplayName: report.user_name,
+              date:            date,
+              canEditContent:  canEditContent,
+            }),
+          )
+        : null,
 
       /* Per-report Ask Agent (PLAN Phase G). Stateless — each question
          is independent. Scope='both' grounds across transcript +

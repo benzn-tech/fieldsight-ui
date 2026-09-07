@@ -95,6 +95,11 @@
             key:       filename,
             s3Key:     s3Key,
             filename:  filename,
+            /* Opt-in selection, passed straight through. Absent for every
+               caller but Evidence, and selectionFor returns null on absence. */
+            selectable:        props.selectable,
+            selectedFilenames: props.selectedFilenames,
+            onToggleFilename:  props.onToggleFilename,
             canDelete: canEditContent && isKeyframe(filename),
             onOpen:    function (url) {
               setLightbox({ url: url, filename: filename });
@@ -122,6 +127,31 @@
   }
 
   /* ---------- single thumb ---------------------------------------------- */
+
+  /* feat/evidence-grouped-download — opt-in selection.
+
+     PhotoGrid is rendered by evidence.js, timeline.js, safety.js and
+     quality.js; only Evidence wants checkboxes. Returning null when nobody
+     asked is what keeps a control off three pages that never requested one.
+
+     Keyed on the FILENAME, never a position: grouping by topic re-orders the
+     grid, so an index means something different before and after a toggle.
+     The same photo can also legitimately appear under two topics
+     (media.js:90-91) and both occurrences must report the same identity. */
+  function selectionFor(props, filename) {
+    props = props || {};
+    if (!props.selectable) return null;
+    var set = props.selectedFilenames;
+    if (!set || typeof set !== 'object') set = {};
+    return {
+      checked: !!set[filename],
+      onToggle: function () {
+        if (typeof props.onToggleFilename === 'function') {
+          props.onToggleFilename(filename);
+        }
+      },
+    };
+  }
 
   function PhotoCell(props) {
     var refUrl = React.useState(null);
@@ -211,7 +241,27 @@
 
     var IconBtn = window.FieldSight.IconButton;
 
-    return React.createElement('div', { className: 'fs-photo-grid__cell' },
+    var sel = selectionFor(props, props.filename);
+
+    return React.createElement('div', {
+      className: 'fs-photo-grid__cell'
+        + (sel && sel.checked ? ' fs-photo-grid__cell--selected' : ''),
+    },
+      /* Rendered only when a caller asked for selection, so the other three
+         pages that mount PhotoGrid are untouched. The label wraps the input so
+         the whole corner is a target on a gloved hand, and stopPropagation
+         keeps a tick from also opening the lightbox. */
+      sel ? React.createElement('label', {
+        className: 'fs-photo-grid__pick',
+        onClick: function (e) { e.stopPropagation(); },
+      },
+        React.createElement('input', {
+          type: 'checkbox',
+          checked: sel.checked,
+          'aria-label': 'Select ' + props.filename,
+          onChange: sel.onToggle,
+        })
+      ) : null,
       React.createElement('button', {
         type:      'button',
         className: 'fs-photo-grid__open',
@@ -302,6 +352,7 @@
      (CommonJS) — mirrors timeline.js's own module.exports guard. No-op in
      the browser (Babel standalone leaves `module` undefined). */
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { isKeyframe: isKeyframe };
+    module.exports = { isKeyframe: isKeyframe,
+                       selectionFor: selectionFor };
   }
 })();

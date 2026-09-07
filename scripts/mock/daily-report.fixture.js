@@ -28,6 +28,25 @@
 
   var REPORT_2026_04_29_JARLEY = {
     report_date: '2026-04-29',
+    /* The day's photos, ALL of them -- not only the ones a topic happened to
+       bind. The backend added this on 2026-09-07 after measuring that 71 of 90
+       photos on days that HAVE a report were unreachable from any screen: a
+       photo taken while nobody was talking binds to nothing, and an unbound
+       photo used to be invisible everywhere.
+
+       Five of these six are also in topics[].related_photos below; the sixth
+       (11-52-40) is bound to NOTHING, which is the case this fixture exists to
+       exercise -- without it the mock would teach a contract the backend does
+       not have. */
+    photo_filenames: [
+      'Benl1_2026-04-29_07-12-04.jpg',
+      'Benl1_2026-04-29_07-19-22.jpg',
+      'Benl1_2026-04-29_08-46-11.jpg',
+      'Benl1_2026-04-29_11-08-44.jpg',
+      'Benl1_2026-04-29_11-31-02.jpg',
+      'Benl1_2026-04-29_11-52-40.jpg',
+    ],
+    uploads: { photos: 6 },
     report_type: 'daily',
     user_name:   'Jarley Trainor',
     device:      'Benl1',

@@ -469,14 +469,191 @@
 
   /* ---------- Section: Photos (per-day groups using PhotoGrid) -------- */
 
+  /* ---------- Photos: one section per (date, user) ---------------------
+
+     Selection and the archive are scoped to a SECTION rather than to a date.
+     Rows are built per (date, user) above, and only role === 'worker' is
+     forced to their own folder -- a site manager, who is who this feature is
+     for, fans out across every user on the site and therefore sees several
+     sections carrying the same date. "All of today" for them spans several
+     owners, so there is no single day section to tick and no single name to
+     give the file. One Download per section keeps both unambiguous: three
+     people's day is three files, each already named for whose it is. */
+  function PhotoSection(props) {
+    var day = props.day;
+    var PhotoGrid = window.FieldSight.PhotoGrid;
+    var eg = window.FS.api.evidenceGrouping;
+
+    var refSel = React.useState({});          /* filename -> true */
+    var selected = refSel[0];
+    var setSelected = refSel[1];
+    var refBusy = React.useState(false);
+    var busy = refBusy[0];
+    var setBusy = refBusy[1];
+    var refNote = React.useState(null);
+    var note = refNote[0];
+    var setNote = refNote[1];
+
+    var grouped = eg ? eg.groupByTopic(day.photos) : null;
+    var selectedNames = Object.keys(selected).filter(function (k) { return selected[k]; });
+
+    function toggle(filename) {
+      setSelected(function (cur) {
+        var next = Object.assign({}, cur);
+        if (next[filename]) delete next[filename]; else next[filename] = true;
+        return next;
+      });
+    }
+    /* Set rather than toggle, so a "select all" on an already-full group does
+       not silently clear it -- that reads as the control being broken. */
+    function setMany(filenames, on) {
+      setSelected(function (cur) {
+        var next = Object.assign({}, cur);
+        filenames.forEach(function (f) { if (on) next[f] = true; else delete next[f]; });
+        return next;
+      });
+    }
+    function allOn(filenames) {
+      return filenames.length > 0 && filenames.every(function (f) { return selected[f]; });
+    }
+
+    function download() {
+      var pa = window.FS.api.photoArchive;
+      if (!pa || busy) return;
+      /* Filtered from day.photos rather than built from the selected map, so
+         the archive is grouped and ordered by exactly the rules the screen
+         used. */
+      var picked = day.photos.filter(function (p) { return selected[p.filename]; });
+      setBusy(true); setNote(null);
+      pa.buildArchive({
+        photos: picked, date: day.date, userDisplayName: day.user_name,
+      }).then(function (res) {
+        var blob = new Blob([res.bytes], { type: 'application/zip' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = res.name;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+        /* The _MISSING/ file inside the archive is the record, but somebody
+           who never opens the zip still deserves to be told. */
+        if (res.missing.length) {
+          setNote(res.missing.length + ' photo'
+            + (res.missing.length === 1 ? '' : 's')
+            + ' could not be downloaded - see _MISSING inside the zip.');
+        }
+      }).catch(function (err) {
+        setNote((err && err.message) || 'Could not build the download.');
+      }).then(function () { setBusy(false); });
+    }
+
+    var allNames = day.photos.map(function (p) { return p.filename; });
+
+    function grid(filenames) {
+      return React.createElement(PhotoGrid, {
+        photos:            filenames,
+        userDisplayName:   day.user_name,
+        date:              day.date,
+        selectable:        true,
+        selectedFilenames: selected,
+        onToggleFilename:  toggle,
+      });
+    }
+
+    return React.createElement('div', { className: 'fs-evidence__section' },
+      React.createElement('div', { className: 'fs-evidence__section-header' },
+        React.createElement('span', { className: 'fs-evidence__section-date' },
+          fmtDate(day.date)),
+        React.createElement('span', { className: 'fs-evidence__section-count' },
+          day.photos.length + ' ' + (day.photos.length === 1 ? 'photo' : 'photos')),
+        React.createElement('label', { className: 'fs-evidence__pick-all' },
+          React.createElement('input', {
+            type: 'checkbox',
+            checked: allOn(allNames),
+            'aria-label': 'Select every photo in this section',
+            onChange: function () { setMany(allNames, !allOn(allNames)); },
+          }),
+          'Select all'),
+        React.createElement('button', {
+          type: 'button',
+          className: 'fs-evidence__download',
+          disabled: busy || selectedNames.length === 0,
+          onClick: download,
+        }, busy ? 'Packaging...' : 'Download (' + selectedNames.length + ')'),
+      ),
+
+      note ? React.createElement('div', { className: 'fs-evidence__note' }, note) : null,
+
+      (props.groupMode === 'topic' && grouped)
+        ? React.createElement('div', { className: 'fs-evidence__topics' },
+            grouped.groups.map(function (g) {
+              var names = g.photos.map(function (p) { return p.filename; });
+              return React.createElement('div', {
+                key: g.topic_id, className: 'fs-evidence__topic',
+              },
+                React.createElement('div', { className: 'fs-evidence__topic-header' },
+                  React.createElement('label', { className: 'fs-evidence__pick-all' },
+                    React.createElement('input', {
+                      type: 'checkbox',
+                      checked: allOn(names),
+                      'aria-label': 'Select every photo under '
+                        + (g.topic_title || 'this topic'),
+                      onChange: function () { setMany(names, !allOn(names)); },
+                    })),
+                  React.createElement('span', { className: 'fs-evidence__topic-title' },
+                    g.topic_title || 'Untitled topic'),
+                  React.createElement('span', { className: 'fs-evidence__topic-count' },
+                    names.length),
+                ),
+                grid(names),
+              );
+            }),
+            /* Rendered whenever it is non-empty, which the spec argues it can
+               never be — every photo the page holds came from a topic. It is
+               here anyway because the spec was WRONG once already: `topic_id`
+               is a loop index, so the first topic of every day is 0, a falsy
+               check dropped its photos, and the section silently showed three
+               of five. A remainder that is invisible is how photos disappear;
+               a remainder that is visible and empty costs nothing. */
+            grouped.ungrouped.length
+              ? React.createElement('div', { className: 'fs-evidence__topic' },
+                  React.createElement('div', { className: 'fs-evidence__topic-header' },
+                    React.createElement('label', { className: 'fs-evidence__pick-all' },
+                      React.createElement('input', {
+                        type: 'checkbox',
+                        checked: allOn(grouped.ungrouped.map(function (p) { return p.filename; })),
+                        'aria-label': 'Select every photo with no topic',
+                        onChange: function () {
+                          var n = grouped.ungrouped.map(function (p) { return p.filename; });
+                          setMany(n, !allOn(n));
+                        },
+                      })),
+                    React.createElement('span', { className: 'fs-evidence__topic-title' },
+                      'No topic'),
+                    React.createElement('span', { className: 'fs-evidence__topic-count' },
+                      grouped.ungrouped.length),
+                  ),
+                  grid(grouped.ungrouped.map(function (p) { return p.filename; }))
+                )
+              : null
+          )
+        : grid(allNames),
+    );
+  }
+
   function PhotosTab(props) {
     var ctx = React.useContext(EvidenceContext);
-    var PhotoGrid = window.FieldSight.PhotoGrid;
     var photos = ctx.photos;
+
+    /* Declared before the early returns below -- rules of hooks. Deliberately
+       NOT persisted, for the same reason Today's order is not: a grouping is a
+       per-visit question and the default has to serve arrival. */
+    var refMode = React.useState('day');
+    var groupMode = refMode[0];
+    var setGroupMode = refMode[1];
 
     if (photos.status === 'idle' || photos.status === 'loading') {
       return React.createElement('div', { className: 'fs-evidence__loading' },
-        'Aggregating photos…');
+        'Aggregating photos...');
     }
     if (photos.status === 'error') {
       return React.createElement('div', { className: 'fs-evidence__empty' },
@@ -487,23 +664,29 @@
         'No photos in the selected range.');
     }
 
-    return React.createElement('div', { className: 'fs-evidence__sections' },
-      photos.perDay.map(function (day) {
-        return React.createElement('div', { key: day.date, className: 'fs-evidence__section' },
-          React.createElement('div', { className: 'fs-evidence__section-header' },
-            React.createElement('span', { className: 'fs-evidence__section-date' },
-              fmtDate(day.date)),
-            React.createElement('span', { className: 'fs-evidence__section-count' },
-              day.photos.length + ' '
-                + (day.photos.length === 1 ? 'photo' : 'photos')),
-          ),
-          React.createElement(PhotoGrid, {
-            photos:          day.photos.map(function (p) { return p.filename; }),
-            userDisplayName: day.user_name,
-            date:            day.date,
-          }),
-        );
-      }),
+    return React.createElement('div', null,
+      React.createElement('div', { className: 'fs-evidence__group-row' },
+        React.createElement('span', { className: 'fs-evidence__group-label' }, 'Group'),
+        [['day', 'By day'], ['topic', 'By topic']].map(function (opt) {
+          var on = groupMode === opt[0];
+          return React.createElement('button', {
+            key: opt[0], type: 'button',
+            className: 'fs-evidence__group-btn'
+              + (on ? ' fs-evidence__group-btn--active' : ''),
+            'aria-pressed': on,
+            onClick: function () { setGroupMode(opt[0]); },
+          }, opt[1]);
+        }),
+      ),
+      React.createElement('div', { className: 'fs-evidence__sections' },
+        photos.perDay.map(function (day) {
+          return React.createElement(PhotoSection, {
+            /* (date, user), never the date alone -- see the key fix above. */
+            key: day.date + '|' + (day.user_folder || day.user_name || ''),
+            day: day, groupMode: groupMode,
+          });
+        })
+      )
     );
   }
 
@@ -698,7 +881,9 @@
             'No recordings in the selected range.')
         : recs.perDay.map(function (day) {
             return React.createElement('div', {
-              key: day.date, className: 'fs-evidence__section',
+              /* Same (date, user) duplication as the photos section above. */
+              key: day.date + '|' + (day.user_folder || day.user_name || ''),
+              className: 'fs-evidence__section',
             },
               React.createElement('div', { className: 'fs-evidence__section-header' },
                 React.createElement('span', { className: 'fs-evidence__section-date' },
