@@ -147,3 +147,47 @@ aws s3 cp s3://fieldsight-data-509194952652/reports/ . --recursive --quiet
 
 The third step is the one that cannot be skipped. Two of the nine zero-hit
 fields turned out to have nothing behind them.
+
+---
+
+## 8. Audit (2026-09-08): every number in this document came from the wrong source
+
+The counts throughout were measured against the S3 artifacts — `extractions/`
+and `reports/` — and then stated about what the page shows. **The page reads
+Aurora.** `render_report_shape` fills `findings` from
+`repositories/findings.list_for_topics`, `action_items` from the
+`action_items` table, and `related_photos` from `topic_photos`. The S3 report
+document and the Aurora read model diverge by design: the report is a document
+artifact, Aurora is the item store, and the UI follows Aurora.
+
+Queried against prod, every affected figure:
+
+| | this document said (S3) | Aurora (what the page sees) |
+|---|---|---|
+| findings — major / minor / none | 40 / 88 / 55 | **39 / 92 / 65** |
+| findings — progress / quality / safety | 141 / 53 / 25 | **124 / 47 / 25** |
+| open action items | 349 | **362** |
+| open items carrying deadline text | 105 of 240 | **102 of 362** |
+| priority high / medium / low | 169 high of 349 | **176 / 162 / 24** |
+| photo bindings | 211 | **143** |
+| topics carrying photos | 69 of 428 | **38 of 350** |
+
+**No shipped behaviour changes.** Each feature groups, orders or labels
+whatever it is handed; none of them branch on a corpus statistic. And the
+conclusions the numbers were used to *argue* all survive on the Aurora figures,
+because each turned on a proportion rather than a count:
+
+- priority is still unusable as a sort key — 176 of 362 is 49 %, where 169 of
+  349 was 48 %
+- `urgency`/`severity` are still badges rather than orders
+- most open items still carry no deadline text — 260 of 362
+- findings are still mostly `progress`, still mostly not safety
+
+The one figure that was right all along is `critical_dates_and_deadlines`:
+`lambda_org_api.py:5911` passes it through from `doc`, the S3 report document
+itself, so measuring the artifact was measuring the source.
+
+**The rule this produces, and it is the fifth instance in two days:** before
+quoting a corpus number in a design, name the table or the object the page
+actually reads, and query that. "The lake says 432" and "the page shows 143"
+are both true and only one of them is an argument.

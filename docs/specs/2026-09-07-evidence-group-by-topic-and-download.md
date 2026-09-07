@@ -28,8 +28,8 @@ group 到一起"*. Checked against prod rather than assumed:
 | | |
 |---|---|
 | photos in the prod lake | **432** (across 11 user folders) |
-| linked to a topic | **211 — 49 %** |
-| topics carrying photos | **69 of 428** |
+| ~~linked to a topic~~ | ~~211 — 49 %~~ — **see §10, this was the wrong source** |
+| ~~topics carrying photos~~ | ~~69 of 428~~ |
 | photos per topic | mostly 1–5; two outliers at 15 and 25 |
 | average photo size | **1.09 MB**, max 1.61 MB |
 | busiest single day | **56 photos, 62.5 MB** (2026-08-20) |
@@ -338,3 +338,38 @@ described what the data *means* and never checked what the consumer *receives*.
 The measurement in section 2 was real; it measured the **lake**. The spec was
 written about the **page**. Nothing in a schema or a comment would have caught
 that - only following the one array the page actually reads.
+
+## 10. Correction (2026-09-08): the binding counts came from the wrong source
+
+The table in §2 counted `related_photos` in the S3 `daily_report.json`
+artifacts. **The page does not read those.** `render_report_shape` builds
+`related_photos` from `t["photos"]`, which `repositories/topics.py:729` fills
+from a `SELECT … FROM topic_photos` — the Aurora read model. The two records
+diverge by design: the report is a document, Aurora is the item store.
+
+Queried against prod:
+
+| | §2 said (S3) | actually (Aurora, what the page sees) |
+|---|---|---|
+| bindings | 211 | **143** |
+| topics carrying photos | 69 | **38** |
+| topics total | 428 | **350** |
+| most photos on one topic | 25 | **17** |
+
+**No behaviour in this feature depends on those numbers** — it groups whatever
+it is handed — and the three assumptions that DO matter were re-verified
+against the live database and all hold:
+
+- `"topic_id": i` is still the loop index (`lambda_org_api.py:5853`), so the
+  `== null` check rather than a falsy one is still load-bearing
+- **16 photos really are bound to two topics**, so treating those as two
+  entries rather than de-duplicating them is correct, not defensive padding
+- zero topics carrying photos have an empty title, so the `Untitled` fallback
+  never fires on prod
+
+What changes is the argument, not the code. §2.1's conclusion — every photo the
+page holds carries a topic by construction — survives, because it followed from
+where the page reads rather than from the counts.
+
+This is the same substitution that withdrew the photo-rebind spec the same
+night: measure the S3 artifact, state the conclusion about the database.
