@@ -148,3 +148,83 @@ test('an empty-string topic_id is still treated as absent', () => {
   const out = groupByTopic([{ filename: 'a.jpg', topic_id: '', topic_title: null }]);
   assert.strictEqual(out.ungrouped.length, 1);
 });
+
+/* ---- the whole day, not only the bound photos ---------------------------- */
+
+const { photosForReport } = require('../scripts/api/evidence-grouping.js');
+
+function report(over) {
+  return Object.assign({
+    user_name: 'Ben Lin',
+    topics: [
+      { topic_id: 0, topic_title: 'Crane pre-start',
+        related_photos: ['a.jpg', 'b.jpg'] },
+      { topic_id: 1, topic_title: 'Concrete pour', related_photos: ['c.jpg'] },
+    ],
+    photo_filenames: ['a.jpg', 'b.jpg', 'c.jpg', 'd.jpg'],
+  }, over);
+}
+
+test('a photo no topic bound is carried, with no topic', () => {
+  // The case the whole change exists for. Measured on prod 2026-09-07 by the
+  // day-photos work: 71 of 90 photos on days that HAVE a report were
+  // unreachable from any screen, because 37 % of topic time windows are a
+  // single instant and a photo taken while nobody was talking binds to
+  // nothing. Photograph a room in silence and every shot used to vanish.
+  const rows = photosForReport(report());
+  const d = rows.filter(r => r.filename === 'd.jpg');
+  assert.strictEqual(d.length, 1);
+  assert.strictEqual(d[0].topic_id, null);
+});
+
+test('a bound photo is NOT also emitted as unbound', () => {
+  // photo_filenames is a superset of the bound ones, so a naive concat shows
+  // every bound photo twice — once under its topic and once under No topic.
+  const rows = photosForReport(report());
+  assert.strictEqual(rows.filter(r => r.filename === 'a.jpg').length, 1);
+  assert.strictEqual(rows.length, 4);
+});
+
+test('a photo bound to TWO topics still appears under both', () => {
+  // media.js:90-91 says this is real, and the two occurrences are not
+  // duplicates — they are the same photo in two folders. Only the UNBOUND
+  // computation dedupes.
+  const rows = photosForReport(report({
+    topics: [
+      { topic_id: 0, topic_title: 'One', related_photos: ['a.jpg'] },
+      { topic_id: 1, topic_title: 'Two', related_photos: ['a.jpg'] },
+    ],
+    photo_filenames: ['a.jpg'],
+  }));
+  assert.strictEqual(rows.length, 2);
+  assert.deepStrictEqual(rows.map(r => r.topic_id), [0, 1]);
+});
+
+test('a day with no photo_filenames is byte-for-byte what it was', () => {
+  // An older backend, or a verbatim-history day, which does not carry the
+  // field. Absent must not become an empty day.
+  const rows = photosForReport(report({ photo_filenames: undefined }));
+  assert.strictEqual(rows.length, 3);
+  assert.ok(rows.every(r => r.topic_id !== null));
+});
+
+test('a day with ONLY unbound photos still yields them', () => {
+  // 2026-08-14 on prod: one topic, five photos, zero returned.
+  const rows = photosForReport(report({
+    topics: [{ topic_id: 0, topic_title: 'Silent walk', related_photos: [] }],
+    photo_filenames: ['x.jpg', 'y.jpg'],
+  }));
+  assert.strictEqual(rows.length, 2);
+  assert.ok(rows.every(r => r.topic_id === null));
+});
+
+test('every row carries the recorder, since the key is built from it', () => {
+  photosForReport(report()).forEach(r => {
+    assert.strictEqual(r.userDisplayName, 'Ben Lin');
+  });
+});
+
+test('a report with neither topics nor photos is not an error', () => {
+  assert.deepStrictEqual(photosForReport({}), []);
+  assert.deepStrictEqual(photosForReport(null), []);
+});
