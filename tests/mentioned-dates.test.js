@@ -133,3 +133,35 @@ test('the author shows only when it is not the report author', () => {
   assert.strictEqual(showsAuthor(e({ who_mentioned: 'Jarley Trainor' }), 'Jarley Trainor'), false);
   assert.strictEqual(showsAuthor(e({ who_mentioned: null }), 'Jarley Trainor'), false);
 });
+
+/* ---- the fixture must not teach a shape the backend cannot send ---------- */
+
+test('the fixture only uses types the generator can emit', () => {
+  // `type: 'milestone'` was in the fixture. The generator's enum
+  // (lambda_report_generator.py:179) is
+  // deadline|inspection|delivery|weather|meeting|other, and across all 239
+  // entries in the prod corpus `milestone` appears ZERO times.
+  //
+  // v1 renders no `type`, so nothing breaks either way. The test exists
+  // because a mock teaching a value the backend cannot send is how the NEXT
+  // feature gets built against a shape that does not exist — this repo has
+  // shipped that twice, most recently a fixture whose photos carried no
+  // topic_id of 0.
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', 'scripts', 'mock', 'daily-report.fixture.js'), 'utf8');
+  const allowed = ['deadline', 'inspection', 'delivery', 'weather', 'meeting', 'other'];
+  let found = 0;
+  let idx = src.indexOf('critical_dates_and_deadlines');
+  while (idx !== -1) {
+    const block = src.slice(idx, src.indexOf('],', idx));
+    (block.match(/type:\s*'([a-z]+)'/g) || []).forEach(function (m) {
+      const t = m.replace(/.*'([a-z]+)'.*/, '$1');
+      found += 1;
+      assert.ok(allowed.includes(t), t + ' is not a type the generator emits');
+    });
+    idx = src.indexOf('critical_dates_and_deadlines', idx + 1);
+  }
+  assert.ok(found > 0, 'no fixture types were inspected — the scan found nothing');
+});
