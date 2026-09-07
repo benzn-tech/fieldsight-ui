@@ -138,3 +138,58 @@ test('both branches keep offline coverage: grouped AND ungrouped', () => {
   assert.strictEqual(flat.photo_groups, undefined,
     '...and must NOT have groups, or the flat branch loses its only fixture');
 });
+
+
+/* ---- the day with NO report --------------------------------------------- */
+
+const path = require('node:path');
+
+function loadTimelineApi() {
+  /* The mock is a browser IIFE; give it just enough window to register. */
+  global.window = {
+    FS: { api: { useMocks: true, delay: () => Promise.resolve(),
+                 cache: { cached: (k, t, f) => f() } } },
+    AuthMock: { currentUser: { role: 'site_manager', name: 'Jarley Trainor' } },
+    FieldSight: {},
+  };
+  delete require.cache[require.resolve('../scripts/mock/daily-report.fixture.js')];
+  delete require.cache[require.resolve('../scripts/api/timeline.js')];
+  require('../scripts/mock/daily-report.fixture.js');
+  require('../scripts/api/timeline.js');
+  return window.FS.api.timeline;
+}
+
+test('the no-report envelope nests its body under raw, like the real one', async () => {
+  /* _fetch.js returns { _notFound, status, raw } and does NOT merge the body.
+     The mock used to fabricate the fields FLAT, so every offline render read
+     `report.message` where the live app reads `report.raw.message` — a mock
+     that does not carry the real shape teaches the wrong contract, and the
+     branch it teaches is the one nobody exercises until a customer does. */
+  const api = loadTimelineApi();
+  const r = await api.getTimeline({ date: '2026-04-27', user: 'Jarley_Trainor' });
+  assert.strictEqual(r._notFound, true);
+  assert.ok(r.raw, 'the body must be nested under raw');
+  assert.strictEqual(r.raw.user, 'Jarley_Trainor',
+    'user is a FIELD on the 404 body — the UI must not parse it out of message');
+});
+
+test('a no-report day carries what DID arrive', async () => {
+  const api = loadTimelineApi();
+  const r = await api.getTimeline({ date: '2026-04-27', user: 'Jarley_Trainor' });
+  assert.strictEqual(r.raw.uploads.photos, 3);
+  assert.strictEqual(r.raw.photo_filenames.length, 3);
+  assert.strictEqual(r.raw.day_state, 'captured',
+    'day_state reports what can be EVIDENCED — never "pending"');
+});
+
+test('most no-report days carry nothing, and that is not the same as zero', async () => {
+  /* Three producers emit _notFound with no raw at all (the CloudFront HTML
+     trap, the legacy-gateway fallback, mock mode's other dates). No `uploads`
+     key means UNKNOWN and must render as the bare message, never as
+     "nothing arrived". */
+  const api = loadTimelineApi();
+  const r = await api.getTimeline({ date: '2026-04-26', user: 'Jarley_Trainor' });
+  assert.strictEqual(r._notFound, true);
+  assert.strictEqual(r.raw.uploads, undefined);
+  assert.strictEqual(r.raw.photo_filenames, undefined);
+});

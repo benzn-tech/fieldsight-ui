@@ -77,13 +77,37 @@
       }
     }
 
-    /* No report — return the 404-body shape (consumers should also handle
-       a real 404 with the same body, see BUG-20). */
-    return {
-      _notFound: true,
-      message:   'No report for ' + (user || '(unknown)') + ' on ' + date,
-      date:      date,
+    /* No report. MIRRORS THE REAL ENVELOPE, which nests the body under `raw`
+       rather than merging it (_fetch.js). This used to fabricate the fields
+       flat, so every offline render read `report.message` where the live app
+       reads `report.raw.message` -- a mock that does not carry the real shape
+       teaches the wrong contract, and the branch it teaches is the one nobody
+       exercises until a customer does.
+
+       A day with uploads carries what arrived (backend 2026-09-06): that is
+       what turns "nothing here" into "56 photos, report not generated". The
+       2026-04-27 fixture day is the one with uploads so the branch is
+       reachable in the preview; every other date keeps the bare shape, which
+       is also real -- three producers emit _notFound with no raw at all. */
+    var bare = {
+      message: 'No report for ' + (user || '(unknown)') + ' on ' + date,
+      date:    date,
+      user:    user || null,
     };
+    if (date === '2026-04-27') {
+      bare.uploads = { sessions: 0, duration_s: 0, photos: 3 };
+      bare.transcripts = 0;
+      bare.day_state = 'captured';
+      bare.photo_filenames = [
+        'Benl1_2026-04-27_08-01-10.jpg',
+        'Benl1_2026-04-27_08-04-55.jpg',
+        'Benl1_2026-04-27_09-30-02.jpg',
+      ];
+    }
+    return { _notFound: true, status: 404, raw: bare,
+             /* kept alongside `raw` because callers written before the
+                envelope was understood still read it off the top level */
+             message: bare.message, date: date };
   }
 
   function getTimeline(opts) {
