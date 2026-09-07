@@ -2183,6 +2183,8 @@
     var AskChat            = window.FieldSight.AskChat;
     var MeetingTopicCard   = window.FieldSight.MeetingTopicCard;
     var PhotoGrid          = window.FieldSight.PhotoGrid;
+    var mentionedDates     = window.FS && window.FS.api
+                             && window.FS.api.mentionedDates;
 
     function ViewToggle() {
       if (!bothExist) return null;
@@ -2532,6 +2534,60 @@
                   date:            date,
                   canEditContent:  canEditContent,
                 }),
+          )
+        : null,
+
+      /* ---- The dates this day named -------------------------------------
+         `critical_dates_and_deadlines` has been on the wire since the report
+         generator shipped and nothing in scripts/ ever read it: 239 entries
+         across 62 of the 99 prod reports that carry topics, 115 of them
+         marked high urgency. Real content — "Carpet installation to be ready
+         in Building 2", "3 floor boxes ready for installation" — and none of
+         it reached a screen.
+
+         Ordering and labelling live in api/mentioned-dates.js, which reuses
+         FS.api.resolveDeadline: it resolves 184 of the 239 against the
+         report's own date, so this is a mostly-ordered list rather than the
+         mostly-unorderable one the design first assumed.
+
+         The label is the RESOLVED day, not the words said — "Tomorrow" read
+         under a day header three weeks later is a trap — and the original
+         phrasing survives in `context` beside it.
+
+         Renders nothing when the field is absent or empty: an older report, a
+         day nobody named a date on, or a graded caller viewing someone else's
+         day, where the backend withholds the whole-day prose on purpose
+         (lambda_org_api.py:6007, cross_user_clip).
+
+         Single-user view only. AggregatedDayView has neither a photo mount
+         nor an Ask mount, so this slot does not exist there; a second mount
+         is a deliberate follow-up rather than an oversight. */
+      (mentionedDates && report.critical_dates_and_deadlines
+          && report.critical_dates_and_deadlines.length)
+        ? React.createElement(React.Fragment, null,
+            React.createElement('div', { className: 'fs-timeline-page__section-label' },
+              'Dates mentioned (' + report.critical_dates_and_deadlines.length + ')'),
+            React.createElement('ul', { className: 'fs-mentioned-dates' },
+              mentionedDates.orderEntries(report.critical_dates_and_deadlines, date)
+                .map(function (entry, i) {
+                  return React.createElement('li', {
+                    key: i, className: 'fs-mentioned-dates__row',
+                  },
+                    React.createElement('span', { className: 'fs-mentioned-dates__when' },
+                      mentionedDates.dateLabel(entry, date)),
+                    React.createElement('span', { className: 'fs-mentioned-dates__what' },
+                      entry.context || ''),
+                    mentionedDates.showsAuthor(entry, report.user_name)
+                      ? React.createElement('span', { className: 'fs-mentioned-dates__who' },
+                          entry.who_mentioned)
+                      : null,
+                    mentionedDates.showsUrgency(entry)
+                      ? React.createElement('span', { className: 'fs-mentioned-dates__urgent' },
+                          'High')
+                      : null,
+                  );
+                })
+            ),
           )
         : null,
 
