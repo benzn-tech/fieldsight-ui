@@ -1,0 +1,92 @@
+/* ==========================================================================
+   api/evidence-grouping.js — the Photos tab, grouped by topic.
+
+   Every photo the Evidence page holds arrives from
+   report.topics[].related_photos (evidence.js:302-309), so it carries a topic
+   BY CONSTRUCTION. `ungrouped` is therefore always empty in practice; it
+   exists so that a future list-photos endpoint fails a test rather than
+   silently dropping photos into nothing. See the spec's §2.1.
+
+   Registers as FS.api.evidenceGrouping.
+   ========================================================================== */
+(function () {
+  'use strict';
+
+  var STAMP_RE = /_(\d{2})-(\d{2})-(\d{2})\.[a-z]+$/i;
+  var KEYFRAME_RE = /_kf_s(\d{2})(\d{2})(\d{2})\.[a-z]+$/i;
+  var MAX_FOLDER = 28;
+  var ILLEGAL = /[\\/:*?"<>|]/g;
+
+  /* 'HH-MM-SS', or null. Deliberately NOT a Date: the only thing needed is a
+     sortable key within one day, and building a Date would drag in the NZDT
+     trap (BUG-19) for no gain. Null means "no time in this name" and the
+     caller sorts those last rather than guessing one. */
+  function photoTime(filename) {
+    var s = String(filename || '');
+    var m = s.match(KEYFRAME_RE) || s.match(STAMP_RE);
+    return m ? (m[1] + '-' + m[2] + '-' + m[3]) : null;
+  }
+
+  function byTime(a, b) {
+    var ta = photoTime(a.filename), tb = photoTime(b.filename);
+    if (ta && tb) return ta < tb ? -1 : (ta > tb ? 1 : a._i - b._i);
+    if (ta) return -1;
+    if (tb) return 1;
+    return a._i - b._i;          /* both unknown: payload order */
+  }
+
+  function groupByTopic(photos) {
+    var list = (photos || []).map(function (p, i) {
+      return Object.assign({}, p, { _i: i });
+    });
+    var order = [], byId = {}, ungrouped = [];
+    list.forEach(function (p) {
+      if (!p.topic_id) { ungrouped.push(p); return; }
+      if (!byId[p.topic_id]) {
+        byId[p.topic_id] = { topic_id: p.topic_id,
+                             topic_title: p.topic_title || '',
+                             photos: [] };
+        order.push(byId[p.topic_id]);
+      }
+      byId[p.topic_id].photos.push(p);
+    });
+    order.forEach(function (g) { g.photos.sort(byTime); });
+    /* Groups ordered by their FIRST photo — the order the day happened in.
+       A group whose photos all lack a time sorts last, by the order the
+       payload gave, for the same reason a photo does. */
+    order.sort(function (a, b) {
+      var ta = photoTime(a.photos[0].filename);
+      var tb = photoTime(b.photos[0].filename);
+      if (ta && tb) return ta < tb ? -1 : (ta > tb ? 1 : 0);
+      if (ta) return -1;
+      if (tb) return 1;
+      return a.photos[0]._i - b.photos[0]._i;
+    });
+    return { groups: order, ungrouped: ungrouped };
+  }
+
+  /* 'NN Title'. The number is the day's order, so a file manager sorting
+     alphabetically still shows the day in sequence — and it is what keeps two
+     titles that truncate to the same 28 characters apart. */
+  function folderName(title, index) {
+    var n = String(index + 1);
+    if (n.length < 2) n = '0' + n;
+    var t = String(title == null ? '' : title).replace(ILLEGAL, '-').trim();
+    if (!t) return n + ' Untitled';
+    if (t.length > MAX_FOLDER) {
+      var cut = t.slice(0, MAX_FOLDER);
+      var sp = cut.lastIndexOf(' ');
+      t = (sp > 8 ? cut.slice(0, sp) : cut).replace(/[\s.-]+$/, '');
+    }
+    return n + ' ' + t;
+  }
+
+  var mod = { photoTime: photoTime, groupByTopic: groupByTopic,
+              folderName: folderName };
+  if (typeof window !== 'undefined') {
+    if (!window.FS) window.FS = {};
+    if (!window.FS.api) window.FS.api = {};
+    window.FS.api.evidenceGrouping = mod;
+  }
+  if (typeof module !== 'undefined' && module.exports) module.exports = mod;
+})();
