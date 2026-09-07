@@ -2420,16 +2420,57 @@
             React.createElement('div', { className: 'fs-timeline-page__section-label' },
               'Photos from this day ('
                 + report.photo_filenames.length + ')'),
-            React.createElement(PhotoGrid, {
-              photos:          report.photo_filenames,
-              /* report.user_name, never the page `user` param: the self-view
-                 route has user===null and the photos belong to whoever
-                 recorded the day — the same crux the TopicCard mount above
-                 documents. PhotoGrid maps the display name to the folder. */
-              userDisplayName: report.user_name,
-              date:            date,
-              canEditContent:  canEditContent,
-            }),
+            /* ---- grouped by where he SAID he was, when he said it ----------
+               An inspection is one announcement followed by minutes of silent
+               photography: "Photos of level two progress", then 8 photos, then
+               "...level three". The backend turns those announcements into a
+               location timeline and hands the day's photos back already
+               grouped (`photo_groups`, 2026-09-07).
+
+               `related_photos` on the topic cards above is a DIFFERENT
+               question and stays as it is: it says "these were taken around
+               this part of the conversation". On Neil / 2026-09-02 the two
+               genuinely disagree — topic binding gives the five levels
+               12/15/9/17/0 because its window rule reaches forward and ties
+               resolve to the earlier topic, while the announcements give
+               8/13/12/10/10. The announcements are what he actually said, so
+               this section renders those.
+
+               Absent means nobody announced anything — the ordinary case for
+               a meeting — and the flat grid below is the whole answer. Absent
+               is NOT the same as an empty array, and the backend is careful to
+               send no key at all rather than `[]`. */
+            (report.photo_groups && report.photo_groups.length)
+              ? report.photo_groups.map(function (group, gi) {
+                  return React.createElement(React.Fragment,
+                    { key: 'grp' + gi + '_' + (group.location || 'none') },
+                    React.createElement('div',
+                      { className: 'fs-timeline-page__section-label' },
+                      /* A null location is a real answer: photos taken before
+                         he said where he was. It gets its own heading rather
+                         than being hidden or folded into the first room —
+                         inventing a location is the misattribution this whole
+                         feature exists to avoid. */
+                      (group.location || 'Before any location was named')
+                        + ' (' + (group.filenames || []).length + ')'),
+                    React.createElement(PhotoGrid, {
+                      photos:          group.filenames || [],
+                      userDisplayName: report.user_name,
+                      date:            date,
+                      canEditContent:  canEditContent,
+                    }));
+                })
+              : React.createElement(PhotoGrid, {
+                  photos:          report.photo_filenames,
+                  /* report.user_name, never the page `user` param: the
+                     self-view route has user===null and the photos belong to
+                     whoever recorded the day — the same crux the TopicCard
+                     mount above documents. PhotoGrid maps the display name to
+                     the folder. */
+                  userDisplayName: report.user_name,
+                  date:            date,
+                  canEditContent:  canEditContent,
+                }),
           )
         : null,
 
