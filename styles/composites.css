@@ -2154,6 +2154,38 @@
 }
 .fs-photo-grid__cell:hover { border-color: var(--border-default); }
 
+/* feat/evidence-grouped-download — opt-in selection. The cell is
+   position:relative already (the delete control sits on it), so the tick
+   anchors to the corner without a new stacking context. */
+.fs-photo-grid__cell--selected {
+  border-color: var(--color-accent-400);
+  box-shadow: inset 0 0 0 2px var(--color-accent-400);
+}
+.fs-photo-grid__pick {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 28px, not the 44px field default: this sits ON a thumbnail and a
+     gloved-hand target would cover the photo it is selecting. The label wraps
+     the input so the whole square is clickable, which buys back most of it. */
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+}
+.fs-photo-grid__pick input { cursor: pointer; margin: 0; }
+.fs-photo-grid__pick:focus-within {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+
 .fs-photo-grid__open {
   display: flex;
   flex-direction: column;
