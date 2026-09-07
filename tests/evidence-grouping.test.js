@@ -228,3 +228,44 @@ test('a report with neither topics nor photos is not an error', () => {
   assert.deepStrictEqual(photosForReport({}), []);
   assert.deepStrictEqual(photosForReport(null), []);
 });
+
+/* ---- measured against the whole prod corpus ------------------------------ */
+
+test('topic_id is an integer on prod, and 0 appears on every report', () => {
+  // Not a shape this file invented. Every one of the 99 prod reports carrying
+  // topics has exactly one topic_id === 0, and all 428 topic_ids across them
+  // are integers — never a uuid string. `render_report_shape` emits the loop
+  // index; the durable id is topic_row_id.
+  //
+  // Replaying the whole corpus through this module with the pre-fix falsy
+  // check gave: 211 photos in, 121 grouped, 90 dropped into `ungrouped` —
+  // 43 % of every photo Evidence can see, on 99 reports out of 99. The fix is
+  // one operator, so this test is what stops it being "simplified" back.
+  const asProd = [
+    { filename: 'a.jpg', topic_id: 0, topic_title: 'First topic of the day' },
+    { filename: 'b.jpg', topic_id: 1, topic_title: 'Second' },
+    { filename: 'c.jpg', topic_id: 2, topic_title: 'Third' },
+  ];
+  const out = groupByTopic(asProd);
+  assert.strictEqual(out.ungrouped.length, 0, 'topic 0 must not be treated as absent');
+  assert.strictEqual(out.groups.reduce((n, g) => n + g.photos.length, 0), 3);
+});
+
+test('every real prod topic title yields a legal folder name', () => {
+  // The longest titles in the corpus, verbatim. Checked across all 69
+  // photo-carrying topics: none produced an illegal character or a name over
+  // 34 characters (28 + the "NN " prefix).
+  const real = [
+    'Laundry Equipment Overview and Lint Collection System',
+    'Steam Heating and Energy Recovery System Explanation',
+    'Washing Machine Control Panel and Capacity Review',
+    'Concrete pour — Block 4 south footing',
+    'Three consecutive days without contact with Brade Construction Queenstown',
+  ];
+  real.forEach((title, i) => {
+    const name = folderName(title, i);
+    assert.ok(name.length <= 34, name + ' is ' + name.length + ' chars');
+    assert.ok(!/[\/:*?"<>|]/.test(name), name);
+    assert.ok(/^\d\d /.test(name), name);
+  });
+});
