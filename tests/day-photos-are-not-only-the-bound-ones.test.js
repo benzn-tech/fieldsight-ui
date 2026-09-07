@@ -80,3 +80,116 @@ test('a day without the field is still a valid day', () => {
     'this fixture is the no-field control; giving it the field removes the only '
     + 'offline coverage of the absent case');
 });
+
+
+/* ---- grouped by where he said he was ------------------------------------ */
+
+test('the grouped shape covers every photo in the flat list', () => {
+  const day = fixtureFor('2026-04-29');
+  assert.ok(Array.isArray(day.photo_groups),
+    'photo_groups missing — the grouped branch is unreachable offline, and a '
+    + 'branch no fixture exercises is one nobody sees until a customer does');
+
+  const grouped = [];
+  day.photo_groups.forEach((g) => (g.filenames || []).forEach((f) => grouped.push(f)));
+
+  /* The invariant that makes grouping safe to render INSTEAD of the flat grid:
+     nothing may be lost on the way into a group. If this ever fails, the day
+     view silently shows fewer photos than the caption above it claims. */
+  assert.deepStrictEqual(grouped.slice().sort(), day.photo_filenames.slice().sort(),
+    'grouped photos and the flat list must be the same set');
+  assert.strictEqual(new Set(grouped).size, grouped.length,
+    'a photo must not appear in two groups');
+});
+
+test('a photo taken before any announcement keeps a group of its own', () => {
+  /* null is a real location: "he had not said where he was yet". Folding it
+     into the first room would invent a place for it, which is the exact
+     misattribution the feature exists to prevent. */
+  const day = fixtureFor('2026-04-29');
+  const nulls = day.photo_groups.filter((g) => g.location === null
+                                            || g.location === undefined);
+  assert.strictEqual(nulls.length, 1,
+    'the fixture must keep exercising the unnamed-location branch');
+  assert.ok(nulls[0].filenames.length > 0);
+});
+
+test('a day nobody announced anything on carries no groups at all', () => {
+  /* Absent, not []. `[]` would read as "he announced somewhere and nothing fell
+     in it" and would render an empty heading; absent means the flat grid is the
+     whole answer. 2026-04-28 is the control. */
+  const day = fixtureFor('2026-04-28');
+  assert.strictEqual(day.photo_groups, undefined);
+});
+
+
+test('both branches keep offline coverage: grouped AND ungrouped', () => {
+  /* The grouped branch was added by giving 2026-04-29 photo_groups. That
+     silently removed the only fixture exercising the FLAT grid -- a branch no
+     fixture reaches is one a customer reaches first. 2026-04-25 is the
+     ungrouped control and must stay ungrouped. */
+  const grouped = fixtureFor('2026-04-29');
+  const flat = fixtureFor('2026-04-25');
+
+  assert.ok(grouped.photo_groups && grouped.photo_groups.length,
+    '2026-04-29 is the grouped fixture');
+  assert.ok(flat.photo_filenames && flat.photo_filenames.length,
+    '2026-04-25 must have photos...');
+  assert.strictEqual(flat.photo_groups, undefined,
+    '...and must NOT have groups, or the flat branch loses its only fixture');
+});
+
+
+/* ---- the day with NO report --------------------------------------------- */
+
+const path = require('node:path');
+
+function loadTimelineApi() {
+  /* The mock is a browser IIFE; give it just enough window to register. */
+  global.window = {
+    FS: { api: { useMocks: true, delay: () => Promise.resolve(),
+                 cache: { cached: (k, t, f) => f() } } },
+    AuthMock: { currentUser: { role: 'site_manager', name: 'Jarley Trainor' } },
+    FieldSight: {},
+  };
+  delete require.cache[require.resolve('../scripts/mock/daily-report.fixture.js')];
+  delete require.cache[require.resolve('../scripts/api/timeline.js')];
+  require('../scripts/mock/daily-report.fixture.js');
+  require('../scripts/api/timeline.js');
+  return window.FS.api.timeline;
+}
+
+test('the no-report envelope nests its body under raw, like the real one', async () => {
+  /* _fetch.js returns { _notFound, status, raw } and does NOT merge the body.
+     The mock used to fabricate the fields FLAT, so every offline render read
+     `report.message` where the live app reads `report.raw.message` — a mock
+     that does not carry the real shape teaches the wrong contract, and the
+     branch it teaches is the one nobody exercises until a customer does. */
+  const api = loadTimelineApi();
+  const r = await api.getTimeline({ date: '2026-04-27', user: 'Jarley_Trainor' });
+  assert.strictEqual(r._notFound, true);
+  assert.ok(r.raw, 'the body must be nested under raw');
+  assert.strictEqual(r.raw.user, 'Jarley_Trainor',
+    'user is a FIELD on the 404 body — the UI must not parse it out of message');
+});
+
+test('a no-report day carries what DID arrive', async () => {
+  const api = loadTimelineApi();
+  const r = await api.getTimeline({ date: '2026-04-27', user: 'Jarley_Trainor' });
+  assert.strictEqual(r.raw.uploads.photos, 3);
+  assert.strictEqual(r.raw.photo_filenames.length, 3);
+  assert.strictEqual(r.raw.day_state, 'captured',
+    'day_state reports what can be EVIDENCED — never "pending"');
+});
+
+test('most no-report days carry nothing, and that is not the same as zero', async () => {
+  /* Three producers emit _notFound with no raw at all (the CloudFront HTML
+     trap, the legacy-gateway fallback, mock mode's other dates). No `uploads`
+     key means UNKNOWN and must render as the bare message, never as
+     "nothing arrived". */
+  const api = loadTimelineApi();
+  const r = await api.getTimeline({ date: '2026-04-26', user: 'Jarley_Trainor' });
+  assert.strictEqual(r._notFound, true);
+  assert.strictEqual(r.raw.uploads, undefined);
+  assert.strictEqual(r.raw.photo_filenames, undefined);
+});

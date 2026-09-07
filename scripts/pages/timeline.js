@@ -777,8 +777,45 @@
 
   /* ---------- Empty / not-found states --------------------------------- */
 
+  /* What a day with no report DID have. The backend puts these on the 404
+     body (2026-09-06); before that a day whose extraction never ran was
+     indistinguishable from a day nobody switched the device on, and 124 photos
+     across the pilot were unreachable from every screen for exactly that
+     reason.
+
+     `facts` is `envelope.raw` and MAY BE ABSENT: three producers emit
+     `_notFound` without it -- the CloudFront HTML trap, the legacy-gateway
+     fallback (`legacyReadFallback` defaults true), and mock mode. So no `raw`
+     and no `uploads` key both mean UNKNOWN, and unknown must read as the old
+     bare message rather than as "nothing arrived". */
+  function arrivalLine(facts) {
+    if (!facts || !facts.uploads) return null;
+    var u = facts.uploads || {};
+    var bits = [];
+    if (u.photos) bits.push(u.photos + (u.photos === 1 ? ' photo' : ' photos'));
+    if (u.sessions) {
+      bits.push(u.sessions + (u.sessions === 1 ? ' recording' : ' recordings'));
+    }
+    if (!bits.length) return null;
+    var line = bits.join(', ');
+    /* `transcribed` means the words are readable NOW through a route that
+       needs no topics. Anything else is left unsaid: `day_state` reports what
+       can be EVIDENCED, and the backend deliberately refuses to emit
+       "pending", because extraction may have run and legitimately produced
+       nothing. Never write "generating" here. */
+    if (facts.day_state === 'transcribed' && facts.transcripts) {
+      line += ' \u2014 ' + facts.transcripts
+        + (facts.transcripts === 1 ? ' transcript' : ' transcripts') + ' ready';
+    }
+    return line;
+  }
+
   function NoReportState(props) {
     var Card = window.FieldSight.Card;
+    var PhotoGrid = window.FieldSight.PhotoGrid;
+    var facts = props.facts || null;
+    var arrived = arrivalLine(facts);
+    var names = (facts && facts.photo_filenames) || [];
     return React.createElement(Card, {
       padding: 'lg', className: 'fs-timeline-page__empty',
     },
@@ -787,6 +824,24 @@
           'No report yet'),
         React.createElement('div', { className: 'fs-timeline-page__empty-body' },
           props.message || 'No report has been generated for this date and user.'),
+        arrived
+          ? React.createElement('div', { className: 'fs-timeline-page__empty-body' },
+              arrived + ' arrived on this day.')
+          : null,
+        (PhotoGrid && names.length)
+          ? React.createElement(React.Fragment, null,
+              React.createElement('div',
+                { className: 'fs-timeline-page__section-label' },
+                'Photos from this day (' + names.length + ')'),
+              React.createElement(PhotoGrid, {
+                photos: names,
+                /* facts.user is a FIELD on all three 404 bodies. Do not parse
+                   the folder out of `message` -- that made a UI read an English
+                   sentence for an identifier. */
+                userDisplayName: unfolder(facts.user || props.user || ''),
+                date: props.date,
+              }))
+          : null,
       ),
     );
   }
@@ -2092,6 +2147,12 @@
         }),
         React.createElement(NoReportState, {
           message: (report && report.message) || ('No report for ' + unfolder(user || '') + ' on ' + date),
+          /* `.raw`, not the envelope: `_fetch.js` nests the 404 body there
+             rather than merging it, so reading report.uploads would find
+             undefined and look exactly like a backend that never shipped. */
+          facts: (report && report.raw) || null,
+          date: date,
+          user: user,
         }),
       );
     }
@@ -2422,16 +2483,57 @@
             React.createElement('div', { className: 'fs-timeline-page__section-label' },
               'Photos from this day ('
                 + report.photo_filenames.length + ')'),
-            React.createElement(PhotoGrid, {
-              photos:          report.photo_filenames,
-              /* report.user_name, never the page `user` param: the self-view
-                 route has user===null and the photos belong to whoever
-                 recorded the day — the same crux the TopicCard mount above
-                 documents. PhotoGrid maps the display name to the folder. */
-              userDisplayName: report.user_name,
-              date:            date,
-              canEditContent:  canEditContent,
-            }),
+            /* ---- grouped by where he SAID he was, when he said it ----------
+               An inspection is one announcement followed by minutes of silent
+               photography: "Photos of level two progress", then 8 photos, then
+               "...level three". The backend turns those announcements into a
+               location timeline and hands the day's photos back already
+               grouped (`photo_groups`, 2026-09-07).
+
+               `related_photos` on the topic cards above is a DIFFERENT
+               question and stays as it is: it says "these were taken around
+               this part of the conversation". On Neil / 2026-09-02 the two
+               genuinely disagree — topic binding gives the five levels
+               12/15/9/17/0 because its window rule reaches forward and ties
+               resolve to the earlier topic, while the announcements give
+               8/13/12/10/10. The announcements are what he actually said, so
+               this section renders those.
+
+               Absent means nobody announced anything — the ordinary case for
+               a meeting — and the flat grid below is the whole answer. Absent
+               is NOT the same as an empty array, and the backend is careful to
+               send no key at all rather than `[]`. */
+            (report.photo_groups && report.photo_groups.length)
+              ? report.photo_groups.map(function (group, gi) {
+                  return React.createElement(React.Fragment,
+                    { key: 'grp' + gi + '_' + (group.location || 'none') },
+                    React.createElement('div',
+                      { className: 'fs-timeline-page__section-label' },
+                      /* A null location is a real answer: photos taken before
+                         he said where he was. It gets its own heading rather
+                         than being hidden or folded into the first room —
+                         inventing a location is the misattribution this whole
+                         feature exists to avoid. */
+                      (group.location || 'Before any location was named')
+                        + ' (' + (group.filenames || []).length + ')'),
+                    React.createElement(PhotoGrid, {
+                      photos:          group.filenames || [],
+                      userDisplayName: report.user_name,
+                      date:            date,
+                      canEditContent:  canEditContent,
+                    }));
+                })
+              : React.createElement(PhotoGrid, {
+                  photos:          report.photo_filenames,
+                  /* report.user_name, never the page `user` param: the
+                     self-view route has user===null and the photos belong to
+                     whoever recorded the day — the same crux the TopicCard
+                     mount above documents. PhotoGrid maps the display name to
+                     the folder. */
+                  userDisplayName: report.user_name,
+                  date:            date,
+                  canEditContent:  canEditContent,
+                }),
           )
         : null,
 
