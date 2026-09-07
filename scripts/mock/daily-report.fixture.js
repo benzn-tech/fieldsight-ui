@@ -505,8 +505,14 @@ action:      'Reinspect tie-downs every 2h until 18:00.',
       'One trip hazard cleared at gate 2; no injuries reported.',
     ],
     critical_dates_and_deadlines: [
+      /* `deadline`, not `milestone`. The generator's enum
+         (lambda_report_generator.py:179) is
+         deadline|inspection|delivery|weather|meeting|other, and `milestone`
+         appears zero times in the 239 prod entries. A mock teaching a value
+         the backend cannot send is how the next feature gets built against a
+         shape that does not exist. */
       { date_mentioned: 'Monday 28 Apr', context: 'Steel frame kick-off',
-        who_mentioned: 'Jarley Trainor', urgency: 'medium', type: 'milestone' },
+        who_mentioned: 'Jarley Trainor', urgency: 'medium', type: 'deadline' },
     ],
     quality_and_compliance: [
       { item: 'Steel mill certs reviewed', status: 'completed',
