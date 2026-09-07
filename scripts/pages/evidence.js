@@ -489,7 +489,14 @@
 
     return React.createElement('div', { className: 'fs-evidence__sections' },
       photos.perDay.map(function (day) {
-        return React.createElement('div', { key: day.date, className: 'fs-evidence__section' },
+        /* fix/evidence-section-key — rows are per (date, user), not per date
+           (see the perDay build above): a site manager fans out across every
+           user on the site, so one date yields several sections and keying on
+           the date alone gives React duplicates. */
+        return React.createElement('div', {
+          key: day.date + '|' + (day.user_folder || day.user_name || ''),
+          className: 'fs-evidence__section',
+        },
           React.createElement('div', { className: 'fs-evidence__section-header' },
             React.createElement('span', { className: 'fs-evidence__section-date' },
               fmtDate(day.date)),
@@ -698,7 +705,9 @@
             'No recordings in the selected range.')
         : recs.perDay.map(function (day) {
             return React.createElement('div', {
-              key: day.date, className: 'fs-evidence__section',
+              /* Same (date, user) duplication as the photos section above. */
+              key: day.date + '|' + (day.user_folder || day.user_name || ''),
+              className: 'fs-evidence__section',
             },
               React.createElement('div', { className: 'fs-evidence__section-header' },
                 React.createElement('span', { className: 'fs-evidence__section-date' },
