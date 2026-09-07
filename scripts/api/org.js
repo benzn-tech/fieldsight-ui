@@ -188,6 +188,42 @@
     return { cognito_sub: sub, folder_name: folder };
   }
 
+  /* -------- staffing: which projects a person is on ------------------------
+     PUT/DELETE /members/{sub}/memberships/{site_id} (pipeline #786). Before
+     these existed the only way into `memberships` was the invite, so the Team
+     page had no way to move anybody and its Reassign action faked the result.
+     The role written here is the PER-SITE one (pm/site_manager/worker), which
+     graded roles read to decide what that person sees on that project -- it is
+     not global_role, which updateMemberRole above writes. */
+  function _membershipPath(sub, siteId) {
+    return '/members/' + encodeURIComponent(sub) + '/memberships/' + encodeURIComponent(siteId);
+  }
+
+  async function setMemberSite(sub, siteId, role) {
+    if (orgWrite()) return api.orgRequest(_membershipPath(sub, siteId),
+                                          { method: 'PUT', body: { role: role } });
+    await api.delay();
+    return { membership: { user_id: sub, site_id: siteId, role: role } };
+  }
+
+  async function removeMemberSite(sub, siteId) {
+    if (orgWrite()) return api.orgRequest(_membershipPath(sub, siteId), { method: 'DELETE' });
+    await api.delay();
+    return { membership: { user_id: sub, site_id: siteId,
+                           archived_at: new Date().toISOString() } };
+  }
+
+  /* Move: add the destination FIRST, then drop the origin. The order is the
+     safety argument -- if the second call fails the person is on both projects,
+     which is visible and undoable; the other order can strand them on none.
+     Nothing is caught here: a failure must reach the caller so the page can say
+     so instead of showing the success it used to show unconditionally. */
+  async function moveMemberToSite(sub, fromSiteId, toSiteId, role) {
+    var added = await setMemberSite(sub, toSiteId, role || 'worker');
+    if (fromSiteId && fromSiteId !== toSiteId) await removeMemberSite(sub, fromSiteId);
+    return added;
+  }
+
   async function archiveMember(sub)   { return _memberArchive(sub, 'archive'); }
   async function unarchiveMember(sub) { return _memberArchive(sub, 'unarchive'); }
   async function _memberArchive(sub, action) {
@@ -784,6 +820,8 @@
     archiveSite: archiveSite, unarchiveSite: unarchiveSite,
     getMembers: getMembers, createMember: createMember, updateMemberRole: updateMemberRole,
     setMemberFolder: setMemberFolder,
+    setMemberSite: setMemberSite, removeMemberSite: removeMemberSite,
+    moveMemberToSite: moveMemberToSite,
     archiveMember: archiveMember, unarchiveMember: unarchiveMember,
     uploadUrl: uploadUrl, assetUrl: assetUrl,
     uploadImage: uploadImage, resolveAssetUrl: resolveAssetUrl,
