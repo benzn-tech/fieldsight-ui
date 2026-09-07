@@ -33,6 +33,18 @@
         jobs.push({ path: folder + '/' + p.filename, filename: p.filename });
       });
     });
+    /* The leftover, and it is NOT optional. Walking only `groups` produced a
+       zip of five photos from a selection of six: the sixth was taken while
+       nobody was talking, bound to no topic, and silently absent from the
+       archive. Caught in a browser, after the same omission had already hidden
+       the ungrouped section from the screen once — the render was fixed and
+       this was not.
+
+       Unnumbered and therefore last, which is where it sits on screen too:
+       these are the photos the day could not place, not its final topic. */
+    grouped.ungrouped.forEach(function (p) {
+      jobs.push({ path: 'No topic/' + p.filename, filename: p.filename });
+    });
 
     var entries = [], missing = [], total = 0;
     for (var s = 0; s < jobs.length; s += BATCH) {

@@ -87,8 +87,62 @@
     return n + ' ' + t;
   }
 
+  /* Every photo a report carries, bound or not.
+
+     A photo used to reach Evidence ONLY as `topic.related_photos` — only if it
+     happened to be taken while somebody was talking about something that
+     became a topic. Measured on prod 2026-09-07: of the photos stored on days
+     that HAVE a report, 71 of 90 were unreachable from any screen. 37 % of
+     topic time windows are a single instant and 76 % are narrower than the
+     +/-2 minute binding tolerance, so photographing a room in silence produced
+     shots that existed nowhere on screen.
+
+     `photo_filenames` (backend 2026-09-07, pipeline #762) is the whole day,
+     tombstone-filtered, and a SUPERSET of the bound ones — so the unbound set
+     is a difference, never a concat. A concat would show every bound photo
+     twice: once under its topic and once under No topic.
+
+     The bound rows are emitted exactly as before, INCLUDING the same photo
+     appearing under two topics, which media.js:90-91 records as real. Those
+     are not duplicates — they are one photo in two folders. Only the unbound
+     computation dedupes.
+
+     A day without the field (an older backend, or a verbatim-history day)
+     yields precisely what it yielded before. */
+  function photosForReport(report) {
+    if (!report) return [];
+    var rows = [], bound = {};
+    (report.topics || []).forEach(function (t) {
+      (t.related_photos || []).forEach(function (filename) {
+        bound[filename] = true;
+        rows.push({
+          filename: filename,
+          topic_id: t.topic_id,
+          topic_title: t.topic_title,
+          userDisplayName: report.user_name,
+        });
+      });
+    });
+    var seen = {};
+    (report.photo_filenames || []).forEach(function (filename) {
+      if (bound[filename] || seen[filename]) return;
+      seen[filename] = true;
+      /* `null`, not undefined and not a sentinel string: groupByTopic tests
+         `== null`, and a topic_id of 0 is a real topic (that distinction cost
+         a day's first topic its photos once already). */
+      rows.push({
+        filename: filename,
+        topic_id: null,
+        topic_title: null,
+        userDisplayName: report.user_name,
+      });
+    });
+    return rows;
+  }
+
   var mod = { photoTime: photoTime, groupByTopic: groupByTopic,
-              folderName: folderName };
+              folderName: folderName,
+              photosForReport: photosForReport };
   if (typeof window !== 'undefined') {
     if (!window.FS) window.FS = {};
     if (!window.FS.api) window.FS.api = {};

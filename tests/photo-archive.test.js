@@ -89,3 +89,42 @@ test('every selected photo is accounted for, present or missing', async () => {
   const jpgs = r.paths.filter(x => x.endsWith('.jpg')).length;
   assert.strictEqual(jpgs + r.missing.length, photos.length);
 });
+
+test('a photo with no topic is IN the zip, under No topic', async () => {
+  // Caught in the browser, not here: selecting all six photos of the marquee
+  // fixture produced a zip holding five. buildArchive walked grouped.groups
+  // and never grouped.ungrouped — the same omission that had already hidden
+  // the ungrouped section from the SCREEN once, repeated in the archive.
+  //
+  // It is the exact defect this module exists to prevent, and the tests above
+  // all passed throughout because every fixture photo carried a topic.
+  const r = await buildArchive({
+    photos: [p({ topic_id: 't1', filename: 'Benl1_2026-09-02_09-00-00.jpg' }),
+             p({ topic_id: null, topic_title: null,
+                 filename: 'Benl1_2026-09-02_11-52-40.jpg' })],
+    date: '2026-09-02', userDisplayName: 'Ben Lin', fetchImpl: okFetch });
+  assert.strictEqual(r.missing.length, 0);
+  assert.strictEqual(r.paths.length, 2);
+  assert.ok(r.paths.some(x => x === 'No topic/Benl1_2026-09-02_11-52-40.jpg'),
+            r.paths.join('\n'));
+});
+
+test('No topic sorts after the numbered topics', async () => {
+  // It is the leftover, so it reads last — the same place it sits on screen.
+  const r = await buildArchive({
+    photos: [p({ topic_id: null, topic_title: null, filename: 'Benl1_2026-09-02_08-00-00.jpg' }),
+             p({ topic_id: 't1', topic_title: 'Crane', filename: 'Benl1_2026-09-02_09-00-00.jpg' })],
+    date: '2026-09-02', userDisplayName: 'Ben Lin', fetchImpl: okFetch });
+  assert.deepStrictEqual(r.paths, [
+    '01 Crane/Benl1_2026-09-02_09-00-00.jpg',
+    'No topic/Benl1_2026-09-02_08-00-00.jpg',
+  ]);
+});
+
+test('a selection that is ENTIRELY unbound still produces an archive', async () => {
+  // 2026-08-14 on prod: one topic, five photos, zero bound.
+  const r = await buildArchive({
+    photos: [p({ topic_id: null, topic_title: null, filename: 'Benl1_2026-08-14_09-00-00.jpg' })],
+    date: '2026-08-14', userDisplayName: 'Ben Lin', fetchImpl: okFetch });
+  assert.deepStrictEqual(r.paths, ['No topic/Benl1_2026-08-14_09-00-00.jpg']);
+});
