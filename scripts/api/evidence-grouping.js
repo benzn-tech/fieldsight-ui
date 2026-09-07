@@ -41,7 +41,13 @@
     });
     var order = [], byId = {}, ungrouped = [];
     list.forEach(function (p) {
-      if (!p.topic_id) { ungrouped.push(p); return; }
+      /* `== null`, NOT falsiness. `topic_id` is the payload's LOOP INDEX
+         (`render_report_shape` emits "topic_id": i; the durable id is
+         `topic_row_id`), so the FIRST topic of every day is 0 — and a
+         falsy check dropped its photos on every single day. The unit test
+         asserting input-count equals sum-of-groups did not catch it because
+         its fixture used invented string ids and never a 0. */
+      if (p.topic_id == null || p.topic_id === '') { ungrouped.push(p); return; }
       if (!byId[p.topic_id]) {
         byId[p.topic_id] = { topic_id: p.topic_id,
                              topic_title: p.topic_title || '',

@@ -110,3 +110,41 @@ test('an empty title still yields a usable folder', () => {
   assert.strictEqual(folderName('', 4), '05 Untitled');
   assert.strictEqual(folderName(null, 0), '01 Untitled');
 });
+
+/* ---- the shape the payload really has ------------------------------------ */
+
+test('topic_id 0 is a topic, not a missing one', () => {
+  // The defect this file shipped and the browser caught. `topic_id` is the
+  // payload's LOOP INDEX (render_report_shape emits "topic_id": i; the durable
+  // id is topic_row_id), so the FIRST topic of every day is 0. A falsy check
+  // dropped its photos on every single day — the most common case, not an edge
+  // one — while every test above stayed green because they all used invented
+  // string ids.
+  const out = groupByTopic([
+    { filename: 'Benl1_2026-04-29_07-12-04.jpg', topic_id: 0, topic_title: 'First' },
+    { filename: 'Benl1_2026-04-29_08-46-11.jpg', topic_id: 1, topic_title: 'Second' },
+  ]);
+  assert.strictEqual(out.ungrouped.length, 0);
+  assert.deepStrictEqual(out.groups.map(g => g.topic_id), [0, 1]);
+});
+
+test('the real payload shape loses nothing', () => {
+  // Exactly what the browser handed the component: integer ids from 0, two
+  // photos sharing the first topic.
+  const real = [
+    { filename: 'Benl1_2026-04-29_07-12-04.jpg', topic_id: 0, topic_title: 'Crane pre-start' },
+    { filename: 'Benl1_2026-04-29_07-19-22.jpg', topic_id: 0, topic_title: 'Crane pre-start' },
+    { filename: 'Benl1_2026-04-29_08-46-11.jpg', topic_id: 1, topic_title: 'Concrete pour' },
+    { filename: 'Benl1_2026-04-29_11-08-44.jpg', topic_id: 2, topic_title: 'Scaffold' },
+    { filename: 'Benl1_2026-04-29_11-31-02.jpg', topic_id: 2, topic_title: 'Scaffold' },
+  ];
+  const out = groupByTopic(real);
+  assert.strictEqual(out.groups.reduce((n, g) => n + g.photos.length, 0), 5);
+  assert.strictEqual(out.ungrouped.length, 0);
+  assert.strictEqual(out.groups.length, 3);
+});
+
+test('an empty-string topic_id is still treated as absent', () => {
+  const out = groupByTopic([{ filename: 'a.jpg', topic_id: '', topic_title: null }]);
+  assert.strictEqual(out.ungrouped.length, 1);
+});
