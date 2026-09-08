@@ -23,7 +23,9 @@
        see the full directory.
      • PM-only "Reassign to another site" right-detail action — opens
        an inline modal with the PM's managed_sites as radio options.
-       Mock-only mutation gated on `useMocks` (PLAN §3 trap pattern).
+       Writes through org.moveMemberToSite (PUT then DELETE on
+       /members/{sub}/memberships/{site}); mocked only when org writes
+       are switched off.
 
    Permission gate: Provider checks FS.can(caller, 'user:manage').
    Sprint 9 grants project_manager `user:manage:project`, so PM now
@@ -324,7 +326,18 @@
         if (s.status !== 'ok') return s;
         var patched = (s.users || []).map(function (u) {
           if (u.device_id !== deviceId) return u;
+          /* memberships is patched alongside primary_site, not just the
+             display fields: the modal reads the per-site role out of it to
+             carry over, so a stale list would demote the person on a second
+             move within the same session. */
+          var kept = (u.memberships || []).filter(function (m) {
+            return m.site_id !== u.primary_site;
+          });
+          var role = ((u.memberships || []).filter(function (m) {
+            return m.site_id === u.primary_site;
+          })[0] || {}).role || 'worker';
           return Object.assign({}, u, { primary_site: newSiteId,
+            memberships: [{ site_id: newSiteId, role: role }].concat(kept),
             sites: u.sites && u.sites.indexOf(newSiteId) >= 0 ? u.sites
               : (u.sites || []).concat([newSiteId]) });
         });
@@ -708,6 +721,17 @@
     var status = refStatus[0];
     var setStatus = refStatus[1];
 
+    /* The per-site role the person holds on the project they are leaving,
+       carried over to the one they are joining. Graded roles read
+       membership.role per site, so dropping it here would silently demote
+       somebody to worker as a side effect of being moved. */
+    function currentSiteRole() {
+      var here = (u.memberships || []).filter(function (m) {
+        return m.site_id === u.primary_site;
+      })[0];
+      return (here && here.role) || 'worker';
+    }
+
     function handleSubmit(e) {
       if (e) e.preventDefault();
       if (!picked || picked === u.primary_site) {
@@ -715,13 +739,26 @@
         return;
       }
       setStatus('submitting');
-      /* Mock-only mutation in Sprint 9 (no /api/users PATCH yet).
-         Live path would: PATCH /api/users/{device_id} { primary_site:
-         picked }; on 200 → call onSubmit; on failure → toast +
-         setStatus('idle'). */
-      setTimeout(function () {
+      /* Sprint 9 shipped this as a 200ms setTimeout that patched local state
+         and toasted success without sending anything -- the move was gone on
+         the next refresh and the admin had been told it worked. It now goes
+         through the real staffing routes, and a failure is reported as one. */
+      var org = window.FS && window.FS.api && window.FS.api.org;
+      Promise.resolve(
+        org
+          ? org.moveMemberToSite(u.device_id, u.primary_site, picked, currentSiteRole())
+          : Promise.reject(new Error('org api unavailable'))
+      ).then(function () {
         if (onSubmit) onSubmit(picked);
-      }, 200);
+      }).catch(function (err) {
+        setStatus('idle');
+        if (window.FS && window.FS.toast) {
+          window.FS.toast.show({
+            message: 'Could not reassign: ' + ((err && err.message) || 'request failed'),
+            tone:    'error',
+          });
+        }
+      });
     }
 
     var content = React.createElement('form', {
