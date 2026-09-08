@@ -7009,6 +7009,23 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color: var(--text-secondary);
 }
 
+/* A control plus the line that explains it. The row itself is already a
+   column flex, but the hint has to sit with its control rather than as a
+   third sibling -- otherwise the row's `gap` spaces the hint the same
+   distance from the input as the next field's label, and it reads as
+   belonging to the field below it. */
+.fs-settings__field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.fs-settings__field-hint {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  line-height: 1.45;
+}
+
 .fs-settings__select {
   appearance: none;
   width: 100%;

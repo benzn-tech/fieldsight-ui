@@ -236,19 +236,57 @@
   }
 
   /* ---------- Shared form helpers (Phase B modals) --------------------- */
-  function fFieldRow(label, control) {
+  /* Said once, so the three controls cannot drift apart in wording. */
+  var UNSAVED_HINT = 'Not stored yet — this backend has no field for it.';
+
+  function fFieldRow(label, control, hint) {
     return React.createElement('div', { className: 'fs-settings__field-row' },
       React.createElement('label', { className: 'fs-settings__label' }, label),
-      control);
+      hint
+        ? React.createElement('div', { className: 'fs-settings__field-stack' },
+            control,
+            React.createElement('div', { className: 'fs-settings__field-hint' }, hint))
+        : control);
   }
-  function fText(value, onChange, type) {
+  function fText(value, onChange, type, opts) {
+    opts = opts || {};
     return React.createElement('input', {
       type: type || 'text', className: 'fs-settings__input', value: value || '',
+      disabled: !!opts.disabled,
+      inputMode: opts.inputMode,
       onChange: function (e) { onChange(e.target.value); },
     });
   }
-  function fSelect(value, options, onChange) {
-    return React.createElement('select', { className: 'fs-settings__select', value: value, onChange: function (e) { onChange(e.target.value); } },
+
+  /* A money field is TEXT, not `type="number"`.
+     A number input rejects "12,400,000" outright -- the browser sanitises a
+     value it cannot parse to empty -- so separators and type=number are
+     mutually exclusive, and the separators are the point. `inputMode:
+     'numeric'` keeps the phone keypad. */
+  function fMoney(value, onChange, opts) {
+    opts = opts || {};
+    return React.createElement('input', {
+      type: 'text', inputMode: 'numeric', className: 'fs-settings__input',
+      value: formatThousands(value), disabled: !!opts.disabled,
+      onChange: function (e) { onChange(digitsOnly(e.target.value)); },
+    });
+  }
+
+  /* Digits as typed, separators as read. Kept as two pure functions rather
+     than one round-tripping formatter because the STORED value must stay
+     unseparated: api/sites.js does Number(project_value_nzd) on the mock
+     path, and Number("12,400,000") is NaN, which that code turns into 0. */
+  function digitsOnly(v) {
+    return String(v == null ? '' : v).replace(/[^0-9]/g, '');
+  }
+  function formatThousands(v) {
+    var d = digitsOnly(v);
+    if (!d) return '';
+    return d.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+  function fSelect(value, options, onChange, opts) {
+    opts = opts || {};
+    return React.createElement('select', { className: 'fs-settings__select', value: value, disabled: !!opts.disabled, onChange: function (e) { onChange(e.target.value); } },
       options.map(function (o) { return React.createElement('option', { key: o.v, value: o.v }, o.l); }));
   }
 
@@ -311,6 +349,8 @@
     var refBusy = React.useState(false); var busy = refBusy[0], setBusy = refBusy[1];
     var iconRef = React.useRef(null);
     var Avatar = window.FieldSight && window.FieldSight.Avatar;
+    /* Live backend -> the three fields below are dropped on submit. */
+    var unsaved = orgLive();
     function set(k, v) { setForm(function (f) { var n = Object.assign({}, f); n[k] = v; return n; }); }
     function onPickIcon(e) {
       var f = e.target.files && e.target.files[0]; if (!f) return;
@@ -361,16 +401,37 @@
           React.createElement('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', ref: iconRef, onChange: onPickIcon, style: { display: 'none' } }),
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm', onClick: function () { if (iconRef.current) iconRef.current.click(); } }, 'Upload icon')
         )),
-        fFieldRow('Location', fText(form.location, function (v) { set('location', v); })),
+        /* Location and Address overlap enough that the form has to say which
+           is which: one is what people call the place, the other is what a
+           geocoder can resolve into the coordinates the weather panel uses. */
+        fFieldRow('Location', fText(form.location, function (v) { set('location', v); }),
+          'What people call this project. Shown on the project header.'),
         fFieldRow('Address', React.createElement(AddressAutocomplete, {
           value: form.address,
           onText: function (v) { setForm(function (f) { return Object.assign({}, f, { address: v, latitude: null, longitude: null }); }); },
           onPick: function (p) { setForm(function (f) { return Object.assign({}, f, { address: p.address, latitude: p.latitude, longitude: p.longitude }); }); },
-        })),
-        fFieldRow('Region', fSelect(form.region, [{ v: 'south-island', l: 'South Island' }, { v: 'north-island', l: 'North Island' }], function (v) { set('region', v); })),
+        }), 'Pick a suggestion to set the coordinates the weather panel uses.'),
+        /* THESE THREE DO NOT PERSIST AGAINST THE REAL BACKEND, and the form
+           said nothing about it. `createOrgSite` sends seven fields and none
+           is one of these; `sites` has had no value, region or completion
+           column since 0002_core_relational.sql. Disabled rather than
+           deleted: the intent to support them is real and a disabled control
+           still says so.
+
+           Gated on orgLive(), NOT unconditional -- on the mock path
+           `FS.api.sites.createSite(form)` keeps all three and they feed the
+           Portfolio and Executive rollups, so disabling them everywhere
+           would break controls that do work in the demo build. */
+        fFieldRow('Region',
+          fSelect(form.region, [{ v: 'south-island', l: 'South Island' }, { v: 'north-island', l: 'North Island' }], function (v) { set('region', v); }, { disabled: unsaved }),
+          unsaved ? UNSAVED_HINT : null),
         fFieldRow('Client', fText(form.client, function (v) { set('client', v); })),
-        fFieldRow('Project value (NZD)', fText(form.project_value_nzd, function (v) { set('project_value_nzd', v); }, 'number')),
-        fFieldRow('Planned completion', fText(form.planned_completion, function (v) { set('planned_completion', v); }, 'date')),
+        fFieldRow('Project value (NZD)',
+          fMoney(form.project_value_nzd, function (v) { set('project_value_nzd', v); }, { disabled: unsaved }),
+          unsaved ? UNSAVED_HINT : null),
+        fFieldRow('Planned completion',
+          fText(form.planned_completion, function (v) { set('planned_completion', v); }, 'date', { disabled: unsaved }),
+          unsaved ? UNSAVED_HINT : null),
         React.createElement('div', { className: 'fs-settings__actions' },
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: props.onClose }, 'Cancel'),
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--md', disabled: busy, onClick: submit }, busy ? 'Creating…' : 'Create project')
