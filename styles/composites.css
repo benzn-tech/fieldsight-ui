@@ -12374,3 +12374,90 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   background: var(--color-warning-100);
 }
 [data-theme="dark"] .fs-mentioned-dates__urgent { color: var(--color-neutral-900); }
+
+/* ---------------------------------------------------------------------------
+   Team — projects editor (right detail) and the invite form's project picker.
+   Replaces the old read-only "Primary site" / "All sites" rows: the backend
+   holds N equal memberships, each with its own role, so the panel lists them
+   and lets an admin change the role, remove one, or add another.
+   --------------------------------------------------------------------------- */
+.fs-team-projects {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fs-team-projects__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fs-team-projects__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.fs-team-projects__role {
+  flex: 0 0 auto;
+  max-width: 150px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.fs-team-projects__remove {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  font-size: 13px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.fs-team-projects__remove:hover:not(:disabled) {
+  color: var(--danger, #b42318);
+  text-decoration: underline;
+}
+
+.fs-team-projects__remove:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.fs-team-projects__add {
+  margin-top: 8px;
+  max-width: 240px;
+}
+
+.fs-team-detail__muted {
+  font-size: 14px;
+  color: var(--text-tertiary);
+}
+
+/* Invite form: several projects at once — createMember always took a list,
+   the form only ever sent one. */
+.fs-team-sitepick {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.fs-team-sitepick__option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
