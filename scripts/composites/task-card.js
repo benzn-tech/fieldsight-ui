@@ -230,10 +230,18 @@
       padding:   'sm',
       onClick:   onSelect && !checkingOff ? function () { onSelect(task); } : undefined,
       className: className,
+      /* ON THE CARD, NOT ON Card.Body -- two reasons, and either alone is
+         enough to stop the row ever being removed.
+
+         `fs-task-card--checking-off` is applied to THIS element, so this is
+         where the animation runs and where `animationend` is dispatched;
+         the event propagates upward, so a handler on a descendant can never
+         see it. And `CardBody` (components/card.js) reads exactly
+         className/style/children with no rest spread, so a handler passed
+         there was never attached to any DOM node at all. */
+      onAnimationEnd: onAnimationEnd,
     },
-      React.createElement(Card.Body, {
-        onAnimationEnd: onAnimationEnd,
-      },
+      React.createElement(Card.Body, null,
         React.createElement('div', { className: 'fs-task-card__row' },
           leading,
           React.createElement('div', { className: 'fs-task-card__main' },
