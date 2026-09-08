@@ -38,6 +38,35 @@
 
   var TIER_PIXELS = { day: 24, week: 6, month: 2 };
 
+  /* Absolute bounds on pixels-per-day, applied AFTER the tier multiplier so a
+     zoom can carry a scale past its own tier's canonical value. The floor is
+     the month tier's own 2 px/day — below it a three-year programme is a
+     smudge and the strip has nothing left to label. The ceiling is where a
+     single day already fills a comfortable column; past it the chart stops
+     being a chart. */
+  var PPD_MIN = 2;
+  var PPD_MAX = 64;
+
+  function clampPpd(v) {
+    var n = Number(v);
+    if (!isFinite(n) || n <= 0) return TIER_PIXELS.day;
+    return Math.min(PPD_MAX, Math.max(PPD_MIN, n));
+  }
+
+  /* The anchor, as two pure halves so the arithmetic can be driven without a
+     browser. Zooming that moves the day under the pointer is the difference
+     between a chart you can read and one you have to re-find your place in
+     after every notch, and it is the whole reason the feature was asked for.
+
+       anchorDay          which day sits under the pointer, before the change
+       scrollLeftForAnchor where to scroll so that day is still there, after */
+  function anchorDay(scrollLeft, offsetX, ppd) {
+    return (scrollLeft + offsetX) / ppd;
+  }
+  function scrollLeftForAnchor(day, offsetX, ppd) {
+    return (day * ppd) - offsetX;
+  }
+
   /* ---------- Helpers --------------------------------------------------- */
 
   /* Sprint 5.2 — auto-mint a task_id that's never been used.
@@ -149,7 +178,23 @@
 
     var refTier   = React.useState('day');
     var tier      = refTier[0];
-    var setTier   = refTier[1];
+    var setTierRaw = refTier[1];
+
+    /* Continuous zoom, as a multiplier on the tier's canonical scale rather
+       than a fourth tier. The three buttons stay exactly what they were —
+       named scales — and ctrl+wheel moves between and past them. */
+    var refZoom = React.useState(1);
+    var zoom    = refZoom[0];
+    var setZoom = refZoom[1];
+
+    /* RESET LIVES HERE, NOT IN THE BUTTON HANDLERS. `setTier` is also called
+       by the Overview switch further down, and a reset wired only into the
+       toggle would leave Overview inheriting whatever multiplier the user
+       last pinched to — a "Month" view silently rendering at 40 px/day. */
+    var setTier = React.useCallback(function (next) {
+      setZoom(1);
+      setTierRaw(next);
+    }, []);
 
     /* Sprint 8.3.1 — "Show float" toggle */
     var refShowFloat = React.useState(false);
@@ -939,6 +984,7 @@
       bootstrapProgramme: bootstrapProgramme,
       view:         view,    setView:    setView,
       tier:         tier,    setTier:    setTier,
+      zoom:         zoom,    setZoom:    setZoom,
       collapsed:    collapsed,
       toggleGroup:  toggleGroup,
       updateTask:   updateTask,
@@ -1031,9 +1077,73 @@
       return window.FS.api.programmeRows.buildRows(s.parents, s.leaves, ctx.collapsed);
     }, [s.parents, s.leaves, ctx.collapsed]);
 
-    var ppd        = TIER_PIXELS[ctx.tier] || 24;
+    var ppd        = clampPpd((TIER_PIXELS[ctx.tier] || 24) * (ctx.zoom || 1));
     var totalDays  = diffDays(prog.start_date, prog.end_date) + 1;
     var totalWidth = totalDays * ppd;
+
+    /* ---- ctrl+wheel zoom, anchored at the pointer ---------------------- */
+
+    /* A CALLBACK REF INTO STATE, not React.useRef — and the difference is the
+       whole feature working or silently not.
+
+       A ref's `.current` is populated after commit but assigning it does not
+       re-render, so an effect keyed on [ppd, tier] read `null` on the first
+       commit (the timeline is not in the tree until the programme has loaded),
+       returned early, and never ran again because none of its deps changed.
+       The listener was therefore never attached: every test passed, and
+       ctrl+wheel in a browser did nothing at all. Found by dispatching a real
+       wheel event at the real element, not by reading the diff. */
+    var refTimelineEl = React.useState(null);
+    var timelineEl    = refTimelineEl[0];
+    var setTimelineEl = refTimelineEl[1];
+    /* Where the pointer was, in DAYS from programme start, and how far that
+       day sat from the left edge of the viewport. Captured before the scale
+       changes and re-applied after the DOM has it. */
+    var anchorRef = React.useRef(null);
+
+    React.useEffect(function () {
+      var el = timelineEl;
+      if (!el) return undefined;
+
+      function onWheel(e) {
+        /* Trackpad pinch arrives as ctrl+wheel too, so this covers both
+           gestures with one handler and no gesture-event polyfill. */
+        if (!e.ctrlKey && !e.metaKey) return;
+        /* MUST be a non-passive listener for this to do anything. Without it
+           ctrl+wheel is the browser's own page zoom and the chart never sees
+           the gesture — React's onWheel cannot make that guarantee, which is
+           why this is attached by hand. */
+        e.preventDefault();
+
+        var rect = el.getBoundingClientRect();
+        /* Offset from the TIMELINE's left edge. `e.offsetX` is relative to
+           whichever bar happens to be under the pointer, so using it makes the
+           anchor jump by the width of a task. */
+        var offsetX = e.clientX - rect.left;
+        anchorRef.current = { day: anchorDay(el.scrollLeft, offsetX, ppd), offsetX: offsetX };
+
+        /* Exponential, so a notch feels the same at every scale — a linear
+           step is imperceptible at 64 px/day and violent at 2. */
+        var next = clampPpd(ppd * Math.exp(-e.deltaY * 0.002));
+        if (next === ppd) { anchorRef.current = null; return; }
+        ctx.setZoom(next / (TIER_PIXELS[ctx.tier] || 24));
+      }
+
+      el.addEventListener('wheel', onWheel, { passive: false });
+      return function () { el.removeEventListener('wheel', onWheel); };
+    }, [timelineEl, ppd, ctx.tier, ctx.setZoom]);
+
+    /* Put the anchored day back under the pointer — AFTER the commit, never
+       inside the handler. `totalWidth` only reaches the DOM when React paints,
+       so assigning scrollLeft during the wheel event is clamped to the OLD
+       scrollWidth and the view slides left every time you zoom in. */
+    React.useLayoutEffect(function () {
+      var el = timelineEl;
+      var a = anchorRef.current;
+      if (!el || !a) return;
+      el.scrollLeft = scrollLeftForAnchor(a.day, a.offsetX, ppd);
+      anchorRef.current = null;
+    }, [ppd]);
 
     /* Today marker offset within the timeline. */
     var todayOffset = null;
@@ -1271,8 +1381,10 @@
             : null,
         ),
 
-        /* Right scrollable timeline */
-        React.createElement('div', { className: 'fs-gantt__timeline' },
+        /* Right scrollable timeline. The ref goes HERE because this is the
+           element with `overflow-x: auto` — the wheel listener and the
+           scrollLeft restore both have to act on the thing that scrolls. */
+        React.createElement('div', { className: 'fs-gantt__timeline', ref: setTimelineEl },
           React.createElement('div', {
             className: 'fs-gantt__timeline-inner',
             style:     { width: totalWidth + 'px' },
