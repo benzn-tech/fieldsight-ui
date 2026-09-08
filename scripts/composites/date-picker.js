@@ -85,6 +85,15 @@
     return window.FS.api.addDaysISO(yyyymmdd, days);
   }
 
+  /* HOW MUCH WAS SAID. Deliberately still gated on hasReport and on the
+     topics count: a day that was captured but never summarised has
+     `topics: 0`, and shading it would claim a density that does not exist.
+     Its presence is carried by hasContentOnly() below, as a separate glyph.
+
+     Changing THIS function to hasContent would have been the whole change
+     and would have rendered nothing: every uploads-only day still returns 0
+     here (t = 0 falls through every branch), the dot is only drawn under
+     `i > 0`, and there is no --i0 rule in composites.css. */
   function intensity(meta) {
     if (!meta || !meta.hasReport) return 0;
     var t = meta.topics || 0;
@@ -92,6 +101,27 @@
     if (t >= 6)  return 2;
     if (t >= 1)  return 1;
     return 0;
+  }
+
+  /* SOMETHING IS HERE, but nothing was summarised — the day is reachable and
+     the day view has facts to show, so the cell must be findable. Separate
+     from intensity() because they are different facts: one says the day
+     exists, the other says how much was talked about. */
+  function hasContentOnly(meta) {
+    var hasContent = (window.FS.api.dates && window.FS.api.dates.hasContent)
+      || function (m) { return !!(m && m.hasReport); };
+    return hasContent(meta) && intensity(meta) === 0;
+  }
+
+  /* What arrived, for the aria-label. The map already carries these two
+     counts per day (lambda_org_api.py:4567-4568) — a cell that announces
+     itself as "no report" while holding 56 photos is the calendar telling
+     the user the opposite of the truth. */
+  function arrivalLabel(meta) {
+    var bits = [];
+    if (meta && meta.photos)   bits.push(meta.photos + (meta.photos === 1 ? ' photo' : ' photos'));
+    if (meta && meta.sessions) bits.push(meta.sessions + (meta.sessions === 1 ? ' recording' : ' recordings'));
+    return bits.length ? bits.join(', ') : 'captured, no report';
   }
 
   /* Day-cell glyph used by both surfaces. */
@@ -107,6 +137,7 @@
     var disabled = props.disabled;     /* future dates if you want to lock — not used yet */
 
     var i  = intensity(meta);
+    var contentOnly = hasContentOnly(meta);
     var hasSafety = meta && meta.hasReport && (meta.safety || 0) > 0;
 
     /* In-range days (strictly between the two chosen endpoints) get the
@@ -134,7 +165,7 @@
       onMouseEnter: function () { if (props.onHover) props.onHover(iso); },
       'aria-label': iso + (meta && meta.hasReport
         ? ', ' + meta.topics + ' topics' + (hasSafety ? ', ' + meta.safety + ' safety' : '')
-        : ', no report'),
+        : (contentOnly ? ', ' + arrivalLabel(meta) : ', no report')),
       'aria-pressed': selected,
     },
       React.createElement('span', { className: 'fs-date-picker__cell-label' }, label),
@@ -144,6 +175,12 @@
       React.createElement('span', { className: 'fs-date-picker__cell-dots' },
         i > 0 ? React.createElement('span', {
           className: 'fs-date-picker__cell-dot fs-date-picker__cell-dot--i' + i,
+        }) : null,
+        /* Captured but not summarised. An outline dot rather than a filled
+           one: it is a real day with real content, but claiming a density
+           shade for `topics: 0` would be a lie in the other direction. */
+        contentOnly ? React.createElement('span', {
+          className: 'fs-date-picker__cell-dot fs-date-picker__cell-dot--content',
         }) : null,
         hasSafety ? React.createElement('span', {
           className: 'fs-date-picker__cell-dot fs-date-picker__cell-dot--safety',
@@ -419,6 +456,8 @@
             React.createElement('span', { className: 'fs-date-picker__cell-dot fs-date-picker__cell-dot--i3' }), ' heavy'),
           React.createElement('span', null,
             React.createElement('span', { className: 'fs-date-picker__cell-dot fs-date-picker__cell-dot--safety' }), ' safety'),
+          React.createElement('span', null,
+            React.createElement('span', { className: 'fs-date-picker__cell-dot fs-date-picker__cell-dot--content' }), ' captured'),
         ),
       );
     }
@@ -479,6 +518,8 @@
               React.createElement('span', { className: 'fs-date-picker__cell-dot fs-date-picker__cell-dot--i3' }), ' heavy'),
             React.createElement('span', null,
               React.createElement('span', { className: 'fs-date-picker__cell-dot fs-date-picker__cell-dot--safety' }), ' safety'),
+            React.createElement('span', null,
+              React.createElement('span', { className: 'fs-date-picker__cell-dot fs-date-picker__cell-dot--content' }), ' captured'),
           ),
         ),
       ) : null,
@@ -491,6 +532,10 @@
   /* Expose the pure date helpers to Node's test runner only (CommonJS).
      No-op in the browser (Babel-standalone leaves `module` undefined). */
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { parseISO: parseISO, toISO: toISO };
+    module.exports = { parseISO: parseISO, toISO: toISO,
+      /* content-vs-density glyphs — the pair a predicate flip alone
+         would not have exercised */
+      intensity: intensity, hasContentOnly: hasContentOnly,
+      arrivalLabel: arrivalLabel, DayCell: DayCell };
   }
 })();

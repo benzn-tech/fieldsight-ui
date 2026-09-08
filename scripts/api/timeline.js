@@ -94,6 +94,22 @@
       date:    date,
       user:    user || null,
     };
+    /* 2026-04-24 is the dates-fixture's captured-but-not-summarised day
+       (hasReport:false, hasUploads:true), so clicking its outline dot in the
+       preview reaches this branch and renders the arrival line + photo grid.
+       2026-04-27 keeps its own entry: it is a day that HAS a report for some
+       folders and none for Jarley_Trainor, which is a different shape and is
+       what tests/day-photos-are-not-only-the-bound-ones.test.js drives. */
+    if (date === '2026-04-24') {
+      bare.uploads = { sessions: 0, duration_s: 0, photos: 3 };
+      bare.transcripts = 0;
+      bare.day_state = 'captured';
+      bare.photo_filenames = [
+        'Benl1_2026-04-24_07-42-11.jpg',
+        'Benl1_2026-04-24_11-15-40.jpg',
+        'Benl1_2026-04-24_15-58-02.jpg',
+      ];
+    }
     if (date === '2026-04-27') {
       bare.uploads = { sessions: 0, duration_s: 0, photos: 3 };
       bare.transcripts = 0;

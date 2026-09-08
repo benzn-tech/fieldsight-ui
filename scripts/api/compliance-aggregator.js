@@ -310,6 +310,10 @@
     }
     var datesMap = (datesRes && datesRes.dates) || {};
     var datesInRange = Object.keys(datesMap)
+      /* hasReport ON PURPOSE, not an oversight (spec §4b): this fans out
+         getTimeline per day and an uploads-only day 404s. Widening it to
+         hasContent buys nothing and spends requests on days that cannot
+         answer. */
       .filter(function (d) { return d >= from && d <= to && datesMap[d].hasReport; })
       .sort();
 

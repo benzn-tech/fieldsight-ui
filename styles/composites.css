@@ -2797,6 +2797,19 @@
 .fs-date-picker__cell-dot--i3 { background: var(--color-info-700); }
 .fs-date-picker__cell-dot--safety { background: var(--color-accent-500); }
 
+/* Captured, not summarised (feat/days-with-content-not-reports). A day with
+   photos or recordings but no extraction topics: it has no density to shade,
+   so it gets an OUTLINE dot instead of a filled one — present and findable,
+   without borrowing the --iN scale that means "this much was talked about".
+   Transparent centre so it never reads as a faint --i1.
+   Note the box-sizing: --cell-dot is 5x5 with no border, and adding one
+   without this would make this dot a pixel larger than its neighbours. */
+.fs-date-picker__cell-dot--content {
+  background: transparent;
+  border: 1px solid var(--color-info-500);
+  box-sizing: border-box;
+}
+
 /* Heat-map background tints — kept very faint so the dots carry the
    information density and the cell stays readable. */
 .fs-date-picker__cell--i1 { background: color-mix(in srgb, var(--color-info-100) 40%, var(--surface-panel)); }
@@ -6994,6 +7007,23 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   color: var(--text-secondary);
+}
+
+/* A control plus the line that explains it. The row itself is already a
+   column flex, but the hint has to sit with its control rather than as a
+   third sibling -- otherwise the row's `gap` spaces the hint the same
+   distance from the input as the next field's label, and it reads as
+   belonging to the field below it. */
+.fs-settings__field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.fs-settings__field-hint {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  line-height: 1.45;
 }
 
 .fs-settings__select {
