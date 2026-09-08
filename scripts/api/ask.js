@@ -21,6 +21,21 @@
     }
   }
 
+  /* How long the browser waits for a model-backed answer.
+
+     Measured against the deployed prod ask-agent 2026-09-08, six consecutive
+     runs of one question: 9.0 9.5 9.6 9.6 10.3 10.8 seconds, every one of them
+     a correct answer. `_fetch`'s 10s default sat in the middle of that, so the
+     Ask box abandoned roughly half of its own successful answers -- and, with
+     no caller signal to mark the abort as deliberate, re-asked each one three
+     more times before surfacing "signal is aborted without reason".
+
+     29s is not a choice, it is API Gateway's integration timeout for this
+     route (see the note on corroborate below). Budget past it so the gateway's
+     own 504 is what arrives when the backend really is stuck: a client that
+     gives up first turns a server-side fact into a client-side mystery. */
+  var MODEL_CALL_TIMEOUT_MS = 35000;
+
   async function ask(opts) {
     opts = opts || {};
     if (!window.FS.api.useMocks) {
@@ -59,6 +74,8 @@
         method: 'POST',
         baseUrl: askBaseUrl,
         body: body,
+        timeoutMs: MODEL_CALL_TIMEOUT_MS,
+        retry: false,
       });
     }
     await window.FS.api.delay(400);
@@ -96,6 +113,8 @@
         method:  'POST',
         baseUrl: askBaseUrl,
         body:    { question: opts.question, answer: opts.answer },
+        timeoutMs: MODEL_CALL_TIMEOUT_MS,
+        retry:     false,
       });
     }
     await window.FS.api.delay(900);
