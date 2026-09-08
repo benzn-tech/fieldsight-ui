@@ -140,9 +140,30 @@
     return rows;
   }
 
+  /* A day with photos and NO report, in the shape photosForReport reads.
+     Returns null when there is nothing to show, so the caller's existing
+     "skip this day" branch keeps working unchanged.
+
+     Why a reshape and not a straight pass-through of the 404 body: the body
+     spells the folder `user`, photosForReport reads `user_name`, and
+     PhotoGrid builds the S3 key from the `userDisplayName` that comes off
+     it — handing over `raw` gives every row `undefined` there and no photo
+     resolves. The two other 404s the backend can emit (cross-user clip,
+     deleted sources) carry `user` but deliberately carry no filenames, and
+     fall out here as null rather than being special-cased. */
+  function reportFromUploadFacts(raw) {
+    var names = (raw && raw.photo_filenames) || [];
+    if (!names.length) return null;
+    return {
+      photo_filenames: names,
+      user_name: String(raw.user || '').replace(/_/g, ' '),
+    };
+  }
+
   var mod = { photoTime: photoTime, groupByTopic: groupByTopic,
               folderName: folderName,
-              photosForReport: photosForReport };
+              photosForReport: photosForReport,
+              reportFromUploadFacts: reportFromUploadFacts };
   if (typeof window !== 'undefined') {
     if (!window.FS) window.FS = {};
     if (!window.FS.api) window.FS.api = {};

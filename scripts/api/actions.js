@@ -581,6 +581,10 @@
     try {
       var span = await window.FS.api.window.getSpan();
       var dmap = (span && span.dates) || {};
+      /* hasReport ON PURPOSE (spec §4b). Note this is a NARROWING, not a
+         filter: a range with zero report days keeps the full enumeration
+         (see the line below), which is why a request-count assertion over
+         an uploads-only-only range would not measure what it looks like. */
       var reportDays = dates.filter(function (d) { return dmap[d] && dmap[d].hasReport; });
       if (reportDays.length) dates = reportDays;
     } catch (e) { /* keep full enumeration */ }

@@ -123,7 +123,7 @@ test('_generatedDayLabel passes a malformed value through rather than throwing',
 
 test('_fallbackCandidates returns days strictly before today, newest first', async () => {
   reset();
-  datesResponse = { dates: { '2026-07-28': 1, '2026-07-31': 1, '2026-08-02': 1, '2026-07-30': 1 } };
+  datesResponse = { dates: { '2026-07-28': { hasReport: true }, '2026-07-31': { hasReport: true }, '2026-08-02': { hasReport: true }, '2026-07-30': { hasReport: true } } };
 
   assert.deepStrictEqual(await _fallbackCandidates('2026-08-02'),
     ['2026-07-31', '2026-07-30', '2026-07-28']);
@@ -132,7 +132,7 @@ test('_fallbackCandidates returns days strictly before today, newest first', asy
 test('_fallbackCandidates caps how many days it will probe', async () => {
   reset();
   const days = {};
-  for (let d = 1; d <= 20; d++) days['2026-07-' + String(d).padStart(2, '0')] = 1;
+  for (let d = 1; d <= 20; d++) days['2026-07-' + String(d).padStart(2, '0')] = { hasReport: true };
   datesResponse = { dates: days };
 
   assert.strictEqual((await _fallbackCandidates('2026-08-02')).length, 5);
@@ -170,7 +170,7 @@ test('an empty today falls back to the most recent day that has sessions', async
   sessionsByDate['2026-08-02'] = [];
   sessionsByDate['2026-08-01'] = [];
   sessionsByDate['2026-07-31'] = [sess('s-31')];
-  datesResponse = { dates: { '2026-08-01': 1, '2026-07-31': 1, '2026-07-30': 1 } };
+  datesResponse = { dates: { '2026-08-01': { hasReport: true }, '2026-07-31': { hasReport: true }, '2026-07-30': { hasReport: true } } };
 
   const out = await runSection('2026-08-02');
 
@@ -185,7 +185,7 @@ test('a failing probe does not abort the walk', async () => {
   sessionsByDate['2026-08-02'] = [];
   sessionsByDate['2026-08-01'] = new Error('one bad day');
   sessionsByDate['2026-07-31'] = [sess('s-31')];
-  datesResponse = { dates: { '2026-08-01': 1, '2026-07-31': 1 } };
+  datesResponse = { dates: { '2026-08-01': { hasReport: true }, '2026-07-31': { hasReport: true } } };
 
   const out = await runSection('2026-08-02');
 
@@ -196,7 +196,7 @@ test('a failing probe does not abort the walk', async () => {
 test('no sessions anywhere resolves to a ready-but-empty state', async () => {
   reset();
   sessionsByDate['2026-08-02'] = [];
-  datesResponse = { dates: { '2026-07-31': 1 } };
+  datesResponse = { dates: { '2026-07-31': { hasReport: true } } };
   sessionsByDate['2026-07-31'] = [];
 
   const out = await runSection('2026-08-02');

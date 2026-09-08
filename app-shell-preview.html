@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="styles/tokens.css?v=5" />
   <link rel="stylesheet" href="styles/app-shell.css?v=11" />
   <link rel="stylesheet" href="styles/components.css?v=11" />
-  <link rel="stylesheet" href="styles/composites.css?v=116" />
+  <link rel="stylesheet" href="styles/composites.css?v=117" />
 
   <style>
     /* Ensure full-bleed with no scroll */
@@ -87,7 +87,7 @@
   <script type="text/babel" src="scripts/composites/audio-playlist.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/video-player.js?v=1"></script>
   <!-- Sprint 2.5 (Phase E) Calendar/date picker -->
-  <script type="text/babel" src="scripts/composites/date-picker.js?v=8"></script>
+  <script type="text/babel" src="scripts/composites/date-picker.js?v=9"></script>
   <!-- fix/english-date-field — compact English due-date trigger + popover,
        wraps DatePicker(inline plain). Must load AFTER date-picker.js. -->
   <script type="text/babel" src="scripts/composites/date-field.js?v=1"></script>
@@ -198,7 +198,7 @@
   <script src="scripts/mock/sites.fixture.js?v=4"></script>
   <!-- Sprint 9 Track A.0 — closed 12-tag vocabulary + tag inference + subcontractor lookup -->
   <script src="scripts/mock/insights-tags.js?v=3"></script>
-  <script src="scripts/mock/dates.fixture.js?v=2"></script>
+  <script src="scripts/mock/dates.fixture.js?v=3"></script>
   <script src="scripts/mock/actions.fixture.js?v=2"></script>
   <script src="scripts/mock/daily-report.fixture.js?v=4"></script>
   <script src="scripts/mock/media.fixture.js?v=1"></script>
@@ -219,10 +219,10 @@
        loads before compliance-aggregator.js, which rebuilds the resolved-mark
        lookup with it. -->
   <script src="scripts/api/content-hash.js?v=1"></script>
-  <script src="scripts/api/dates.js?v=5"></script>
+  <script src="scripts/api/dates.js?v=6"></script>
   <!-- Sprint date-range-batch — Data window (range calculations) -->
-  <script src="scripts/api/data-window.js?v=2"></script>
-  <script src="scripts/api/timeline.js?v=4"></script>
+  <script src="scripts/api/data-window.js?v=3"></script>
+  <script src="scripts/api/timeline.js?v=5"></script>
   <script src="scripts/api/transcripts.js?v=2"></script>
   <script src="scripts/api/speaker-naming.js?v=10"></script>
   <script src="scripts/api/recording-deletion.js?v=3"></script>
@@ -251,7 +251,7 @@
   <!-- feat/evidence-grouped-download — grouping, the store-only zip writer
        and the archive assembler. All three MUST load after api/index.js,
        which assigns window.FS.api wholesale. -->
-  <script src="scripts/api/evidence-grouping.js?v=2"></script>
+  <script src="scripts/api/evidence-grouping.js?v=3"></script>
   <script src="scripts/api/zip-store.js?v=1"></script>
   <script src="scripts/api/photo-archive.js?v=2"></script>
   <!-- feat/mentioned-dates — the dates a day's report says somebody named.
@@ -337,13 +337,13 @@
   <!-- Mock data shim (weather only) + page registry + pages -->
   <script type="text/babel" src="scripts/mock-data.js?v=4"></script>
   <script type="text/babel" src="scripts/pages/_page-registry.js?v=1"></script>
-  <script type="text/babel" src="scripts/pages/today.js?v=56"></script>
-  <script type="text/babel" src="scripts/pages/timeline.js?v=62"></script>
+  <script type="text/babel" src="scripts/pages/today.js?v=57"></script>
+  <script type="text/babel" src="scripts/pages/timeline.js?v=63"></script>
   <script type="text/babel" src="scripts/pages/reports.js?v=5"></script>
   <script type="text/babel" src="scripts/pages/sites.js?v=14"></script>
   <script type="text/babel" src="scripts/pages/activity.js?v=5"></script>
   <script type="text/babel" src="scripts/pages/tasks.js?v=20"></script>
-  <script type="text/babel" src="scripts/pages/evidence.js?v=17"></script>
+  <script type="text/babel" src="scripts/pages/evidence.js?v=18"></script>
   <script type="text/babel" src="scripts/pages/programme.js?v=28"></script>
   <script type="text/babel" src="scripts/pages/my-work.js?v=1"></script>
   <script type="text/babel" src="scripts/pages/safety.js?v=25"></script>

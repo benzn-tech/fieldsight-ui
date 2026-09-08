@@ -166,6 +166,8 @@
     }
     var datesMap = (datesRes && datesRes.dates) || {};
     var datesInRange = Object.keys(datesMap)
+      /* hasReport ON PURPOSE (spec §4b) — fans out getTimeline per day;
+         an uploads-only day has no report to fetch. */
       .filter(function (d) { return d >= from && d <= to && datesMap[d].hasReport; })
       .sort();
 
