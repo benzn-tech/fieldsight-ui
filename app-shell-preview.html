@@ -215,6 +215,10 @@
   <!--   3. Per-endpoint api modules (read fixtures via FS.api.*) -->
   <script src="scripts/api/sites.js?v=5"></script>
   <script src="scripts/api/org.js?v=22"></script>
+  <!-- staffing — pure "who is on which project, and as what" helpers, read by
+       pages/team.js. Loads before it (and before any page module) because the
+       page calls into it during its first render. -->
+  <script src="scripts/api/staffing.js?v=1"></script>
   <!-- compliance-resolutions — JS twin of src/content_hash.py (parity guard);
        loads before compliance-aggregator.js, which rebuilds the resolved-mark
        lookup with it. -->
@@ -349,7 +353,7 @@
   <script type="text/babel" src="scripts/pages/safety.js?v=25"></script>
   <script type="text/babel" src="scripts/pages/quality.js?v=21"></script>
   <!-- Sprint 7.1+7.2 — /team page -->
-  <script type="text/babel" src="scripts/pages/team.js?v=13"></script>
+  <script type="text/babel" src="scripts/pages/team.js?v=14"></script>
   <!-- Sprint 7.3 + 7.6 — /settings page (density toggle added in 7.6) -->
   <script type="text/babel" src="scripts/pages/settings.js?v=13"></script>
   <!-- Sprint 10 B.2 — Template upload modal composite -->

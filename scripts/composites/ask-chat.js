@@ -491,9 +491,14 @@
           .then(function (cr) { patchCorrob(mid, cr); })
           .catch(function () { patchCorrob(mid, { _failed: true }); });
       }).catch(function (err) {
+        /* A timeout is not an unreachable agent, and saying so sent the reader
+           at the backend while it was answering correctly. Name the two cases
+           apart: one is "it is slow", the other is "it is not there". */
         setMsgs(function (m) { return m.concat([{
           role:  'assistant',
-          text:  'Could not reach the agent. ' + (err && err.message || ''),
+          text:  (err && err.timeout)
+                   ? 'The agent took too long to answer. It may still be working — try asking again.'
+                   : 'Could not reach the agent. ' + (err && err.message || ''),
           error: true,
         }]); });
       }).then(function () {

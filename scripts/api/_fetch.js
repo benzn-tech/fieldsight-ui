@@ -29,6 +29,9 @@
          signal:    AbortSignal
          allowAnon: boolean — skip auth header (e.g. /api/health)
          timeoutMs: number — per-request timeout in ms (default 10000)
+         retry:     boolean — false to attempt once (default: retry 5xx and
+                    network faults on a 1s/2s/4s ladder). Use false when a
+                    retry re-runs work the first attempt is still doing.
        }
        → resolves to either:
             the JSON body, or
@@ -88,7 +91,11 @@
      Returns the Response or throws on timeout/network error. */
   async function fetchWithTimeout(url, fetchOpts, timeoutMs) {
     var controller = new AbortController();
-    var timer = setTimeout(function () { controller.abort(); }, timeoutMs);
+    var timedOut = false;
+    var timer = setTimeout(function () {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
 
     /* Merge caller's AbortSignal with our timeout signal. */
     var callerSignal = fetchOpts.signal;
@@ -98,6 +105,19 @@
 
     try {
       return await fetch(url, Object.assign({}, fetchOpts, { signal: controller.signal }));
+    } catch (err) {
+      /* Our own deadline, not the caller's cancel and not a network fault.
+         Left as the raw AbortError it reached the Ask box as the browser's
+         DOMException text -- "signal is aborted without reason" -- which tells
+         a user nothing and points at the backend, which was healthy. */
+      if (timedOut) {
+        var e = new Error('The request timed out after ' +
+                          Math.round(timeoutMs / 1000) + 's.');
+        e.name = 'TimeoutError';
+        e.timeout = true;
+        throw e;
+      }
+      throw err;
     } finally {
       clearTimeout(timer);
     }
@@ -105,8 +125,13 @@
 
   /* Retry wrapper: retries on 5xx or network-level errors.
      4xx responses are returned immediately (caller decides). */
-  async function fetchWithRetry(url, fetchOpts, timeoutMs) {
-    var maxAttempts = RETRY_DELAYS_MS.length + 1;
+  async function fetchWithRetry(url, fetchOpts, timeoutMs, retry) {
+    /* `retry: false` is for requests where a second attempt is not free.
+       /ask spends a RAG search and a model call per try, so retrying a slow
+       answer buys a duplicate of the same work, four times the tokens, and a
+       user who waits 47s to be told the agent was unreachable while four
+       copies of their question are still being answered. */
+    var maxAttempts = retry === false ? 1 : RETRY_DELAYS_MS.length + 1;
     var lastErr;
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
       try {
@@ -177,7 +202,7 @@
                  ? (opts.body instanceof FormData ? opts.body : JSON.stringify(opts.body))
                  : undefined,
       signal:  opts.signal,
-    }, timeoutMs);
+    }, timeoutMs, opts.retry);
   }
 
   async function request(path, opts) {
