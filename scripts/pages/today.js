@@ -409,11 +409,21 @@
     });
   }
 
-  /* Most recent days with content, strictly before `today`, newest first. */
+  /* Most recent days with a REPORT, strictly before `today`, newest first.
+
+     The hasReport filter is new and is not optional. This used to take every
+     key in the map, which was the same thing only because the map contained
+     report days and nothing else. It now also carries uploads-only days
+     (api/dates.js sends `uploads=1`), and `org.getSessions` builds its
+     sessions from extraction topics (lambda_org_api.py:6668) — so an
+     uploads-only day answers 200 with `sessions: []`. Without this filter the
+     five probes below would be spent on days that cannot answer, hiding the
+     most recent day that can. */
   function _fallbackCandidates(today) {
     return window.FS.api.dates.getDates({ months: 1 }).then(function (res) {
-      return Object.keys((res && res.dates) || {})
-        .filter(function (d) { return d < today; })
+      var dmap = (res && res.dates) || {};
+      return Object.keys(dmap)
+        .filter(function (d) { return d < today && dmap[d] && dmap[d].hasReport; })
         .sort().reverse()
         .slice(0, GENERATED_FALLBACK_PROBES);
     }).catch(function () { return []; });
@@ -1068,6 +1078,8 @@
               }).then(function (res) {
                 var dmap = (res && res.dates) || {};
                 return Object.keys(dmap)
+                  /* hasReport ON PURPOSE (spec §4b) — these pairs exist to
+                     fetch reports from; an uploads-only day has none. */
                   .filter(function (d) { return dmap[d] && dmap[d].hasReport && d >= from && d <= today; })
                   .map(function (d) { return { date: d, folder: f }; });
               }).catch(function () { return []; });

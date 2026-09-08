@@ -202,7 +202,14 @@
         var datesMap = (span && span.dates) || {};
         var allDates = Object.keys(datesMap)
           .filter(function (d) {
-            return datesMap[d] && datesMap[d].hasReport && d >= view.from && d <= view.to;
+            /* Content, not reports. A day with photos and no extraction
+               topics still has photos, and they are reachable through the
+               404's `photo_filenames` — see the `_notFound` branch in the
+               row builder below, without which these days would list with
+               zero photos each. */
+            var hasContent = (window.FS.api.dates && window.FS.api.dates.hasContent)
+              || function (m) { return !!(m && m.hasReport); };
+            return hasContent(datesMap[d]) && d >= view.from && d <= view.to;
           })
           .sort()
           .reverse();
@@ -297,7 +304,23 @@
         var rows = [];
         var total = 0;
         perDay.forEach(function (x) {
-          if (!x || !x.report || x.report._notFound || x.report._accessDenied || x.report.available_users) return;
+          if (!x || !x.report || x.report._accessDenied || x.report.available_users) return;
+          /* A day with photos and no report is a 404 whose body carries the
+             whole day's filenames. Reshape rather than pass `raw` straight
+             through: photosForReport reads `photo_filenames` AND `user_name`,
+             and the 404 body spells the folder `user` — handing it `raw`
+             would give every row `userDisplayName: undefined`, which is what
+             PhotoGrid builds the S3 key from.
+             The other two 404s (cross-user clip, deleted sources) carry
+             `user` but deliberately no filenames, so they fall out here. */
+          if (x.report._notFound) {
+            var egn = window.FS && window.FS.api && window.FS.api.evidenceGrouping;
+            var asReport = egn && egn.reportFromUploadFacts
+              ? egn.reportFromUploadFacts(x.report.raw)
+              : null;
+            if (!asReport) return;
+            x = { date: x.date, report: asReport };
+          }
           /* feat/evidence-shows-the-whole-day — the day's photos, bound or
              not. This used to walk topics only, so a photo taken while nobody
              was talking reached no screen: 71 of 90 on prod days that HAVE a

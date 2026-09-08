@@ -40,15 +40,26 @@
      triggers one GET /api/dates. */
   var spanPromise = null;
 
+  /* CONTENT, not reports. This span is the bound of the 'All' preset, so a
+     day that holds 56 photos and no extraction topics was outside every
+     range the app could express — see the spec's §2 table. hasContent falls
+     back to hasReport wherever the backend did not send hasUploads, so this
+     is unchanged on the legacy path and in mocks.
+
+     Widening it does NOT widen any report fan-out: the four aggregators that
+     consume resolve('all') filter on hasReport themselves (spec §4b), so
+     they issue the same requests over a wider nominal window. */
   function computeSpan(datesMap) {
-    var reportKeys = Object.keys(datesMap).filter(function (k) {
-      return datesMap[k] && datesMap[k].hasReport;
+    var hasContent = (window.FS.api.dates && window.FS.api.dates.hasContent)
+      || function (m) { return !!(m && m.hasReport); };
+    var contentKeys = Object.keys(datesMap).filter(function (k) {
+      return hasContent(datesMap[k]);
     }).sort();
 
     return {
       dates: datesMap,
-      earliest: reportKeys.length ? reportKeys[0] : null,
-      latest:   reportKeys.length ? reportKeys[reportKeys.length - 1] : null,
+      earliest: contentKeys.length ? contentKeys[0] : null,
+      latest:   contentKeys.length ? contentKeys[contentKeys.length - 1] : null,
     };
   }
 
@@ -103,5 +114,10 @@
     getSpan: getSpan,
     resolve: resolve,
   };
+
+  /* Node test runner only; no-op in the browser. */
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { computeSpan: computeSpan, resolve: resolve };
+  }
 
 })();

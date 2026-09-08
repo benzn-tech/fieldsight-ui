@@ -36,7 +36,12 @@
     { d: 2,  kind: 'full',    topics: 9,  safety: 1 }, /* 04-27 Mon */
     { d: 3,  kind: 'full',    topics: 12, safety: 2 }, /* 04-26 Sun (catch-up) */
     { d: 4,  kind: 'minutes', topics: 4,  safety: 0 }, /* 04-25 Sat — minutes only */
-    { d: 5,  kind: 'empty' },                          /* 04-24 Fri — empty */
+    /* 04-24 Fri — CAPTURED, NOT SUMMARISED. Photos arrived, extraction
+       produced no topics. Was 'empty' (omitted from the map entirely), which
+       meant mock mode could not reach the outline dot, the widened span, or
+       Evidence's _notFound branch at all — 43% of prod capture days are this
+       shape and none of them were previewable. */
+    { d: 5,  kind: 'captured', topics: 0, safety: 0, photos: 3, sessions: 0 },
     { d: 6,  kind: 'full',    topics: 13, safety: 4 }, /* 04-23 Thu — high-risk */
     { d: 7,  kind: 'full',    topics: 11, safety: 1 }, /* 04-22 Wed */
     { d: 8,  kind: 'minutes', topics: 5,  safety: 0 }, /* 04-21 Tue — minutes only */
@@ -73,6 +78,14 @@
       topics:        entry.topics,
       safety:        entry.safety,
     };
+    /* Only the captured day carries the uploads half of the contract. Every
+       other entry leaves hasUploads ABSENT on purpose: absent is the case
+       that must keep behaving exactly as it did before hasContent existed. */
+    if (entry.kind === 'captured') {
+      dates[key].hasUploads = true;
+      dates[key].photos     = entry.photos;
+      dates[key].sessions   = entry.sessions;
+    }
   });
 
   if (!window.FieldSight) window.FieldSight = {};

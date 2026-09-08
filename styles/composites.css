@@ -2797,6 +2797,19 @@
 .fs-date-picker__cell-dot--i3 { background: var(--color-info-700); }
 .fs-date-picker__cell-dot--safety { background: var(--color-accent-500); }
 
+/* Captured, not summarised (feat/days-with-content-not-reports). A day with
+   photos or recordings but no extraction topics: it has no density to shade,
+   so it gets an OUTLINE dot instead of a filled one — present and findable,
+   without borrowing the --iN scale that means "this much was talked about".
+   Transparent centre so it never reads as a faint --i1.
+   Note the box-sizing: --cell-dot is 5x5 with no border, and adding one
+   without this would make this dot a pixel larger than its neighbours. */
+.fs-date-picker__cell-dot--content {
+  background: transparent;
+  border: 1px solid var(--color-info-500);
+  box-sizing: border-box;
+}
+
 /* Heat-map background tints — kept very faint so the dots carry the
    information density and the cell stays readable. */
 .fs-date-picker__cell--i1 { background: color-mix(in srgb, var(--color-info-100) 40%, var(--surface-panel)); }

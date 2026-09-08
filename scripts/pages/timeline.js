@@ -550,17 +550,55 @@
     };
   }
 
-  /* Pick the most recent date with a report from /api/dates, or null.
-     Mirrors the helper in today.js so the two pages share the same
-     fallback semantics — when "today" has no report, the user lands
-     on the latest available rather than a stale hardcoded date. */
+  /* Pick the most recent date with CONTENT from /api/dates, or null — when
+     "today" is empty the user lands on the latest available rather than a
+     stale hardcoded date.
+
+     Content, not reports: on 2026-09-08 the two newest capture days in prod
+     (09-06 and 09-07) held recordings and no extraction topics, so this
+     landed the user two days behind the newest thing they had recorded.
+     Both destinations now render those days — the single-user view via
+     NoReportState's `facts`, the aggregated view via the branch added in
+     AggregatedDayView below. Changing this without that branch would have
+     landed a site-anchored manager on "No reports for this project". */
   function findLatestReportDate(datesMap) {
+    var hasContent = (window.FS.api.dates && window.FS.api.dates.hasContent)
+      || function (m) { return !!(m && m.hasReport); };
     var keys = Object.keys(datesMap || {}).filter(function (d) {
-      return datesMap[d] && datesMap[d].hasReport;
+      return hasContent(datesMap[d]);
     });
     if (keys.length === 0) return null;
     keys.sort();
     return keys[keys.length - 1];
+  }
+
+  /* Folders that captured something on a day that produced no report.
+
+     Their 404 body carries what arrived (uploads / photo_filenames /
+     day_state) and NoReportState already knows how to draw all of it — but
+     AggregatedDayView filtered `_notFound` out before rendering and showed a
+     bare "No reports for this project", so those facts never reached a
+     screen. That is the state a site-anchored manager lands in for every
+     uploads-only day, and on prod 2026-09-08 that was 18 of 42 capture days.
+
+     ONLY the plain "no report" 404 carries the fields. The cross-user-clip
+     and deleted-sources 404s carry `user` and deliberately no counts and no
+     filenames — the first because answering "they recorded 53 photos"
+     discloses the very fact being withheld, the second because a photo key
+     has no session id so the counts would partially undo a deletion. Testing
+     for the payload rather than for the status code is what keeps both of
+     them out. */
+  function capturedFolders(results) {
+    return (results || []).filter(function (x) {
+      var raw = x && x.report && x.report._notFound && x.report.raw;
+      return !!(raw && (raw.uploads || (raw.photo_filenames || []).length));
+    }).map(function (x) {
+      return { user: x.user, facts: x.report.raw };
+    }).sort(function (a, b) {
+      var an = ((a.user && a.user.name) || '').toLowerCase();
+      var bn = ((b.user && b.user.name) || '').toLowerCase();
+      return an < bn ? -1 : (an > bn ? 1 : 0);
+    });
   }
 
   function formatDateLabel(yyyymmdd) {
@@ -1158,7 +1196,8 @@
             var bn = (b.report.user_name || b.user.name || '').toLowerCase();
             return an < bn ? -1 : (an > bn ? 1 : 0);
           });
-          setState({ status: 'ok', sections: sections });
+          setState({ status: 'ok', sections: sections,
+                     captured: capturedFolders(results) });
           /* Retire optimistic patches the fresh fan-out has caught up to
              (across every section's topics). */
           var freshTopics = [];
@@ -1217,7 +1256,25 @@
     }
 
     var sections = state.sections || [];
+    var captured = state.captured || [];
     if (sections.length === 0) {
+      /* Nothing was summarised — but something may have ARRIVED. One
+         NoReportState per folder that captured, each carrying that folder's
+         own facts, so the photos render under the person who took them
+         rather than being merged into a single anonymous grid. */
+      if (captured.length) {
+        return React.createElement(React.Fragment, null,
+          captured.map(function (c) {
+            return React.createElement(NoReportState, {
+              key:     c.user.folder_name,
+              message: (c.user.name || unfolder(c.user.folder_name))
+                       + ' — no report for ' + formatDateLabel(props.date),
+              facts:   c.facts,
+              date:    props.date,
+              user:    c.user.folder_name,
+            });
+          }));
+      }
       return React.createElement(NoReportState, {
         message: 'No reports for this project on ' + formatDateLabel(props.date),
       });
@@ -4211,6 +4268,8 @@
       diffWords: diffWords,
       formatEditTime: formatEditTime,
       formatContentEdit: formatContentEdit,
+      findLatestReportDate: findLatestReportDate,
+      capturedFolders: capturedFolders,
       /* live recording KPIs */
       fmtRecordedTime: fmtRecordedTime,
       /* feat/findings-legible — the seam between this render and
