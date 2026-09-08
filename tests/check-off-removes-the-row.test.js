@@ -88,6 +88,16 @@ function loadTaskCard(stateSeed) {
            Card: global.window.FieldSight.Card };
 }
 
+/* NEWLINES NORMALISED BEFORE ANY MATCHING. This repo is developed on Windows
+   with core.autocrlf=true, so the same file is LF in one checkout and CRLF in
+   the next — a `git stash pop` is enough to flip it. A pattern spanning a line
+   break then matches when the file happens to be LF and fails when it happens
+   to be CRLF, which reads as "the code changed" when nothing changed. */
+function readNormalised(name) {
+  return fs.readFileSync(path.join(__dirname, '..', 'styles', name), 'utf8')
+    .replace(/\r\n/g, '\n');
+}
+
 function walk(node, visit) {
   if (!node || typeof node !== 'object') return;
   visit(node);
@@ -227,10 +237,10 @@ test('every custom property used without a fallback is actually defined', () => 
 });
 
 test('the check-off animation resolves to a real easing curve', () => {
-  const composites = fs.readFileSync(
-    path.join(__dirname, '..', 'styles', 'composites.css'), 'utf8');
-  const tokens = fs.readFileSync(
-    path.join(__dirname, '..', 'styles', 'tokens.css'), 'utf8');
+  /* Newlines normalised: core.autocrlf=true flips these files between LF and
+     CRLF, and a pattern spanning a line break must not depend on which. */
+  const composites = readNormalised('composites.css');
+  const tokens = readNormalised('tokens.css');
 
   const decl = composites.match(/\.fs-task-card--checking-off\s*\{[^}]*animation:\s*([^;]+);/);
   assert.ok(decl, 'the check-off animation declaration has moved or been removed');
