@@ -12,7 +12,8 @@
 
    Right detail (7.2):
      • Large Avatar + name + role badge + scope pill
-     • Field rows: Primary site · All sites · Device ID
+     • Field rows: Projects (editable: role per project, remove,
+       add) · Device ID
      • Footer: "View their reports" → /timeline, "View their tasks" → /tasks?user=
 
    Sprint 9 Track B additions:
@@ -62,7 +63,7 @@
        • PM whose name matches a fixture user with managed_sites or
          sites → use that
        • Anyone else (worker / site_manager) → fall back to their own
-         primary_site (single-site scope)
+         their own projects (single-project scope)
      A null return = "do NOT filter". */
   function getCallerManagedSites(caller) {
     if (!caller || caller.isAdmin) return null;
@@ -110,29 +111,20 @@
   /* Returns true if a user record overlaps any of the given site_ids. */
   function userOnSites(user, siteIds) {
     if (!siteIds || siteIds.length === 0) return true;
-    if (user.primary_site && siteIds.indexOf(user.primary_site) >= 0) return true;
-    return (user.sites || []).some(function (s) {
-      return siteIds.indexOf(s) >= 0;
+    /* Every membership counts, not just the one that happened to be first.
+       Scoped to primary_site, a PM could not see a person who is on their
+       project as anything other than that person's earliest project. */
+    return window.FS.staffing.projectsOf(user).some(function (p) {
+      return siteIds.indexOf(p.site_id) >= 0;
     });
   }
 
-  /* Deterministic sort key: descending by user count, then site name. */
-  function siteGroupSortKey(group) {
-    return -group.users.length;
-  }
-
+  /* Grouping is FS.staffing.groupByProject: a person on two projects is
+     listed under both (grouping on primary_site left them off the second
+     project's roster), each row carries the role held on THAT project, and
+     people on no project keep their own bucket instead of vanishing. */
   function groupUsersBySite(users) {
-    var map = {};
-    (users || []).forEach(function (u) {
-      var key = u.primary_site || '__none__';
-      if (!map[key]) map[key] = { site_id: key, users: [] };
-      map[key].users.push(u);
-    });
-    return Object.values(map).sort(function (a, b) {
-      var diff = siteGroupSortKey(a) - siteGroupSortKey(b);
-      if (diff !== 0) return diff;
-      return (a.site_id || '').localeCompare(b.site_id || '');
-    });
+    return window.FS.staffing.groupByProject(users);
   }
 
   /* Live org site names (batch 2c Task 4) — org.getMembers() memberships
@@ -141,8 +133,12 @@
      TeamProvider's load effect (getOrgSites) once org sites resolve;
      stays empty in mock mode so the fixtures lookup below is unaffected. */
   var _orgSiteNames = {};
+  /* Same source as _orgSiteNames, kept as an option list because the detail
+     panel's project picker needs the ids too, not just the labels. */
+  var _orgSiteOptions = [];
 
   function siteDisplayName(siteId) {
+    if (siteId === window.FS.staffing.UNSTAFFED) return 'No project';
     if (_orgSiteNames[siteId]) return _orgSiteNames[siteId];
     var fix = (window.FieldSight && window.FieldSight.fixtures && window.FieldSight.fixtures.sites) || {};
     var match = (fix.sites || []).filter(function (s) { return s.site_id === siteId; })[0];
@@ -266,6 +262,9 @@
           window.FS.api.org.getOrgSites({ includeArchived: true }).then(function (sitesRes) {
             if (cancelled || !sitesRes || !sitesRes.sites) return;
             sitesRes.sites.forEach(function (s) { _orgSiteNames[s.site_id] = s.name; });
+            _orgSiteOptions = sitesRes.sites.map(function (s) {
+              return { v: s.site_id, l: s.name };
+            });
             setState(function (s) { return Object.assign({}, s); });   /* re-render so group headers refresh */
           }).catch(function () {});
 
@@ -412,6 +411,33 @@
       });
     }
 
+    /* Staffing writes. Each one is a single membership call, and state is
+       patched ONLY after the server took it -- the Reassign action used to
+       patch first and never call, which is how it managed to report a move it
+       had not made. */
+    function writeMembership(deviceId, siteId, role) {
+      var org  = window.FS.api.org;
+      var call = role === null ? org.removeMemberSite(deviceId, siteId)
+                               : org.setMemberSite(deviceId, siteId, role);
+      return Promise.resolve(call).then(function (res) {
+        if (res && (res._accessDenied || res._notFound)) {
+          throw new Error(res.error || 'not permitted');
+        }
+        setState(function (s) {
+          if (s.status !== 'ok') return s;
+          var patched = (s.users || []).map(function (u) {
+            if (u.device_id !== deviceId) return u;
+            var next = role === null
+              ? window.FS.staffing.withoutProject(u.memberships, siteId)
+              : window.FS.staffing.withProject(u.memberships, siteId, role);
+            return Object.assign({}, u, { memberships: next });
+          });
+          return Object.assign({}, s, { users: patched, groups: groupUsersBySite(patched) });
+        });
+        return res;
+      });
+    }
+
     var ctx = {
       state:       state,
       caller:      caller,
@@ -420,6 +446,8 @@
       setShowArchived: setShowArchived,
       refetch: function () { setRetry(function (n) { return n + 1; }); },
       applyReassign: applyReassign,
+      writeMembership: writeMembership,
+      orgSiteOptions: function () { return _orgSiteOptions.slice(); },
       addUser:     addUser,
       removeUser:  removeUser,
       changeRole:  changeRole,
@@ -439,6 +467,27 @@
     return React.createElement('select', { className: 'fs-settings__select', value: value, onChange: function (e) { onChange(e.target.value); } },
       options.map(function (o) { return React.createElement('option', { key: o.v, value: o.v }, o.l); }));
   }
+  /* Multi-pick list. The invite form used a single <select> although
+     createMember has always taken an array of memberships, so a person who
+     starts on two projects had to be invited to one and then added to the
+     other by hand. */
+  function fCheckList(values, options, onToggle) {
+    values = values || [];
+    if (!options.length) {
+      return React.createElement('div', { className: 'fs-settings__hint' }, 'No projects available');
+    }
+    return React.createElement('div', { className: 'fs-team-sitepick' },
+      options.map(function (o) {
+        return React.createElement('label', { key: o.v, className: 'fs-team-sitepick__option' },
+          React.createElement('input', {
+            type: 'checkbox',
+            checked: values.indexOf(o.v) >= 0,
+            onChange: function () { onToggle(o.v); },
+          }),
+          React.createElement('span', null, o.l));
+      }));
+  }
+
   function roleOptions() {
     /* Live org API only knows 5 global_role slugs — offering the full
        10-role mock vocabulary would let an admin pick a role toOrgRole()
@@ -485,12 +534,20 @@
     /* Live default is WORKER, explicitly — the live roleOptions() list is
        admin-first, and inheriting roles[0] would silently default every new
        member to full org admin (least-privilege, review fix batch 2c). */
-    var refForm = React.useState({ name: '', email: '', role: live ? 'worker' : ((roles[0] && roles[0].v) || 'worker'), primary_site: live ? '' : ((mockSites[0] && mockSites[0].v) || '') });
+    var refForm = React.useState({ name: '', email: '', role: live ? 'worker' : ((roles[0] && roles[0].v) || 'worker'), site_ids: live ? [] : ((mockSites[0] && [mockSites[0].v]) || []) });
     var form = refForm[0], setForm = refForm[1];
     var refBusy = React.useState(false); var busy = refBusy[0], setBusy = refBusy[1];
     var avatarRef = React.useRef(null);
     var Avatar = window.FieldSight && window.FieldSight.Avatar;
     function set(k, v) { setForm(function (f) { var n = Object.assign({}, f); n[k] = v; return n; }); }
+    function toggleSite(siteId) {
+      setForm(function (f) {
+        var picked = (f.site_ids || []).slice();
+        var at = picked.indexOf(siteId);
+        if (at >= 0) picked.splice(at, 1); else picked.push(siteId);
+        return Object.assign({}, f, { site_ids: picked });
+      });
+    }
     function onPickAvatar(e) { var f = e.target.files && e.target.files[0]; if (!f) return; var r = new FileReader(); r.onload = function () { set('avatarUrl', r.result); }; r.readAsDataURL(f); }
     function submit() {
       if (!form.name.trim() || busy) return;
@@ -505,10 +562,7 @@
             first_name:  firstName,
             last_name:   lastName,
             global_role: orgRole,
-            memberships: form.primary_site ? [{
-              site_id: form.primary_site,
-              role:    (['pm', 'site_manager', 'worker'].indexOf(orgRole) >= 0 ? orgRole : 'worker'),
-            }] : [],
+            memberships: window.FS.staffing.membershipsForInvite(form.site_ids, orgRole),
           })
         : window.FS.api.sites.createUser(form);
       creating.then(function (resp) {
@@ -538,7 +592,7 @@
         )),
         fFieldRow('Email', fText(form.email, function (v) { set('email', v); }, 'email')),
         fFieldRow('Position / role', fSelect(form.role, roles, function (v) { set('role', v); })),
-        fFieldRow('Primary site', fSelect(form.primary_site, (live ? [{ v: '', l: '— select site —' }].concat(sites) : sites), function (v) { set('primary_site', v); })),
+        fFieldRow('Projects', fCheckList(form.site_ids, sites, toggleSite)),
         React.createElement('div', { className: 'fs-settings__actions' },
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: props.onClose }, 'Cancel'),
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--md', disabled: busy, onClick: submit }, busy ? 'Adding…' : 'Add member')
@@ -663,9 +717,15 @@
                 ),
 
                 React.createElement('div', { className: 'fs-team__user-list' },
-                  group.users.map(function (u) {
+                  group.users.map(function (row) {
+                    var u = row.user;
                     var isSelected = selectedId === u.device_id;
-                    var extraSites = (u.sites || []).filter(function (s) { return s !== u.primary_site; });
+                    /* The badge shows the role held on THIS project, which is
+                       what graded roles act on -- u.role is the global tier and
+                       showing it here said "Admin" under a project where the
+                       person is a worker. */
+                    var siteRole = row.role || u.role;
+                    var elsewhere = window.FS.staffing.projectsOf(u).length - 1;
                     return React.createElement('button', {
                       key:       u.device_id,
                       type:      'button',
@@ -680,13 +740,13 @@
                         React.createElement('div', { className: 'fs-team__user-meta' },
                           Badge ? React.createElement(Badge, {
                             tone: 'neutral', size: 'xs', variant: 'subtle',
-                          }, roleLabel(u.role)) : roleLabel(u.role),
+                          }, roleLabel(siteRole)) : roleLabel(siteRole),
                           (u.archived && Badge) ? React.createElement(Badge, {
                             tone: 'neutral', size: 'xs', variant: 'subtle',
                           }, 'Archived') : null,
-                          extraSites.length > 0
+                          elsewhere > 0
                             ? React.createElement('span', { className: 'fs-team__extra-sites' },
-                                '+' + extraSites.length + ' site' + (extraSites.length > 1 ? 's' : ''))
+                                '+' + elsewhere + ' project' + (elsewhere > 1 ? 's' : ''))
                             : null,
                         ),
                       ),
@@ -767,7 +827,9 @@
     },
       React.createElement('p', { className: 'fs-team-reassign__lead' },
         'Move ', React.createElement('strong', null, u.name),
-        ' to a different primary site within your managed projects.'),
+        ' off ', React.createElement('strong', null, siteDisplayName(u.primary_site)),
+        ' and onto another of your projects. Their other projects are left'
+        + ' alone — use Projects in the detail panel to edit those.'),
 
       React.createElement('div', { className: 'fs-team-reassign__options', role: 'radiogroup', 'aria-label': 'Pick a primary site' },
         managedSites.map(function (siteId) {
@@ -822,6 +884,83 @@
   }
 
   /* ---------- TeamRightDetail — Sprint 7.2 + 9.B ------------------------ */
+
+  /* ---------- ProjectsField --------------------------------------------
+     The right-detail replacement for the read-only "Primary site" / "All
+     sites" rows. Those showed memberships[0] as if it were a primary and the
+     rest as a count, which is not the shape the backend holds: N equal
+     memberships, each with its own role, and the role is what graded roles act
+     on. This lists them, lets an admin change the role on one, take the person
+     off one, or add another -- each through a single membership call. */
+  function ProjectsField(props) {
+    var u = props.user;
+    var canEdit = props.canEdit;
+    var ctx = React.useContext(TeamContext);
+    var staffing = window.FS.staffing;
+    var refBusy = React.useState('');
+    var busy = refBusy[0], setBusy = refBusy[1];
+
+    var projects = staffing.projectsOf(u);
+    var options  = (ctx && ctx.orgSiteOptions) ? ctx.orgSiteOptions() : [];
+    var addable  = staffing.addableProjects(u, options);
+
+    function write(siteId, role) {
+      if (!ctx || !ctx.writeMembership) return;
+      setBusy(siteId);
+      ctx.writeMembership(u.device_id, siteId, role).then(function () {
+        setBusy('');
+      }).catch(function (err) {
+        setBusy('');
+        if (window.FS.toast) {
+          window.FS.toast.show({
+            message: 'Could not update projects: ' + ((err && err.message) || 'request failed'),
+            tone: 'error', duration: 5000,
+          });
+        }
+      });
+    }
+
+    return React.createElement('div', { className: 'fs-team-detail__field' },
+      React.createElement('div', { className: 'fs-team-detail__field-label' }, 'Projects'),
+      React.createElement('div', { className: 'fs-team-detail__field-value' },
+        projects.length === 0
+          ? React.createElement('span', { className: 'fs-team-detail__muted' },
+              'Not on any project')
+          : React.createElement('ul', { className: 'fs-team-projects' },
+              projects.map(function (p) {
+                return React.createElement('li', { key: p.site_id, className: 'fs-team-projects__row' },
+                  React.createElement('span', { className: 'fs-team-projects__name' },
+                    siteDisplayName(p.site_id)),
+                  canEdit
+                    ? React.createElement('select', {
+                        className: 'fs-settings__select fs-team-projects__role',
+                        value: p.role,
+                        disabled: busy === p.site_id,
+                        onChange: function (e) { write(p.site_id, e.target.value); },
+                      }, staffing.MEMBERSHIP_ROLES.map(function (r) {
+                        return React.createElement('option', { key: r, value: r }, roleLabel(r));
+                      }))
+                    : React.createElement('span', { className: 'fs-team-projects__role' },
+                        roleLabel(p.role)),
+                  canEdit
+                    ? React.createElement('button', {
+                        type: 'button',
+                        className: 'fs-team-projects__remove',
+                        disabled: busy === p.site_id,
+                        onClick: function () { write(p.site_id, null); },
+                      }, busy === p.site_id ? '…' : 'Remove')
+                    : null);
+              })),
+        (canEdit && addable.length > 0)
+          ? React.createElement('select', {
+              className: 'fs-settings__select fs-team-projects__add',
+              value: '',
+              onChange: function (e) { if (e.target.value) write(e.target.value, 'worker'); },
+            }, [{ v: '', l: '+ Add to project…' }].concat(addable).map(function (o) {
+              return React.createElement('option', { key: o.v, value: o.v }, o.l);
+            }))
+          : null));
+  }
 
   function TeamRightDetail(props) {
     var fs      = window.FieldSight;
@@ -880,8 +1019,7 @@
     }
     var u = liveUser;
 
-    var allSiteNames = (u.sites || []).map(siteDisplayName).join(', ') || '—';
-    var scopePrimary = siteDisplayName(u.primary_site);
+    var scopePrimary = window.FS.staffing.projectSummary(u, siteDisplayName);
     var today        = window.FS.api && window.FS.api.todayNZDT ? window.FS.api.todayNZDT() : '';
 
     /* Task 4 (batch A) — deliberately does NOT forward u.primary_site (or
@@ -929,6 +1067,12 @@
        orgLive()-gated like archive: setMemberFolder has a mock branch too
        (api/org.js), so the control also works in demo/mock mode. */
     var canEditFolder = !!(window.FS && window.FS.can && window.FS.can(caller, 'user:manage'));
+
+    /* Staffing edits are live-only: the mock branch of setMemberSite resolves
+       without persisting, so offering the control in mock mode would be the
+       same fiction the Reassign button used to be. */
+    var canEditProjects = orgLive()
+      && !!(window.FS && window.FS.can && window.FS.can(caller, 'user:manage'));
 
     function startEditFolder() {
       setFolderValue(u.folder_name || '');
@@ -1022,14 +1166,7 @@
             }, roleOptions().map(function (o) { return React.createElement('option', { key: o.v, value: o.v }, o.l); })),
           ),
         ),
-        React.createElement('div', { className: 'fs-team-detail__field' },
-          React.createElement('div', { className: 'fs-team-detail__field-label' }, 'Primary site'),
-          React.createElement('div', { className: 'fs-team-detail__field-value' }, scopePrimary),
-        ),
-        React.createElement('div', { className: 'fs-team-detail__field' },
-          React.createElement('div', { className: 'fs-team-detail__field-label' }, 'All sites'),
-          React.createElement('div', { className: 'fs-team-detail__field-value' }, allSiteNames),
-        ),
+        React.createElement(ProjectsField, { user: u, canEdit: canEditProjects }),
         React.createElement('div', { className: 'fs-team-detail__field' },
           React.createElement('div', { className: 'fs-team-detail__field-label' }, 'Device ID'),
           React.createElement('div', { className: 'fs-team-detail__field-value fs-team-detail__field-value--mono' },
