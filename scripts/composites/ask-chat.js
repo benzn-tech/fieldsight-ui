@@ -136,6 +136,29 @@
      shown as an empty state, 1078 uploads with zero log lines). The answer
      itself still never acquires an error banner: an optional enrichment
      failing is not the answer failing. */
+  /* The early return that decides whether this block appears at all.
+
+     It is its own function because it is the part that has already been wrong
+     once: the design says a failure must render a LINE and never nothing, and
+     an early return that only knew about the three fields existing at the time
+     violated it four lines later. Every field added to the response body since
+     has had to be remembered here, and `searched` is the newest -- a body that
+     says "we did not consult the web" carries no items, no dropped, no
+     truncated and no timeout, so the old condition would have swallowed it
+     into silence, which is the exact shape this component forbids.
+
+     Exported because it is a pure decision and this file cannot be rendered
+     under Node (no React, no build step), so this is the piece a test can
+     actually drive. */
+  function hasNothingToShow(res) {
+    if (!res) return true;
+    return !(res.corroborations || []).length
+        && !(res.dropped || []).length
+        && !res.truncated
+        && !res.timed_out
+        && res.searched !== false;
+  }
+
   function renderCorroboration(res) {
     if (!res) return null;
 
@@ -164,7 +187,7 @@
        This was written into the design and then violated four lines later by
        an early return that only knew about the three fields it had at the
        time. */
-    if (!items.length && !dropped.length && !res.truncated && !res.timed_out) {
+    if (hasNothingToShow(res)) {
       return null;
     }
 
@@ -214,6 +237,23 @@
       res.timed_out
         ? React.createElement('div', { className: 'fs-ask-corrob__note' },
             'The check ran out of time')
+        : null,
+
+      /* A third thing, and it needs its own words.
+
+         `truncated` and `timed_out` are already said separately because a
+         reader who sees three cards deserves to know which happened. This is
+         neither: the request finished, quickly, and never consulted anything --
+         the vendor answered without running the search. Routing it through
+         `timed_out` would print "ran out of time" about a four-second request,
+         and calling it `not_found` would assert a search that did not happen.
+
+         Measured on OpenRouter 2026-09-08: a model returned 200 OK with
+         confident prose and zero web results. The backend now refuses to
+         reconcile that; this line is how the reader is told. */
+      res.searched === false
+        ? React.createElement('div', { className: 'fs-ask-corrob__note' },
+            'Couldn’t check the web for this answer')
         : null
     );
   }
@@ -633,6 +673,7 @@
 
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.AskChat = AskChat;
+  window.FieldSight._corroborationHasNothingToShow = hasNothingToShow;
   /* Exported so the wording can be pinned by a test without rendering React,
      and so SP-Ask's spoken variant can be written against the same dict. */
   window.FieldSight.formatAnswerBasis = formatAnswerBasis;
