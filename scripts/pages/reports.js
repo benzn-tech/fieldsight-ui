@@ -56,9 +56,57 @@
 
   /* Trigger a download for a presigned URL. We must NOT cache the URL
      (15-min expiry, BACKEND-CONTEXT §7) — fetch fresh on every click. */
+  /* WHICH FILE THE BUTTON ACTUALLY FETCHES.
+
+     The button has always said "Download .docx" and always presigned
+     `report.key`, which is the .json — so every download in this product's
+     life handed the user raw JSON while the Word file sat beside it in the
+     same S3 folder, unmentioned by the history endpoint. That endpoint now
+     returns `docx_key` when a Word file exists.
+
+     `docx_key` ABSENT means this report genuinely has no Word file (Word
+     generation disables itself when the python-docx layer is missing or built
+     for the wrong runtime; production has one such day). Falling back to the
+     .json is right there — it is the report, just not in Word — but the
+     button has to stop claiming otherwise, which is what downloadLabel is
+     for. Presigning a .docx that does not exist would hand the browser a URL
+     that answers 403, and this bucket answers 403 for absent keys, so it
+     would not even read as "no Word file". */
+  function downloadKeyFor(report) {
+    return (report && report.docx_key) || (report && report.key) || null;
+  }
+  function downloadLabel(report) {
+    return (report && report.docx_key) ? 'Download .docx' : 'Download .json';
+  }
+
+  /* Read a report in the browser. Same presigned URL the download uses —
+     which is fetchable cross-origin because the data bucket carries a CORS
+     rule for the Amplify origins (out-of-band config; see the pipeline's
+     CLAUDE.md, it is not in any template).
+
+     Always the .json, never the .docx: this is the machine-readable form and
+     the one the viewer renders. The Word file is for sending to someone. */
+  async function fetchReportJson(report) {
+    var key = (report && report.key) || null;
+    if (!key) throw new Error('This report has no file to open.');
+    var res = await window.FS.api.media.presignedUrl(key);
+    var r = await fetch(res.url);
+    if (!r.ok) throw new Error('Could not fetch the report (' + r.status + ').');
+    /* BUG-20: a 404 can arrive as a 200 carrying HTML. A report that parses
+       as JSON is the only one worth rendering. */
+    var text = await r.text();
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      throw new Error('That file is not a readable report.');
+    }
+  }
+
   async function downloadReport(report) {
     try {
-      var res = await window.FS.api.media.presignedUrl(report.key);
+      var key = downloadKeyFor(report);
+      if (!key) return;
+      var res = await window.FS.api.media.presignedUrl(key);
       var a = document.createElement('a');
       a.href = res.url;
       a.target = '_blank';
@@ -454,6 +502,7 @@
      ReportsRightDetail
      ===================================================================== */
   function ReportsRightDetail(props) {
+    var Viewer = window.FieldSight && window.FieldSight.ReportViewerModal;
     var fs       = window.FieldSight;
     var Button   = fs.Button;
     var Badge    = fs.Badge;
@@ -466,6 +515,21 @@
     var refConfirm = React.useState({ phase: 'idle' });
     var conf = refConfirm[0];
     var setConf = refConfirm[1];
+
+    /* Read it here, rather than downloading a Word file to glance at
+       yesterday. `viewer.status` carries loading/ok/error so a slow fetch is
+       visible and a failed one says why — the modal opens on click, not when
+       the content happens to arrive.
+
+       ABOVE THE EARLY RETURN, with the other hooks. This sat further down,
+       after the "nothing selected" placeholder returns, so React saw one hook
+       on an empty pane and two once a report was picked: "Rendered more hooks
+       than during the previous render", and the whole page replaced by an
+       error boundary. Every test passed — the helpers are pure and the hook
+       order is not something they can see. */
+    var viewRef = React.useState({ open: false, status: 'idle', report: null, error: '' });
+    var viewer  = viewRef[0];
+    var setView = viewRef[1];
 
     /* Reset the confirm state whenever a new report is selected. */
     React.useEffect(function () {
@@ -483,6 +547,16 @@
 
     function onDownload() {
       downloadReport(sel);
+    }
+
+    function onView() {
+      setView({ open: true, status: 'loading', report: null, error: '' });
+      fetchReportJson(sel).then(function (json) {
+        setView({ open: true, status: 'ok', report: json, error: '' });
+      }).catch(function (err) {
+        setView({ open: true, status: 'error', report: null,
+                  error: (err && err.message) || 'Could not load this report.' });
+      });
     }
 
     function onConfirmRegenerate() {
@@ -528,7 +602,10 @@
         }),
         React.createElement(DetailRow, {
           label: 'File',
-          value: sel.key.split('/').pop(),
+          /* The file the button will fetch, not the one the row is keyed on.
+             Naming the .json here while the button sends the .docx would be
+             the same mismatch in the other direction. */
+          value: (downloadKeyFor(sel) || '').split('/').pop(),
           mono:  true,
         }),
         React.createElement(DetailRow, {
@@ -539,9 +616,22 @@
       /* Action row */
       React.createElement('div', { className: 'fs-reports-detail__actions' },
         React.createElement(Button, {
-          leftIcon: 'download', size: 'sm',
+          leftIcon: 'eye', size: 'sm', variant: 'primary',
+          onClick: onView,
+        }, 'View'),
+
+        React.createElement(Button, {
+          leftIcon: 'download', size: 'sm', variant: 'secondary',
           onClick: onDownload,
-        }, 'Download .docx'),
+        }, downloadLabel(sel)),
+
+        Viewer ? React.createElement(Viewer, {
+          open:    viewer.open,
+          status:  viewer.status,
+          report:  viewer.report,
+          error:   viewer.error,
+          onClose: function () { setView({ open: false, status: 'idle', report: null, error: '' }); },
+        }) : null,
 
         canRegenerate
           ? (conf.phase === 'idle'

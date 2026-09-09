@@ -254,20 +254,51 @@ function geocodeOnce(query) {
   }).catch(function () { geocodeMemo[key] = null; return null; });
 }
 
+/* A geocoded address, shortened to the part a person reads.
+
+   Photon returns the full postal form — "Forestry Road, Christchurch, 8041,
+   Canterbury, New Zealand" — which is five components to say one place, in a
+   360px panel. The first two non-numeric components are the street and the
+   town, which is what identifies a site; the postcode, region and country are
+   what a courier needs, not a reader checking whose weather this is.
+
+   Numeric-only parts are dropped before the two are taken, so
+   "111 Frankton-Ladies Mile Highway, 9304, Otago, New Zealand" reads as
+   "111 Frankton-Ladies Mile Highway, Otago" rather than leading with a
+   postcode. The untouched string stays available as the element's title. */
+function shortPlace(address) {
+  const raw = String(address == null ? '' : address).trim();
+  if (!raw) return null;
+  const parts = raw.split(',')
+    .map(function (p) { return p.trim(); })
+    .filter(function (p) { return p && !/^\d+$/.test(p); });
+  if (parts.length === 0) return raw;
+  return parts.slice(0, 2).join(', ');
+}
+
 /* The priority chain, in one function, so the order is stated once and can be
    exercised without a browser. Saved coordinates beat a geocode of the
    address, which beats a geocode of the human label. Nothing else is invented. */
 function resolveSitePlace(site) {
   if (!site) return Promise.resolve(null);
-  const label = site.location || site.address || site.name || null;
+  /* THE MOST SPECIFIC PLACE KNOWN, which is the address when there is one.
+
+     This was `location || address || name` on the first pass, on the theory
+     that `location` is the human label. In production `location` is mostly an
+     administrative region — "South Island" for a site whose address is
+     "Forestry Road, Christchurch" — so that theory put the least useful of the
+     two on screen. A panel that answers "where is this forecast for?" with a
+     third of the country has not answered it. */
+  const label = shortPlace(site.address) || site.location || site.name || null;
   if (site.latitude != null && site.longitude != null) {
     return Promise.resolve({
       lat: site.latitude, lng: site.longitude, source: 'saved', place: label,
+      placeFull: site.address || null,
     });
   }
   if (site.address) {
     return geocodeOnce(site.address).then(function (c) {
-      if (c) return { lat: c.lat, lng: c.lng, source: 'address', place: site.address };
+      if (c) return { lat: c.lat, lng: c.lng, source: 'address', place: shortPlace(site.address), placeFull: site.address };
       /* An address that will not geocode is not the end of the chain — most
          production projects carry only a city in `location`, which is both
          geocodable and the right granularity for a forecast. */
@@ -523,7 +554,14 @@ function WeatherIndicator() {
       });
 
     return function() { cancelled = true; };
-  }, [coord.lat, coord.lng, selectedDate, isHistorical]);
+    /* NULL-SAFE, AND THE GUARD INSIDE THE EFFECT IS NOT ENOUGH.
+       A dependency array is evaluated during RENDER, before the effect body
+       ever runs, so `coord.lat` threw for the state this file introduced --
+       a selected project with no coordinate, which is five of the eight in
+       production. The `if (!coord)` two dozen lines up could not save it:
+       React never got that far. It took /today down with
+       "Cannot read properties of null (reading 'lat')". */
+  }, [coord && coord.lat, coord && coord.lng, selectedDate, isHistorical]);
 
   /* Resolve what to actually render: live result, else the mock fixture
      (tag-less — mock has no historical/realtime distinction), else
@@ -607,6 +645,7 @@ function WeatherIndicator() {
       /* WHERE, and HOW WE KNOW. Without both, a geocoded guess for "Auckland"
          and a surveyed coordinate render identically. */
       place: coord && coord.place,
+      placeFull: coord && coord.placeFull,
       placeSource: coord && coord.source,
       onClose: function() { setOpen(false); },
     }) : null,
@@ -650,7 +689,10 @@ function WeatherPopover(props) {
     (place || provenance) ? React.createElement('div',
       { className: 'fs-weather-popover__place' },
       place ? React.createElement('span',
-        { className: 'fs-weather-popover__place-name' }, place) : null,
+        { className: 'fs-weather-popover__place-name',
+          /* The shortened form is what reads; the full postal string stays
+             one hover away rather than being thrown out. */
+          title: props.placeFull || undefined }, place) : null,
       provenance ? React.createElement('span',
         { className: 'fs-weather-popover__place-source' }, provenance) : null,
     ) : null,

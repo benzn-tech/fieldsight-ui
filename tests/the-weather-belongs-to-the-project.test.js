@@ -30,7 +30,7 @@ function loadWeatherHelpers(geocodeAddress) {
     .readFileSync(path.join(__dirname, '..', 'scripts', 'app-shell.js'), 'utf8')
     .replace(/\r\n/g, '\n');
 
-  const parts = ['geocodeOnce', 'resolveSitePlace', 'placeProvenance'].map(function (name) {
+  const parts = ['shortPlace', 'geocodeOnce', 'resolveSitePlace', 'placeProvenance'].map(function (name) {
     const m = source.match(new RegExp('function ' + name + '\\([\\s\\S]*?\\n\\}'));
     assert.ok(m, name + ' has moved or been renamed');
     return m[0];
@@ -45,7 +45,7 @@ function loadWeatherHelpers(geocodeAddress) {
   // eslint-disable-next-line no-new-func
   return new Function('window',
     'const geocodeMemo = {};\n' + parts.join('\n')
-    + '\nreturn { geocodeOnce, resolveSitePlace, placeProvenance };')(sandbox);
+    + '\nreturn { shortPlace, geocodeOnce, resolveSitePlace, placeProvenance };')(sandbox);
 }
 
 /* A geocoder that answers for the three city names prod actually stores, and
@@ -175,6 +175,77 @@ test('zero is a coordinate, not a missing one', async () => {
     'a `!site.latitude` test would treat 0 as absent and geocode over a real '
     + 'stored position');
   assert.deepStrictEqual(calls, []);
+});
+
+/* ---------- which of the two place fields gets shown ------------------- */
+
+/* Reported from the running app: UC PK's panel read "South Island".
+   That project's address is "Forestry Road, Christchurch, 8041, Canterbury,
+   New Zealand". The first version of this file chose the label as
+   `location || address || name`, on the theory that `location` is the human
+   one — but in production `location` is mostly an administrative region, so
+   that theory put a third of the country on screen in place of a street. */
+
+test('a saved coordinate is labelled by its address, not by a region in `location`', async () => {
+  const { resolveSitePlace } = loadWeatherHelpers(fakeGeocoder([], CITIES));
+  const out = await resolveSitePlace({
+    name: 'UC PK', location: 'South Island',
+    address: 'Forestry Road, Christchurch, 8041, Canterbury, New Zealand',
+    latitude: -43.5227319, longitude: 172.5852876,
+  });
+  assert.strictEqual(out.place, 'Forestry Road, Christchurch',
+    '"South Island" does not answer "where is this forecast for?"');
+  assert.strictEqual(out.placeFull,
+    'Forestry Road, Christchurch, 8041, Canterbury, New Zealand',
+    'the full postal string stays available for the title attribute');
+});
+
+test('`location` is still the label when there is no address', async () => {
+  const { resolveSitePlace } = loadWeatherHelpers(fakeGeocoder([], CITIES));
+  const out = await resolveSitePlace({
+    name: 'MANGERE WASTEWATER TREATMENT', location: 'Auckland',
+    address: null, latitude: null, longitude: null,
+  });
+  assert.strictEqual(out.place, 'Auckland');
+});
+
+test('the name is the last resort, not a coordinate pair', async () => {
+  const { resolveSitePlace } = loadWeatherHelpers(fakeGeocoder([], CITIES));
+  const out = await resolveSitePlace({
+    name: 'Bridge 4 Abutment', location: '', address: '',
+    latitude: -41.2, longitude: 174.8,
+  });
+  assert.strictEqual(out.place, 'Bridge 4 Abutment',
+    'the reader wants to recognise the site, not verify the arithmetic');
+});
+
+test('a postal address is shortened to the street and the town', () => {
+  const { shortPlace } = loadWeatherHelpers(function () { return Promise.resolve([]); });
+  assert.strictEqual(
+    shortPlace('Forestry Road, Christchurch, 8041, Canterbury, New Zealand'),
+    'Forestry Road, Christchurch');
+  assert.strictEqual(
+    shortPlace('63 Manchester Street, Christchurch, 8011, Canterbury, New Zealand'),
+    '63 Manchester Street, Christchurch');
+});
+
+test('a postcode never becomes the second half of the label', () => {
+  const { shortPlace } = loadWeatherHelpers(function () { return Promise.resolve([]); });
+  /* This one has no suburb, so the naive "first two parts" reads
+     "111 Frankton-Ladies Mile Highway, 9304". */
+  assert.strictEqual(
+    shortPlace('111 Frankton-Ladies Mile Highway, 9304, Otago, New Zealand'),
+    '111 Frankton-Ladies Mile Highway, Otago');
+});
+
+test('an address with nothing to trim is returned as it stands', () => {
+  const { shortPlace } = loadWeatherHelpers(function () { return Promise.resolve([]); });
+  assert.strictEqual(shortPlace('Riccarton'), 'Riccarton');
+  assert.strictEqual(shortPlace('  '), null);
+  assert.strictEqual(shortPlace(null), null);
+  assert.strictEqual(shortPlace('8041'), '8041',
+    'an address that is ONLY a number is odd data, but dropping every part '
+    + 'would leave the panel with no label at all');
 });
 
 /* ---------- the geocoder is asked once -------------------------------- */
