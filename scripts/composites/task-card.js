@@ -226,10 +226,38 @@
         )
       : React.createElement(Avatar, { name: task.assignee, size: 'sm' });
 
+    /* fix/batch-select-row-target — IN BATCH MODE THE WHOLE ROW SELECTS.
+       It used to be only the 28px round button, while the row body kept
+       opening the detail panel. So somebody who turned Batch Select on and
+       did the obvious thing — click a row, Shift-click another — selected
+       nothing and watched the right-hand panel change instead. Measured in
+       the browser: Shift+click on the round button ranges correctly (the
+       hook was never the problem), Shift+click on the row body selected 0.
+       That is what "shift 和 ctrl 都没有作用" was.
+
+       THE EVENT HAS TO BE FORWARDED. The old handler was
+       `function () { onSelect(task); }` — it dropped its argument, so even
+       once the row was wired up there would be no shiftKey/ctrlKey to read
+       and range-select could never fire.
+
+       Batch mode off, or a row that has no round button to begin with
+       (`checkable` false — a programme row, an item missing topic_id), is
+       untouched: same onSelect, same detail panel. */
+    var rowSelects = batchMode && checkable && !!props.onBatchToggle;
+
+    function handleRowClick(e) {
+      if (rowSelects) {
+        if (e) { e.preventDefault(); }
+        props.onBatchToggle(task, e);
+        return;
+      }
+      if (onSelect) onSelect(task);
+    }
+
     return React.createElement(Card, {
       padding:   'sm',
-      onClick:   onSelect && !checkingOff ? function () { onSelect(task); } : undefined,
-      className: className,
+      onClick:   (onSelect || rowSelects) && !checkingOff ? handleRowClick : undefined,
+      className: className + (rowSelects ? ' fs-task-card--batch' : ''),
       /* ON THE CARD, NOT ON Card.Body -- two reasons, and either alone is
          enough to stop the row ever being removed.
 

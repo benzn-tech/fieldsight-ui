@@ -163,9 +163,35 @@
 
   var COMPARATORS = { said: cmpSaid, due: cmpDue };
 
-  function orderOpenItemsBy(list, mode) {
+  /* Does this item have the key the mode actually sorts on? Not the same
+     question in the two modes, which is why the direction flip below has to
+     ask it per mode rather than reversing the array. */
+  function hasKeyFor(mode) {
+    return mode === 'due'
+      ? hasDue
+      : function (it) { return !!dayKey(it); };
+  }
+
+  /* `dir` is 'desc' (the shipped order, and the default) or 'asc'.
+     OMITTED IS UNCHANGED — every existing caller keeps its exact order.
+
+     Ascending is the same list read backwards WITH ONE EXCEPTION: items the
+     mode has no key for stay at the end. Both comparators deliberately sink
+     them ('dated before undated' in cmpDue; a missing dayKey sorting last in
+     cmpSaid), and a plain `.reverse()` would open the list with the "No due
+     date · N" pile — roughly three quarters of prod's open items — which is
+     the one group nobody asked to see first. Flipping the order of the work
+     that HAS a date is the whole point of the control; promoting the work
+     that has none is not. */
+  function orderOpenItemsBy(list, mode, dir) {
     var cmp = COMPARATORS[mode] || cmpSaid;
-    return (list || []).slice().sort(cmp);
+    var sorted = (list || []).slice().sort(cmp);
+    if (dir !== 'asc') return sorted;
+
+    var keyed = hasKeyFor(mode);
+    var withKey = [], without = [];
+    sorted.forEach(function (it) { (keyed(it) ? withKey : without).push(it); });
+    return withKey.reverse().concat(without);
   }
 
   /* Back-compat: the previous single-order entry point. Same default. */
