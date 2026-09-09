@@ -55,6 +55,28 @@
   /* A range is usable only if BOTH ends are ISO dates and they are in order.
      Anything else — null, undefined, '', a Date object, a timestamp, or an
      end before its start — is not a range this component can walk. */
+  /* The narrowest gap at which a label of each tier is still readable rather
+     than a smear. Day labels are "29", week labels "Mon 4 May", month labels
+     "May 2026", so the day floor is the tightest of the three.
+
+     THE THREE PRESET SCALES MUST LAND WHERE THEY ALWAYS DID, and these numbers
+     are chosen for that and nothing else: 24 px/day -> day (24 >= 20),
+     6 px/day -> week (42 >= 38), 2 px/day -> month (14 < 38). Continuous zoom
+     is a new capability; it is not licence to move the three scales people
+     have been reading for months. */
+  var DAY_LABEL_MIN_PX  = 20;
+  var WEEK_LABEL_MIN_PX = 38;
+
+  function labelTierFor(ppd, requestedTier) {
+    var scale = Number(ppd);
+    /* No usable scale -> honour whatever the caller asked for. This is the
+       back-compatible path for any caller that renders without one. */
+    if (!isFinite(scale) || scale <= 0) return requestedTier || 'day';
+    if (scale >= DAY_LABEL_MIN_PX) return 'day';
+    if (scale * 7 >= WEEK_LABEL_MIN_PX) return 'week';
+    return 'month';
+  }
+
   function isUsableRange(from, to) {
     return typeof from === 'string' && ISO_DATE.test(from)
         && typeof to === 'string'   && ISO_DATE.test(to)
@@ -105,7 +127,13 @@
     var from = props.from;
     var to   = props.to;
     var ppd  = props.pixelsPerDay || 24;
-    var tier = props.tier || 'day';
+    /* LABEL DENSITY FOLLOWS THE SCALE, NOT THE BUTTON.
+       `tier` used to pick the markers outright, which was safe only while
+       `pixelsPerDay` could be one of three fixed numbers. Under continuous
+       zoom it is not: at 2 px/day the day tier draws a label every two pixels,
+       and at 64 px/day the month tier draws one every nineteen hundred. The
+       requested tier is now the fallback for a caller that passes no scale. */
+    var tier = labelTierFor(ppd, props.tier);
 
     /* Memoized: at day tier this builds one marker per calendar day across
        the whole programme — ~1,100 for a three-year run — and it used to be
@@ -165,6 +193,7 @@
   }
 
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { dateRangeISO: dateRangeISO, isUsableRange: isUsableRange };
+    module.exports = { dateRangeISO: dateRangeISO, isUsableRange: isUsableRange,
+                       labelTierFor: labelTierFor };
   }
 })();
