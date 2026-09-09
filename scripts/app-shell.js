@@ -209,13 +209,81 @@ function _wxDayDate(iso) {
   return (+p[2]) + ' ' + _WX_MONTHS[(+p[1]) - 1];
 }
 
+/* Central Christchurch. USED ONLY FOR THE FIXTURE/DEMO PATH NOW.
+   It used to be the last link in the live chain, and that is the defect this
+   section exists to remove: five of the eight production projects have no
+   coordinate, so a project in Auckland and one in Wanaka were both shown
+   Christchurch's forecast under no label at all — 760km, and coastal weather
+   standing in for alpine, with nothing on screen to reveal it. */
 const WEATHER_DEFAULT_COORD = { lat: -43.5321, lng: 172.6362 };
 
-/* site_id -> { lat, lng } | null, filled once from the org API (real Aurora
-   coordinates, now that the site record carries latitude/longitude). null = a
-   resolved site that has no coordinate yet (un-backfilled) -> caller falls back
-   to fixture coord / default. */
+/* site_id -> { lat, lng, source, place } | null.
+
+   `source` says HOW the coordinate was arrived at, and it is not decoration:
+   without it a geocoded guess is indistinguishable from a surveyed position,
+   which is the same failure as the silent default one step quieter.
+     'saved'    — sites.latitude/longitude, entered or previously backfilled
+     'address'  — geocoded from sites.address
+     'location' — geocoded from sites.location, the human label ("Auckland")
+   null = resolved, and this project has nowhere we can place it.
+
+   `place` is the text the panel shows. Never a coordinate pair: the reader
+   wants to recognise the site, not check the arithmetic. */
 const orgSiteCoordCache = {};
+
+/* Free text -> {lat,lng} through the same keyless Photon geocoder the address
+   autocomplete already uses, memoised per query for the life of the page.
+   Deliberately NOT written back to the site record: a weather panel is a read
+   surface, and a coordinate persisted from a guess outlives the guess.
+   Persisting belongs to the backfill. */
+const geocodeMemo = {};
+function geocodeOnce(query) {
+  const key = String(query || '').trim().toLowerCase();
+  if (!key) return Promise.resolve(null);
+  if (Object.prototype.hasOwnProperty.call(geocodeMemo, key)) {
+    return Promise.resolve(geocodeMemo[key]);
+  }
+  const api = window.FS && window.FS.api && window.FS.api.org;
+  if (!api || !api.geocodeAddress) return Promise.resolve(null);
+  return api.geocodeAddress(query).then(function (hits) {
+    const hit = (hits && hits[0]) || null;
+    const out = (hit && hit.lat != null && hit.lng != null)
+      ? { lat: hit.lat, lng: hit.lng } : null;
+    geocodeMemo[key] = out;
+    return out;
+  }).catch(function () { geocodeMemo[key] = null; return null; });
+}
+
+/* The priority chain, in one function, so the order is stated once and can be
+   exercised without a browser. Saved coordinates beat a geocode of the
+   address, which beats a geocode of the human label. Nothing else is invented. */
+function resolveSitePlace(site) {
+  if (!site) return Promise.resolve(null);
+  const label = site.location || site.address || site.name || null;
+  if (site.latitude != null && site.longitude != null) {
+    return Promise.resolve({
+      lat: site.latitude, lng: site.longitude, source: 'saved', place: label,
+    });
+  }
+  if (site.address) {
+    return geocodeOnce(site.address).then(function (c) {
+      if (c) return { lat: c.lat, lng: c.lng, source: 'address', place: site.address };
+      /* An address that will not geocode is not the end of the chain — most
+         production projects carry only a city in `location`, which is both
+         geocodable and the right granularity for a forecast. */
+      if (!site.location) return null;
+      return geocodeOnce(site.location).then(function (c2) {
+        return c2 ? { lat: c2.lat, lng: c2.lng, source: 'location', place: site.location } : null;
+      });
+    });
+  }
+  if (site.location) {
+    return geocodeOnce(site.location).then(function (c) {
+      return c ? { lat: c.lat, lng: c.lng, source: 'location', place: site.location } : null;
+    });
+  }
+  return Promise.resolve(null);
+}
 
 /* Module-level cache: `${lat},${lng},${date},${h|r}` → { data, ts }.
    Cheap insurance against refetch storms (route/site churn while a
@@ -316,22 +384,31 @@ function WeatherIndicator() {
     let cancelled = false;
     window.FS.api.org.getOrgSites().then(function(res) {
       const list = (res && res.sites) || [];
-      list.forEach(function(s) {
-        if (s && s.site_id && s.latitude != null && s.longitude != null) {
-          orgSiteCoordCache[s.site_id] = { lat: s.latitude, lng: s.longitude };
-        }
+      const site = list.find(function (s) { return s && s.site_id === activeSiteId; });
+      return resolveSitePlace(site).then(function (resolved) {
+        /* May be null, and null is an ANSWER here, not a gap: it means this
+           project has been looked at and cannot be placed. Caching it stops
+           every re-render re-asking the geocoder the same unanswerable
+           question. */
+        orgSiteCoordCache[activeSiteId] = resolved;
+        if (!cancelled) setSiteCoord(resolved);
       });
-      if (orgSiteCoordCache[activeSiteId] === undefined) {
-        orgSiteCoordCache[activeSiteId] = null;  // resolved: this site has no coord
-      }
-      if (!cancelled) setSiteCoord(orgSiteCoordCache[activeSiteId]);
     }).catch(function() { if (!cancelled) setSiteCoord(null); });
     return function() { cancelled = true; };
   }, [activeSiteId]);
 
+  /* NO SILENT DEFAULT ON THE LIVE PATH. When a project is selected and cannot
+     be placed, `coord` stays null and the panel says why. Showing Christchurch
+     under no label is exactly what made a wrong forecast indistinguishable
+     from a right one. The fixture branch keeps the demo build working, and the
+     default is reached only when no project is selected at all. */
+  const fixtureCoord = fixtureSite && fixtureSite.coord;
   const coord = siteCoord
-    || (fixtureSite && fixtureSite.coord)
-    || WEATHER_DEFAULT_COORD;
+    || (fixtureCoord && { lat: fixtureCoord.lat, lng: fixtureCoord.lng,
+                          source: 'saved', place: fixtureSite.name || null })
+    || (activeSiteId ? null
+                     : { lat: WEATHER_DEFAULT_COORD.lat, lng: WEATHER_DEFAULT_COORD.lng,
+                         source: 'default', place: null });
 
   /* status: 'loading' | 'success' | 'error' */
   const [liveState, setLiveState] = React.useState({ status: 'loading', data: null });
@@ -459,6 +536,44 @@ function WeatherIndicator() {
 
   const loading = liveState.status === 'loading' && !display;
 
+  /* A SELECTED PROJECT WE CANNOT PLACE IS ITS OWN STATE, and it has to be
+     visible. Returning null here would hide the control entirely, which reads
+     as "weather is broken" and, worse, is indistinguishable from the old
+     behaviour of quietly showing somewhere else's forecast. The reader needs
+     to know the project has no location and where to set one. */
+  const unplaceable = !!activeSiteId && !coord;
+  if (unplaceable) {
+    return React.createElement('div', {
+      ref: wrapRef,
+      style: { position: 'relative', display: 'inline-block' },
+    },
+      React.createElement('button', {
+        type: 'button',
+        onClick: function () { setOpen(function (o) { return !o; }); },
+        className: 'fs-utility-item fs-utility-item--muted' + (open ? ' fs-utility-item--active' : ''),
+        title: 'No location set for this project',
+        'aria-label': 'Weather unavailable, no location set for this project',
+        'aria-expanded': open,
+      },
+        NavIcon && React.createElement(NavIcon, { name: 'cloud', size: 16 }),
+        React.createElement('span', { className: 'fs-utility-item__text' }, '—'),
+      ),
+      open ? React.createElement('div', {
+        className: 'fs-weather-popover fs-weather-popover--empty',
+        role: 'dialog',
+        'aria-label': 'Weather unavailable',
+      },
+        React.createElement('div', { className: 'fs-weather-popover__place' },
+          React.createElement('span', { className: 'fs-weather-popover__place-name' },
+            'No location for this project')),
+        React.createElement('div', { className: 'fs-weather-popover__empty-body' },
+          'Add an address or a location to this project and the forecast will '
+          + 'follow it. Until then there is no site to report on — a nearby '
+          + 'city’s weather would not be this one’s.'),
+      ) : null,
+    );
+  }
+
   if (!display && !loading) return null;
 
   return React.createElement('div', {
@@ -489,6 +604,10 @@ function WeatherIndicator() {
       current: display,
       hourly: (display && display.hourly) || (mockWeather && mockWeather.hourly) || [],
       daily: (display && display.daily) || (mockWeather && mockWeather.daily) || [],
+      /* WHERE, and HOW WE KNOW. Without both, a geocoded guess for "Auckland"
+         and a surveyed coordinate render identically. */
+      place: coord && coord.place,
+      placeSource: coord && coord.source,
       onClose: function() { setOpen(false); },
     }) : null,
   );
@@ -499,16 +618,42 @@ function WeatherIndicator() {
    (current_weather + hourly[next 12h] + daily[7d], with wind direction),
    or the static mock fixture on a fetch failure. `hourly`/`daily` are empty
    on a historical date (forward-looking strips don't apply) and self-hide. */
+/* How the coordinate was arrived at, in words the reader can act on.
+   `saved` says nothing — a coordinate that came from the record needs no
+   apology — while the two geocoded cases do, because they are inferences and
+   the reader is the only one who can tell whether the inference is right. */
+function placeProvenance(source) {
+  if (source === 'address') return 'from the project address';
+  if (source === 'location') return 'from the project location';
+  if (source === 'default') return 'default location — no project selected';
+  return null;
+}
+
 function WeatherPopover(props) {
   const NavIcon = window.FieldSight && window.FieldSight.NavIcon;
   const Badge = window.FieldSight && window.FieldSight.Badge;
   const current = props.current;
+  const place = props.place || null;
+  const provenance = placeProvenance(props.placeSource);
 
   return React.createElement('div', {
     className: 'fs-weather-popover',
     role: 'dialog',
-    'aria-label': 'Weather forecast',
+    /* Names the place, so the state is available without sight. It used to be
+       the constant 'Weather forecast', which is true of every possible
+       rendering and therefore says nothing. */
+    'aria-label': place ? ('Weather forecast for ' + place) : 'Weather forecast',
   },
+
+    /* Which place this is. First line, before any number: a forecast whose
+       location the reader has to infer is a forecast they cannot check. */
+    (place || provenance) ? React.createElement('div',
+      { className: 'fs-weather-popover__place' },
+      place ? React.createElement('span',
+        { className: 'fs-weather-popover__place-name' }, place) : null,
+      provenance ? React.createElement('span',
+        { className: 'fs-weather-popover__place-source' }, provenance) : null,
+    ) : null,
 
     /* Current */
     React.createElement('div', { className: 'fs-weather-popover__current' },

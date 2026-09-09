@@ -7020,6 +7020,14 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   gap: var(--space-1);
 }
 
+/* Latitude and longitude side by side: one fact in two boxes, so they have to
+   read as a single control rather than two unrelated fields. */
+.fs-settings__field-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-2);
+}
+
 .fs-settings__field-hint {
   font-size: var(--font-size-xs);
   color: var(--text-tertiary);
