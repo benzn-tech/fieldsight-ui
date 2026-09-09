@@ -311,6 +311,43 @@ button:not([class*="fs-"]):focus-visible,
   color: var(--text-primary);
 }
 
+/* Which place this forecast is for, and how we know — the first thing in the
+   panel, above any number. A forecast whose location the reader has to infer
+   is one they cannot check, and five of eight production projects were being
+   shown a city they had no connection to. */
+.fs-weather-popover__place {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle, var(--border-default));
+}
+
+.fs-weather-popover__place-name {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+/* Said quietly, but said: a geocoded guess and a surveyed coordinate must not
+   render identically. */
+.fs-weather-popover__place-source {
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.fs-weather-popover__empty-body {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* The indicator for a project with no location: present, so the reader can
+   ask why, but not dressed as a reading. */
+.fs-utility-item--muted {
+  color: var(--text-tertiary);
+}
+
 .fs-weather-popover {
   position: absolute;
   top: calc(100% + 6px);

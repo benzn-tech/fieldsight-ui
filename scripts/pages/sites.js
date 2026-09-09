@@ -239,6 +239,51 @@
   /* Said once, so the three controls cannot drift apart in wording. */
   var UNSAVED_HINT = 'Not stored yet — this backend has no field for it.';
 
+  /* Latitude / longitude, editable, and NOT a read-out of the address picker.
+     Two reasons it is a real input rather than a label:
+
+       * a site can have a coordinate and no postal address at all — a job on
+         a road with no number, a paddock, a bridge — and until now the only
+         way to get coordinates was to pick an address suggestion, so those
+         sites had none and the weather panel silently reported another city;
+       * the geocoder is a guess. When it puts the pin in the wrong place the
+         person who has stood on the site is the one who can fix it, and they
+         could not.
+
+     Picking an address still fills these (AddressAutocomplete's onPick), and
+     typing an address by hand still clears them (onText) — a coordinate that
+     outlives the address it came from is worse than none. */
+  function fCoords(form, setForm) {
+    function setNum(key, raw) {
+      var t = String(raw == null ? '' : raw).trim();
+      /* '' means CLEARED, which is a different fact from 0 and must survive
+         as null rather than becoming the equator. */
+      var v = (t === '') ? null : Number(t);
+      setForm(function (f) {
+        var n = Object.assign({}, f);
+        n[key] = (v === null || isNaN(v)) ? null : v;
+        return n;
+      });
+    }
+    function num(v) { return v == null ? '' : String(v); }
+    return fFieldRow('Coordinates',
+      React.createElement('div', { className: 'fs-settings__field-pair' },
+        React.createElement('input', {
+          type: 'text', inputMode: 'decimal', className: 'fs-settings__input',
+          placeholder: 'Latitude', 'aria-label': 'Latitude',
+          value: num(form.latitude),
+          onChange: function (e) { setNum('latitude', e.target.value); },
+        }),
+        React.createElement('input', {
+          type: 'text', inputMode: 'decimal', className: 'fs-settings__input',
+          placeholder: 'Longitude', 'aria-label': 'Longitude',
+          value: num(form.longitude),
+          onChange: function (e) { setNum('longitude', e.target.value); },
+        })),
+      'Filled in when you pick an address. Set them directly for a site with '
+      + 'no street address, or to correct the pin.');
+  }
+
   function fFieldRow(label, control, hint) {
     return React.createElement('div', { className: 'fs-settings__field-row' },
       React.createElement('label', { className: 'fs-settings__label' }, label),
@@ -411,6 +456,7 @@
           onText: function (v) { setForm(function (f) { return Object.assign({}, f, { address: v, latitude: null, longitude: null }); }); },
           onPick: function (p) { setForm(function (f) { return Object.assign({}, f, { address: p.address, latitude: p.latitude, longitude: p.longitude }); }); },
         }), 'Pick a suggestion to set the coordinates the weather panel uses.'),
+        fCoords(form, setForm),
         /* THESE THREE DO NOT PERSIST AGAINST THE REAL BACKEND, and the form
            said nothing about it. `createOrgSite` sends seven fields and none
            is one of these; `sites` has had no value, region or completion
@@ -481,7 +527,8 @@
           value: form.address,
           onText: function (v) { setForm(function (f) { return Object.assign({}, f, { address: v, latitude: null, longitude: null }); }); },
           onPick: function (p) { setForm(function (f) { return Object.assign({}, f, { address: p.address, latitude: p.latitude, longitude: p.longitude }); }); },
-        })),
+        }), 'Pick a suggestion to set the coordinates the weather panel uses.'),
+        fCoords(form, setForm),
         React.createElement('div', { className: 'fs-settings__actions' },
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: props.onClose }, 'Cancel'),
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--md', disabled: busy, onClick: submit }, busy ? 'Saving…' : 'Save changes')
