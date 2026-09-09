@@ -56,9 +56,34 @@
 
   /* Trigger a download for a presigned URL. We must NOT cache the URL
      (15-min expiry, BACKEND-CONTEXT §7) — fetch fresh on every click. */
+  /* WHICH FILE THE BUTTON ACTUALLY FETCHES.
+
+     The button has always said "Download .docx" and always presigned
+     `report.key`, which is the .json — so every download in this product's
+     life handed the user raw JSON while the Word file sat beside it in the
+     same S3 folder, unmentioned by the history endpoint. That endpoint now
+     returns `docx_key` when a Word file exists.
+
+     `docx_key` ABSENT means this report genuinely has no Word file (Word
+     generation disables itself when the python-docx layer is missing or built
+     for the wrong runtime; production has one such day). Falling back to the
+     .json is right there — it is the report, just not in Word — but the
+     button has to stop claiming otherwise, which is what downloadLabel is
+     for. Presigning a .docx that does not exist would hand the browser a URL
+     that answers 403, and this bucket answers 403 for absent keys, so it
+     would not even read as "no Word file". */
+  function downloadKeyFor(report) {
+    return (report && report.docx_key) || (report && report.key) || null;
+  }
+  function downloadLabel(report) {
+    return (report && report.docx_key) ? 'Download .docx' : 'Download .json';
+  }
+
   async function downloadReport(report) {
     try {
-      var res = await window.FS.api.media.presignedUrl(report.key);
+      var key = downloadKeyFor(report);
+      if (!key) return;
+      var res = await window.FS.api.media.presignedUrl(key);
       var a = document.createElement('a');
       a.href = res.url;
       a.target = '_blank';
@@ -528,7 +553,10 @@
         }),
         React.createElement(DetailRow, {
           label: 'File',
-          value: sel.key.split('/').pop(),
+          /* The file the button will fetch, not the one the row is keyed on.
+             Naming the .json here while the button sends the .docx would be
+             the same mismatch in the other direction. */
+          value: (downloadKeyFor(sel) || '').split('/').pop(),
           mono:  true,
         }),
         React.createElement(DetailRow, {
@@ -541,7 +569,7 @@
         React.createElement(Button, {
           leftIcon: 'download', size: 'sm',
           onClick: onDownload,
-        }, 'Download .docx'),
+        }, downloadLabel(sel)),
 
         canRegenerate
           ? (conf.phase === 'idle'
