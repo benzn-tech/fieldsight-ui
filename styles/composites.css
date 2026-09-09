@@ -12499,3 +12499,92 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color: var(--text-primary);
   cursor: pointer;
 }
+
+/* ==========================================================================
+   Report viewer — reading a generated report in the browser
+   --------------------------------------------------------------------------
+   Deliberately plain. This is a document, so it gets document typography:
+   one column, a readable measure, and no cards. The only structure is the
+   heading hierarchy the report itself already has.
+   ========================================================================== */
+
+.fs-report-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  /* ~70 characters. A report read at full modal width is a wall. */
+  max-width: 68ch;
+}
+
+.fs-report-view__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-2) var(--space-5);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.fs-report-view__section { display: flex; flex-direction: column; gap: var(--space-2); }
+
+.fs-report-view__h {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.fs-report-view__para {
+  margin: 0;
+  font-size: var(--font-size-base);
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+.fs-report-view__para--muted { color: var(--text-tertiary); }
+
+.fs-report-view__list {
+  margin: 0;
+  padding-left: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.fs-report-view__item-head {
+  font-size: var(--font-size-base);
+  line-height: 1.55;
+  color: var(--text-primary);
+}
+
+/* The detail lines under an entry: who raised it, what the risk level was,
+   when it is due. Set quieter than the entry itself so a list of ten reads
+   as ten things, not thirty. */
+.fs-report-view__item-meta {
+  margin-top: var(--space-1);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.fs-report-view__kv { display: flex; gap: var(--space-2); align-items: baseline; }
+
+.fs-report-view__k {
+  flex: 0 0 auto;
+  min-width: 7.5rem;
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.fs-report-view__v {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  /* A long recommended_action must wrap, not stretch the modal sideways. */
+  overflow-wrap: anywhere;
+}
+
+.fs-report-view__state {
+  padding: var(--space-6) 0;
+  font-size: var(--font-size-base);
+  color: var(--text-secondary);
+}

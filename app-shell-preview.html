@@ -109,6 +109,7 @@
   <script type="text/babel" src="scripts/composites/recording-delete-modal.js?v=1"></script>
   <!-- Delivery-C Tier-2 — per-session report review modal (opened from the timeline picker) -->
   <script type="text/babel" src="scripts/composites/email-preview-modal.js?v=7"></script>
+  <script type="text/babel" src="scripts/composites/report-viewer-modal.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/session-report-modal.js?v=5"></script>
   <!-- Sprint 5.1 — Programme task editor (modal form for editing a leaf) -->
   <script type="text/babel" src="scripts/composites/programme-task-editor.js?v=4"></script>
@@ -239,6 +240,9 @@
   <script src="scripts/api/search.js?v=2"></script>
   <script src="scripts/api/reports.js?v=1"></script>
   <script src="scripts/api/media.js?v=3"></script>
+  <!-- report-view-model must load AFTER api/index.js: FS.api is assigned
+       wholesale there, and anything registered before it is silently wiped. -->
+  <script src="scripts/api/report-view-model.js?v=1"></script>
   <script src="scripts/api/meetings.js?v=1"></script>
   <!-- fix/mine-team-attribution — shared Mine/Team predicate; loads before
        today-adapter.js + tasks.js (below), which both call it. -->
