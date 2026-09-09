@@ -523,7 +523,14 @@ function WeatherIndicator() {
       });
 
     return function() { cancelled = true; };
-  }, [coord.lat, coord.lng, selectedDate, isHistorical]);
+    /* NULL-SAFE, AND THE GUARD INSIDE THE EFFECT IS NOT ENOUGH.
+       A dependency array is evaluated during RENDER, before the effect body
+       ever runs, so `coord.lat` threw for the state this file introduced --
+       a selected project with no coordinate, which is five of the eight in
+       production. The `if (!coord)` two dozen lines up could not save it:
+       React never got that far. It took /today down with
+       "Cannot read properties of null (reading 'lat')". */
+  }, [coord && coord.lat, coord && coord.lng, selectedDate, isHistorical]);
 
   /* Resolve what to actually render: live result, else the mock fixture
      (tag-less — mock has no historical/realtime distinction), else
