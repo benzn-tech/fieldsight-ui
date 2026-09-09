@@ -75,7 +75,26 @@
   };
 
   /* Show the host, not the raw URL. A reader judges "is this a source I trust"
-     from the domain; the full URL is noise at this size and wraps badly. */
+     from the domain; the full URL is noise at this size and wraps badly.
+
+     The backend now sends `domain` because parsing the URL stopped being able
+     to answer this. A measured annotation from the current search vendor:
+
+         url:   https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZ...
+         title: "wikipedia.org"
+
+     The link is an opaque Google redirect, so every source under every claim
+     would read `vertexaisearch.cloud.google.com` -- one host, standing in for
+     whoever actually published each thing, on the one surface whose promise is
+     that external evidence is visibly separate and attributable.
+
+     The URL fallback stays for a response from a backend that has not shipped
+     `domain` yet; the two repos deploy independently and no order is enforced. */
+  function sourceDomain(s) {
+    if (s && s.domain) return String(s.domain);
+    return sourceHost(s && s.url);
+  }
+
   function sourceHost(url) {
     try { return new URL(url).hostname.replace(/^www\./, ''); }
     catch (e) { return url || ''; }
@@ -117,8 +136,15 @@
               return React.createElement('a', {
                 key: j, href: s.url, target: '_blank', rel: 'noopener noreferrer',
                 className: 'fs-ask-corrob__source',
-                title: s.title || s.url,
-              }, sourceHost(s.url) + (s.published ? ' · ' + s.published : ''));
+                /* The visible text is the domain, so a title that IS the
+                   domain would only repeat it in the tooltip. The link the
+                   reader follows is the vendor's, redirect and all -- we did
+                   not get another one, and inventing it would fabricate a
+                   citation. The tooltip is where that is honest. */
+                title: (s.title && s.title !== sourceDomain(s))
+                  ? s.title + ' — ' + s.url
+                  : s.url,
+              }, sourceDomain(s) + (s.published ? ' · ' + s.published : ''));
             })
           )
         : null
@@ -674,6 +700,7 @@
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.AskChat = AskChat;
   window.FieldSight._corroborationHasNothingToShow = hasNothingToShow;
+  window.FieldSight._corroborationSourceDomain = sourceDomain;
   /* Exported so the wording can be pinned by a test without rendering React,
      and so SP-Ask's spoken variant can be written against the same dict. */
   window.FieldSight.formatAnswerBasis = formatAnswerBasis;

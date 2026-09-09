@@ -111,3 +111,58 @@ test('it never claims the web was searched and found nothing', () => {
   assert.ok(!/not found/i.test(line), 'the not-searched line must not say "not found"');
   assert.ok(!/ran out of time/i.test(line), 'nor borrow the timeout wording');
 });
+
+/* ---- a source has to say who published it ------------------------------- */
+
+/* The domain under a claim is the trust carrier: a reader decides whether to
+   believe a source from the host. It used to be derived by parsing the URL,
+   which worked while the vendor returned real result URLs.
+   The current search vendor returns Google grounding redirects -- measured:
+
+     url:   https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZ...
+     title: "wikipedia.org"
+
+   so parsing the URL makes every source under every claim read
+   `vertexaisearch.cloud.google.com`. The backend now sends `domain`. */
+
+function loadSourceDomain() {
+  global.window = { FieldSight: {}, FS: { api: {} } };
+  global.React = { createElement: function () { return null; } };
+  delete require.cache[require.resolve('../scripts/composites/ask-chat.js')];
+  require('../scripts/composites/ask-chat.js');
+  return global.window.FieldSight._corroborationSourceDomain;
+}
+
+test('a redirect link does not get to stand in for the publisher', () => {
+  const sourceDomain = loadSourceDomain();
+  assert.strictEqual(
+    sourceDomain({
+      url: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZ',
+      domain: 'wikipedia.org',
+      title: 'wikipedia.org',
+    }),
+    'wikipedia.org'
+  );
+});
+
+test('a response from a backend without the field still shows a host', () => {
+  /* Deploy order is not enforced across the two repos. Without the fallback
+     this renders an empty label, which says nothing at all. */
+  const sourceDomain = loadSourceDomain();
+  assert.strictEqual(
+    sourceDomain({ url: 'https://www.standards.govt.nz/nzs3604' }),
+    'standards.govt.nz'
+  );
+});
+
+test('a source with neither renders nothing rather than a broken URL', () => {
+  const sourceDomain = loadSourceDomain();
+  assert.strictEqual(sourceDomain({}), '');
+  assert.strictEqual(sourceDomain(null), '');
+});
+
+test('the link is still the one the vendor gave us', () => {
+  /* Building a link out of the domain would fabricate a citation that was
+     never returned. The redirect is the only URL we have. */
+  assert.match(askChat, /href: s\.url/);
+});
