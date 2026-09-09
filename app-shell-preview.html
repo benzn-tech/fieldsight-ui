@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="styles/tokens.css?v=5" />
   <link rel="stylesheet" href="styles/app-shell.css?v=11" />
   <link rel="stylesheet" href="styles/components.css?v=11" />
-  <link rel="stylesheet" href="styles/composites.css?v=117" />
+  <link rel="stylesheet" href="styles/composites.css?v=120" />
 
   <style>
     /* Ensure full-bleed with no scroll */
@@ -62,7 +62,7 @@
   <script type="text/babel" src="scripts/components/avatar.js?v=2"></script>
 
   <!-- Layer 5 composites (depend on L4 atoms above) -->
-  <script type="text/babel" src="scripts/composites/task-card.js?v=16"></script>
+  <script type="text/babel" src="scripts/composites/task-card.js?v=17"></script>
   <!-- T4 — useMultiSelect hook + MultiSelectBulkBar, shared by /today
        Leftover, /safety, /quality. Loaded before those pages below. -->
   <script type="text/babel" src="scripts/composites/multi-select-list.js?v=1"></script>
@@ -247,7 +247,7 @@
   <!-- fix/mine-team-attribution — shared Mine/Team predicate; loads before
        today-adapter.js + tasks.js (below), which both call it. -->
   <script src="scripts/api/mine-team.js?v=1"></script>
-  <script src="scripts/api/today-ordering.js?v=3"></script>
+  <script src="scripts/api/today-ordering.js?v=4"></script>
   <!-- feat/findings-legible — what a finding is, said on screen (severity +
        domain, which the payload has always carried and the timeline threw
        away). Same load-order constraint: after api/index.js, which assigns
@@ -345,7 +345,7 @@
   <!-- Mock data shim (weather only) + page registry + pages -->
   <script type="text/babel" src="scripts/mock-data.js?v=4"></script>
   <script type="text/babel" src="scripts/pages/_page-registry.js?v=1"></script>
-  <script type="text/babel" src="scripts/pages/today.js?v=57"></script>
+  <script type="text/babel" src="scripts/pages/today.js?v=59"></script>
   <script type="text/babel" src="scripts/pages/timeline.js?v=63"></script>
   <script type="text/babel" src="scripts/pages/reports.js?v=5"></script>
   <script type="text/babel" src="scripts/pages/sites.js?v=14"></script>
