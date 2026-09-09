@@ -150,7 +150,7 @@
      list, so Mine/Team is NEVER merged (the old Leftover bug) — each
      section still filters its own bucket by the same isMineTask-derived
      membership it always had. */
-  function visibleTasks(list, hideAged, mode) {
+  function visibleTasks(list, hideAged, mode, dir) {
     var kept = (list || []).filter(function (t) {
       return !hideAged || !isAgedTask(t);
     });
@@ -161,7 +161,7 @@
        api/today-ordering.js. Absent (older cached page, module not loaded)
        degrades to the previous unordered behaviour rather than crashing. */
     var orderBy = window.FS && window.FS.api && window.FS.api.orderOpenItemsBy;
-    if (orderBy) return orderBy(kept, mode || 'said');
+    if (orderBy) return orderBy(kept, mode || 'said', dir || 'desc');
     var order = window.FS && window.FS.api && window.FS.api.orderOpenItems;
     return order ? order(kept) : kept;
   }
@@ -173,6 +173,17 @@
      Mine and Team totals for the page-level hidden count — it is NOT
      Mine-only (the old countOwnStranded was, for a hint that no longer
      exists). */
+  /* The direction's name, which depends on what is being ordered: "newest"
+     means nothing about a due date and "soonest" means nothing about when
+     something was said. Exported so the label is asserted rather than
+     eyeballed — a tooltip that says the opposite of what the list does is
+     worse than no tooltip. */
+  function sortDirLabel(mode, dir) {
+    var asc = dir === 'asc';
+    if (mode === 'due') return asc ? 'Latest due first' : 'Soonest due first';
+    return asc ? 'Oldest first' : 'Newest first';
+  }
+
   function countAged(list) {
     return (list || []).filter(isAgedTask).length;
   }
@@ -1883,6 +1894,13 @@
     var sortRef  = React.useState('said');
     var sortMode = sortRef[0];
     var setSortMode = sortRef[1];
+
+    /* Direction, same per-visit reasoning as sortMode above — not persisted.
+       'desc' is the order the page has always shipped (newest said first,
+       soonest due first), so the default changes nothing. */
+    var dirRef   = React.useState('desc');
+    var sortDir  = dirRef[0];
+    var setSortDir = dirRef[1];
     function toggleHideAged() {
       setHideAged(function (prev) {
         var next = !prev;
@@ -1918,8 +1936,8 @@
     var earlyData   = (state && state.status === 'ok') ? state.data : null;
     var myAll       = (earlyData && earlyData.myTasks)   || [];
     var teamAll     = (earlyData && earlyData.teamTasks) || [];
-    var myVisible   = visibleTasks(myAll, hideAged, sortMode);
-    var teamVisible = visibleTasks(teamAll, hideAged, sortMode);
+    var myVisible   = visibleTasks(myAll, hideAged, sortMode, sortDir);
+    var teamVisible = visibleTasks(teamAll, hideAged, sortMode, sortDir);
 
     /* feat/leftover-inline-filter — how many aged items exist across both
        buckets (gates whether the filter control shows at all — nothing
@@ -2208,15 +2226,6 @@
          select" gate tasks.js uses for its own toggle. */
       React.createElement('div', { className: 'fs-today__toolbar-row' },
         React.createElement(TimelineLink, null),
-        batchEligibleItems.length > 0
-          ? React.createElement('button', {
-              type:            'button',
-              className:       'fs-multi-select__toggle'
-                + (multiSelect.batchMode ? ' fs-multi-select__toggle--active' : ''),
-              onClick:         function () { multiSelect.setBatchMode(function (prev) { return !prev; }); },
-              'aria-pressed':  multiSelect.batchMode,
-            }, multiSelect.batchMode ? 'Batch Select: On' : 'Batch Select')
-          : null,
       ),
 
       /* fix/today-batch-select-expand — bulk action bar, shared
@@ -2297,6 +2306,10 @@
          order, and a control that appears only sometimes is one the reader
          never learns to look for. */
       React.createElement('div', { className: 'fs-today__sort-row' },
+        /* Label + modes + arrow travel together. Without this wrapper the
+           row's flex-wrap splits them on a narrow column and the arrow ends
+           up on the next line, away from the buttons it modifies. */
+        React.createElement('div', { className: 'fs-today__sort-group' },
         React.createElement('span', { className: 'fs-today__sort-label' }, 'Order'),
         [['said', 'When it was said'], ['due', 'Due date']].map(function (opt) {
           var active = sortMode === opt[0];
@@ -2309,6 +2322,33 @@
             'aria-pressed': active,
           }, opt[1]);
         }),
+        /* Direction. The arrow is the whole control — an order already has a
+           direction, and the two names for it depend on which key is being
+           sorted, so the label lives in the tooltip/aria rather than on
+           screen where it would double the width of the row. */
+        React.createElement('button', {
+          type:           'button',
+          className:      'fs-today__sort-dir',
+          onClick:        function () {
+            setSortDir(function (prev) { return prev === 'asc' ? 'desc' : 'asc'; });
+          },
+          title:          sortDirLabel(sortMode, sortDir),
+          'aria-label':   sortDirLabel(sortMode, sortDir),
+        }, sortDir === 'asc' ? '↑' : '↓'),
+        ),
+
+        /* Batch Select, moved here from the toolbar row above. Same button,
+           same gate — it is the other "how am I working with this list"
+           control, so it reads as one row instead of two. */
+        batchEligibleItems.length > 0
+          ? React.createElement('button', {
+              type:            'button',
+              className:       'fs-multi-select__toggle'
+                + (multiSelect.batchMode ? ' fs-multi-select__toggle--active' : ''),
+              onClick:         function () { multiSelect.setBatchMode(function (prev) { return !prev; }); },
+              'aria-pressed':  multiSelect.batchMode,
+            }, multiSelect.batchMode ? 'Batch Select: On' : 'Batch Select')
+          : null,
       ),
 
       agedTotal > 0
@@ -3106,6 +3146,7 @@
          above; exercised by tests/leftover-inline-filter.test.js. */
       isAgedTask:           isAgedTask,
       visibleTasks:         visibleTasks,
+      sortDirLabel:         sortDirLabel,
       countAged:            countAged,
       readHideAgedPref:     readHideAgedPref,
       writeHideAgedPref:    writeHideAgedPref,

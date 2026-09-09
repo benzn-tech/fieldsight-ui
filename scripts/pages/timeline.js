@@ -2740,12 +2740,25 @@
       isDone:     props.isDone,
     });
     if (!draft) {
-      return React.createElement('button', {
-        type:      'button',
-        className: 'fs-btn fs-btn--tertiary fs-btn--sm fs-draft-email fs-draft-email--empty',
-        disabled:  true,
-        title:     'No outstanding action items in this view to send',
-      }, 'Draft email');
+      /* BOTH controls stay on screen, disabled with the reason. This used to
+         `return` here, which rendered the disabled "Draft email" and dropped
+         "Preview & copy" entirely — on any day whose actions are all ticked
+         off, which is most of them. A disabled control says "nothing to send
+         today"; a missing one is indistinguishable from a feature that was
+         removed, and it was reported as exactly that. The comment below this
+         function already said "beside it, not instead of it"; this is the
+         branch that did not honour it. */
+      return React.createElement(React.Fragment, null,
+        React.createElement('button', {
+          type:      'button',
+          className: 'fs-btn fs-btn--tertiary fs-btn--sm fs-draft-email fs-draft-email--empty',
+          disabled:  true,
+          title:     'No outstanding action items in this view to send',
+        }, 'Draft email'),
+        React.createElement(PreviewEmailButton,
+          Object.assign({}, props, {
+            emptyReason: 'No outstanding action items in this view to preview',
+          })));
     }
     var tip = draft.truncated
       ? ('Opens a draft in your mail client — ' + draft.omittedItems
@@ -2784,6 +2797,15 @@
     var setOpen = openRef[1];
     var Modal   = window.FieldSight.EmailPreviewModal;
     if (!Modal) return null;          /* script not loaded → no broken button */
+    /* Nothing to hand off: still shown, still labelled, just not clickable. */
+    if (props.emptyReason) {
+      return React.createElement('button', {
+        type:      'button',
+        className: 'fs-btn fs-btn--tertiary fs-btn--sm',
+        disabled:  true,
+        title:     props.emptyReason,
+      }, 'Preview & copy');
+    }
     return React.createElement(React.Fragment, null,
       React.createElement('button', {
         type:      'button',
@@ -2883,7 +2905,26 @@
     var Modal   = (window.FieldSight || {}).SessionReportModal;
     var caller  = (window.AuthMock && window.AuthMock.currentUser) || {};
     var canCreate = !!(window.FS && window.FS.can && window.FS.can(caller, window.FS.P('report', 'create')));
-    if (!props.session || !Modal || !canCreate) return null;
+    if (!Modal || !canCreate) return null;
+
+    /* "All day" is not a meeting, and this modal is per-meeting: the backend
+       route is POST /sessions/{id}/report/preview, so there is no id to ask
+       about when the picker is on All day.
+
+       It used to return null here, so the control simply was not there and the
+       question it raises — "why can't I generate a report for the whole day?"
+       — had no answer on screen. It does have an answer: the whole day IS a
+       report, the nightly daily one, and /reports can regenerate it. Say that
+       instead of disappearing. */
+    if (!props.session) {
+      return React.createElement('button', {
+        type:      'button',
+        className: 'fs-btn fs-btn--secondary fs-btn--sm fs-generate-report',
+        disabled:  true,
+        title:     'Reports here are per meeting — pick one above. '
+                   + 'The whole day is the daily report, on the Reports page.',
+      }, 'Generate report');
+    }
     return React.createElement(React.Fragment, null,
       React.createElement('button', {
         type:      'button',
