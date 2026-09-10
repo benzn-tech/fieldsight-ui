@@ -182,6 +182,7 @@
         && !(res.dropped || []).length
         && !res.truncated
         && !res.timed_out
+        && !res.failed
         && res.searched !== false;
   }
 
@@ -277,6 +278,23 @@
          Measured on OpenRouter 2026-09-08: a model returned 200 OK with
          confident prose and zero web results. The backend now refuses to
          reconcile that; this line is how the reader is told. */
+      /* A check that BROKE, which is not a check that ran late and not a
+         check with nothing to do.
+
+         All three used to arrive as `timed_out`, and one of them was measured
+         on TEST: a model returned prose instead of JSON and the reader was
+         told the check ran out of time -- in ten seconds, against a
+         twenty-seven second budget. "Ran out of time" invites trying again;
+         trying again fails identically.
+
+         Dropping the flag instead would have made "nothing to check" and "the
+         check broke" render the same, which is the thing the backend test
+         guarding this has always been for. So: three states, three sentences. */
+      res.failed
+        ? React.createElement('div', { className: 'fs-ask-corrob__note' },
+            'The web check could not be completed')
+        : null,
+
       res.searched === false
         ? React.createElement('div', { className: 'fs-ask-corrob__note' },
             'Couldn’t check the web for this answer')
