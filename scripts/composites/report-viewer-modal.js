@@ -50,9 +50,11 @@
     var inner;
 
     if (props.kind === 'narrative') {
+      if (typeof body !== 'string') return null;
       inner = h('p', 'fs-report-view__para', body);
 
     } else if (props.kind === 'kpi') {
+      if (!Array.isArray(body)) return null;
       inner = h('div', 'fs-report-view__facts fs-report-view__facts--inline',
         body.map(function (kv, i) {
           return React.createElement('div',
@@ -62,6 +64,7 @@
         }));
 
     } else if (props.kind === 'table') {
+      if (!body || !Array.isArray(body.columns) || !Array.isArray(body.rows)) return null;
       /* The wrapper scrolls, not the modal: an Actions table is five columns
          wide and a phone is not. */
       inner = h('div', 'fs-report-view__tablewrap',
@@ -80,7 +83,14 @@
       /* list and photos. Photos arrive as bare filenames -- this modal has no
          presigner, and a grid of broken images would be worse than a count,
          so the names are listed and the thumbnails wait for the day the
-         viewer can fetch them. */
+         viewer can fetch them.
+
+         The guard is not defensive noise. Two section shapes reach this file
+         and they are told apart by one string: lose `kind: 'raw'` on the
+         derived path and a weekly report arrives here with `body` undefined,
+         `body.map` throws inside render, and React blanks the WHOLE modal --
+         a crash, not a missing section. */
+      if (!Array.isArray(body)) return null;
       inner = h('ul', 'fs-report-view__list',
         body.map(function (item, i) {
           return React.createElement('li',
@@ -125,6 +135,17 @@
         })));
   }
 
+  var SESSION_NUMBERS = { Recordings: 1, 'Total audio': 1, Photos: 1 };
+
+  function headerFactsFor(vm, report) {
+    var facts = vm.headerFacts(report);
+    var hasKpi = (vm.sections(report) || []).some(function (s) {
+      return s.kind === 'kpi';
+    });
+    if (!hasKpi) return facts;
+    return facts.filter(function (f) { return !SESSION_NUMBERS[f.label]; });
+  }
+
   function ReportViewerModal(props) {
     var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
     var vm = view();
@@ -143,8 +164,13 @@
       var weather = vm.weatherLine(report.weather);
       var note    = vm.weatherNote(report);
       body = React.createElement('div', { className: 'fs-report-view' },
+        /* Identity only when the report carries an "On Site" KPI section:
+           without this the same three numbers are on screen twice, once from
+           `recording_session` here and once from the section built out of it,
+           and they disagree about zero (the header hides `Photos 0`, the
+           section shows it). */
         React.createElement('div', { className: 'fs-report-view__facts' },
-          vm.headerFacts(report).map(function (f, i) {
+          headerFactsFor(vm, report).map(function (f, i) {
             return React.createElement('div', { key: i, className: 'fs-report-view__kv' },
               React.createElement('span', { className: 'fs-report-view__k' }, f.label),
               React.createElement('span', { className: 'fs-report-view__v' }, f.value));

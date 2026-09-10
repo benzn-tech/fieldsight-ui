@@ -229,3 +229,68 @@ test('null and odd reports still do not throw', () => {
     assert.doesNotThrow(function () { vm.sections(bad); });
   });
 });
+
+/* ---------- what the review caught ------------------------------------- */
+
+test('every derived section is marked raw, because one string tells them apart', () => {
+  /* The modal branches on `s.kind === 'raw'`. Lose the marker on the derived
+     path and a weekly report reaches the generated renderer with `body`
+     undefined — `body.map` throws inside render, and React blanks the WHOLE
+     modal. A missing section is a bug; a blank modal is an outage. */
+  const WEEKLY = {
+    report_date: '2026-08-16', report_type: 'weekly', site: 'UC PK',
+    executive_summary: ['A week.'], safety_trends: ['Fewer near misses.'],
+  };
+  vm.sections(WEEKLY).forEach(function (s) {
+    assert.strictEqual(s.kind, 'raw', s.title + ' lost its raw marker');
+    assert.ok('value' in s, s.title + ' has no value for the raw renderer');
+  });
+});
+
+test('a thin day does not bring the timeline back', () => {
+  /* `sections: []` means the backend built the reader's shape and it came out
+     empty — or `build` raised and it wrote []. Falling all the way back would
+     resurrect the Detailed Timeline and the raw entries on exactly the days
+     nobody is watching. */
+  [[], [{ title: 'Summary', kind: 'narrative', body: '   ' }]].forEach(function (thin) {
+    const r = Object.assign({}, REPORT, { sections: thin });
+    const t = titles(r);
+    assert.ok(t.indexOf('Detailed Timeline') === -1,
+      'timeline came back for ' + JSON.stringify(thin));
+    assert.ok(t.indexOf('Quality & Compliance') !== -1,
+      'a thin report should still show its content, not a blank modal');
+  });
+});
+
+test('a report that never had sections still shows its timeline', () => {
+  /* The distinction that makes the rule above safe: "the generator spoke and
+     had nothing" is not "this report predates sections". */
+  const legacy = Object.assign({}, REPORT);
+  delete legacy.sections;
+  assert.ok(titles(legacy).indexOf('Detailed Timeline') !== -1);
+});
+
+test('a meeting is named on screen somewhere', () => {
+  /* A meeting's compat report deliberately leaves `site` empty and carries
+     `meeting_title`. That key is in META_KEYS so it is never content — which
+     left the name of the meeting appearing nowhere at all. */
+  const meeting = {
+    report_date: '2026-09-03', report_type: 'daily', site: '',
+    meeting_title: 'Subcontractor coordination',
+    executive_summary: ['Discussed the programme.'],
+  };
+  assert.ok(vm.reportTitle(meeting).indexOf('Subcontractor coordination') !== -1,
+    vm.reportTitle(meeting));
+});
+
+test('a real site still beats a meeting title', () => {
+  assert.ok(vm.reportTitle(Object.assign({}, REPORT,
+    { meeting_title: 'Should not win' })).indexOf('UC PK') !== -1);
+});
+
+test('a kind borrowed from Object.prototype is not a kind', () => {
+  const r = Object.assign({}, REPORT, { sections: [
+    { title: 'Odd', kind: 'constructor', items: ['Still readable'] },
+  ] });
+  assert.strictEqual(byTitle(r, 'Odd').kind, 'list');
+});

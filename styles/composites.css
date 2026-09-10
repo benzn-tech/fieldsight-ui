@@ -12651,6 +12651,10 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   border-bottom: none;
 }
 
+/* The header's labels are a column and share a 7.5rem gutter. Inline they are
+   pairs, and that gutter puts a hand's width between "Recordings" and "3". */
+.fs-report-view__facts--inline .fs-report-view__k { min-width: 0; }
+
 /* The table wrapper scrolls, never the modal body: an Actions table is five
    columns wide and a phone is not. */
 .fs-report-view__tablewrap { overflow-x: auto; }
@@ -12658,6 +12662,11 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-report-view__table {
   border-collapse: collapse;
   width: 100%;
+  /* Without a floor the table obeys `width: 100%` at any width and squeezes
+     the columns instead of overflowing -- so `overflow-x` on the wrapper never
+     fires and an action reads "Chase the st / eel" on a 320px screen. The
+     floor is what turns squeezing into scrolling. */
+  min-width: 28rem;
   font-size: var(--font-size-sm);
 }
 
@@ -12678,8 +12687,10 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   vertical-align: top;
   color: var(--text-primary);
   border-bottom: 1px solid var(--border-subtle, var(--border-default));
-  /* A long action must wrap rather than stretch the modal sideways. */
-  overflow-wrap: anywhere;
+  /* `break-word` and not `anywhere`: `anywhere` counts toward min-content, so
+     the browser is free to shrink the column to one character and break words
+     mid-syllable rather than let the wrapper scroll. */
+  overflow-wrap: break-word;
 }
 
 .fs-report-view__table tr:last-child td { border-bottom: none; }

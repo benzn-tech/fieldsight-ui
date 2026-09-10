@@ -80,7 +80,12 @@
   function reportTitle(report) {
     if (!report) return 'Report';
     var type = TYPE_WORD[report.report_type] || titleCase(report.report_type || 'Site');
-    var site = report.site || '';
+    /* A meeting's compat report deliberately leaves `site` empty -- a meeting
+       is not a site walk -- and carries `meeting_title` instead. That key is
+       in META_KEYS so it is never rendered as content, which left the name of
+       the meeting appearing NOWHERE: the modal said "Daily Site Report —
+       2026-09-03" for a meeting called "Subcontractor coordination". */
+    var site = report.site || report.meeting_title || '';
     var when = report.report_date || '';
     /* A weekly report's `report_date` is the period end; showing the range is
        what makes it readable as a week rather than as a very quiet day. */
@@ -176,7 +181,9 @@
       if (!title) return;
       /* An unknown kind is rendered as a list rather than dropped: a section
          the backend adds next should look plain, not disappear. */
-      var kind = SECTION_KINDS[s.kind] ? s.kind : 'list';
+      var kind = (typeof s.kind === 'string'
+                  && Object.prototype.hasOwnProperty.call(SECTION_KINDS, s.kind))
+        ? s.kind : 'list';
       var body = sectionBody(s, kind);
       if (body === null) return;              /* nothing in it to show */
       out.push({ key: 'gen-' + i, title: title, kind: kind, body: body });
@@ -241,12 +248,24 @@
     var generated = fromGenerator(report);
     if (generated) return generated;
 
+    /* THE GENERATOR SPOKE AND HAD NOTHING TO SHOW. `sections` being an array
+       means the backend built the reader's shape; an empty or all-empty one
+       means that day produced nothing for it, or `build` raised and the
+       backend wrote `[]`. Falling all the way back would then resurrect the
+       two things the report owner asked to be rid of -- the Detailed Timeline
+       and the raw `Follow up needed  true` entries -- on precisely the days
+       nobody is watching. So the raw content still renders, minus the
+       timeline: a thin report is better than a blank modal, and `topics` was
+       never for a reader. */
+    var spoke = Array.isArray(report.sections);
+
     var out = [];
     var seen = {};
 
     KNOWN_ORDER.forEach(function (pair) {
       var key = pair[0], title = pair[1];
       seen[key] = 1;
+      if (spoke && key === 'topics') return;
       var v = report[key];
       if (isEmpty(v)) return;
       out.push({ key: key, title: title, kind: 'raw', value: v });
