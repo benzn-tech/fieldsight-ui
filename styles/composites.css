@@ -12647,3 +12647,40 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   font-size: var(--font-size-base);
   color: var(--text-secondary);
 }
+
+/* ── Ask · answered from the open web ─────────────────────────────────────
+   Sits ABOVE the answer, unlike the corroboration block which sits below it.
+   Corroboration annotates an answer that came from the customer's own
+   recordings; this one says the answer did NOT. A reader who meets that fact
+   after the prose has already read it as their own record. */
+
+.fs-ask-web {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--accent-primary, #C9762B);
+  background: var(--surface-panel-muted);
+  border-radius: var(--radius-sm, 4px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fs-ask-web__label {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.fs-ask-web__sources { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+
+.fs-ask-web__source {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--border-default);
+}
+.fs-ask-web__source:hover,
+.fs-ask-web__source:focus-visible { color: var(--text-primary); }
