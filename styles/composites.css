@@ -12642,6 +12642,63 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   overflow-wrap: anywhere;
 }
 
+/* A generated section's KPI row sits inline rather than in the header grid. */
+.fs-report-view__facts--inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+/* The header's labels are a column and share a 7.5rem gutter. Inline they are
+   pairs, and that gutter puts a hand's width between "Recordings" and "3". */
+.fs-report-view__facts--inline .fs-report-view__k { min-width: 0; }
+
+/* The table wrapper scrolls, never the modal body: an Actions table is five
+   columns wide and a phone is not. */
+.fs-report-view__tablewrap { overflow-x: auto; }
+
+.fs-report-view__table {
+  border-collapse: collapse;
+  width: 100%;
+  /* Without a floor the table obeys `width: 100%` at any width and squeezes
+     the columns instead of overflowing -- so `overflow-x` on the wrapper never
+     fires and an action reads "Chase the st / eel" on a 320px screen. The
+     floor is what turns squeezing into scrolling. */
+  min-width: 28rem;
+  font-size: var(--font-size-sm);
+}
+
+.fs-report-view__table th {
+  text-align: left;
+  padding: var(--space-1) var(--space-3) var(--space-1) 0;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-default);
+  white-space: nowrap;
+}
+
+.fs-report-view__table td {
+  padding: var(--space-2) var(--space-3) var(--space-2) 0;
+  vertical-align: top;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-subtle, var(--border-default));
+  /* `break-word` and not `anywhere`: `anywhere` counts toward min-content, so
+     the browser is free to shrink the column to one character and break words
+     mid-syllable rather than let the wrapper scroll. */
+  overflow-wrap: break-word;
+}
+
+.fs-report-view__table tr:last-child td { border-bottom: none; }
+
+/* The first column is the thing itself; the rest are its attributes. */
+.fs-report-view__table td:first-child { color: var(--text-primary); }
+.fs-report-view__table td:not(:first-child) { color: var(--text-secondary); }
+
 .fs-report-view__state {
   padding: var(--space-6) 0;
   font-size: var(--font-size-base);
