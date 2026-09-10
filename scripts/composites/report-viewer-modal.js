@@ -26,6 +26,74 @@
     return (window.FS && window.FS.api && window.FS.api.reportView) || null;
   }
 
+  function h(tag, cls, children) {
+    return React.createElement(tag, cls ? { className: cls } : null, children);
+  }
+
+  /* ---------- the shape the generator sends -------------------------------
+
+     `report_sections.py` emits the same section vocabulary the template
+     Library uses, so each kind gets the rendering it was designed for instead
+     of the one-size fallback below. That fallback turned a quality entry into
+
+         Waterproofing detail 216 — heavy dwang solution
+         Status              in_progress
+         Details             Stick with heavy dwang, on top of it
+         Follow up needed    true
+
+     -- database columns, verbatim, in a customer's report. As a table with
+     declared columns the same row reads as a row, and `follow_up_needed` is
+     not in `fields` at all, so it never reaches a reader. */
+
+  function GeneratedSection(props) {
+    var body = props.body;
+    var inner;
+
+    if (props.kind === 'narrative') {
+      inner = h('p', 'fs-report-view__para', body);
+
+    } else if (props.kind === 'kpi') {
+      inner = h('div', 'fs-report-view__facts fs-report-view__facts--inline',
+        body.map(function (kv, i) {
+          return React.createElement('div',
+            { key: i, className: 'fs-report-view__kv' },
+            h('span', 'fs-report-view__k', kv.label),
+            h('span', 'fs-report-view__v', kv.value));
+        }));
+
+    } else if (props.kind === 'table') {
+      /* The wrapper scrolls, not the modal: an Actions table is five columns
+         wide and a phone is not. */
+      inner = h('div', 'fs-report-view__tablewrap',
+        React.createElement('table', { className: 'fs-report-view__table' },
+          React.createElement('thead', null,
+            React.createElement('tr', null, body.columns.map(function (c) {
+              return React.createElement('th', { key: c.key }, c.label);
+            }))),
+          React.createElement('tbody', null, body.rows.map(function (row, i) {
+            return React.createElement('tr', { key: i }, row.map(function (cell, j) {
+              return React.createElement('td', { key: j }, cell);
+            }));
+          }))));
+
+    } else {
+      /* list and photos. Photos arrive as bare filenames -- this modal has no
+         presigner, and a grid of broken images would be worse than a count,
+         so the names are listed and the thumbnails wait for the day the
+         viewer can fetch them. */
+      inner = h('ul', 'fs-report-view__list',
+        body.map(function (item, i) {
+          return React.createElement('li',
+            { key: i, className: 'fs-report-view__item' },
+            h('div', 'fs-report-view__item-head', item));
+        }));
+    }
+
+    return React.createElement('div', { className: 'fs-report-view__section' },
+      h('h3', 'fs-report-view__h', props.title),
+      inner);
+  }
+
   function Section(props) {
     var vm = view();
     var value = props.value;
@@ -92,7 +160,11 @@
             : React.createElement('p', { className: 'fs-report-view__para fs-report-view__para--muted' }, note)),
 
         vm.sections(report).map(function (s) {
-          return React.createElement(Section, { key: s.key, title: s.title, value: s.value });
+          return s.kind === 'raw'
+            ? React.createElement(Section,
+                { key: s.key, title: s.title, value: s.value })
+            : React.createElement(GeneratedSection,
+                { key: s.key, title: s.title, kind: s.kind, body: s.body });
         }));
     }
 

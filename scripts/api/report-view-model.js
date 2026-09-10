@@ -32,6 +32,15 @@
     report_date: 1, report_type: 1, user_name: 1, device: 1, site: 1,
     site_id: 1, role: 1, period: 1, recording_session: 1, weather: 1,
     _report_metadata: 1,
+    /* `sections` is the reader's whole shape, not a field inside the report,
+       and `meeting_title` is identity. Without them here the fallback below
+       renders the entire section list AGAIN as one section titled "Sections",
+       under a title derived from the key -- which is what production did the
+       day the generator started emitting it. Kept even though `sections` is
+       normally consumed above, because the fallback is what runs when it
+       arrives malformed, and that is exactly when a junk section is least
+       welcome. */
+    sections: 1, meeting_title: 1,
   };
 
   /* Section order follows the Word document (lambda_report_generator.py
@@ -135,8 +144,103 @@
 
   /* ---------- sections --------------------------------------------------- */
 
+  /* ---------- the reader's shape, when the generator sent one ------------
+
+     `report.sections` is built by the backend (src/report_sections.py) in the
+     Library template's own vocabulary -- {title, kind, fields} with `kind` one
+     of narrative/kpi/list/table/photos. When it is there it IS the report a
+     person is meant to read, and deriving a second set of sections from the
+     raw keys beside it produces three separate wrongs at once, all of which
+     production showed:
+
+       - a junk section titled "Sections" (the fallback rendering the shape);
+       - "Detailed Timeline", rendered from `topics` -- which the report owner
+         asked to remove and which the backend now keeps ONLY because
+         chunking.py splits the RAG index straight out of it;
+       - every entry dumped as `titleCase(key)`: `value`, so a reader saw
+         "Status in_progress" and "Follow up needed true" -- database columns,
+         verbatim, in a customer's report.
+
+     The derived path stays for weekly and monthly reports, which have no
+     `sections`, and for every report generated before this existed. */
+
+  var SECTION_KINDS = { narrative: 1, kpi: 1, list: 1, table: 1, photos: 1 };
+
+  function fromGenerator(report) {
+    var raw = report.sections;
+    if (!Array.isArray(raw) || raw.length === 0) return null;
+    var out = [];
+    raw.forEach(function (s, i) {
+      if (!s || typeof s !== 'object') return;
+      var title = typeof s.title === 'string' ? s.title.trim() : '';
+      if (!title) return;
+      /* An unknown kind is rendered as a list rather than dropped: a section
+         the backend adds next should look plain, not disappear. */
+      var kind = SECTION_KINDS[s.kind] ? s.kind : 'list';
+      var body = sectionBody(s, kind);
+      if (body === null) return;              /* nothing in it to show */
+      out.push({ key: 'gen-' + i, title: title, kind: kind, body: body });
+    });
+    return out.length ? out : null;
+  }
+
+  /* One shape per kind, normalised here so the viewer never has to guess. */
+  function sectionBody(s, kind) {
+    if (kind === 'narrative') {
+      var text = typeof s.body === 'string' ? s.body.trim() : '';
+      return text || null;
+    }
+    if (kind === 'kpi') {
+      var vals = s.values && typeof s.values === 'object' ? s.values : {};
+      var pairs = (Array.isArray(s.fields) ? s.fields : Object.keys(vals))
+        .map(function (f) { return { label: titleCase(f), value: cellText(vals[f]) }; })
+        .filter(function (p) { return p.value !== ''; });
+      return pairs.length ? pairs : null;
+    }
+    if (kind === 'table') {
+      var fields = (Array.isArray(s.fields) ? s.fields : []).filter(function (f) {
+        return typeof f === 'string' && f;
+      });
+      var rows = (Array.isArray(s.rows) ? s.rows : []).filter(function (r) {
+        return r && typeof r === 'object';
+      });
+      if (!fields.length || !rows.length) return null;
+      /* A column every row leaves blank is a header with nothing under it.
+         `status` is the live one: the report generator's own extraction has no
+         status at all, while org-api's rows carry one. */
+      var used = fields.filter(function (f) {
+        return rows.some(function (r) { return cellText(r[f]) !== ''; });
+      });
+      if (!used.length) return null;
+      return {
+        columns: used.map(function (f) { return { key: f, label: titleCase(f) }; }),
+        rows: rows.map(function (r) {
+          return used.map(function (f) { return cellText(r[f]); });
+        }),
+      };
+    }
+    /* list and photos are both "a sequence of short strings". */
+    var items = (Array.isArray(s.items) ? s.items : [])
+      .map(cellText).filter(Boolean);
+    return items.length ? items : null;
+  }
+
+  /* Cells are strings. `false` and `0` are values a reader may need, so they
+     are rendered rather than treated as empty -- but `null`/`undefined` are
+     absence, and an object in a cell is a shape nobody designed a column for
+     and is left out instead of printed as [object Object]. */
+  function cellText(v) {
+    if (v === null || v === undefined) return '';
+    if (typeof v === 'object') return '';
+    return String(v).trim();
+  }
+
   function sections(report) {
     if (!report || typeof report !== 'object') return [];
+
+    var generated = fromGenerator(report);
+    if (generated) return generated;
+
     var out = [];
     var seen = {};
 
@@ -145,7 +249,7 @@
       seen[key] = 1;
       var v = report[key];
       if (isEmpty(v)) return;
-      out.push({ key: key, title: title, value: v });
+      out.push({ key: key, title: title, kind: 'raw', value: v });
     });
 
     /* Whatever the generator adds next. Rendering it under a derived title
@@ -156,7 +260,7 @@
       if (key.charAt(0) === '_') return;
       var v = report[key];
       if (isEmpty(v)) return;
-      out.push({ key: key, title: titleCase(key), value: v });
+      out.push({ key: key, title: titleCase(key), kind: 'raw', value: v });
     });
 
     return out;
@@ -209,6 +313,7 @@
   }
 
   var api = {
+    cellText:     cellText,
     reportTitle:  reportTitle,
     headerFacts:  headerFacts,
     weatherLine:  weatherLine,
