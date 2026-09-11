@@ -100,6 +100,10 @@
      -- a wrong colour on a safety line is worse than no colour. */
   var CHIP_TONE = {
     low: 'fs-report-view__chip--low',
+    /* An action's priority and a safety risk use `medium` where the weather
+       scale says `moderate`; they mean the same thing to a reader and must not
+       be the only chip on the page with no colour. */
+    medium: 'fs-report-view__chip--moderate',
     moderate: 'fs-report-view__chip--moderate',
     high: 'fs-report-view__chip--high',
     severe: 'fs-report-view__chip--severe',

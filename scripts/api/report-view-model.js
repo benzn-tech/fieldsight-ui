@@ -161,7 +161,12 @@
     push('Site', report.site || report.meeting_title);
     push('User', s.worker || report.user_name);
     push('Date', longDay(report.report_date) || report.report_date);
-    push('Time', sessionSpan(s));
+    /* `Time` is gone too. It was the last survivor of the session block, and
+       a span from the first recording to the last describes when the device
+       was on, which is the same kind of fact as the counts that went before
+       it. `sessionSpan` stays exported: it is tested, cheap, and the next
+       person to want it should not have to rediscover that per_recording
+       times are strings with seconds on them. */
     return out;
   }
 
@@ -243,6 +248,11 @@
     var out = [];
     raw.forEach(function (s, i) {
       if (!s || typeof s !== 'object') return;
+      /* The recording counts, dropped wherever they come from. The backend
+         stopped building this section, but every report generated before that
+         still carries one, and regenerating a year of reports to remove three
+         numbers is not the fix. */
+      if (s.kind === 'kpi') return;
       var title = typeof s.title === 'string' ? s.title.trim() : '';
       if (!title) return;
       /* An unknown kind is rendered as a list rather than dropped: a section
