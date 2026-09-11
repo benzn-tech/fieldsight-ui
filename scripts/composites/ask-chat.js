@@ -186,6 +186,36 @@
         && res.searched !== false;
   }
 
+  /* The line that keeps the two sources apart.
+
+     It sits ABOVE the answer for the same reason the basis line does: by the
+     time a reader reaches a footnote they have already read the answer as if it
+     came from their own recordings. The separation has to arrive first.
+
+     `sources` carries `domain` because this vendor returns Google grounding
+     redirects -- parsing the URL would attribute every source to
+     `vertexaisearch.cloud.google.com`, which is the opposite of naming a
+     publisher. */
+  function renderWebOrigin(m) {
+    if (!m.fromWeb) return null;
+    var web = m.web || {};
+    var sources = web.sources || [];
+    return React.createElement('div', { className: 'fs-ask-web' },
+      React.createElement('div', { className: 'fs-ask-web__label' },
+        'From the open web — not from your recordings'),
+      sources.length
+        ? React.createElement('div', { className: 'fs-ask-web__sources' },
+            sources.map(function (s, i) {
+              return React.createElement('a', {
+                key: i, href: s.url, target: '_blank', rel: 'noopener noreferrer',
+                className: 'fs-ask-web__source',
+                title: s.url,
+              }, sourceDomain(s));
+            }))
+        : null
+    );
+  }
+
   function renderCorroboration(res) {
     if (!res) return null;
 
@@ -538,8 +568,11 @@
         question: question,
       }).then(function (res) {
         var answerText = res.answer || '';
+        /* Not on a web-derived answer: corroborating the web against the web
+           is a loop that reads as confirmation. */
         var wantsCorrob = !!(((window.FS || {}).api || {}).externalCorroboration)
-                          && !!answerText;
+                          && !!answerText
+                          && !res.from_web;
         /* A per-message id, because the corroboration arrives later and has to
            find its own answer again. Position is not an identity here: two
            questions can be in flight, and matching on text attaches the block
@@ -554,6 +587,12 @@
           /* What the backend actually searched. Absent on the legacy path and
              on older deploys, which formatAnswerBasis renders as no line. */
           basis:     res.basis || null,
+          /* The records could not answer this and the web could. Carried as
+             its own field, never folded into `text`: a reader who cannot tell
+             what came out of their own meetings from what came off the
+             internet has no reason to suspect they need to check. */
+          fromWeb:   !!res.from_web,
+          web:       res.web || null,
           corrob:    wantsCorrob ? { _pending: true } : null,
           /* Captured from the question at send time, not read off the answer:
              the model's reply language is not reliable (measured on prod, a
@@ -652,6 +691,7 @@
                     + (m.basis && m.basis.widened ? ' fs-ask-chat__basis--widened' : ''),
                 }, formatAnswerBasis(m.basis, m.zh))
               : null,
+            m.role === 'assistant' ? renderWebOrigin(m) : null,
             m.role === 'assistant' && window.FieldSight.renderMarkdown
               ? React.createElement('div', {
                   className: 'fs-ask-chat__msg-text fs-ask-chat__msg-text--md',
