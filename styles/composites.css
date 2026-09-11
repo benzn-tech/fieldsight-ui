@@ -12642,8 +12642,204 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   overflow-wrap: anywhere;
 }
 
+/* A generated section's KPI row sits inline rather than in the header grid. */
+.fs-report-view__facts--inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+/* The header's labels are a column and share a 7.5rem gutter. Inline they are
+   pairs, and that gutter puts a hand's width between "Recordings" and "3". */
+.fs-report-view__facts--inline .fs-report-view__k { min-width: 0; }
+
+/* The table wrapper scrolls, never the modal body: an Actions table is five
+   columns wide and a phone is not. */
+.fs-report-view__tablewrap { overflow-x: auto; }
+
+.fs-report-view__table {
+  border-collapse: collapse;
+  width: 100%;
+  /* Without a floor the table obeys `width: 100%` at any width and squeezes
+     the columns instead of overflowing -- so `overflow-x` on the wrapper never
+     fires and an action reads "Chase the st / eel" on a 320px screen. The
+     floor is what turns squeezing into scrolling. */
+  min-width: 28rem;
+  font-size: var(--font-size-sm);
+}
+
+.fs-report-view__table th {
+  text-align: left;
+  padding: var(--space-1) var(--space-3) var(--space-1) 0;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-default);
+  white-space: nowrap;
+}
+
+.fs-report-view__table td {
+  padding: var(--space-2) var(--space-3) var(--space-2) 0;
+  vertical-align: top;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-subtle, var(--border-default));
+  /* `break-word` and not `anywhere`: `anywhere` counts toward min-content, so
+     the browser is free to shrink the column to one character and break words
+     mid-syllable rather than let the wrapper scroll. */
+  overflow-wrap: break-word;
+}
+
+.fs-report-view__table tr:last-child td { border-bottom: none; }
+
+/* The first column is the thing itself; the rest are its attributes. */
+.fs-report-view__table td:first-child { color: var(--text-primary); }
+.fs-report-view__table td:not(:first-child) { color: var(--text-secondary); }
+
+/* The site and the day, under the report's name. */
+.fs-report-view__subtitle {
+  margin-top: calc(var(--space-2) * -1);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+/* An entry: the thing, its state beside it, one line underneath. */
+.fs-report-view__entries {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.fs-report-view__entry-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.fs-report-view__entry-title {
+  font-size: var(--font-size-base);
+  line-height: 1.5;
+  color: var(--text-primary);
+  overflow-wrap: break-word;
+}
+
+/* The state, set small and quiet: it qualifies the thing, it is not the thing. */
+.fs-report-view__chip {
+  flex: 0 0 auto;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full, 999px);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+/* Weather impact, yellow through red. Tinted fills rather than text colour: a
+   one-word chip at 11px does not carry a hue reliably, and the point is that it
+   is legible at a glance without being read. The border stays so the shape
+   matches a neutral chip, and the text keeps the theme's own colour so it is
+   readable on both grounds. */
+.fs-report-view__chip--low {
+  background: color-mix(in srgb, #d9a219 14%, transparent);
+  border-color: color-mix(in srgb, #d9a219 36%, transparent);
+  color: var(--text-primary);
+}
+.fs-report-view__chip--moderate {
+  background: color-mix(in srgb, #e08421 18%, transparent);
+  border-color: color-mix(in srgb, #e08421 42%, transparent);
+  color: var(--text-primary);
+}
+.fs-report-view__chip--high {
+  background: color-mix(in srgb, #d9601f 22%, transparent);
+  border-color: color-mix(in srgb, #d9601f 48%, transparent);
+  color: var(--text-primary);
+}
+.fs-report-view__chip--severe {
+  background: color-mix(in srgb, #c0392b 24%, transparent);
+  border-color: color-mix(in srgb, #c0392b 55%, transparent);
+  color: var(--text-primary);
+}
+
+.fs-report-view__entry-note {
+  margin-top: 2px;
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  color: var(--text-secondary);
+  overflow-wrap: break-word;
+}
+
+/* Photographs, not a list of their filenames. */
+.fs-report-view__photos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+
+.fs-report-view__photo { margin: 0; }
+
+.fs-report-view__photo-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-sunken, transparent);
+}
+
+.fs-report-view__photo-cap {
+  margin-top: 2px;
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+
 .fs-report-view__state {
   padding: var(--space-6) 0;
   font-size: var(--font-size-base);
   color: var(--text-secondary);
 }
+
+/* ── Ask · answered from the open web ─────────────────────────────────────
+   Sits ABOVE the answer, unlike the corroboration block which sits below it.
+   Corroboration annotates an answer that came from the customer's own
+   recordings; this one says the answer did NOT. A reader who meets that fact
+   after the prose has already read it as their own record. */
+
+.fs-ask-web {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--accent-primary, #C9762B);
+  background: var(--surface-panel-muted);
+  border-radius: var(--radius-sm, 4px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fs-ask-web__label {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.fs-ask-web__sources { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+
+.fs-ask-web__source {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--border-default);
+}
+.fs-ask-web__source:hover,
+.fs-ask-web__source:focus-visible { color: var(--text-primary); }
