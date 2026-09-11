@@ -135,15 +135,20 @@ test('an empty section is skipped rather than rendered as a heading with nothing
 
 /* ---------- the header facts ------------------------------------------ */
 
-test('the header carries the session facts and drops the empty ones', () => {
+test('the header carries four facts about the day, not the recording', () => {
+  /* It used to carry Recordings / Total audio / Words transcribed as well.
+     The report's owner asked for them to go -- "多少分钟。多少个字啊？多少，
+     这些都不要了" -- because they describe the microphone, not the day: a
+     reader is not helped by learning it took 1,267 files. */
   const facts = vm.headerFacts(DAILY);
   const map = {};
   facts.forEach(function (f) { map[f.label] = f.value; });
   assert.strictEqual(map.Site, 'UC PK');
-  assert.strictEqual(map.Recordings, '46');
-  assert.strictEqual(map['Total audio'], '82m 28s');
-  assert.strictEqual(map['Words transcribed'], '13,433');
-  assert.ok(!('Photos' in map), 'zero photos is not a fact worth a row');
+  assert.ok(map.User, 'who was on site');
+  assert.ok(map.Date, 'which day');
+  ['Recordings', 'Total audio', 'Words transcribed', 'Photos'].forEach(function (k) {
+    assert.ok(!(k in map), k + ' is a fact about the recording, not the day');
+  });
 });
 
 test('a weekly report has no recording session and still produces a header', () => {

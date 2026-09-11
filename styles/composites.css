@@ -12699,6 +12699,82 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-report-view__table td:first-child { color: var(--text-primary); }
 .fs-report-view__table td:not(:first-child) { color: var(--text-secondary); }
 
+/* The site and the day, under the report's name. */
+.fs-report-view__subtitle {
+  margin-top: calc(var(--space-2) * -1);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+/* An entry: the thing, its state beside it, one line underneath. */
+.fs-report-view__entries {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.fs-report-view__entry-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.fs-report-view__entry-title {
+  font-size: var(--font-size-base);
+  line-height: 1.5;
+  color: var(--text-primary);
+  overflow-wrap: break-word;
+}
+
+/* The state, set small and quiet: it qualifies the thing, it is not the thing. */
+.fs-report-view__chip {
+  flex: 0 0 auto;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full, 999px);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.fs-report-view__entry-note {
+  margin-top: 2px;
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  color: var(--text-secondary);
+  overflow-wrap: break-word;
+}
+
+/* Photographs, not a list of their filenames. */
+.fs-report-view__photos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+
+.fs-report-view__photo { margin: 0; }
+
+.fs-report-view__photo-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-sunken, transparent);
+}
+
+.fs-report-view__photo-cap {
+  margin-top: 2px;
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+
 .fs-report-view__state {
   padding: var(--space-6) 0;
   font-size: var(--font-size-base);

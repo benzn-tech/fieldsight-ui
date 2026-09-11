@@ -77,6 +77,51 @@
 
   var TYPE_WORD = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' };
 
+  var WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday',
+                  'Friday', 'Saturday'];
+  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+                'August', 'September', 'October', 'November', 'December'];
+
+  /* UTC arithmetic, never `new Date('2026-09-03')` read as local: in NZ that
+     parses as UTC midnight and prints as the 3rd or the 4th depending on the
+     season, which is BUG-19 and has bitten the calendar already. */
+  function longDay(iso) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+    if (!m) return '';
+    var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    if (isNaN(d.getTime())) return '';
+    return WEEKDAYS[d.getUTCDay()] + ' ' + d.getUTCDate() + ' '
+      + MONTHS[d.getUTCMonth()] + ' ' + d.getUTCFullYear();
+  }
+
+  /* THE NAME OF THE THING. Everything that varies -- which site, which day --
+     moved to the line underneath, because a heading that reads "Daily Site
+     Report: UC PK — 2026-09-03" makes the reader parse a sentence to learn
+     they are looking at a daily report. */
+  function reportHeading(report) {
+    if (!report) return 'Report';
+    var type = TYPE_WORD[(report || {}).report_type]
+      || titleCase((report || {}).report_type || 'Site');
+    return type + ' Site Report';
+  }
+
+  /* The site and the day, in words. A weekday is how somebody remembers a day
+     on site; 2026-09-03 is how a database does. */
+  function reportSubtitle(report) {
+    if (!report) return '';
+    var bits = [];
+    var site = report.site || report.meeting_title || '';
+    if (site) bits.push(site);
+    var p = report.period;
+    if (p && p.start && p.end) {
+      bits.push(longDay(p.start) + ' → ' + longDay(p.end));
+    } else {
+      var day = longDay(report.report_date);
+      if (day) bits.push(day);
+    }
+    return bits.join(' \u00b7 ');
+  }
+
   function reportTitle(report) {
     if (!report) return 'Report';
     var type = TYPE_WORD[report.report_type] || titleCase(report.report_type || 'Site');
@@ -96,6 +141,14 @@
 
   /* ---------- the header facts ------------------------------------------ */
 
+  /* FOUR FACTS. It used to carry the session's counts as well -- recordings,
+     total audio, words transcribed, photos -- and the report's owner asked for
+     them to go: "多少分钟。多少个字啊？多少，这些都不要了". They describe the
+     recording, not the day, and a reader who wants to know how the day went is
+     not helped by learning it took 1,267 files.
+
+     `Time` replaces the durations with the one temporal fact that is about the
+     day: when the first recording started and the last one ended. */
   function headerFacts(report) {
     var out = [];
     if (!report) return out;
@@ -105,15 +158,27 @@
         out.push({ label: label, value: String(value) });
       }
     }
-    push('Site', report.site);
-    push('Worker', s.worker || report.user_name);
-    push('Role', s.role ? String(s.role).replace(/_/g, ' ') : null);
-    if (s.workers && s.workers.length) push('Workers', s.workers.join(', '));
-    push('Recordings', s.recordings);
-    push('Total audio', s.total_duration_display);
-    if (s.total_words) push('Words transcribed', Number(s.total_words).toLocaleString('en-NZ'));
-    push('Photos', s.photos);
+    push('Site', report.site || report.meeting_title);
+    push('User', s.worker || report.user_name);
+    push('Date', longDay(report.report_date) || report.report_date);
+    push('Time', sessionSpan(s));
     return out;
+  }
+
+  /* When the day started and when it stopped, from the per-recording list the
+     report already carries. Not a duration: 1091 minutes of audio across a day
+     is a fact about the microphone. `07:02 – 17:45` is a fact about the day.
+
+     One recording is a point in time, not a span, and rendering "07:02 – 07:02"
+     would read as a stuck clock. */
+  function sessionSpan(s) {
+    var recs = (s && Array.isArray(s.per_recording)) ? s.per_recording : [];
+    var times = recs.map(function (r) {
+      return String((r && r.time) || '').slice(0, 5);
+    }).filter(function (t) { return /^\d{2}:\d{2}$/.test(t); }).sort();
+    if (!times.length) return '';
+    var first = times[0], last = times[times.length - 1];
+    return first === last ? first : (first + ' \u2013 ' + last);
   }
 
   /* ---------- weather ---------------------------------------------------- */
@@ -169,7 +234,8 @@
      The derived path stays for weekly and monthly reports, which have no
      `sections`, and for every report generated before this existed. */
 
-  var SECTION_KINDS = { narrative: 1, kpi: 1, list: 1, table: 1, photos: 1 };
+  var SECTION_KINDS = { narrative: 1, kpi: 1, list: 1, table: 1,
+                        entries: 1, photos: 1 };
 
   function fromGenerator(report) {
     var raw = report.sections;
@@ -226,7 +292,45 @@
         }),
       };
     }
-    /* list and photos are both "a sequence of short strings". */
+    if (kind === 'entries') {
+      /* A thing, the state it is in, and one line about it. Not a table: four
+         columns of prose read as a spreadsheet of paragraphs, and the columns
+         do not line up anyway, because `note` is a sentence and `status` is a
+         word. */
+      var entries = (Array.isArray(s.items) ? s.items : [])
+        .map(function (e) {
+          if (!e || typeof e !== 'object') {
+            var plain = cellText(e);
+            return plain ? { title: plain, status: '', note: '' } : null;
+          }
+          var t = cellText(e.title);
+          if (!t) return null;
+          return { title: t, status: cellText(e.status), note: cellText(e.note) };
+        })
+        .filter(Boolean);
+      return entries.length ? entries : null;
+    }
+
+    if (kind === 'photos') {
+      /* `{name, key}` since the backend started sending something a fetch can
+         use. A bare string is a pre-change report: the name is shown, and
+         there is no key to presign, so no thumbnail -- which is honest rather
+         than a broken image. */
+      var photos = (Array.isArray(s.items) ? s.items : [])
+        .map(function (ph) {
+          if (typeof ph === 'string') {
+            return ph.trim() ? { name: ph.trim(), key: '' } : null;
+          }
+          if (!ph || typeof ph !== 'object') return null;
+          var name = cellText(ph.name) || cellText(ph.key);
+          if (!name) return null;
+          return { name: name, key: cellText(ph.key) };
+        })
+        .filter(Boolean);
+      return photos.length ? photos : null;
+    }
+
+    /* list. */
     var items = (Array.isArray(s.items) ? s.items : [])
       .map(cellText).filter(Boolean);
     return items.length ? items : null;
@@ -332,7 +436,11 @@
   }
 
   var api = {
-    cellText:     cellText,
+    cellText:       cellText,
+    longDay:        longDay,
+    sessionSpan:    sessionSpan,
+    reportHeading:  reportHeading,
+    reportSubtitle: reportSubtitle,
     reportTitle:  reportTitle,
     headerFacts:  headerFacts,
     weatherLine:  weatherLine,

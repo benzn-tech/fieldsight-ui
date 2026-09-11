@@ -40,7 +40,10 @@ const vm = require('../scripts/api/report-view-model.js');
 const REPORT = {
   report_date: '2026-09-03', report_type: 'daily', site: 'UC PK',
   user_name: 'Ben_UCPK2',
-  recording_session: { recordings: 3, total_duration_display: '2m 52s', photos: 6 },
+  recording_session: {
+    worker: 'Ben_UCPK2', recordings: 3, total_duration_display: '2m 52s', photos: 6,
+    per_recording: [{ time: '07:02:13' }, { time: '12:30:00' }, { time: '17:45:45' }],
+  },
 
   /* The machine's half. Still on the wire, still not for a reader. */
   topics: [{ topic_title: 'Ground floor', time_range: '10:00 – 10:03',
@@ -293,4 +296,99 @@ test('a kind borrowed from Object.prototype is not a kind', () => {
     { title: 'Odd', kind: 'constructor', items: ['Still readable'] },
   ] });
   assert.strictEqual(byTitle(r, 'Odd').kind, 'list');
+});
+
+/* ---------- the header and the photographs ----------------------------- */
+
+test('the report is named, and what changes sits underneath', () => {
+  /* "Daily Site Report: UC PK — 2026-09-03" makes a reader parse a sentence
+     to learn they are looking at a daily report. The name is the heading; the
+     site and the day are the line under it. */
+  assert.strictEqual(vm.reportHeading(REPORT), 'Daily Site Report');
+  assert.strictEqual(vm.reportSubtitle(REPORT), 'UC PK · Thursday 3 September 2026');
+});
+
+test('the day is named by its weekday, which is how anyone remembers it', () => {
+  assert.strictEqual(vm.longDay('2026-09-03'), 'Thursday 3 September 2026');
+  assert.strictEqual(vm.longDay('2026-09-09'), 'Wednesday 9 September 2026');
+});
+
+test('the date is read as UTC, not as local midnight', () => {
+  /* BUG-19: `new Date('2026-09-03')` is UTC midnight, and printing it with
+     local getters in NZ (UTC+12/+13) yields the 3rd or the 4th depending on
+     the season. A report would be filed under the wrong weekday for half the
+     year, and only for half the year. */
+  ['2026-01-15', '2026-07-15'].forEach(function (iso) {
+    assert.ok(vm.longDay(iso).indexOf(iso.slice(8).replace(/^0/, '')) !== -1,
+      iso + ' -> ' + vm.longDay(iso));
+  });
+});
+
+test('a weekly report keeps its span in the subtitle', () => {
+  const weekly = { report_type: 'weekly', site: 'UC PK', report_date: '2026-08-16',
+                   period: { start: '2026-08-10', end: '2026-08-16' } };
+  assert.strictEqual(vm.reportHeading(weekly), 'Weekly Site Report');
+  assert.ok(vm.reportSubtitle(weekly).indexOf('→') !== -1, vm.reportSubtitle(weekly));
+});
+
+test('the header is site, user, date and time — and nothing about the recording', () => {
+  const map = {};
+  vm.headerFacts(REPORT).forEach(function (f) { map[f.label] = f.value; });
+  assert.deepStrictEqual(Object.keys(map), ['Site', 'User', 'Date', 'Time']);
+  assert.strictEqual(map.Time, '07:02 – 17:45');
+});
+
+test('one recording is a time, not a span that reads as a stuck clock', () => {
+  assert.strictEqual(vm.sessionSpan({ per_recording: [{ time: '09:15:00' }] }), '09:15');
+  assert.strictEqual(vm.sessionSpan({}), '');
+  assert.strictEqual(vm.sessionSpan({ per_recording: [{ time: 'nonsense' }] }), '');
+});
+
+test('quality and safety are the same shape, and it is not a table', () => {
+  /* Asked for directly: "我不关心你是用列表还是表格，我希望和上面统一", and the
+     table form was 冗长 — four columns of prose read as a spreadsheet of
+     paragraphs, and they never line up because `note` is a sentence and
+     `status` is a word. */
+  const r = Object.assign({}, REPORT, { sections: [
+    { title: 'Issues & Quality', kind: 'entries', items: [
+      { title: 'PS4 outstanding', status: 'concern', note: 'Chase the engineer' }] },
+    { title: 'Safety', kind: 'entries', items: [
+      { title: 'Loose cable', status: 'low', note: 'Level 2 · Tape it' }] },
+  ] });
+  const q = byTitle(r, 'Issues & Quality'), s = byTitle(r, 'Safety');
+  assert.strictEqual(q.kind, 'entries');
+  assert.strictEqual(s.kind, 'entries');
+  assert.deepStrictEqual(Object.keys(q.body[0]), Object.keys(s.body[0]));
+  assert.deepStrictEqual(q.body[0],
+    { title: 'PS4 outstanding', status: 'concern', note: 'Chase the engineer' });
+});
+
+test('an entry with no note or status is still an entry', () => {
+  const r = Object.assign({}, REPORT, { sections: [
+    { title: 'Safety', kind: 'entries', items: [{ title: 'Loose cable' }, 'Bare string'] },
+  ] });
+  assert.deepStrictEqual(byTitle(r, 'Safety').body, [
+    { title: 'Loose cable', status: '', note: '' },
+    { title: 'Bare string', status: '', note: '' },
+  ]);
+});
+
+test('a photo carries a key, because a filename cannot be fetched', () => {
+  /* Why photos were never IN the report: `related_photos` held bare
+     filenames, so nothing downstream could presign one. */
+  const r = Object.assign({}, REPORT, { sections: [
+    { title: 'Photos', kind: 'photos', items: [
+      { name: 'a.jpg', key: 'users/Ben_UCPK2/pictures/2026-09-03/a.jpg' }] },
+  ] });
+  assert.deepStrictEqual(byTitle(r, 'Photos').body,
+    [{ name: 'a.jpg', key: 'users/Ben_UCPK2/pictures/2026-09-03/a.jpg' }]);
+});
+
+test('a photo from an older report still shows its name', () => {
+  /* Reports generated before the key existed carry plain strings. A name with
+     no thumbnail is honest; a broken image is not. */
+  const r = Object.assign({}, REPORT, { sections: [
+    { title: 'Photos', kind: 'photos', items: ['old.jpg'] },
+  ] });
+  assert.deepStrictEqual(byTitle(r, 'Photos').body, [{ name: 'old.jpg', key: '' }]);
 });
