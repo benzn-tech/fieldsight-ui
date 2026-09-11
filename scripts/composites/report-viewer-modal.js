@@ -94,6 +94,21 @@
     }));
   }
 
+  /* Weather impact runs yellow to red; everything else keeps the neutral chip.
+     The severity words are the backend's (`report_sections._WEATHER_SCALE`),
+     and a word this does not know stays neutral rather than guessing a colour
+     -- a wrong colour on a safety line is worse than no colour. */
+  var CHIP_TONE = {
+    low: 'fs-report-view__chip--low',
+    moderate: 'fs-report-view__chip--moderate',
+    high: 'fs-report-view__chip--high',
+    severe: 'fs-report-view__chip--severe',
+  };
+
+  function chipTone(status) {
+    return CHIP_TONE[String(status || '').toLowerCase()] || '';
+  }
+
   function GeneratedSection(props) {
     var body = props.body;
     var inner;
@@ -140,7 +155,8 @@
           React.createElement('div', { className: 'fs-report-view__entry-head' },
             h('span', 'fs-report-view__entry-title', e.title),
             e.status
-              ? h('span', 'fs-report-view__chip', e.status.replace(/_/g, ' '))
+              ? h('span', 'fs-report-view__chip ' + chipTone(e.status),
+                  e.status.replace(/_/g, ' '))
               : null),
           e.note ? h('div', 'fs-report-view__entry-note', e.note) : null);
       }));
@@ -231,8 +247,15 @@
       body = React.createElement('div', { className: 'fs-report-view__state' },
         props.error || 'Could not load this report.');
     } else {
-      var weather = vm.weatherLine(report.weather);
-      var note    = vm.weatherNote(report);
+      /* The generator sends a Weather SECTION now. Rendering the old block
+         beside it puts the same sentence on screen twice -- and the block
+         cannot show the impact level, which is the half worth reading. */
+      var generated = vm.sections(report) || [];
+      var hasWeatherSection = generated.some(function (s) {
+        return s.title === 'Weather';
+      });
+      var weather = hasWeatherSection ? null : vm.weatherLine(report.weather);
+      var note    = hasWeatherSection ? null : vm.weatherNote(report);
       var subtitle = vm.reportSubtitle ? vm.reportSubtitle(report) : '';
       body = React.createElement('div', { className: 'fs-report-view' },
 
@@ -257,13 +280,14 @@
         /* Weather sits above the narrative, as it does in the report the
            customer asked for — and when it is missing it says so rather than
            quietly not being there. */
-        React.createElement('div', { className: 'fs-report-view__section' },
+        hasWeatherSection ? null : React.createElement(
+          'div', { className: 'fs-report-view__section' },
           React.createElement('h3', { className: 'fs-report-view__h' }, 'Weather'),
           weather
             ? React.createElement('p', { className: 'fs-report-view__para' }, weather)
             : React.createElement('p', { className: 'fs-report-view__para fs-report-view__para--muted' }, note)),
 
-        vm.sections(report).map(function (s) {
+        generated.map(function (s) {
           return s.kind === 'raw'
             ? React.createElement(Section,
                 { key: s.key, title: s.title, value: s.value })
