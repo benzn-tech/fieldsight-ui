@@ -45,6 +45,55 @@
      declared columns the same row reads as a row, and `follow_up_needed` is
      not in `fields` at all, so it never reaches a reader. */
 
+  /* The photographs, fetched one presigned URL at a time.
+
+     The backend now sends `{name, key}`; before it did, `related_photos` held
+     bare filenames and nothing downstream could find the image, which is why
+     "why are the photos not in the report" had no better answer than a list of
+     names. A photo with no key still renders as its name -- honest, and better
+     than a broken image.
+
+     Failures are per photo, not per section: one object the caller cannot
+     presign must not take the other eleven down with it. */
+  function PhotoGrid(props) {
+    var items = props.items;
+    var state = React.useState({});
+    var urls = state[0], setUrls = state[1];
+
+    React.useEffect(function () {
+      var media = window.FS && window.FS.api && window.FS.api.media;
+      if (!media || !media.getUrl) return;
+      var live = true;
+      items.forEach(function (ph) {
+        if (!ph.key) return;
+        Promise.resolve(media.getUrl(ph.key)).then(function (url) {
+          if (live && url) {
+            setUrls(function (prev) {
+              if (prev[ph.key]) return prev;
+              var next = {};
+              Object.keys(prev).forEach(function (k) { next[k] = prev[k]; });
+              next[ph.key] = url;
+              return next;
+            });
+          }
+        }, function () { /* this photo stays a name */ });
+      });
+      return function () { live = false; };
+    }, [items]);
+
+    return h('div', 'fs-report-view__photos', items.map(function (ph, i) {
+      var url = ph.key ? urls[ph.key] : null;
+      return React.createElement('figure',
+        { key: i, className: 'fs-report-view__photo' },
+        url ? React.createElement('img', {
+          src: url, alt: ph.name, loading: 'lazy',
+          className: 'fs-report-view__photo-img',
+        }) : null,
+        React.createElement('figcaption',
+          { className: 'fs-report-view__photo-cap' }, ph.name));
+    }));
+  }
+
   function GeneratedSection(props) {
     var body = props.body;
     var inner;
@@ -79,8 +128,29 @@
             }));
           }))));
 
+    } else if (props.kind === 'entries') {
+      /* A thing, the state it is in, and one line about it. This replaced a
+         four-column table for Quality and for Safety: columns of prose read as
+         a spreadsheet of paragraphs, and they do not line up anyway, because
+         `note` is a sentence and `status` is a word. */
+      if (!Array.isArray(body)) return null;
+      inner = h('ul', 'fs-report-view__entries', body.map(function (e, i) {
+        return React.createElement('li',
+          { key: i, className: 'fs-report-view__entry' },
+          React.createElement('div', { className: 'fs-report-view__entry-head' },
+            h('span', 'fs-report-view__entry-title', e.title),
+            e.status
+              ? h('span', 'fs-report-view__chip', e.status.replace(/_/g, ' '))
+              : null),
+          e.note ? h('div', 'fs-report-view__entry-note', e.note) : null);
+      }));
+
+    } else if (props.kind === 'photos') {
+      if (!Array.isArray(body)) return null;
+      inner = React.createElement(PhotoGrid, { items: body });
+
     } else {
-      /* list and photos. Photos arrive as bare filenames -- this modal has no
+      /* list. Photos used to arrive as bare filenames -- this modal has no
          presigner, and a grid of broken images would be worse than a count,
          so the names are listed and the thumbnails wait for the day the
          viewer can fetch them.
@@ -163,7 +233,15 @@
     } else {
       var weather = vm.weatherLine(report.weather);
       var note    = vm.weatherNote(report);
+      var subtitle = vm.reportSubtitle ? vm.reportSubtitle(report) : '';
       body = React.createElement('div', { className: 'fs-report-view' },
+
+        /* The modal's own title bar carries the NAME of the report; which site
+           and which day sit here, smaller, because they are what changes. */
+        subtitle
+          ? h('div', 'fs-report-view__subtitle', subtitle)
+          : null,
+
         /* Identity only when the report carries an "On Site" KPI section:
            without this the same three numbers are on screen twice, once from
            `recording_session` here and once from the section built out of it,
@@ -197,7 +275,9 @@
     return React.createElement(Modal, {
       open:    true,
       size:    'lg',
-      title:   report ? vm.reportTitle(report) : 'Report',
+      title:   report
+        ? (vm.reportHeading ? vm.reportHeading(report) : vm.reportTitle(report))
+        : 'Report',
       onClose: props.onClose,
     }, body);
   }
