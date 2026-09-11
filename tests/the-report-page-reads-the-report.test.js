@@ -392,3 +392,50 @@ test('a photo from an older report still shows its name', () => {
   ] });
   assert.deepStrictEqual(byTitle(r, 'Photos').body, [{ name: 'old.jpg', key: '' }]);
 });
+
+/* ---------- weather impact, and what got done -------------------------- */
+
+test('the weather impact level is the only thing that gets a colour', () => {
+  /* Yellow through red, asked for directly. A word the frontend does not know
+     stays neutral rather than guessing: a wrong colour on a safety line is
+     worse than no colour at all. */
+  const modal = require('fs').readFileSync(
+    require('path').join(__dirname, '..', 'scripts', 'composites',
+                         'report-viewer-modal.js'), 'utf8');
+  ['low', 'moderate', 'high', 'severe'].forEach(function (level) {
+    assert.ok(modal.indexOf(level + ": 'fs-report-view__chip--" + level + "'") !== -1,
+      level + ' has no tone');
+  });
+  const css = require('fs').readFileSync(
+    require('path').join(__dirname, '..', 'styles', 'composites.css'), 'utf8');
+  ['low', 'moderate', 'high', 'severe'].forEach(function (level) {
+    assert.ok(css.indexOf('.fs-report-view__chip--' + level) !== -1,
+      level + ' has no rule');
+  });
+});
+
+test('a weather section carries its lines and its impact', () => {
+  const r = Object.assign({}, REPORT, { sections: [{
+    title: 'Weather', kind: 'entries', items: [
+      { title: 'Slight rain', status: 'moderate',
+        note: 'rain affects earthworks and pours' },
+      { title: 'Temperature: 11.2°C – 13.5°C', status: '', note: '' },
+      { title: 'Rainfall: 5.9mm', status: '', note: '' },
+      { title: 'Maximum wind speed: 22.2 km/h', status: '', note: '' },
+    ] }] });
+  const w = byTitle(r, 'Weather');
+  assert.strictEqual(w.kind, 'entries');
+  assert.strictEqual(w.body.length, 4);
+  assert.strictEqual(w.body[0].status, 'moderate');
+  assert.strictEqual(w.body[1].status, '', 'a measurement is not an impact');
+});
+
+test('work completed is its own list', () => {
+  const r = Object.assign({}, REPORT, { sections: [{
+    title: 'Work Completed', kind: 'list',
+    items: ['Continued groundworks despite slight rain',
+            'Progressed with foundation preparations'] }] });
+  assert.deepStrictEqual(byTitle(r, 'Work Completed').body,
+    ['Continued groundworks despite slight rain',
+     'Progressed with foundation preparations']);
+});

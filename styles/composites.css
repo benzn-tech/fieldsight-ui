@@ -12743,6 +12743,32 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   white-space: nowrap;
 }
 
+/* Weather impact, yellow through red. Tinted fills rather than text colour: a
+   one-word chip at 11px does not carry a hue reliably, and the point is that it
+   is legible at a glance without being read. The border stays so the shape
+   matches a neutral chip, and the text keeps the theme's own colour so it is
+   readable on both grounds. */
+.fs-report-view__chip--low {
+  background: color-mix(in srgb, #d9a219 14%, transparent);
+  border-color: color-mix(in srgb, #d9a219 36%, transparent);
+  color: var(--text-primary);
+}
+.fs-report-view__chip--moderate {
+  background: color-mix(in srgb, #e08421 18%, transparent);
+  border-color: color-mix(in srgb, #e08421 42%, transparent);
+  color: var(--text-primary);
+}
+.fs-report-view__chip--high {
+  background: color-mix(in srgb, #d9601f 22%, transparent);
+  border-color: color-mix(in srgb, #d9601f 48%, transparent);
+  color: var(--text-primary);
+}
+.fs-report-view__chip--severe {
+  background: color-mix(in srgb, #c0392b 24%, transparent);
+  border-color: color-mix(in srgb, #c0392b 55%, transparent);
+  color: var(--text-primary);
+}
+
 .fs-report-view__entry-note {
   margin-top: 2px;
   font-size: var(--font-size-sm);
