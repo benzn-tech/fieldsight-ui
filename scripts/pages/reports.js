@@ -72,6 +72,17 @@
      for. Presigning a .docx that does not exist would hand the browser a URL
      that answers 403, and this bucket answers 403 for absent keys, so it
      would not even read as "no Word file". */
+  /* WHAT THE DETAIL PANEL IS HANDED WHEN A ROW IS CLICKED.
+
+     The whole row, plus the two fields that say what kind of selection it is.
+     This used to be a hand-built object with a fixed field list, and docx_key
+     was not on it: the history endpoint named the Word file, the click threw
+     it away, and every report in the archive offered its .json. A longer list
+     would lose the next field the same way, so the row is passed through. */
+  function reportSelection(r) {
+    return Object.assign({}, r, { kind: 'report', id: r.key });
+  }
+
   function downloadKeyFor(report) {
     return (report && report.docx_key) || (report && report.key) || null;
   }
@@ -462,17 +473,7 @@
                 className: 'fs-reports__row' + (selected ? ' fs-reports__row--selected' : ''),
                 onClick:   function () {
                   if (props.onSelect) {
-                    props.onSelect({
-                      kind:         'report',
-                      id:           r.key,
-                      key:          r.key,
-                      type:         r.type,
-                      date:         r.date,
-                      generated_at: r.generated_at,
-                      size:         r.size,
-                      author:       r.author,
-                      site:         r.site,
-                    });
+                    props.onSelect(reportSelection(r));
                   }
                 },
               },
