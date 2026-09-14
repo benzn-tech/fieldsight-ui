@@ -43,7 +43,7 @@
     // ctx = {session, date, userFolder, form:{templateId,title,attendees,fields}, deliver, recipients}
     var form = (ctx && ctx.form) || {};
     var deliver = ctx && ctx.deliver === 'email' ? 'email' : 'download';
-    return {
+    var payload = {
       sessionId: ctx && ctx.session ? ctx.session.session_id : undefined,
       date: ctx ? ctx.date : undefined,
       user: ctx ? ctx.userFolder : undefined,
@@ -55,6 +55,13 @@
       // recipients only travel when emailing (download has no addressees)
       recipients: deliver === 'email' && Array.isArray(ctx.recipients) ? ctx.recipients : [],
     };
+    // ABSENT means "the whole meeting", which is what every report was before a
+    // selection existed. Only a real subset travels: the backend rejects an empty
+    // list (asking for nothing) and treats a missing one as everything.
+    if (ctx && Array.isArray(ctx.topicRowIds) && ctx.topicRowIds.length) {
+      payload.topicRowIds = ctx.topicRowIds.slice();
+    }
+    return payload;
   }
 
   function interpretReportStatus(res) {
@@ -90,10 +97,82 @@
       .filter(function (s) { return !!s; });
   }
 
-  function canGenerate(deliver, recipients) {
+  function canGenerate(deliver, recipients, selection) {
     // Email delivery needs at least one recipient (the backend rejects email with
     // none); download is always allowed. Gates the review step's Generate button.
+    // `selection` is selectedRowIds' result: null = the whole meeting, [] = the
+    // reviewer unticked everything, which is a report about nothing.
+    if (Array.isArray(selection) && selection.length === 0) return false;
     return deliver !== 'email' || (Array.isArray(recipients) && recipients.length > 0);
+  }
+
+  // ---- Choosing what the report covers ------------------------------------
+  //
+  // A topic's time_range is the device's wall clock ("13:40 – 13:41"), and the
+  // timeline shows it verbatim, so a window picked here is in the same clock the
+  // device stamped. No timezone conversion exists anywhere in this path, and
+  // none is needed while both ends of the comparison are that one clock.
+
+  function _minutes(h, m) {
+    h = Number(h); m = Number(m);
+    if (!(h >= 0 && h <= 23 && m >= 0 && m <= 59)) return null;
+    return h * 60 + m;
+  }
+
+  function parseClock(v) {
+    // What an <input type="time"> produces: "HH:MM". Anything else is no clock.
+    var m = /^(\d{1,2}):(\d{2})$/.exec(String(v == null ? '' : v).trim());
+    return m ? _minutes(m[1], m[2]) : null;
+  }
+
+  function parseTimeRange(tr) {
+    // "HH:MM[:SS] <dash> HH:MM[:SS]" with any dash, or a single time. Returns
+    // {start,end} in minutes, or null when the string cannot place the topic --
+    // including a range that runs backwards, which is either a model error or a
+    // midnight wrap, and in both cases we cannot say which minutes it covers.
+    if (typeof tr !== 'string') return null;
+    var re = /(\d{1,2}):(\d{2})(?::\d{2})?/g, found = [], m;
+    while ((m = re.exec(tr)) && found.length < 2) {
+      var v = _minutes(m[1], m[2]);
+      if (v === null) return null;
+      found.push(v);
+    }
+    if (!found.length) return null;
+    var start = found[0], end = found.length > 1 ? found[1] : found[0];
+    return end < start ? null : { start: start, end: end };
+  }
+
+  function overlapsWindow(timeRange, from, to) {
+    // OVERLAP, not "starts inside": a discussion running 11:20-11:50 is still
+    // going on when a 9:00-11:30 window closes. An unplaceable topic or an
+    // unreadable window selects nothing -- a range must never widen to "all".
+    var r = parseTimeRange(timeRange), f = parseClock(from), t = parseClock(to);
+    if (!r || f === null || t === null || f > t) return false;
+    return r.start <= t && r.end >= f;
+  }
+
+  function windowChecked(topics, from, to) {
+    // The tick state a window produces: {topic_row_id: bool}.
+    var out = {};
+    (topics || []).forEach(function (t) {
+      if (t && t.topic_row_id) out[t.topic_row_id] = overlapsWindow(t.time_range, from, to);
+    });
+    return out;
+  }
+
+  function selectedRowIds(topics, checked) {
+    // null when every choosable topic is ticked (send nothing: the whole
+    // meeting), otherwise the ticked ids in meeting order -- possibly [].
+    // A topic is ticked unless explicitly unticked, so a fresh modal is the
+    // whole meeting. A topic with no topic_row_id cannot be named in a
+    // selection at all; it is not counted either way.
+    var ids = [], all = true;
+    (topics || []).forEach(function (t) {
+      if (!t || !t.topic_row_id) return;
+      if (checked && checked[t.topic_row_id] === false) all = false;
+      else ids.push(t.topic_row_id);
+    });
+    return all ? null : ids;
   }
 
   // ---- React shell (browser only; not exercised by node tests) ----------
@@ -176,6 +255,9 @@
     var s_result = React.useState(null); var result = s_result[0], setResult = s_result[1];
     var s_error = React.useState(null); var error = s_error[0], setError = s_error[1];
     var s_photos = React.useState({}); var photoSrc = s_photos[0], setPhotoSrc = s_photos[1];
+    var s_checked = React.useState({}); var checked = s_checked[0], setChecked = s_checked[1];
+    var s_wf = React.useState(''); var winFrom = s_wf[0], setWinFrom = s_wf[1];
+    var s_wt = React.useState(''); var winTo = s_wt[0], setWinTo = s_wt[1];
 
     function sid() { return props.session ? props.session.session_id : null; }
 
@@ -185,6 +267,7 @@
         setStep('preview'); setReqId(null); setResult(null); setError(null);
         setPreview(null); setPreviewErr(null); setPhotoSrc({});
         setDeliver('download'); setRecip([]); setRecipText('');
+        setChecked({}); setWinFrom(''); setWinTo('');
       }
     }, [props.open]);
 
@@ -266,6 +349,7 @@
       var payload = buildGeneratePayload({
         session: props.session, date: props.date, userFolder: props.userFolder,
         form: form, deliver: deliver, recipients: recipients,
+        topicRowIds: selectedRowIds(preview ? preview.topics : [], checked),
       });
       Promise.resolve(org.generateSessionReport(payload)).then(function (res) {
         var v = interpretReportStatus(res);
@@ -298,6 +382,17 @@
       }, label);
     }
 
+    var pTopics = (preview && preview.topics) || [];
+    var choosable = pTopics.filter(function (t) { return t && t.topic_row_id; }).length;
+    var selection = selectedRowIds(pTopics, checked);
+    var chosenCount = selection === null ? choosable : selection.length;
+    var unplaceable = pTopics.filter(function (t) {
+      return t && t.topic_row_id && !parseTimeRange(t.time_range);
+    }).length;
+    function toggle(id) {
+      setChecked(function (c) { var n = Object.assign({}, c); n[id] = (c[id] === false); return n; });
+    }
+
     // Step bodies — placeholders for F3 (preview) / F4 (fill) / F6 (done UI).
     var body;
     if (step === 'preview') {
@@ -311,10 +406,28 @@
           h('p', { className: 'fs-srm__preview-meta' }, [preview.siteName, preview.date].filter(Boolean).join(' · ')),
           (preview.participants && preview.participants.length)
             ? h('p', { className: 'fs-srm__preview-attendees' }, 'Attendees: ' + preview.participants.join(', ')) : null,
+          choosable ? h('div', { className: 'fs-srm__window' },
+            h('span', { className: 'fs-srm__window-label' }, 'Cover only'),
+            h('input', { type: 'time', className: 'fs-input fs-srm__window-time', value: winFrom,
+              'aria-label': 'Window start', onChange: function (e) { setWinFrom(e.target.value); } }),
+            h('span', null, '–'),
+            h('input', { type: 'time', className: 'fs-input fs-srm__window-time', value: winTo,
+              'aria-label': 'Window end', onChange: function (e) { setWinTo(e.target.value); } }),
+            btn('Select this window', function () { setChecked(windowChecked(pTopics, winFrom, winTo)); }),
+            btn('Select all', function () { setChecked({}); }),
+            h('span', { className: 'fs-srm__window-count' },
+              chosenCount + ' of ' + choosable + ' topics'
+              + (unplaceable ? ' · ' + unplaceable + ' without a time, not picked by a window' : ''))) : null,
           h('div', { className: 'fs-srm__preview-topics' },
             (preview.topics || []).map(function (t, i) {
-              return h('div', { key: i, className: 'fs-srm__preview-topic' },
-                h('h4', null, t.topic_title || t.title || ('Topic ' + (i + 1))),
+              var on = !t.topic_row_id || checked[t.topic_row_id] !== false;
+              return h('div', { key: i, className: 'fs-srm__preview-topic' + (on ? '' : ' fs-srm__preview-topic--off') },
+                h('h4', null,
+                  t.topic_row_id ? h('input', { type: 'checkbox', checked: on,
+                    'aria-label': 'Include this topic', onChange: function () { toggle(t.topic_row_id); } }) : null,
+                  ' ',
+                  t.time_range ? h('span', { className: 'fs-srm__preview-time' }, t.time_range + ' · ') : null,
+                  t.topic_title || t.title || ('Topic ' + (i + 1))),
                 t.summary ? h('p', null, t.summary) : null,
                 (t.action_items && t.action_items.length)
                   ? h('ul', { className: 'fs-srm__preview-actions' },
@@ -336,7 +449,8 @@
         h('p', { className: 'fs-srm__hint' }, 'Review, choose how to deliver, then generate.'),
         h('ul', { className: 'fs-srm__review-summary' },
           h('li', null, 'Title: ' + (form.title || '—')),
-          h('li', null, 'Attendees: ' + ((form.attendees || []).length))),
+          h('li', null, 'Attendees: ' + ((form.attendees || []).length)),
+          h('li', null, 'Topics: ' + chosenCount + ' of ' + choosable)),
         h(DeliveryChooser, {
           deliver: deliver, onDeliver: setDeliver,
           recipientsText: recipText,
@@ -368,8 +482,11 @@
       btn('Back', function () { setStep('fill'); }),
       h('button', {
         type: 'button', className: 'fs-btn fs-btn--primary',
-        disabled: !canGenerate(deliver, recipients),
-        title: canGenerate(deliver, recipients) ? undefined : 'Add at least one recipient to email the report',
+        disabled: !canGenerate(deliver, recipients, selection),
+        title: canGenerate(deliver, recipients, selection) ? undefined
+          : (Array.isArray(selection) && !selection.length
+              ? 'Tick at least one topic to report on'
+              : 'Add at least one recipient to email the report'),
         onClick: onGenerate,
       }, 'Generate report'));
     else if (step === 'generating') footer = h('footer', { className: 'fs-srm__footer' },
@@ -390,6 +507,7 @@
 
   // Pure-helper export for node --test (browser ignores this).
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { buildGeneratePayload: buildGeneratePayload, interpretReportStatus: interpretReportStatus, previewFieldDefaults: previewFieldDefaults, parseAttendees: parseAttendees, canGenerate: canGenerate, STEPS: STEPS };
+    module.exports = { buildGeneratePayload: buildGeneratePayload, interpretReportStatus: interpretReportStatus, previewFieldDefaults: previewFieldDefaults, parseAttendees: parseAttendees, canGenerate: canGenerate, STEPS: STEPS,
+      parseTimeRange: parseTimeRange, parseClock: parseClock, overlapsWindow: overlapsWindow, windowChecked: windowChecked, selectedRowIds: selectedRowIds };
   }
 })();
