@@ -182,6 +182,33 @@
     return !!(sessions && sessions.length >= 2);
   }
 
+  /* Which meeting a per-meeting report would be ABOUT.
+
+     The selected one -- or, when nothing is selected and the day holds exactly
+     one, that one. The picker above only renders for >=2 sessions, and the
+     report button used to require a selection, so a one-meeting day had a
+     button nothing could enable. A stale selection is never swapped for the
+     one-meeting fallback: that would report on a different meeting than the
+     user chose. */
+  function reportableSession(sessions, selectedSessionId) {
+    var list = sessions || [];
+    if (selectedSessionId != null) {
+      return list.filter(function (s) { return s.session_id === selectedSessionId; })[0] || null;
+    }
+    return list.length === 1 ? list[0] : null;
+  }
+
+  /* The disabled button's tooltip. "Pick one above" is only true when the
+     picker is actually rendered. */
+  function generateReportUnavailableReason(sessionCount) {
+    if (!sessionCount) {
+      return 'No meeting was recorded this day, so there is nothing to report on here. '
+        + 'The whole day is the daily report, on the Reports page.';
+    }
+    return 'Reports here are per meeting — pick one above. '
+      + 'The whole day is the daily report, on the Reports page.';
+  }
+
   /* null/undefined sessionId = "All day" (no filtering) — returns the list
      unchanged, INCLUDING session_kind:'report' topics (which carry no
      session_id at all and would otherwise never match anything). A real
@@ -2387,7 +2414,9 @@
     /* Delivery-C Tier-2 generate control — sits beside the mailto draft, active
        only when a specific meeting is selected (the modal is per-session). */
     var _genReportEl = React.createElement(GenerateReportButton, {
-      session:    _selectedSession,
+      /* Not _selectedSession: a one-meeting day has no picker to select from. */
+      session:    reportableSession(daySessions, selectedSessionId),
+      sessionCount: daySessions.length,
       date:       date,
       userFolder: _draftUserFolder,
       siteName:   report.site || site || '',
@@ -2921,8 +2950,7 @@
         type:      'button',
         className: 'fs-btn fs-btn--secondary fs-btn--sm fs-generate-report',
         disabled:  true,
-        title:     'Reports here are per meeting — pick one above. '
-                   + 'The whole day is the daily report, on the Reports page.',
+        title:     generateReportUnavailableReason(props.sessionCount),
       }, 'Generate report');
     }
     return React.createElement(React.Fragment, null,
@@ -4321,6 +4349,8 @@
       TopicCorrectionPropagate: TopicCorrectionPropagate,
       /* session picker (feat 5) */
       shouldShowSessionPicker: shouldShowSessionPicker,
+      reportableSession: reportableSession,
+      generateReportUnavailableReason: generateReportUnavailableReason,
       filterTopicsBySession: filterTopicsBySession,
       groupSessionsByBlock: groupSessionsByBlock,
       formatParticipants: formatParticipants,
