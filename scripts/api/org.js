@@ -721,17 +721,24 @@
   async function generateSessionReport(opts) {
     opts = opts || {};
     if (sessionReportLive()) {
+      var body = {
+        templateId: opts.templateId,
+        title:      opts.title,
+        attendees:  opts.attendees,
+        fields:     opts.fields || {},
+        deliver:    opts.deliver || 'download',
+        recipients: opts.recipients || [],
+      };
+      /* Only a real subset travels. Absent is "the whole meeting" on the
+         backend, and an empty list is a 400 there -- so neither [] nor null may
+         be sent, and an untouched modal sends exactly what it always did. */
+      if (Array.isArray(opts.topicRowIds) && opts.topicRowIds.length) {
+        body.topicRowIds = opts.topicRowIds;
+      }
       return api.orgRequest('/sessions/' + encodeURIComponent(opts.sessionId) + '/report', {
         method: 'POST',
         params: { date: opts.date, user: opts.user },
-        body: {
-          templateId: opts.templateId,
-          title:      opts.title,
-          attendees:  opts.attendees,
-          fields:     opts.fields || {},
-          deliver:    opts.deliver || 'download',
-          recipients: opts.recipients || [],
-        },
+        body: body,
       });
     }
     await api.delay();
