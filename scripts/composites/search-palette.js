@@ -355,7 +355,13 @@
        the latest report date for the resolved user folder. getSpan() is
        already warm by the time this fires (kicked off by _loadCache on
        palette open), so the async hop is imperceptible in practice; still
-       tolerate a slow/failed span lookup by falling back to today. */
+       tolerate a slow/failed span lookup by falling back to today.
+       Unscoped by design (spec 2026-09-15-one-ask-scoped §4): no context, so
+       the chips are empty and the placeholder reads "Ask across all your
+       projects…". The fallback below hands the question to Timeline, which
+       sees the prefill and keeps that first Ask global (askFromPaletteRef in
+       pages/timeline.js) — a question typed in the global palette stays
+       global. */
     function doAsk(q) {
       if (!q) return;
       saveRecent(q);
@@ -504,7 +510,6 @@
                   key:             askMode.question,
                   compact:         true,
                   initialQuestion: askMode.question,
-                  scope:           'both',
                 }),
               )
             :

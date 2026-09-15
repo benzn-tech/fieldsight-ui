@@ -713,3 +713,14 @@ test('8d the middle column wires the day reset and the palette rule', () => {
   assert.match(mid, /askFromPaletteRef\.current \? \{\} : askApi\.askContext/,
     'mount #1 can auto-send a palette question with a stale scope');
 });
+
+test('8e the palette mount passes no scope, no context and no suggestions', () => {
+  const src = fs.readFileSync(require.resolve('../scripts/composites/search-palette.js'), 'utf8');
+  const at = src.indexOf('React.createElement(window.FieldSight.AskChat');
+  assert.ok(at > 0, 'palette AskChat mount not found');
+  const mount = src.slice(at, src.indexOf('}),', at));
+  assert.doesNotMatch(mount, /\bscope:/);
+  assert.doesNotMatch(mount, /\bcontext:/);
+  assert.doesNotMatch(mount, /\bsuggestions:/);
+  assert.doesNotMatch(mount, /\btopic_id:/);
+});
