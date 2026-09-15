@@ -556,6 +556,38 @@
     return chips;
   }
 
+  /* Copy for each `applied_scope.dropped` entry (spec §2 table). Keyed on the
+     exact field:reason pair; anything else renders nothing -- a raw code under
+     an answer is worse than silence, and the chips already grey the field. */
+  var SCOPE_DROP_COPY = {
+    'topic_row_id:not_visible':  'Topic not available — answered for the day',
+    'topic_row_id:invalid':      'Topic not available — answered for the day',
+    'author_folder:not_visible': "Couldn't narrow to this person — answered for the project and day",
+    'author_folder:invalid':     "Couldn't narrow to this person — answered for the project and day",
+    'site_id:not_visible':       "Couldn't narrow to this project",
+    'site_id:invalid':           "Couldn't narrow to this project",
+    'date:invalid':              "Couldn't narrow to this day",
+    'date:overridden_by_question':        'Used the dates in your question',
+    'date:overridden_by_topic':           "Answered for this topic's day",
+    'question_range:overridden_by_topic': "Answered for this topic's day, not the dates in your question",
+  };
+
+  /* Built from the RESPONSE only. The UI renders what the backend enforced,
+     never its own request: a backend that predates applied_scope must read as
+     visibly unscoped, not as silently scoped. */
+  function basisLinesFor(response) {
+    var applied = response && response.applied_scope;
+    if (!applied || typeof applied !== 'object') return ['Searched all your projects'];
+    var out = [];
+    (Array.isArray(applied.dropped) ? applied.dropped : []).forEach(function (d) {
+      if (!d) return;
+      var key = d.field + ':' + d.reason;
+      if (!Object.prototype.hasOwnProperty.call(SCOPE_DROP_COPY, key)) return;
+      if (out.indexOf(SCOPE_DROP_COPY[key]) === -1) out.push(SCOPE_DROP_COPY[key]);
+    });
+    return out;
+  }
+
   function AskChat(props) {
     var date     = props.date;
     var user     = props.user;
@@ -877,12 +909,12 @@
      and so SP-Ask's spoken variant can be written against the same dict. */
   window.FieldSight.formatAnswerBasis = formatAnswerBasis;
   /* Pure scope helpers, exported for tests (tests/ask-scoped-context.test.js).
-     Later tasks add chipsFor / basisLinesFor / suggestionsFor / placeholderFor
-     to this same object. */
+     A later task adds suggestionsFor / placeholderFor to this same object. */
   window.FieldSight.askScope = {
     requestBodyFor: requestBodyFor,
     hasScope:       hasScope,
     shortDay:       shortDay,
     chipsFor:       chipsFor,
+    basisLinesFor:  basisLinesFor,
   };
 })();

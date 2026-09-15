@@ -181,3 +181,61 @@ test('4c an answer with no applied_scope at all marks every segment not enforced
   S.chipsFor(TOPIC, { answer: 'x' }).forEach(c => c.segments.forEach(s =>
     assert.strictEqual(s.enforced, false, s.field)));
 });
+
+/* ---- 3. basisLinesFor ---------------------------------------------------- */
+
+test('3a no applied_scope means the backend did not scope: say so', () => {
+  const S = loadScope();
+  assert.deepStrictEqual(S.basisLinesFor({ answer: 'x' }), ['Searched all your projects']);
+  assert.deepStrictEqual(S.basisLinesFor({ applied_scope: null }), ['Searched all your projects']);
+});
+
+test('3b every dropped row of the spec table renders its own copy', () => {
+  const S = loadScope();
+  const rows = [
+    ['topic_row_id', 'not_visible', 'Topic not available — answered for the day'],
+    ['topic_row_id', 'invalid', 'Topic not available — answered for the day'],
+    ['author_folder', 'not_visible', "Couldn't narrow to this person — answered for the project and day"],
+    ['author_folder', 'invalid', "Couldn't narrow to this person — answered for the project and day"],
+    ['site_id', 'not_visible', "Couldn't narrow to this project"],
+    ['site_id', 'invalid', "Couldn't narrow to this project"],
+    ['date', 'invalid', "Couldn't narrow to this day"],
+    ['date', 'overridden_by_question', 'Used the dates in your question'],
+    ['date', 'overridden_by_topic', "Answered for this topic's day"],
+    ['question_range', 'overridden_by_topic', "Answered for this topic's day, not the dates in your question"],
+  ];
+  rows.forEach(function (r) {
+    assert.deepStrictEqual(
+      S.basisLinesFor({ applied_scope: { dropped: [{ field: r[0], reason: r[1] }] } }),
+      [r[2]], r[0] + '/' + r[1]);
+  });
+});
+
+test('3c an unknown field/reason pair renders nothing, never a raw code', () => {
+  const S = loadScope();
+  const out = S.basisLinesFor({ applied_scope: { dropped: [
+    { field: 'date', reason: 'not_visible' },
+    { field: 'weather', reason: 'invalid' },
+    { field: 'site_id', reason: 'exploded' },
+    null,
+  ] } });
+  assert.deepStrictEqual(out, []);
+});
+
+test('3d a fully enforced scope has no line', () => {
+  const S = loadScope();
+  assert.deepStrictEqual(S.basisLinesFor({ applied_scope: {
+    date: '2026-09-03', site_id: 's', author_folder: 'A', topic_row_id: 't',
+    topic_title: 'T', dropped: [] } }), []);
+  assert.deepStrictEqual(S.basisLinesFor({ applied_scope: { date: '2026-09-03' } }), []);
+});
+
+test('3e the line comes from the response, not the request', () => {
+  const S = loadScope();
+  /* Same request, two answers: the lines must differ, so they cannot have
+     been built from the request. */
+  const a = S.basisLinesFor({ applied_scope: { date: '2026-09-03', dropped: [] } });
+  const b = S.basisLinesFor({ applied_scope: { dropped: [{ field: 'date', reason: 'invalid' }] } });
+  assert.notDeepStrictEqual(a, b);
+  assert.strictEqual(S.basisLinesFor.length, 1, 'basisLinesFor must take the response only');
+});
