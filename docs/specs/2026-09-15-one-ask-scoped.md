@@ -78,7 +78,9 @@ Pure helpers extracted from `ask-chat.js` and exported for tests:
     | `date` | `overridden_by_topic` | `Answered for this topic's day` |
     | `question_range` | `overridden_by_topic` | `Answered for this topic's day, not the dates in your question` |
 
-    An unknown field/reason pair renders nothing (never a raw code).
+    `site_id` / `author_folder` with `overridden_by_topic` render **nothing**: the topic chip
+    already states the scope, and the topic's own site and author are what the day chip shows.
+    Any other unknown field/reason pair also renders nothing (never a raw code).
 * **Conversation reset.** The reset effect (`ask-chat.js` 501–503, keyed on `date, user, scope,
   topic_id`) keys on `context.date, siteId, authorFolder, topicRowId` instead.
 * **Empty scoped answer.** A scoped answer with no citations shows `Ask across everything`,
