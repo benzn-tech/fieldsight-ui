@@ -526,6 +526,13 @@ test('D-f a widen that lands mid-request is sent once the request settles', asyn
   await h.settle(1, { answer: 'b', citations: [] });
   assert.strictEqual(h.asks.length, 3, 'the widen was dropped');
   assert.deepStrictEqual(h.asks[2], { question: 'first', user: 'Ben' });
+  /* The resend must clear its own ref: settling the resent request must not
+     fire it again. Rerender first so the harness's effect deps observe
+     busy flip back to true (the resend itself put a new request in flight)
+     before it flips to false again on settle. */
+  h.rerender();
+  await h.settle(2, { answer: 'c', citations: [] });
+  assert.strictEqual(h.asks.length, 3, 'a never-cleared deferred resend fired again');
 });
 
 test('D-g a widen the host did not apply never fires on a later change', async () => {
