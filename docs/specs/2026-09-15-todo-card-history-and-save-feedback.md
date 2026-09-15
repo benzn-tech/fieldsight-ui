@@ -249,16 +249,19 @@ Additive; nothing else in the payload changes.
 * `repositories/topics.py`: `list_topics_for_source_prefix` and `list_topics_for_date` stamp
   `edit_count` on each **surviving** action item right after
   `todo_collapse.collapse_if_enabled` (~485 and ~732), from one batch query —
-  `SELECT row_id, count(*) AS n FROM content_edits WHERE table_name = 'action_items' AND row_id = ANY(%s) GROUP BY row_id`
+  `SELECT row_id, count(*) AS n FROM content_edits WHERE table_name = 'action_items' AND row_id = ANY(%s::uuid[]) GROUP BY row_id`
+  (the cast is required: ids arrive as strings and Postgres has no `uuid = text` operator — a
+  FakeConn test cannot catch its absence)
   — over the survivors' ids (`collapsed_ids` are not counted, matching what `GET …/history`
   returns for the survivor, `content_edits.list_content_edits` is per `row_id`). Served by
   `idx_content_edits_row (table_name, row_id, created_at)` (migration 0019).
   **No company predicate:** every writer stamps the row's own company, and `get_content_history`
   filters by the row's company, so the unscoped count equals what history returns.
 * `lambda_org_api.render_report_shape` (~6209): add `"version": 1 + a.get("edit_count", 0)` to
-  each action item in the fixed allowlist. Its other callers — the session-report preview
-  (~1251) and reindex (`reindex.py` ~92, fed by `get_topic_full`) — carry no `edit_count` and
-  serialise `version: 1` without a query of their own. The comment above that allowlist records
+  each action item in the fixed allowlist. The session-report preview (~1251) reads through
+  `_day_report_rows` → `list_topics_for_source_prefix`, so it carries the real version too
+  (consistent with Today's chip). Only reindex (`reindex.py` ~92, fed by `get_topic_full`) carries
+  no `edit_count` and serialises `version: 1` without a query of its own. The comment above that allowlist records
   that fields dropped there once passed every repository test — so the test is on the
   **rendered** shape (below).
 * No N+1: one query per day read regardless of item count. Every `/timeline` path
