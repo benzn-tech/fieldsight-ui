@@ -118,6 +118,63 @@
     return d.getFullYear() + '-' + (mm.length < 2 ? '0' + mm : mm) + '-' + (dd.length < 2 ? '0' + dd : dd);
   }
 
+  /* A REGENERATE OUTLIVES THE PANEL THAT STARTED IT.
+
+     The waiting state used to live only in the detail panel, so a reload, a route
+     change or selecting another report showed the Regenerate button again while
+     the generator was still running -- which reads as "it failed" and invites a
+     second click, i.e. a second generation. So the click is recorded here, per
+     report key, and the panel resumes from it. Records expire with the
+     generator's own timeout and belong to the folder that clicked, so a shared
+     browser with a different login never sees them. Storage that is blocked or
+     corrupt means "nothing pending", never an error. */
+  var PENDING_REGEN_KEY = 'fs.reports.pendingRegenerate';
+  var PENDING_REGEN_TTL_MS = 15 * 60 * 1000;
+
+  function readPendingRegenerations(storage, now) {
+    var all = {};
+    try {
+      all = JSON.parse((storage && storage.getItem(PENDING_REGEN_KEY)) || '{}') || {};
+    } catch (_) { return {}; }
+    if (typeof all !== 'object') return {};
+    var live = {};
+    Object.keys(all).forEach(function (k) {
+      var e = all[k];
+      if (e && typeof e.startedAt === 'number' && now - e.startedAt <= PENDING_REGEN_TTL_MS) live[k] = e;
+    });
+    return live;
+  }
+
+  function pendingRegenerationFor(storage, key, folder, now) {
+    if (!key || !folder) return null;
+    var e = readPendingRegenerations(storage, now)[key];
+    return e && e.folder === folder ? e : null;
+  }
+
+  function rememberPendingRegeneration(storage, key, entry) {
+    try {
+      var all = readPendingRegenerations(storage, entry.startedAt);
+      all[key] = { before: entry.before || '', startedAt: entry.startedAt, folder: entry.folder };
+      storage.setItem(PENDING_REGEN_KEY, JSON.stringify(all));
+    } catch (_) { /* blocked or full: the in-memory wait still works for this view */ }
+  }
+
+  function forgetPendingRegeneration(storage, key) {
+    /* Removes exactly this key. It reads the raw record rather than the live view:
+       clearing one report must never also drop another report's record by judging
+       it against this call's clock. */
+    try {
+      var all = JSON.parse(storage.getItem(PENDING_REGEN_KEY) || '{}') || {};
+      if (typeof all !== 'object') return;
+      delete all[key];
+      storage.setItem(PENDING_REGEN_KEY, JSON.stringify(all));
+    } catch (_) { /* nothing to clear */ }
+  }
+
+  function localStore() {
+    try { return window.localStorage; } catch (_) { return null; }
+  }
+
   /* Done means the report object was rewritten after the click -- never the 202. */
   function regenerationFinished(before, row) {
     if (!row || !row.generated_at) return false;
@@ -339,6 +396,16 @@
       return function () { window.removeEventListener('fs:reports-refresh', onRefresh); };
     }, []);
 
+    /* Re-read pending regenerates when one starts or ends, so the row label
+       follows without a reload. */
+    var pendingTickRef = React.useState(0);
+    var setPendingTick = pendingTickRef[1];
+    React.useEffect(function () {
+      function onPending() { setPendingTick(function (n) { return n + 1; }); }
+      window.addEventListener('fs:reports-pending', onPending);
+      return function () { window.removeEventListener('fs:reports-pending', onPending); };
+    }, []);
+
     /* Inline regenerate panel: 'closed' | 'pick' | 'submitting' | 'done' */
     var refReg = React.useState({ phase: 'closed' });
     var reg    = refReg[0];
@@ -558,7 +625,9 @@
                   React.createElement('div', { className: 'fs-reports__row-date' },
                     fmtDate(r.date)),
                   React.createElement('div', { className: 'fs-reports__row-meta' },
-                    (r.author || '—') + ' · ' + fmtGeneratedAt(r.generated_at)),
+                    pendingRegenerationFor(localStore(), r.key, caller.folder_name, Date.now())
+                      ? 'Generating… · ' + fmtGeneratedAt(r.generated_at)
+                      : (r.author || '—') + ' · ' + fmtGeneratedAt(r.generated_at)),
                 ),
 
                 React.createElement('div', { className: 'fs-reports__row-size' },
@@ -605,6 +674,18 @@
     /* Reset the confirm state whenever a new report is selected -- unless the
        "new" selection is this same report refreshed after its regenerate. */
     React.useEffect(function () {
+      var pending = sel ? pendingRegenerationFor(localStore(), sel.key, caller.folder_name, Date.now()) : null;
+      if (pending && regenerationFinished(pending.before, sel)) {
+        // It finished while this panel was not showing it.
+        forgetPendingRegeneration(localStore(), sel.key);
+        window.dispatchEvent(new CustomEvent('fs:reports-pending'));
+        setConf({ phase: 'done', message: 'Updated ' + fmtGeneratedAt(sel.generated_at) });
+        return;
+      }
+      if (pending) {
+        setConf({ phase: 'waiting', key: sel.key, before: pending.before, startedAt: pending.startedAt });
+        return;
+      }
       setConf(function (c) { return c.phase === 'done' ? c : { phase: 'idle' }; });
     }, [sel && sel.id]);
 
@@ -619,6 +700,8 @@
         if (stopped) return;
         if (Date.now() > deadline) {
           clearInterval(timer);
+          forgetPendingRegeneration(localStore(), conf.key);
+          window.dispatchEvent(new CustomEvent('fs:reports-pending'));
           setConf({ phase: 'timeout' });
           return;
         }
@@ -627,6 +710,8 @@
           var fresh = ((res && res.reports) || []).filter(function (r) { return r.key === conf.key; })[0];
           if (regenerationFinished(conf.before, fresh)) {
             clearInterval(timer);
+            forgetPendingRegeneration(localStore(), conf.key);
+            window.dispatchEvent(new CustomEvent('fs:reports-pending'));
             setConf({ phase: 'done', message: 'Updated ' + fmtGeneratedAt(fresh.generated_at) });
             window.dispatchEvent(new CustomEvent('fs:reports-refresh', { detail: { key: conf.key } }));
           }
@@ -667,7 +752,11 @@
       }).then(function (res) {
         var problem = regenerateErrorMessage(res);
         if (problem) { setConf({ phase: 'error', error: { message: problem } }); return; }
-        setConf({ phase: 'waiting', key: key, before: before, startedAt: Date.now() });
+        var startedAt = Date.now();
+        rememberPendingRegeneration(localStore(), key,
+          { before: before, startedAt: startedAt, folder: caller.folder_name });
+        window.dispatchEvent(new CustomEvent('fs:reports-pending'));
+        setConf({ phase: 'waiting', key: key, before: before, startedAt: startedAt });
       }).catch(function (err) {
         setConf({ phase: 'error', error: err });
       });
