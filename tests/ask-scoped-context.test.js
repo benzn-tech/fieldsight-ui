@@ -276,3 +276,42 @@ test('3f a duplicate {field, reason} in dropped renders only one line', () => {
   ] } });
   assert.deepStrictEqual(out, ["Couldn't narrow to this project"]);
 });
+
+/* ---- wiring: the helpers are what the component actually uses ----------- */
+
+const askSrc = () => fs.readFileSync(require.resolve('../scripts/composites/ask-chat.js'), 'utf8');
+
+test('W1 the component sends requestBodyFor(context, ...) and no scope/topic_id', () => {
+  const src = askSrc();
+  const send = src.slice(src.indexOf('function send('), src.indexOf('function onSubmit('));
+  assert.match(send, /requestBodyFor\(/);
+  assert.doesNotMatch(send, /scope:\s/, 'send still passes scope');
+  assert.doesNotMatch(send, /topic_id:\s/, 'send still passes topic_id');
+});
+
+test('W2 the reset effect is keyed on the four context fields', () => {
+  const src = askSrc();
+  const eff = src.slice(src.indexOf('When scope keys change'));
+  const deps = eff.slice(0, eff.indexOf(']);') + 3);
+  ['context.date', 'context.siteId', 'context.authorFolder', 'context.topicRowId']
+    .forEach(k => assert.ok(deps.includes(k), 'reset effect missing ' + k));
+  assert.doesNotMatch(deps, /\bscope, topic_id\b/);
+});
+
+test('W3 scope lines render from the stored response, above the answer text', () => {
+  const src = askSrc();
+  const at = src.indexOf('basisLinesFor(m.scopeResponse)');
+  assert.ok(at > 0, 'basisLinesFor is not called with the stored response');
+  assert.ok(at < src.indexOf('fs-ask-chat__msg-text fs-ask-chat__msg-text--md'));
+  assert.doesNotMatch(src, /basisLinesFor\([^)]*context/);
+});
+
+test('W4 chips, the widen button and focus are wired', () => {
+  const src = askSrc();
+  assert.match(src, /chipsFor\(context,/);
+  assert.match(src, /Ask across everything/);
+  assert.match(src, /props\.onContextChange\(\{\}\)/);
+  assert.match(src, /\[props\.focusNonce\]/);
+  assert.match(src, /props\.suggestions \|\| suggestionsFor\(context\)/);
+  assert.match(src, /props\.placeholder \|\| placeholderFor\(context\)/);
+});
