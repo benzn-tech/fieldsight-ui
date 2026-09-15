@@ -69,15 +69,22 @@
     return payload;
   }
 
+  /* Shared translation of the org client's "no folder mapping" server text (see
+     scripts/api/_fetch.js's 403 envelope) into the one thing the reviewer can
+     actually act on. Returns null when the raw text does not match, so callers
+     fall back to their own generic wording. */
+  function noFolderMappingMessage(raw) {
+    return /no folder mapping/i.test(raw || '')
+      ? 'Your account has no recording folder yet, so there is nothing of yours to report on.'
+      : null;
+  }
+
   /* What to tell the reviewer when the preview could not be built. A worker whose account
      has no recording folder gets a 403 from the server; "unavailable" would hide the one
      thing they can act on (spec 2026-09-15 §5.7). */
   function previewErrorMessage(res) {
     var raw = (res && res.error) || '';
-    if (/no folder mapping/i.test(raw)) {
-      return 'Your account has no recording folder yet, so there is nothing of yours to report on.';
-    }
-    return raw || 'Preview is unavailable here.';
+    return noFolderMappingMessage(raw) || raw || 'Preview is unavailable here.';
   }
 
   /* The server's reason when a report did not start (spec §5.2), not a generic line. */
@@ -85,12 +92,18 @@
     return (res && res.error) || 'The report did not start.';
   }
 
-  function interpretReportStatus(res) {
+  function interpretReportStatus(res, scope) {
     // Map a generate / status response to a UI phase. Mirrors the F1 client's
     // envelopes: {_accessDenied}/{_notFound} (never thrown), {status:'unavailable'}
     // (gated off), and the async {queued|done|error} contract.
-    if (!res || res._accessDenied) return { phase: 'error', message: 'You don’t have access to this report.' };
-    if (res._notFound) return { phase: 'error', message: 'Session not found.' };
+    if (!res) return { phase: 'error', message: 'You don’t have access to this report.' };
+    if (res._accessDenied) {
+      var deniedMessage = noFolderMappingMessage(res.error) || res.error || 'You don’t have access to this report.';
+      return { phase: 'error', message: deniedMessage };
+    }
+    if (res._notFound) {
+      return { phase: 'error', message: scope === 'day' ? 'Nothing was found for this day.' : 'Session not found.' };
+    }
     var status = res.status;
     if (status === 'done') return { phase: 'done', docUrl: res.docUrl || null, emailed: !!res.emailed };
     if (status === 'error') return { phase: 'error', message: res.error || 'Report generation failed.' };
@@ -356,7 +369,7 @@
         Promise.resolve(org.getSessionReportStatus(Object.assign(scopeOpts(), { requestId: reqId })))
           .then(function (res) {
           if (!alive) return;
-          var v = interpretReportStatus(res);
+          var v = interpretReportStatus(res, props.scope);
           if (v.phase === 'done') { setResult(v); setStep('done'); }
           else if (v.phase === 'error') { setError(v.message); setStep('error'); }
           else { timer = setTimeout(tick, 2000); }
@@ -377,7 +390,7 @@
         topicRowIds: selectedRowIds(preview ? preview.topics : [], checked),
       });
       Promise.resolve(org.generateSessionReport(payload)).then(function (res) {
-        var v = interpretReportStatus(res);
+        var v = interpretReportStatus(res, props.scope);
         if (v.phase === 'error') { setError(v.message); setStep('error'); return; }
         if (v.phase === 'done') { setResult(v); setStep('done'); return; }
         if (res && res.requestId) { setReqId(res.requestId); }      // hands off to the poll effect
@@ -427,7 +440,8 @@
         body = h('div', { className: 'fs-srm__step' }, h('p', { className: 'fs-srm__hint' }, 'Loading preview…'));
       } else {
         body = h('div', { className: 'fs-srm__step fs-srm__preview' },
-          h('h3', { className: 'fs-srm__preview-title' }, preview.title || 'Session report'),
+          h('h3', { className: 'fs-srm__preview-title' },
+            preview.title || (props.scope === 'day' ? 'Day report' : 'Session report')),
           h('p', { className: 'fs-srm__preview-meta' }, [preview.siteName, preview.date].filter(Boolean).join(' · ')),
           (preview.participants && preview.participants.length)
             ? h('p', { className: 'fs-srm__preview-attendees' }, 'Attendees: ' + preview.participants.join(', ')) : null,
@@ -523,7 +537,7 @@
 
     return h(ModalOverlay, {
       open: !!props.open, onClose: props.onClose, closeOnBackdrop: false,
-      size: 'lg', title: 'Session report',
+      size: 'lg', title: props.scope === 'day' ? 'Day report' : 'Session report',
     }, h('div', { className: 'fs-srm' }, body, footer));
   }
 
@@ -534,6 +548,6 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = { buildGeneratePayload: buildGeneratePayload, interpretReportStatus: interpretReportStatus, previewFieldDefaults: previewFieldDefaults, parseAttendees: parseAttendees, canGenerate: canGenerate, STEPS: STEPS,
       parseTimeRange: parseTimeRange, parseClock: parseClock, overlapsWindow: overlapsWindow, windowChecked: windowChecked, selectedRowIds: selectedRowIds,
-      previewErrorMessage: previewErrorMessage, generateErrorMessage: generateErrorMessage };
+      previewErrorMessage: previewErrorMessage, generateErrorMessage: generateErrorMessage, noFolderMappingMessage: noFolderMappingMessage };
   }
 })();

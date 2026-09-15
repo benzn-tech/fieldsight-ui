@@ -213,6 +213,10 @@
       return 'No meeting was recorded this day, so there is nothing to report on here. '
         + 'The whole day is the daily report, on the Reports page.';
     }
+    // Unreachable from GenerateReportButton now that a day with at least one
+    // meeting reports on the whole day (generateReportScope returns 'day', so
+    // the button is never disabled here for sessionCount > 0) — kept for the
+    // sessionCount > 0 case still exercised directly by tests below.
     return 'Reports here are per meeting — pick one above. '
       + 'The whole day is the daily report, on the Reports page.';
   }

@@ -80,6 +80,45 @@ test('a worker with no recording folder is told so, not "unavailable"', () => {
   assert.equal(generateErrorMessage({}), 'The report did not start.');
 });
 
+test('interpretReportStatus: access denied surfaces the server reason, not a generic line', () => {
+  global.window = { FieldSight: {} };
+  delete require.cache[require.resolve('../scripts/composites/session-report-modal.js')];
+  const { interpretReportStatus } = require('../scripts/composites/session-report-modal.js');
+
+  const folderless = interpretReportStatus({ _accessDenied: true, error: 'no folder mapping for your account' });
+  assert.equal(folderless.phase, 'error');
+  assert.match(folderless.message, /no recording folder/);
+
+  const otherReason = interpretReportStatus({ _accessDenied: true, error: 'not a member of this site' });
+  assert.equal(otherReason.phase, 'error');
+  assert.equal(otherReason.message, 'not a member of this site');
+
+  const noReason = interpretReportStatus({ _accessDenied: true });
+  assert.equal(noReason.phase, 'error');
+  assert.equal(noReason.message, 'You don’t have access to this report.');
+
+  const noResponse = interpretReportStatus(null);
+  assert.equal(noResponse.phase, 'error');
+  assert.equal(noResponse.message, 'You don’t have access to this report.');
+});
+
+test('interpretReportStatus: not found reads as a day or a session depending on scope', () => {
+  global.window = { FieldSight: {} };
+  delete require.cache[require.resolve('../scripts/composites/session-report-modal.js')];
+  const { interpretReportStatus } = require('../scripts/composites/session-report-modal.js');
+
+  const day = interpretReportStatus({ _notFound: true }, 'day');
+  assert.equal(day.phase, 'error');
+  assert.equal(day.message, 'Nothing was found for this day.');
+
+  const meeting = interpretReportStatus({ _notFound: true });
+  assert.equal(meeting.phase, 'error');
+  assert.equal(meeting.message, 'Session not found.');
+
+  const meetingExplicitScope = interpretReportStatus({ _notFound: true }, 'session');
+  assert.equal(meetingExplicitScope.message, 'Session not found.');
+});
+
 test('generateReportScope: a meeting, a day, or nothing', () => {
   global.React = { createElement: function () { return {}; }, useState: function (v) { return [v, function () {}]; },
     useEffect: function () {}, useRef: function (v) { return { current: v }; }, Fragment: 'Fragment' };
