@@ -708,8 +708,13 @@
 
     /* "Ask about this topic" — bring the one Ask into view and put the cursor
        in it. Smooth scroll only when the reader has not asked for reduced
-       motion. */
+       motion. The nonce lives in the page Provider and never resets, while
+       this component remounts on every day change or refetch: act only on a
+       change seen by THIS mount, never on the value it was mounted with. */
+    var seenFocusNonceRef = React.useRef(props.focusNonce);
     React.useEffect(function () {
+      if (props.focusNonce === seenFocusNonceRef.current) return;
+      seenFocusNonceRef.current = props.focusNonce;
       if (!props.focusNonce) return;
       var root = rootRef.current;
       var input = inputRef.current;

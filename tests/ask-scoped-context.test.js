@@ -348,9 +348,23 @@ function mountAsk() {
     si = 0; ri = 0; ei = 0;
     h.props = props;
     h.tree = AskChat(props);
+    /* Attach a recording element to every ref the tree hands out, the way
+       React fills refs before effects run. */
+    h.nodes().forEach(n => {
+      if (n.props.ref && n.props.ref.current == null) {
+        n.props.ref.current = {
+          scrollIntoView(o) { h.dom.scrolls.push(o); },
+          focus(o) { h.dom.focuses.push(o); },
+          querySelectorAll() { return []; },
+        };
+      }
+    });
     h.effects.forEach(e => { if (e.changed) { e.changed = false; e.fn(); } });
     return h.tree;
   };
+  h.dom = { scrolls: [], focuses: [] };
+  /* Unmount: every hook slot is gone; the next render is a fresh mount. */
+  h.unmount = () => { h.states = []; h.refs = []; h.effects = []; };
   h.rerender = () => h.render(h.props);
   h.nodes = function () {
     const out = [];
@@ -549,6 +563,31 @@ test('D-g a widen the host did not apply never fires on a later change', async (
   assert.strictEqual(h.asks.length, 1, 'a stale widen fired on a later, unrelated change');
 });
 
+test('D-i a focus request fires once; a remount with the same nonce does not refire it', () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED, focusNonce: 0 });
+  assert.strictEqual(h.dom.scrolls.length + h.dom.focuses.length, 0, 'focused on a plain mount');
+
+  h.render({ user: 'Ben', context: SCOPED, focusNonce: 1 });
+  assert.strictEqual(h.dom.scrolls.length, 1, 'a nonce bump did not scroll the Ask into view');
+  assert.strictEqual(h.dom.focuses.length, 1, 'a nonce bump did not focus the input');
+  assert.strictEqual(h.dom.scrolls[0].behavior, 'smooth');
+
+  h.rerender();
+  assert.strictEqual(h.dom.scrolls.length, 1, 'a rerender with the same nonce scrolled again');
+
+  /* Day change / refetch: the middle column unmounts AskChat and mounts it
+     again, while the Provider still holds nonce 1. */
+  h.unmount();
+  h.render({ user: 'Ben', context: SCOPED, focusNonce: 1 });
+  assert.strictEqual(h.dom.scrolls.length, 1, 'a remount with an old nonce scrolled the page');
+  assert.strictEqual(h.dom.focuses.length, 1, 'a remount with an old nonce focused the input');
+
+  /* The remounted Ask still answers a new request. */
+  h.render({ user: 'Ben', context: SCOPED, focusNonce: 2 });
+  assert.strictEqual(h.dom.focuses.length, 2, 'a new request after a remount was ignored');
+});
+
 test('D-h the chip remove button names what it removes', async () => {
   const h = mountAsk();
   h.render({ context: Object.assign({}, SCOPED, { topicRowId: 't', topicTitle: 'Crane' }),
@@ -608,12 +647,18 @@ test('6b the page registers a Provider', () => {
   assert.strictEqual(typeof page.Right, 'function');
 });
 
-test('6c the Provider holds only the four ask fields', () => {
+test('6c the Provider holds only the ask fields', () => {
   const { page } = loadTimeline({ createContext() { return { Provider: 'AskCtxProvider' }; } });
   const el = page.Provider({ children: 'kids' });
   assert.strictEqual(el.type, 'AskCtxProvider');
   assert.deepStrictEqual(Object.keys(el.props.value).sort(),
-    ['askContext', 'askFocusNonce', 'requestAskFocus', 'setAskContext']);
+    ['askContext', 'askFocusNonce', 'hasAsk', 'requestAskFocus', 'setAskContext', 'setHasAsk']);
+  assert.strictEqual(el.props.value.hasAsk, false, 'a fresh page claims an Ask is mounted');
+});
+
+test('6e outside a Provider there is no Ask to point a topic button at', () => {
+  const { mod } = loadTimeline();
+  assert.strictEqual(mod.useTimelineAsk().hasAsk, false);
 });
 
 test('6d exactly one AskChat mount remains in timeline.js', () => {
@@ -625,14 +670,47 @@ test('6d exactly one AskChat mount remains in timeline.js', () => {
 
 test('7a the button is hidden for a topic without topic_row_id', () => {
   const { mod } = loadTimeline();
-  assert.strictEqual(mod.TopicAskButton({ topic: { topic_id: 2 }, onAsk() {} }), null);
-  assert.strictEqual(mod.TopicAskButton({ topic: null, onAsk() {} }), null);
+  assert.strictEqual(mod.TopicAskButton({ topic: { topic_id: 2 }, hasAsk: true, onAsk() {} }), null);
+  assert.strictEqual(mod.TopicAskButton({ topic: null, hasAsk: true, onAsk() {} }), null);
+});
+
+test('7a2 the button is hidden when no Ask is mounted (aggregated site view)', () => {
+  const { mod } = loadTimeline();
+  assert.strictEqual(mod.topicAskVisible(true, { topic_row_id: 't' }), true);
+  assert.strictEqual(mod.topicAskVisible(false, { topic_row_id: 't' }), false);
+  assert.strictEqual(mod.topicAskVisible(undefined, { topic_row_id: 't' }), false);
+  assert.strictEqual(mod.topicAskVisible(true, { topic_id: 2 }), false);
+  /* Driven through the component, not only the helper. */
+  assert.strictEqual(mod.TopicAskButton({ topic: { topic_row_id: 't' }, hasAsk: false, onAsk() {} }), null,
+    'a topic button rendered with no Ask on the page');
+});
+
+test('7a3 AskPresence publishes hasAsk for exactly as long as it is mounted', () => {
+  const effects = [];
+  const { mod } = loadTimeline({ useEffect(fn) { effects.push(fn); } });
+  const seen = [];
+  assert.strictEqual(mod.AskPresence({ setHasAsk: v => seen.push(v) }), null);
+  assert.strictEqual(effects.length, 1);
+  const cleanup = effects[0]();
+  assert.deepStrictEqual(seen, [true], 'mounting the Ask did not publish hasAsk');
+  assert.strictEqual(typeof cleanup, 'function', 'unmounting the Ask would leave hasAsk true');
+  cleanup();
+  assert.deepStrictEqual(seen, [true, false]);
+});
+
+test('7a4 the presence marker sits next to the one AskChat mount', () => {
+  const src = timelineSrc();
+  const at = src.indexOf('React.createElement(AskChat,');
+  const before = src.slice(at - 200, at);
+  assert.match(before, /React\.createElement\(AskPresence, \{ setHasAsk: askApi\.setHasAsk \}\)/);
+  const right = src.slice(src.indexOf('function TimelineRightDetail('), src.indexOf('/* ---------- Register'));
+  assert.match(right, /hasAsk: askApi\.hasAsk/, 'the topic button is not told whether an Ask exists');
 });
 
 test('7b the button renders and clicking it calls onAsk', () => {
   const { mod } = loadTimeline();
   let clicked = 0;
-  const el = mod.TopicAskButton({ topic: { topic_row_id: 't' }, onAsk() { clicked++; } });
+  const el = mod.TopicAskButton({ topic: { topic_row_id: 't' }, hasAsk: true, onAsk() { clicked++; } });
   assert.strictEqual(el.type, 'button');
   assert.deepStrictEqual(el.children, ['Ask about this topic']);
   el.props.onClick();
@@ -663,6 +741,26 @@ test('7d pinning from an empty or other-day context uses the topic\'s own day', 
     { date: '2026-09-04', authorFolder: 'Ben_UCPK2', topicRowId: 't', topicTitle: 'T' });
   assert.strictEqual(mod.askContextWithTopic(DAY, { topic_row_id: 't' }, dayCtx).date, '2026-09-04');
   assert.strictEqual(mod.askContextWithTopic(DAY, { topic_id: 1 }, dayCtx), null);
+});
+
+test('7d2 the current scope is kept only when it is the topic\'s own day, owner and site', () => {
+  const { mod } = loadTimeline();
+  const T = { topic_row_id: 't', topic_title: 'T' };
+  /* Same date, another owner: the topic's owner wins. */
+  const otherOwner = mod.askContextWithTopic(DAY, T, { date: '2026-09-03', authorFolder: 'Someone' });
+  assert.strictEqual(otherOwner.authorFolder, 'Someone');
+  assert.ok(!('siteName' in otherOwner), 'the other owner\'s site leaked into the topic scope');
+  /* Same date and owner, another site (both known): the topic's site wins. */
+  const otherSite = mod.askContextWithTopic(DAY, T,
+    { date: '2026-09-03', authorFolder: 'Ben_UCPK2', siteId: 'other-site' });
+  assert.strictEqual(otherSite.siteId, 'other-site');
+  /* Same date, owner and site: the current scope (with its site name) is kept. */
+  const same = mod.askContextWithTopic(DAY, T,
+    { date: '2026-09-03', authorFolder: 'Ben_UCPK2', siteId: 'site-uuid' });
+  assert.strictEqual(same.siteName, 'UC PK');
+  /* Site known on one side only is not a mismatch. */
+  assert.strictEqual(mod.askContextWithTopic(DAY, T,
+    { date: '2026-09-03', authorFolder: 'Ben_UCPK2' }).siteName, 'UC PK');
 });
 
 test('7e the topic detail header mounts the button; selecting a topic does not touch the context', () => {
@@ -712,6 +810,22 @@ test('8d the middle column wires the day reset and the palette rule', () => {
   assert.match(deps, /askOwner/, 'owner change does not reset the context');
   assert.match(mid, /askFromPaletteRef\.current \? \{\} : askApi\.askContext/,
     'mount #1 can auto-send a palette question with a stale scope');
+  assert.match(mid, /dayKey === askDayKeyRef\.current\) return;/,
+    'the reset does not compare against the last applied day');
+});
+
+test('8f a refetch of the same day keeps a pinned topic; a real day change resets', () => {
+  const { mod } = loadTimeline();
+  const k = mod.askDayResetKey;
+  assert.strictEqual(k('loading', '2026-09-03', 'Ben', 's'), null, 'a loading render reset the scope');
+  const applied = k('ok', '2026-09-03', 'Ben', 's');
+  /* loading → ok on the same day (content edit refresh, retry). */
+  assert.strictEqual(k('ok', '2026-09-03', 'Ben', 's'), applied, 'a refetch rebuilt the day and dropped the topic');
+  assert.notStrictEqual(k('ok', '2026-09-04', 'Ben', 's'), applied, 'a date change kept the old scope');
+  assert.notStrictEqual(k('ok', '2026-09-03', 'Someone', 's'), applied, 'an owner change kept the old scope');
+  assert.notStrictEqual(k('ok', '2026-09-03', 'Ben', 'other'), applied, 'a site change kept the old scope');
+  /* A missing site reads the same whether it came as false, undefined or ''. */
+  assert.strictEqual(k('ok', '2026-09-03', 'Ben', false), k('ok', '2026-09-03', 'Ben', undefined));
 });
 
 test('8e the palette mount passes no scope, no context and no suggestions', () => {

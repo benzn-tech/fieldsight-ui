@@ -1053,16 +1053,25 @@
     setAskContext: function () {},
     askFocusNonce: 0,
     requestAskFocus: function () {},
+    hasAsk: false,
+    setHasAsk: function () {},
   };
 
   function TimelineAskProvider(props) {
-    var refCtx   = React.useState({});
-    var refNonce = React.useState(0);
+    var refCtx    = React.useState({});
+    var refNonce  = React.useState(0);
+    var refHasAsk = React.useState(false);
     var value = {
       askContext:      refCtx[0],
       setAskContext:   function (next) { refCtx[1](next || {}); },
       askFocusNonce:   refNonce[0],
       requestAskFocus: function () { refNonce[1](function (n) { return n + 1; }); },
+      /* True only while the middle column actually has the one Ask mounted
+         (AskPresence below). The aggregated site view, the meeting view and
+         the error / no-report states mount none, and a topic button there
+         would do nothing. */
+      hasAsk:          refHasAsk[0],
+      setHasAsk:       refHasAsk[1],
     };
     if (!TimelineAskContext) return React.createElement(React.Fragment, null, props.children);
     return React.createElement(TimelineAskContext.Provider, { value: value }, props.children);
@@ -1104,7 +1113,10 @@
   function askContextWithTopic(current, topic, dayContext) {
     if (!topic || !topic.topic_row_id) return null;
     var day = dayContext || {};
-    var base = (current && current.date && current.date === day.date) ? current : day;
+    var sameDay = !!(current && current.date && current.date === day.date
+      && current.authorFolder === day.authorFolder
+      && (!(current.siteId && day.siteId) || current.siteId === day.siteId));
+    var base = sameDay ? current : day;
     return Object.assign({}, base, {
       topicRowId: topic.topic_row_id,
       topicTitle: topic.topic_title || '',
@@ -1120,9 +1132,33 @@
   }
 
   /* Meeting topics carry no topic_row_id → no button; the day Ask still
-     covers their day. */
+     covers their day. No mounted Ask (aggregated site view, meeting view,
+     error states, outside the Provider) → no button either. */
+  function topicAskVisible(hasAsk, topic) {
+    return !!(hasAsk && topic && topic.topic_row_id);
+  }
+
+  /* Mounted next to the one AskChat: publishes "an Ask is on the page" for
+     exactly as long as it is. */
+  function AskPresence(props) {
+    var set = props.setHasAsk;
+    React.useEffect(function () {
+      set(true);
+      return function () { set(false); };
+    }, [set]);
+    return null;
+  }
+
+  /* The day scope is rebuilt only when the day actually changes: a refetch
+     of the same day (content edit refresh, retry) goes loading → ok again
+     and must keep a pinned topic. null while loading = do nothing. */
+  function askDayResetKey(status, date, owner, siteId) {
+    if (status === 'loading') return null;
+    return [date || '', owner || '', siteId || ''].join('|');
+  }
+
   function TopicAskButton(props) {
-    if (!props.topic || !props.topic.topic_row_id) return null;
+    if (!topicAskVisible(props.hasAsk, props.topic)) return null;
     return React.createElement('button', {
       type: 'button',
       className: 'fs-btn fs-btn--secondary fs-btn--sm fs-topic-detail__ask',
@@ -2198,8 +2234,12 @@
     var askReport = state.report;
     var askReportReady = !!(askReport && !askReport._notFound && !askReport.available_users);
     var askOwner = user || (askReportReady && askReport.user_name) || '';
+    var askDayKeyRef = React.useRef(null);
     React.useEffect(function () {
-      if (state.status === 'loading') return;
+      var dayKey = askDayResetKey(state.status, date, askOwner,
+                                  askReportReady && askReport.site_id);
+      if (dayKey === null || dayKey === askDayKeyRef.current) return;
+      askDayKeyRef.current = dayKey;
       var fromPalette = askFromPaletteRef.current;
       askFromPaletteRef.current = false;
       askApi.setAskContext(askContextForLoadedDay(askReportReady ? askReport : null,
@@ -2795,6 +2835,7 @@
       AskChat ? React.createElement(React.Fragment, null,
         React.createElement('div', { className: 'fs-timeline-page__section-label' },
           'Ask agent'),
+        React.createElement(AskPresence, { setHasAsk: askApi.setHasAsk }),
         React.createElement(AskChat, {
           user:            user || (report && report.user_name && window.FS.api.folderName(report.user_name)),
           context:         askFromPaletteRef.current ? {} : askApi.askContext,
@@ -4339,6 +4380,7 @@
           ),
           React.createElement(TopicAskButton, {
             topic: topic,
+            hasAsk: askApi.hasAsk,
             onAsk: function () {
               pinTopicAsk(askApi, topic, askContextForDay(
                 { site_id: sel.site_id || null, user_name: sel.user_name },
@@ -4470,6 +4512,9 @@
       askContextWithTopic: askContextWithTopic,
       pinTopicAsk: pinTopicAsk,
       TopicAskButton: TopicAskButton,
+      topicAskVisible: topicAskVisible,
+      AskPresence: AskPresence,
+      askDayResetKey: askDayResetKey,
     };
   }
 
