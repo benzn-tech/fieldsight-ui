@@ -6,13 +6,13 @@
 /* global React, ReactDOM, window */
 
 const STORAGE_KEYS = {
-  middleWidth:  'fs.appshell.middleWidth',
+  middleWidth:  'fs.appshell.middleWidth.v2',
   navCollapsed: 'fs.appshell.navCollapsed',
   theme:        'fs.settings.theme',
   density:      'fs.settings.density',
 };
 
-const MIDDLE_WIDTH_DEFAULT = 320;
+const MIDDLE_WIDTH_DEFAULT = 420;
 
 /* ---------- Mobile bottom-nav item icons (mirrors NAV_ICONS in left-nav.js) */
 const NAV_ICONS_BOTTOM = {
@@ -761,8 +761,8 @@ function WeatherPopover(props) {
     ) : null,
   );
 }
-const MIDDLE_WIDTH_MIN     = 280;
-const MIDDLE_WIDTH_MAX     = 480;
+const MIDDLE_WIDTH_MIN     = 360;
+const MIDDLE_WIDTH_MAX     = 560;
 
 /* ---------- Date subtitle helper ------------------------------------------ */
 function formatTodayDate() {
@@ -1153,7 +1153,11 @@ function AppShell({ showDevSwitcher = false }) {
 
   /* Persisted middle column width */
   const [middleWidth, setMiddleWidth] = React.useState(function() {
-    return (dd && dd.read(STORAGE_KEYS.middleWidth, MIDDLE_WIDTH_DEFAULT)) || MIDDLE_WIDTH_DEFAULT;
+    /* .v2 key: widths saved inside the old 280-480 range are not a preference
+       about the new one (spec 2026-09-15 §9.2). read() does not clamp, so a
+       hand-edited out-of-range value is clamped here on first paint. */
+    if (!dd) return MIDDLE_WIDTH_DEFAULT;
+    return dd.clamp(dd.read(STORAGE_KEYS.middleWidth, MIDDLE_WIDTH_DEFAULT), MIDDLE_WIDTH_MIN, MIDDLE_WIDTH_MAX);
   });
 
   /* Selected item for right detail panel */
