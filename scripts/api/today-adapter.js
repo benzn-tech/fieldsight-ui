@@ -435,6 +435,12 @@
              task-detail editors must treat null as "not editable", never
              crash. */
           actionItemId: a.id || null,
+          /* spec 2026-09-15 §2/§8 — TodoHistory joins provenance on the
+             topic's session; the card chip reads version (1 + content_edits
+             rows, backend §8.1). A missing version is 1: no chip. */
+          sessionId:   t.session_id || null,
+          sessionKind: t.session_kind || null,
+          version:     (typeof a.version === 'number' && a.version >= 1) ? a.version : 1,
           /* feat/today-title-edit — durable topics.id (backend Task 8
              passthrough, same field OverviewTab reads as topic.topic_row_id
              in timeline.js), threaded down onto every action item flattened

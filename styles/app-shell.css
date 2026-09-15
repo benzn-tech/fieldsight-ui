@@ -48,8 +48,8 @@ body {
   height: 100%;
   flex-shrink: 0;
   position: relative;
-  min-width: 280px;
-  max-width: 480px;
+  min-width: 360px;
+  max-width: 560px;
   overflow: hidden;
 }
 

@@ -6,6 +6,7 @@
 
    Props:
      children   StatCard nodes
+     compact    boolean, optional — one-line variant, Timeline day header only
 
    Exported to:
      window.FieldSight.KpiStrip
@@ -18,10 +19,14 @@
 
   function KpiStrip(props) {
     return React.createElement('div', {
-      className: 'fs-kpi-strip',
+      className: 'fs-kpi-strip' + (props.compact ? ' fs-kpi-strip--compact' : ''),
     }, props.children);
   }
 
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.KpiStrip = KpiStrip;
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { KpiStrip: KpiStrip };
+  }
 })();
