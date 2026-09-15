@@ -624,6 +624,23 @@
     return { byDate: byDate, dates: dates };
   }
 
+  /* spec 2026-09-15 §4 — the ONE place a field-editor save is judged.
+     Returns {ok}. ok === true only for a resolved, non-denied, non-error
+     envelope. On ok: shows the 'Saved' toast and emits content:edited
+     {table, id} (FS.events). On !ok: does nothing, and the caller keeps its
+     own existing failure handling. A thrown save never reaches here (callers'
+     .catch paths are unchanged). Call pattern:
+       if (!api.settleSave(res, {table, id}).ok) { ...existing failure... } */
+  function settleSave(res, target) {
+    var ok = !!res && !res._accessDenied && !res._notFound && !res.error;
+    if (!ok) return { ok: false };
+    var toast = window.FS && window.FS.toast;
+    if (toast) toast.show({ message: 'Saved', tone: 'success', duration: 2000 });
+    var events = window.FS && window.FS.events;
+    if (events && target) events.emit('content:edited', { table: target.table, id: target.id });
+    return { ok: true };
+  }
+
   window.FS.api.actions = {
     getActions:      getActions,
     getActionsRange: getActionsRange,
@@ -645,6 +662,7 @@
     applyTopicCorrection:   applyTopicCorrection,
     propagateLive:          propagateLive,
     getContentHistory: getContentHistory,
+    settleSave:      settleSave,
     confirmAlias:    confirmAlias,
     createRedaction: createRedaction,
     revertRedaction: revertRedaction,
@@ -668,6 +686,7 @@
       propagateLive:            propagateLive,
       previewTopicCorrection:   previewTopicCorrection,
       applyTopicCorrection:     applyTopicCorrection,
+      settleSave:               settleSave,
     };
   }
 
