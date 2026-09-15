@@ -488,6 +488,15 @@
     };
   }
 
+  /* spec 2026-09-15 §3.1 — ONE cached sessions read per (date, owner folder),
+     shared by Timeline's day view and every TodoHistory card, so expanding a
+     card on a day that already loaded sessions issues zero requests. */
+  function getSessionsCached(date, folder) {
+    return api.cache.cached('sessions:' + date + ':' + folder, undefined, function () {
+      return getSessions({ date: date, user: folder });
+    });
+  }
+
   // -------- recurring-item threading: the review queue --------
   /* The matcher proposes which earlier SUBJECT a topic restates; confirming
      is what actually links them, and it is a person's call. A wrong link
@@ -838,6 +847,7 @@
     getComplianceResolutions: getComplianceResolutions,
     getLiveItems: getLiveItems,
     getSessions: getSessions,
+    getSessionsCached: getSessionsCached,
     getSessionReportPreview: getSessionReportPreview,
     generateSessionReport: generateSessionReport,
     getSessionReportStatus: getSessionReportStatus,

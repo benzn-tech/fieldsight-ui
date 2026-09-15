@@ -1788,7 +1788,7 @@
       if (!folder || !date) { setSessionsState({ status: 'idle', sessions: [], excluded: null }); return undefined; }
       var cancelled = false;
       setSessionsState({ status: 'loading', sessions: [], excluded: null });
-      window.FS.api.org.getSessions({ date: date, user: folder }).then(function (res) {
+      window.FS.api.org.getSessionsCached(date, folder).then(function (res) {
         if (cancelled) return;
         if (!res || res._accessDenied || res._notFound) {
           setSessionsState({ status: 'ok', sessions: [], excluded: null });
