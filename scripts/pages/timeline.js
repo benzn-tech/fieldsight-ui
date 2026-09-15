@@ -3459,6 +3459,17 @@
   /* editable-content-correction (Task 18 Step 1) — content_edits audit
      trail for one row, mirrors tasks.js's ActionHistoryPanel (fetch on
      mount, render a list). */
+  /* spec 2026-09-15 §5 — extracted so the callback that bumps the reload
+     tick is itself under direct test (a source-scan alone can't tell an
+     emptied callback from a working one). Returns an unsubscribe fn always,
+     even when events are unavailable, so the caller never has to branch. */
+  function subscribeContentReload(events, table, id, bump) {
+    if (events && events.onContentEdited) {
+      return events.onContentEdited(table, id, function () { bump(); });
+    }
+    return function () {};
+  }
+
   function ContentHistoryPanel(props) {
     var dataRef = React.useState({ status: 'loading' });
     var data = dataRef[0], setData = dataRef[1];
@@ -3475,9 +3486,7 @@
     /* spec 2026-09-15 §5 — a save to THIS row re-reads the trail (the server
        assigns created_at/actor_name; never append optimistically). */
     React.useEffect(function () {
-      var events = window.FS && window.FS.events;
-      if (!events || !events.onContentEdited) return undefined;
-      return events.onContentEdited(props.table, props.id, function () {
+      return subscribeContentReload(window.FS && window.FS.events, props.table, props.id, function () {
         setReloadTick(function (n) { return n + 1; });
       });
     }, [props.table, props.id]);
@@ -4355,6 +4364,7 @@
       diffWords: diffWords,
       formatEditTime: formatEditTime,
       formatContentEdit: formatContentEdit,
+      subscribeContentReload: subscribeContentReload,
       findLatestReportDate: findLatestReportDate,
       capturedFolders: capturedFolders,
       /* live recording KPIs */

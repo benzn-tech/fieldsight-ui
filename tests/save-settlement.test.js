@@ -55,6 +55,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const page = (f) => fs.readFileSync(path.join(__dirname, '..', 'scripts', 'pages', f), 'utf8').replace(/\r\n/g, '\n');
 
+/* subscribeContentReload is a pure function (events passed explicitly, not
+   read off a module-scoped window), so it's safe to require timeline.js
+   once here even though load() above reassigns global.window per-test. */
+global.window = global.window || {};
+global.React = global.React || {};
+const { subscribeContentReload } = require('../scripts/pages/timeline.js');
+const { createEvents } = require('../scripts/api/events.js');
+
 function block(src, startMarker, endMarker) {
   const s = src.indexOf(startMarker);
   assert.ok(s >= 0, 'marker not found: ' + startMarker);
@@ -71,13 +79,56 @@ test('9: timeline EditableText.commit calls settleSave before the glossary early
 });
 
 /* ---- 10b: SOURCE SCAN (wiring pin) — ContentHistoryPanel re-fetches on a
-   matching content:edited; the matching rule itself is FS.events.onContentEdited,
-   covered behaviourally in tests/events.test.js. */
-test('10b ContentHistoryPanel subscribes with its own table and id and re-fetches on tick', () => {
+   matching content:edited via subscribeContentReload. subscribeContentReload's
+   own matching/callback behaviour is exercised behaviourally just below,
+   driving the real FS.events (scripts/api/events.js createEvents). A source
+   scan alone can't tell an emptied callback from a working one. */
+test('10b: ContentHistoryPanel subscribes via subscribeContentReload and re-fetches on tick', () => {
   const src = page('timeline.js');
   const b = block(src, 'function ContentHistoryPanel(', 'function OverviewTab(');
-  assert.match(b, /onContentEdited\(props\.table, props\.id,/);
+  assert.match(b, /subscribeContentReload\(window\.FS && window\.FS\.events, props\.table, props\.id,/);
   assert.match(b, /\[props\.table, props\.id, reloadTick\]/);
+});
+
+test('10b: subscribeContentReload bumps on a matching content:edited emit', () => {
+  const ev = createEvents();
+  let calls = 0;
+  subscribeContentReload(ev, 'action_items', 'ai-1', () => { calls++; });
+  ev.emit('content:edited', { table: 'action_items', id: 'ai-1' });
+  assert.strictEqual(calls, 1);
+});
+
+test('10b: subscribeContentReload does not bump on a different id', () => {
+  const ev = createEvents();
+  let calls = 0;
+  subscribeContentReload(ev, 'action_items', 'ai-1', () => { calls++; });
+  ev.emit('content:edited', { table: 'action_items', id: 'ai-2' });
+  assert.strictEqual(calls, 0);
+});
+
+test('10b: subscribeContentReload does not bump on the same id but a different table', () => {
+  const ev = createEvents();
+  let calls = 0;
+  subscribeContentReload(ev, 'action_items', 'ai-1', () => { calls++; });
+  ev.emit('content:edited', { table: 'topics', id: 'ai-1' });
+  assert.strictEqual(calls, 0);
+});
+
+test('10b: after off(), no more bumps', () => {
+  const ev = createEvents();
+  let calls = 0;
+  const off = subscribeContentReload(ev, 'action_items', 'ai-1', () => { calls++; });
+  off();
+  ev.emit('content:edited', { table: 'action_items', id: 'ai-1' });
+  assert.strictEqual(calls, 0);
+});
+
+test('10b: subscribeContentReload with no events does not throw and returns a callable unsubscribe', () => {
+  let calls = 0;
+  const off = subscribeContentReload(undefined, 'action_items', 'ai-1', () => { calls++; });
+  assert.strictEqual(typeof off, 'function');
+  assert.doesNotThrow(() => off());
+  assert.strictEqual(calls, 0);
 });
 
 test('9: timeline assignTo calls settleSave', () => {
