@@ -111,6 +111,9 @@
   overflow-wrap: anywhere;
 }
 
+/* "This to-do has been changed" — quieter than status (spec 2026-09-15 §8.2). */
+.fs-task-card__version { vertical-align: 1px; }
+
 .fs-task-card__meta {
   display: flex;
   align-items: center;
