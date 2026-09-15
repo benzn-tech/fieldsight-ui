@@ -144,6 +144,12 @@ the card, and a to-do whose deadline moved *is* an updated to-do, so the numberi
   showing the original text (the oldest text edit's `before_text`, or the current text when the
   text was never edited).
 * A to-do with no edits is `v1`: no version block (card spec's "empty list is the normal case").
+* Check-offs count: every check-off writes a `status` row (`patch_action_item`), so ticking a
+  to-do done and re-opening it is two versions (`v3`). That is correct under this rule, not a bug.
+  Today drops done items from the list, so a done item never shows a chip.
+* `responsible` edits arrive from two endpoints (`PATCH /action-items/{id}` and
+  `PATCH /content/action_items/{id}`); both render as the same sentence
+  (`responsible changed to …`).
 * The top of the list and the chip show the same `N`. If history returns a different count than
   the `version` the list was rendered with (an edit landed in between), the history read wins
   and the host's chip is updated from it (§8.3).
@@ -240,19 +246,25 @@ As a user who may edit (e.g. Ben_UCPK2, UC PK, 2026-09-03):
 
 Additive; nothing else in the payload changes.
 
-* `repositories/topics.py`, in the read path that loads `action_items` for the day
-  (`list_topics_for_*`, the `SELECT … FROM action_items WHERE topic_id = ANY(%s)` at ~473): one
-  further batch query —
-  `SELECT row_id, count(*) FROM content_edits WHERE table_name = 'action_items' AND row_id = ANY(%s) [AND company_id = %s] GROUP BY row_id`
-  — over the ids of the items **after** the todo collapse (the survivor's id; `collapsed_ids`
-  are not counted, matching what `GET …/history` returns for the survivor). Served by
-  `idx_content_edits_row (table_name, row_id, created_at)` (migration 0019). Include the
-  `company_id` predicate when the caller passes one, so the count agrees with
-  `list_content_edits` (company-scoped).
-* `lambda_org_api.render_report_shape` (~6209): add `"version": 1 + count` to each action item
-  in the fixed allowlist. The comment above that allowlist records that fields dropped there
-  once passed every repository test — so the test is on the **rendered** shape (below).
-* No N+1: one query per day read regardless of item count.
+* `repositories/topics.py`: `list_topics_for_source_prefix` and `list_topics_for_date` stamp
+  `edit_count` on each **surviving** action item right after
+  `todo_collapse.collapse_if_enabled` (~485 and ~732), from one batch query —
+  `SELECT row_id, count(*) AS n FROM content_edits WHERE table_name = 'action_items' AND row_id = ANY(%s) GROUP BY row_id`
+  — over the survivors' ids (`collapsed_ids` are not counted, matching what `GET …/history`
+  returns for the survivor, `content_edits.list_content_edits` is per `row_id`). Served by
+  `idx_content_edits_row (table_name, row_id, created_at)` (migration 0019).
+  **No company predicate:** every writer stamps the row's own company, and `get_content_history`
+  filters by the row's company, so the unscoped count equals what history returns.
+* `lambda_org_api.render_report_shape` (~6209): add `"version": 1 + a.get("edit_count", 0)` to
+  each action item in the fixed allowlist. Its other callers — the session-report preview
+  (~1251) and reindex (`reindex.py` ~92, fed by `get_topic_full`) — carry no `edit_count` and
+  serialise `version: 1` without a query of their own. The comment above that allowlist records
+  that fields dropped there once passed every repository test — so the test is on the
+  **rendered** shape (below).
+* No N+1: one query per day read regardless of item count. Every `/timeline` path
+  (own day, `cross_user_clip`, merged multi-device) goes through `_aurora_shape` → the same
+  repository functions → the same serializer. A verbatim-S3 day has no durable ids: no
+  `version`, treated as 1, no chip.
 
 Tests (pytest, FakeConn): an item with 0 edits → `version: 1`; with 3 → `4`; a collapsed pair
 → survivor's count only; the serialized `/timeline` response carries `version` (rendered shape,
@@ -265,23 +277,26 @@ Rollout: backend to TEST before the UI reads it; the UI treats a missing `versio
 
 ### 8.2 Placement
 
-`TaskCard`'s bottom meta row (`task-card.js` ~305–340) already holds, left to right,
-`raised N×`, `Possibly personal`, the status badge, and the due time. The chip goes **first in
-that row**, before `raised N×`:
+The chip is an **inline prefix inside `.fs-task-card__title`**, before the title text:
 
 ```
-◯  Roofing price — confirm 530 figure with Aaron
-   [v2] [raised 3×] [Open]  Fri 5 Sep
+◯  [v2] Roofing price — confirm 530 figure with Aaron      [raised 3×] [Open] Fri 5 Sep
+◯  Light poles PS4 — confirm delivery date with the supplier before Thursday   [Open] —
+◯  [v3] Backfill Zone 1 — book tanking                                     [Open] Mon 8 Sep
 ```
 
-Why there, not beside the title: titles wrap to two lines at this width, so a trailing chip
-jumps between line ends from card to card; the meta row is one line with a fixed left edge,
-so every card's chip lands in the same place and scans as a column. Why first: it is the
-freshest fact about the card — "someone changed this" — and `raised N×` explains the sort
-order, which reads naturally after it.
+Why there: it is the only position on the card with a fixed left edge at every width.
+`.fs-task-card__row` is `flex-wrap: wrap` with `__main { flex: 1 1 14rem }` and
+`__meta { flex-shrink: 0 }` (`composites.css` ~69–119): at 320px the meta row wraps under the
+title, but at the widths §9 introduces (420–560) it sits **beside** a variable-width title, so a
+chip in the meta row would land at a different x on every card and would also widen the meta
+and change where it wraps. A title prefix never moves and scans as a column down the list, and
+the fact it carries — "this to-do has been changed" — belongs to the to-do's text.
 
 * Rendered only when `task.version >= 2`. Text `v{N}`. `Badge` tone `neutral`, variant
-  `outline`, size `sm` — deliberately quieter than status: it signals "this changed", not
+  `outline`, size `sm` (`Badge` spreads unknown props, `badge.js` ~47–80, so `title` and
+  `aria-label` pass through), followed by a normal space before the title text; it wraps with
+  the title's first line — deliberately quieter than status: it signals "this changed", not
   "act on this".
 * `title` tooltip: `Edited {N-1} time(s) — open to see history`.
 * Clicking the chip behaves like clicking the card body (opens the detail panel, where the
@@ -290,9 +305,18 @@ order, which reads naturally after it.
 
 ### 8.3 Keeping the chip current
 
-On `content:edited {table:'action_items', id}` Today's provider bumps that item's `version` by
-one immediately (the save succeeded, so an edit row exists), and when the open panel's history
-read returns, sets `version = 1 + edits.length` (authoritative, §3.4). No refetch of the day.
+On `content:edited {table:'action_items', id}` Today's provider finds the item by
+`t.actionItemId === id` — **not** `t.id`, which is the composite `date__folder_action_t_i` key
+`patchTask` uses (`today.js` ~1168, ~1311) — and calls
+`patchTask(t.id, {version: (t.version || 1) + 1})`. When the open panel's history read returns,
+it calls `patchTask(t.id, {version: 1 + edits.length})` (authoritative, §3.4). No refetch of the day.
+
+The optimistic bump may run one ahead: `commitTaskField` (`today.js` ~2759) has no unchanged
+guard, and `patch_action_item` appends a `content_edits` row only when a value really changes.
+Such a save can only be made from the open panel, so its history read corrects the chip within
+the same interaction. `TopicCorrectionPropagate.apply` writes `action_items.text` /
+`responsible` rows without emitting `content:edited` (§1 excludes it); its chips are stale until
+the next day load.
 
 ### 8.4 Tests
 
@@ -310,9 +334,14 @@ Provider: a matching `content:edited` bumps only that item. Mutation: render the
 |---|---|---|
 | Default (`MIDDLE_WIDTH_DEFAULT`, `app-shell.js` 15) | 320 | **420** |
 | Minimum (`MIDDLE_WIDTH_MIN`, 764; CSS `.middle-column` `min-width`, `app-shell.css` 51) | 280 | **360** |
-| Maximum (`MIDDLE_WIDTH_MAX`, 765; CSS `max-width`, 52) | 480 | **640** |
+| Maximum (`MIDDLE_WIDTH_MAX`, 765; CSS `max-width`, 52) | 480 | **560** |
 
 JS constants and CSS limits change together — they are two copies of one rule.
+
+Why 560 and not wider: the left nav is 240px expanded and collapses only at ≤64rem
+(`left-nav.js` ~380), and `.right-detail` is `flex: 1` with no `min-width` (`app-shell.css` ~80).
+At a 1025–1200px viewport a 640px middle leaves the right panel 145–320px; 560 keeps it at
+≥225px at 1025px and ≥400px at 1200px, where the field editors still fit.
 
 ### 9.2 Saved widths
 
@@ -320,17 +349,24 @@ The width persists under `fs.appshell.middleWidth` (`app-shell.js` 9, read at 11
 that saved the old default keeps 320 forever, so nobody who has used the app would see the
 change. Rename the key to **`fs.appshell.middleWidth.v2`**; the old key is ignored (not
 migrated — a width chosen inside the old 280–480 range is not a preference about the new one).
-Any stored value outside the new range is clamped by the existing `DragDivider.clamp`.
+`DragDivider.read` does **not** clamp (`drag-divider.js` ~40–46; clamping happens only on the
+next drag commit), so the initial read in `app-shell.js` (~1156) is wrapped:
+`DragDivider.clamp(read(key, DEFAULT), MIN, MAX)`, so a hand-edited out-of-range value renders
+clamped on first paint.
 
-Unchanged: mobile (`app-shell.css` ~177, `width:100% !important`, no resize handle) and print
-(~905). No other script reads the key (grepped).
+Unchanged: mobile (`app-shell.css` ~177, `width:100% !important`, no resize handle), print
+(~905), full-width pages (~96–101 override min/max). No other script reads the key (grepped).
 
 ### 9.3 Tests / verification
 
-A test over the exported constants: default within [min, max], and the CSS `min-width` /
-`max-width` in `app-shell.css` equal the JS min / max (source read — pins that the two copies
-agree). Manual: with `fs.appshell.middleWidth=320` in localStorage, reload → 420; drag → clamps
-at 360 and 640; right detail still usable at a 1280px viewport with max width.
+`app-shell.js` cannot be `require`d (no `module.exports`, reads `window.FS.tokens` at load), so
+the test is a **source scan, labelled as such**: regex the three `MIDDLE_WIDTH_*` constants from
+`app-shell.js` and the `.middle-column` `min-width` / `max-width` from `app-shell.css`; assert
+420/360/560, default within [min, max], CSS equals JS, the storage key string ends `.v2`, and the
+initial read is wrapped in `clamp(`.
+Manual: with `fs.appshell.middleWidth=320` in localStorage, reload → 420; drag → stops at 360 and
+560; at a **1040px** viewport with the middle at max, the right panel still shows Today's field
+editors.
 
 ## 10. Timeline stat strip
 
@@ -358,7 +394,13 @@ Add a `compact` variant, used **only** by this Timeline strip:
 
 ### 10.3 Tests / verification
 
-Timeline renders `KpiStrip` with `compact: true`; no other `KpiStrip` mount passes it (source
-scan, labelled as a wiring pin). `components-preview.html` shows the compact strip beside the
+`KpiStrip` (`kpi-strip.js` ~19) currently renders a fixed class and ignores every prop but
+`children`, and `StatCard` (`stat-card.js` ~27) takes no `className`, so the only component
+change is `KpiStrip` accepting `compact` and appending the modifier class; everything else is
+CSS scoped under it. Timeline has **two** `ReportKpis` mounts (`timeline.js` ~1420 and ~2435);
+both pass `compact`. `demo-tour.js` ~31 highlights `.fs-kpi-strip` and still matches.
+
+Wiring pin (source scan, labelled as such): both `ReportKpis` mounts reach `KpiStrip` with
+`compact: true`, and no other `KpiStrip` mount in `scripts/` passes it. `components-preview.html` shows the compact strip beside the
 default one. Manual: Timeline 2026-09-03 → the stat row is a single short line; Insights tiles
 look exactly as before; phone width wraps to two per row.
