@@ -1396,6 +1396,20 @@
       });
     }, []);
 
+    /* spec 2026-09-15 §8.3 — keep a card's version chip current after a save
+       from anywhere (Today panel, Timeline row, Tasks), with no day refetch. */
+    var latestStateRef = React.useRef(state);
+    latestStateRef.current = state;
+    React.useEffect(function () {
+      var events = window.FS && window.FS.events;
+      if (!events || !events.on) return undefined;
+      return events.on('content:edited', function (payload) {
+        var s = latestStateRef.current;
+        var hit = versionBumpFor(s && s.status === 'ok' ? s.data : null, payload);
+        if (hit) patchTask(hit.taskId, hit.patch);
+      });
+    }, []);
+
     return { state: state, removeMyTask: removeMyTask, patchTask: patchTask };
   }
 
@@ -1698,6 +1712,30 @@
      yet has nothing to edit, permission notwithstanding). */
   function titleEditable(item, canEditContentRow) {
     return !!item && item.kind === 'task' && !!canEditContentRow && !!item.actionItemId;
+  }
+
+  /* spec 2026-09-15 §8.3 — which Today card a content:edited belongs to.
+     Matched on the DURABLE actionItemId, never t.id (the composite
+     date__folder_action_t_i key patchTask uses). Optimistic +1; the open
+     panel's history read then corrects it (authoritativeVersionPatch). */
+  function versionBumpFor(data, payload) {
+    if (!data || !payload || payload.table !== 'action_items' || !payload.id) return null;
+    var lists = [data.myTasks || [], data.teamTasks || []];
+    for (var i = 0; i < lists.length; i++) {
+      for (var j = 0; j < lists[i].length; j++) {
+        var t = lists[i][j];
+        if (t && t.actionItemId === payload.id) {
+          return { taskId: t.id, patch: { version: (t.version || 1) + 1 } };
+        }
+      }
+    }
+    return null;
+  }
+
+  /* spec §3.4 — the history read wins over the list's version. */
+  function authoritativeVersionPatch(item, n) {
+    if (typeof n !== 'number' || n < 1 || !item) return null;
+    return (item.version || 1) === n ? null : { version: n };
   }
 
   /* feat/today-title-edit — local mirror of timeline.js's isSiteManagerPlus
@@ -2997,6 +3035,26 @@
 
       renderDetailRows(rows),
 
+      /* spec 2026-09-15 §2 — Today host, beneath the field rows (mirrors
+         Tasks' History tab). open = this panel is showing that item.
+         date/folder are the report OWNER's (item.date / item.folder). */
+      item.kind === 'task' && item.actionItemId && fs.TodoHistory
+        ? React.createElement(fs.TodoHistory, {
+            key:          item.actionItemId,
+            open:         true,
+            actionItemId: item.actionItemId,
+            sessionId:    item.sessionId || null,
+            sessionKind:  item.sessionKind || null,
+            date:         item.date,
+            folder:       item.folder,
+            currentText:  item.title,
+            onVersion: function (n) {
+              var patch = authoritativeVersionPatch(item, n);
+              if (patch && ctx && ctx.patchTask) ctx.patchTask(item.id, patch);
+            },
+          })
+        : null,
+
       related.length > 0 ? React.createElement(React.Fragment, null,
         React.createElement('div', {
           style: {
@@ -3160,6 +3218,9 @@
       WeeklyCompletionKpi:  WeeklyCompletionKpi,
       /* feat/today-title-edit — title editor's pure gate. */
       titleEditable:        titleEditable,
+      /* spec 2026-09-15 §8.3 — version chip refresh. */
+      versionBumpFor:            versionBumpFor,
+      authoritativeVersionPatch: authoritativeVersionPatch,
       /* feat/related-popup-context — Related-popup pure helpers. */
       findItemById:         findItemById,
       isTopicMate:          isTopicMate,
