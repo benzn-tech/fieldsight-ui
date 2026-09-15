@@ -83,6 +83,55 @@
     return Object.assign({}, r, { kind: 'report', id: r.key });
   }
 
+  /* WHOSE REPORT THIS IS. A per-person report lives at
+     reports/<date>/<folder>/<type>_report.json. Summary, site and combined
+     reports have no folder segment, so they belong to nobody -- and nobody
+     regenerates them by hand. */
+  function reportFolder(key) {
+    var m = /^reports\/[^/]+\/([^/]+)\/(daily|weekly|monthly)_report\.json$/.exec(key || '');
+    return m ? m[1] : null;
+  }
+
+  /* Owner rule: each person regenerates only their own reports. The server
+     enforces it; this only decides whether to offer the button -- and which row
+     the page then waits on. */
+  function canRegenerateReport(caller, report) {
+    var mine = caller && caller.folder_name;
+    if (!mine || !report) return false;
+    if (['daily', 'weekly', 'monthly'].indexOf(report.type) < 0) return false;
+    return reportFolder(report.key) === mine;
+  }
+
+  /* The archive-level buttons generate your own LATEST period: yesterday, the
+     last completed week (ending Sunday), the previous month. Local calendar. */
+  function defaultPeriodEnd(type, now) {
+    var d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (type === 'weekly') {
+      var back = d.getDay() === 0 ? 7 : d.getDay();
+      d.setDate(d.getDate() - back);
+    } else if (type === 'monthly') {
+      d = new Date(d.getFullYear(), d.getMonth(), 0);
+    } else {
+      d.setDate(d.getDate() - 1);
+    }
+    var mm = String(d.getMonth() + 1), dd = String(d.getDate());
+    return d.getFullYear() + '-' + (mm.length < 2 ? '0' + mm : mm) + '-' + (dd.length < 2 ? '0' + dd : dd);
+  }
+
+  /* Done means the report object was rewritten after the click -- never the 202. */
+  function regenerationFinished(before, row) {
+    if (!row || !row.generated_at) return false;
+    return String(row.generated_at) > String(before || '');
+  }
+
+  function regenerateErrorMessage(res) {
+    if (!res) return 'Could not start the report.';
+    if (res._accessDenied) return res.error || 'You can only regenerate your own reports.';
+    if (res._notFound) return res.error || 'No recordings for that date.';
+    if (res.status === 'unavailable') return res.error || 'Regenerate is unavailable here.';
+    return null;
+  }
+
   function downloadKeyFor(report) {
     return (report && report.docx_key) || (report && report.key) || null;
   }
@@ -263,7 +312,8 @@
     var Card   = fs.Card;
 
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
-    var canRegenerate = window.FS.can(caller, window.FS.P('report','create'));
+    /* Own reports only: anyone with a recording folder can regenerate theirs. */
+    var canRegenerate = !!caller.folder_name;
 
     var refState = React.useState({ status: 'loading', rows: [] });
     var state    = refState[0];
@@ -276,6 +326,18 @@
     var refFilter = React.useState('all');
     var filter    = refFilter[0];
     var setFilter = refFilter[1];
+
+    /* A regenerate in the detail panel finished: refetch, and re-select the
+       report so the panel shows its new Generated and Size. */
+    var reselectRef = React.useRef(null);
+    React.useEffect(function () {
+      function onRefresh(e) {
+        reselectRef.current = (e && e.detail && e.detail.key) || null;
+        setRetry(function (n) { return n + 1; });
+      }
+      window.addEventListener('fs:reports-refresh', onRefresh);
+      return function () { window.removeEventListener('fs:reports-refresh', onRefresh); };
+    }, []);
 
     /* Inline regenerate panel: 'closed' | 'pick' | 'submitting' | 'done' */
     var refReg = React.useState({ phase: 'closed' });
@@ -302,6 +364,11 @@
           return (b.generated_at || '').localeCompare(a.generated_at || '');
         });
         setState({ status: 'ok', rows: sorted });
+        if (reselectRef.current && props.onSelect) {
+          var fresh = sorted.filter(function (r) { return r.key === reselectRef.current; })[0];
+          reselectRef.current = null;
+          if (fresh) props.onSelect(reportSelection(fresh));
+        }
       }).catch(function (err) {
         if (cancelled) return;
         setState({ status: 'error', error: { code: (err && err.status) || 0, message: (err && err.message) || 'Could not load reports', retryable: true }, retry: function () { setRetry(function (n) { return n + 1; }); }, rows: [] });
@@ -311,10 +378,13 @@
 
     function regenerate(type) {
       setReg({ phase: 'submitting', type: type });
-      var payload = { report_type: type, force: true };
-      if (selTplId) payload.template_id = selTplId;
-      window.FS.api.reports.regenerate(payload).then(function (res) {
-        setReg({ phase: 'done', type: type, message: res.message });
+      var date = defaultPeriodEnd(type, new Date());
+      window.FS.api.reports.regenerate({ report_type: type, date: date }).then(function (res) {
+        var problem = regenerateErrorMessage(res);
+        if (problem) { setReg({ phase: 'error', type: type, error: { message: problem } }); return; }
+        setReg({ phase: 'done', type: type,
+                 message: 'Queued your ' + type + ' report for ' + date + ' — it appears here when ready.' });
+        setTimeout(function () { setRetry(function (n) { return n + 1; }); }, 60000);
         /* Clear the success message after a moment without dismissing
            the panel — gives the user a beat to see the confirmation. */
         setTimeout(function () { setReg({ phase: 'closed' }); }, 2400);
@@ -408,7 +478,7 @@
               React.createElement('div', { className: 'fs-reports__regen-title' },
                 'Generate report'),
               React.createElement('div', { className: 'fs-reports__regen-body' },
-                'Queue a fresh report; existing copies are overwritten.'),
+                'Regenerate your own latest report. It replaces your previous copy; nobody else\u2019s report is touched.'),
             ),
             reg.phase === 'closed' ? React.createElement('div', { className: 'fs-reports__regen-actions' },
               React.createElement(Button, {
@@ -511,7 +581,7 @@
 
     var sel = props.selectedItem;
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
-    var canRegenerate = window.FS.can(caller, window.FS.P('report','create'));
+    var canRegenerate = canRegenerateReport(caller, sel);
 
     var refConfirm = React.useState({ phase: 'idle' });
     var conf = refConfirm[0];
@@ -532,10 +602,38 @@
     var viewer  = viewRef[0];
     var setView = viewRef[1];
 
-    /* Reset the confirm state whenever a new report is selected. */
+    /* Reset the confirm state whenever a new report is selected -- unless the
+       "new" selection is this same report refreshed after its regenerate. */
     React.useEffect(function () {
-      setConf({ phase: 'idle' });
+      setConf(function (c) { return c.phase === 'done' ? c : { phase: 'idle' }; });
     }, [sel && sel.id]);
+
+    /* Follow a regenerate to completion. ABOVE the early return with the other
+       hooks. Polls history until THIS report's generated_at moves past the value
+       captured at click time; the generator can take up to 15 minutes. */
+    React.useEffect(function () {
+      if (conf.phase !== 'waiting') return undefined;
+      var stopped = false;
+      var deadline = conf.startedAt + 15 * 60 * 1000;
+      var timer = setInterval(function () {
+        if (stopped) return;
+        if (Date.now() > deadline) {
+          clearInterval(timer);
+          setConf({ phase: 'timeout' });
+          return;
+        }
+        window.FS.api.reports.getReportsHistory(50).then(function (res) {
+          if (stopped) return;
+          var fresh = ((res && res.reports) || []).filter(function (r) { return r.key === conf.key; })[0];
+          if (regenerationFinished(conf.before, fresh)) {
+            clearInterval(timer);
+            setConf({ phase: 'done', message: 'Updated ' + fmtGeneratedAt(fresh.generated_at) });
+            window.dispatchEvent(new CustomEvent('fs:reports-refresh', { detail: { key: conf.key } }));
+          }
+        });
+      }, 10000);
+      return function () { stopped = true; clearInterval(timer); };
+    }, [conf.phase]);
 
     if (!sel || sel.kind !== 'report') {
       return React.createElement('div', { className: 'fs-reports-detail__placeholder' },
@@ -561,11 +659,15 @@
     }
 
     function onConfirmRegenerate() {
+      var before = sel.generated_at;
+      var key = sel.key;
       setConf({ phase: 'submitting' });
       window.FS.api.reports.regenerate({
-        report_type: sel.type, date: sel.date, force: true,
+        report_type: sel.type, date: sel.date,
       }).then(function (res) {
-        setConf({ phase: 'done', message: res.message });
+        var problem = regenerateErrorMessage(res);
+        if (problem) { setConf({ phase: 'error', error: { message: problem } }); return; }
+        setConf({ phase: 'waiting', key: key, before: before, startedAt: Date.now() });
       }).catch(function (err) {
         setConf({ phase: 'error', error: err });
       });
@@ -655,6 +757,12 @@
               : conf.phase === 'submitting'
               ? React.createElement('span', { className: 'fs-reports-detail__msg' },
                   'Queueing…')
+              : conf.phase === 'waiting'
+              ? React.createElement('span', { className: 'fs-reports-detail__msg' },
+                  'Generating your report… this can take a few minutes.')
+              : conf.phase === 'timeout'
+              ? React.createElement('span', { className: 'fs-reports-detail__msg fs-reports-detail__msg--err' },
+                  'No new report yet — check again later.')
               : conf.phase === 'done'
               ? React.createElement('span', {
                   className: 'fs-reports-detail__msg fs-reports-detail__msg--ok',
