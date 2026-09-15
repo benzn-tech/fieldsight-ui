@@ -38,7 +38,7 @@
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 
   <!-- FieldSight globals: tokens + roles (load order matters) -->
-  <script src="scripts/fs-globals.js?v=10"></script>
+  <script src="scripts/fs-globals.js?v=11"></script>
   <!-- Sprint 7.0 — theme module (must load after fs-globals, before app-shell) -->
   <script src="scripts/theme.js?v=1"></script>
   <!-- Sprint 7.6 — density module (must load after fs-globals, before app-shell) -->
@@ -112,7 +112,7 @@
   <!-- Delivery-C Tier-2 — per-session report review modal (opened from the timeline picker) -->
   <script type="text/babel" src="scripts/composites/email-preview-modal.js?v=7"></script>
   <script type="text/babel" src="scripts/composites/report-viewer-modal.js?v=1"></script>
-  <script type="text/babel" src="scripts/composites/session-report-modal.js?v=5"></script>
+  <script type="text/babel" src="scripts/composites/session-report-modal.js?v=6"></script>
   <!-- Sprint 5.1 — Programme task editor (modal form for editing a leaf) -->
   <script type="text/babel" src="scripts/composites/programme-task-editor.js?v=4"></script>
   <!-- Sprint 5.4/5.5/8.2.2 — CSV + XML + XLSX import modal -->
@@ -217,7 +217,7 @@
   <script src="scripts/mock/templates.fixture.js?v=1"></script>
   <!--   3. Per-endpoint api modules (read fixtures via FS.api.*) -->
   <script src="scripts/api/sites.js?v=5"></script>
-  <script src="scripts/api/org.js?v=23"></script>
+  <script src="scripts/api/org.js?v=24"></script>
   <!-- staffing — pure "who is on which project, and as what" helpers, read by
        pages/team.js. Loads before it (and before any page module) because the
        page calls into it during its first render. -->
@@ -350,7 +350,7 @@
   <script type="text/babel" src="scripts/mock-data.js?v=4"></script>
   <script type="text/babel" src="scripts/pages/_page-registry.js?v=1"></script>
   <script type="text/babel" src="scripts/pages/today.js?v=61"></script>
-  <script type="text/babel" src="scripts/pages/timeline.js?v=64"></script>
+  <script type="text/babel" src="scripts/pages/timeline.js?v=65"></script>
   <script type="text/babel" src="scripts/pages/reports.js?v=5"></script>
   <script type="text/babel" src="scripts/pages/sites.js?v=14"></script>
   <script type="text/babel" src="scripts/pages/activity.js?v=5"></script>

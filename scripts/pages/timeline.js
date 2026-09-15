@@ -198,6 +198,14 @@
     return list.length === 1 ? list[0] : null;
   }
 
+  /* Which report a Generate click makes, or null when there is nothing to report.
+     A selected meeting is a meeting report; "All day" with at least one meeting is a
+     day report (spec 2026-09-15 §5.1); a day with no meeting has neither. */
+  function generateReportScope(session, sessionCount) {
+    if (session) return 'session';
+    return sessionCount > 0 ? 'day' : null;
+  }
+
   /* The disabled button's tooltip. "Pick one above" is only true when the
      picker is actually rendered. */
   function generateReportUnavailableReason(sessionCount) {
@@ -205,6 +213,10 @@
       return 'No meeting was recorded this day, so there is nothing to report on here. '
         + 'The whole day is the daily report, on the Reports page.';
     }
+    // Unreachable from GenerateReportButton now that a day with at least one
+    // meeting reports on the whole day (generateReportScope returns 'day', so
+    // the button is never disabled here for sessionCount > 0) — kept for the
+    // sessionCount > 0 case still exercised directly by tests below.
     return 'Reports here are per meeting — pick one above. '
       + 'The whole day is the daily report, on the Reports page.';
   }
@@ -2945,7 +2957,8 @@
        — had no answer on screen. It does have an answer: the whole day IS a
        report, the nightly daily one, and /reports can regenerate it. Say that
        instead of disappearing. */
-    if (!props.session) {
+    var scope = generateReportScope(props.session, props.sessionCount);
+    if (!scope) {
       return React.createElement('button', {
         type:      'button',
         className: 'fs-btn fs-btn--secondary fs-btn--sm fs-generate-report',
@@ -2958,11 +2971,13 @@
         type:      'button',
         className: 'fs-btn fs-btn--primary fs-btn--sm fs-generate-report',
         onClick:   function () { setOpen(true); },
-        title:     'Generate a report for this meeting',
+        title:     scope === 'day' ? 'Generate a report for this whole day'
+                                   : 'Generate a report for this meeting',
       }, 'Generate report'),
       React.createElement(Modal, {
         open:       open,
         onClose:    function () { setOpen(false); },
+        scope:      scope,
         session:    props.session,
         date:       props.date,
         userFolder: props.userFolder,
@@ -4384,6 +4399,7 @@
       shouldShowSessionPicker: shouldShowSessionPicker,
       reportableSession: reportableSession,
       generateReportUnavailableReason: generateReportUnavailableReason,
+      generateReportScope: generateReportScope,
       filterTopicsBySession: filterTopicsBySession,
       groupSessionsByBlock: groupSessionsByBlock,
       formatParticipants: formatParticipants,
