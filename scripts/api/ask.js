@@ -1,7 +1,7 @@
 /* ==========================================================================
    FieldSight API · Ask Agent — BACKEND-CONTEXT §4.12
    --------------------------------------------------------------------------
-   POST /api/ask  body { question, date?, user?, site_id?, author_folder?, topic_row_id?, tz?, scope?, topic_id? }
+   POST /api/ask  body { question, date?, user?, site_id?, author_folder?, topic_row_id?, scoped?, tz?, scope?, topic_id? }
      → { answer, citations, model, ... }
 
    Stateless on the server (BACKEND-CONTEXT §10) — multi-turn must be
@@ -61,6 +61,11 @@
         author_folder: opts.author_folder,
         topic_row_id:  opts.topic_row_id,
       };
+      /* Pass-through only: the caller (requestBodyFor) decides when narrowing
+         applies. Only `true` is ever forwarded -- omitting the key for every
+         other value keeps existing callers, which never set this, producing
+         an identical body. */
+      if (opts.scoped === true) body.scoped = true;
       /* The zone the question is being asked FROM. The backend reads relative
          time out of the question ("yesterday", "this week") and can only
          resolve it against the asker's own calendar day — and the browser is

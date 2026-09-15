@@ -467,7 +467,12 @@
   /* Context -> POST /api/ask body. Omits absent fields rather than sending ''
      or null: the backend treats a present-but-empty field as malformed and
      reports it `dropped: invalid`, which would put a warning under every
-     answer. Never sends `scope` / `topic_id` -- the RAG path ignores both. */
+     answer. Never sends `scope` / `topic_id` -- the RAG path ignores both.
+
+     `scoped: true` is only added when at least one narrowing field went on
+     the body -- it tells the backend "honour date/site/author/topic for
+     narrowing", and an unscoped question must not opt into that by accident
+     (user decision 2026-09-16). */
   function requestBodyFor(context, question) {
     var c = context || {};
     var body = { question: question };
@@ -475,6 +480,9 @@
     if (present(c.siteId))       body.site_id       = c.siteId;
     if (present(c.authorFolder)) body.author_folder = c.authorFolder;
     if (present(c.topicRowId))   body.topic_row_id  = c.topicRowId;
+    if (present(c.date) || present(c.siteId) || present(c.authorFolder) || present(c.topicRowId)) {
+      body.scoped = true;
+    }
     return body;
   }
 

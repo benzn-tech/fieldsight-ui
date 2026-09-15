@@ -51,8 +51,11 @@ Pure helpers extracted from `ask-chat.js` and exported for tests:
 * **Request.** `requestBodyFor` maps `date → date`, `siteId → site_id`,
   `authorFolder → author_folder`, `topicRowId → topic_row_id`, and **omits** absent fields (no
   `''`, no `null` — `api/ask.js` relies on `JSON.stringify` dropping `undefined`). AskChat stops
-  passing `scope` and `topic_id`. `FS.api.ask.ask` itself stays a pass-through: it keeps
-  forwarding `scope`/`topic_id` when a caller supplies them, so
+  passing `scope` and `topic_id`. Whenever at least one narrowing field is present the body also
+  carries `scoped: true`, which is what tells the backend to honour those fields for narrowing at
+  all (user decision 2026-09-16); an unscoped question omits the key entirely. `FS.api.ask.ask`
+  itself stays a pass-through: it keeps forwarding `scope`/`topic_id` when a caller supplies them,
+  and forwards `scoped` only when it is exactly `true`, so
   `tests/ask-timezone-and-basis.test.js` "ask still sends what it always sent" stays green and
   unchanged. `user` and `tz` are still sent.
 * **Chips** above the input, from `chipsFor(context)`: a day chip
