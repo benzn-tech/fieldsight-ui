@@ -27,10 +27,11 @@ test('8a: a resolved row settles ok, one Saved toast, one content:edited', () =>
 });
 
 for (const [label, res] of [
-  ['_accessDenied', { _accessDenied: true, error: 'nope' }],
-  ['_notFound',     { _notFound: true }],
-  ['{error}',       { error: 'bad' }],
-  ['undefined',     undefined],
+  ['_accessDenied',              { _accessDenied: true }],
+  ['_notFound',                  { _notFound: true }],
+  ['{error}',                    { error: 'bad' }],
+  ['undefined',                  undefined],
+  ['_accessDenied + error (403)', { _accessDenied: true, error: 'nope' }],
 ]) {
   test('8b: ' + label + ' settles not ok, no toast, no emit', () => {
     const { settleSave } = load();
