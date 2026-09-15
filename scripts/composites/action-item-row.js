@@ -46,6 +46,11 @@
                    and resolveCloser falls back to action.updated_by_name.
      checkedAt     ISO   (optional) — overlay counterpart to checkedBy.
      onToggled     ({ checked }) => void  — optional listener
+     withHistory   boolean (optional) — host opts in to the History disclosure
+                   (spec 2026-09-15 §2; Timeline OverviewTab only). Needs
+                   action.id; absent -> row renders exactly as before.
+     sessionId, sessionKind  the owning topic's session_id / session_kind,
+                   forwarded to TodoHistory for the provenance line.
 
    Exported to:
      window.FieldSight.ActionItemRow
@@ -67,6 +72,13 @@
      here. */
   function isColumnDone(props) {
     return !!(props.action && props.action.status === 'done');
+  }
+
+  /* Task 11 (spec 2026-09-15 §2) — pure gate for the History disclosure.
+     Needs both the host's opt-in AND a durable action_items.id (TodoHistory
+     fetches by id, so a legacy row with no id has nothing to show). */
+  function historyEnabled(props) {
+    return !!(props && props.withHistory && props.action && props.action.id);
   }
 
   /* fix/closed-by-display — who/when this row was closed, preferring the
@@ -148,6 +160,13 @@
     var setChecked = ref[1];
 
     var pendingRef  = React.useRef(false);
+
+    /* Task 11 — History disclosure state, unconditional so hook order stays
+       stable across renders regardless of withHistory. */
+    var historyRef  = React.useState(false);
+    var historyOpen = historyRef[0];
+    var setHistoryOpen = historyRef[1];
+    var withHistory = historyEnabled(props);
 
     /* Sprint 6.7.1 — sync local checked state when initialChecked
        prop changes (e.g., parent state was updated by a sibling
@@ -260,7 +279,7 @@
     var className = 'fs-action-item-row' + (checked ? ' fs-action-item-row--checked' : '');
     var closerCaption = checked ? formatCloserCaption(closer) : null;
 
-    return React.createElement('label', { className: className },
+    var row = React.createElement('label', { className: className },
       React.createElement('input', {
         type:      'checkbox',
         className: 'fs-action-item-row__checkbox',
@@ -308,6 +327,21 @@
                        ' separate recordings on this day',
               }, 'Said ' + action.mention_count + '×')
             : null,
+
+          withHistory
+            ? React.createElement('button', {
+                type: 'button',
+                className: 'fs-action-item-row__meta-item fs-action-item-row__history-toggle',
+                'aria-expanded': historyOpen,
+                onClick: function (e) {
+                  /* Inside a <label>: without preventDefault the click would
+                     also toggle the checkbox. */
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setHistoryOpen(function (v) { return !v; });
+                },
+              }, historyOpen ? 'Hide history' : 'History')
+            : null,
         ),
       ),
       action.priority
@@ -318,6 +352,21 @@
             className: 'fs-action-item-row__priority',
           }, action.priority.charAt(0).toUpperCase() + action.priority.slice(1))
         : null,
+    );
+
+    if (!withHistory) return row;
+    var TodoHistory = window.FieldSight.TodoHistory;
+    return React.createElement('div', { className: 'fs-action-item-row-wrap' },
+      row,
+      TodoHistory ? React.createElement(TodoHistory, {
+        open:         historyOpen,        /* no request while collapsed */
+        actionItemId: action.id,
+        sessionId:    props.sessionId || null,
+        sessionKind:  props.sessionKind || null,
+        date:         date,
+        folder:       userFolder,         /* report OWNER's folder */
+        currentText:  action.action,
+      }) : null,
     );
   }
 
@@ -332,6 +381,7 @@
       resolveCloser:        resolveCloser,
       formatCloserCaption:  formatCloserCaption,
       isColumnDone:         isColumnDone,
+      historyEnabled:       historyEnabled,
     };
   }
 })();

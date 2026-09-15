@@ -521,7 +521,32 @@
         '/content/' + encodeURIComponent(table) + '/' + encodeURIComponent(id) + '/history');
     }
     await window.FS.api.delay(40);
-    return { edits: [] };
+    return { edits: table === 'action_items' ? mockActionEdits(id) : [] };
+  }
+
+  /* Mock read serves the fixture's own data (CLAUDE.md "a read stub should
+     serve the day's own fixture"): an item stamped version N gets N-1
+     priority edits, newest first, so opening it under mocks agrees with its
+     chip instead of resetting it to v1 (spec 2026-09-15 §3.4/§8.3). */
+  function mockActionEdits(id) {
+    var reports = (((window.FieldSight || {}).fixtures || {}).reports) || {};
+    var version = 1;
+    Object.keys(reports).forEach(function (d) {
+      Object.keys(reports[d]).forEach(function (f) {
+        (reports[d][f].topics || []).forEach(function (t) {
+          (t.action_items || []).forEach(function (a) { if (a.id === id && a.version) version = a.version; });
+        });
+      });
+    });
+    var edits = [];
+    for (var k = version - 1; k >= 1; k--) {
+      edits.push({
+        id: 'mock-edit-' + id + '-' + k, field: 'priority',
+        before_text: k % 2 ? 'medium' : 'high', after_text: k % 2 ? 'high' : 'medium',
+        actor_name: 'Jack Gibson', created_at: '2026-04-29T0' + k + ':00:00+00:00',
+      });
+    }
+    return edits;
   }
 
   /* editable-content-correction — confirm a glossary candidate into a scoped
@@ -624,6 +649,23 @@
     return { byDate: byDate, dates: dates };
   }
 
+  /* spec 2026-09-15 §4 — the ONE place a field-editor save is judged.
+     Returns {ok}. ok === true only for a resolved, non-denied, non-error
+     envelope. On ok: shows the 'Saved' toast and emits content:edited
+     {table, id} (FS.events). On !ok: does nothing, and the caller keeps its
+     own existing failure handling. A thrown save never reaches here (callers'
+     .catch paths are unchanged). Call pattern:
+       if (!api.settleSave(res, {table, id}).ok) { ...existing failure... } */
+  function settleSave(res, target) {
+    var ok = !!res && !res._accessDenied && !res._notFound && !res.error;
+    if (!ok) return { ok: false };
+    var toast = window.FS && window.FS.toast;
+    if (toast) toast.show({ message: 'Saved', tone: 'success', duration: 2000 });
+    var events = window.FS && window.FS.events;
+    if (events && target) events.emit('content:edited', { table: target.table, id: target.id });
+    return { ok: true };
+  }
+
   window.FS.api.actions = {
     getActions:      getActions,
     getActionsRange: getActionsRange,
@@ -645,6 +687,7 @@
     applyTopicCorrection:   applyTopicCorrection,
     propagateLive:          propagateLive,
     getContentHistory: getContentHistory,
+    settleSave:      settleSave,
     confirmAlias:    confirmAlias,
     createRedaction: createRedaction,
     revertRedaction: revertRedaction,
@@ -668,6 +711,7 @@
       propagateLive:            propagateLive,
       previewTopicCorrection:   previewTopicCorrection,
       applyTopicCorrection:     applyTopicCorrection,
+      settleSave:               settleSave,
     };
   }
 

@@ -11,8 +11,8 @@
 
   <link rel="stylesheet" href="styles/tokens.css?v=1" />
   <link rel="stylesheet" href="styles/app-shell.css?v=3" />
-  <link rel="stylesheet" href="styles/components.css?v=5" />
-  <link rel="stylesheet" href="styles/composites.css?v=20" />
+  <link rel="stylesheet" href="styles/components.css?v=7" />
+  <link rel="stylesheet" href="styles/composites.css?v=21" />
 
   <style>
     html, body { overflow: auto; height: auto; }
@@ -86,7 +86,7 @@
   <script type="text/babel" src="scripts/components/avatar.js?v=2"></script>
 
   <!-- Layer 5 composites (depend on L4 atoms above) -->
-  <script type="text/babel" src="scripts/composites/task-card.js?v=8"></script>
+  <script type="text/babel" src="scripts/composites/task-card.js?v=9"></script>
   <!-- T4 — useMultiSelect hook + MultiSelectBulkBar, shared by /today
        Leftover, /safety, /quality. -->
   <script type="text/babel" src="scripts/composites/multi-select-list.js?v=1"></script>
@@ -96,7 +96,8 @@
   <script type="text/babel" src="scripts/composites/on-site-card.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/timeline.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/stat-card.js?v=1"></script>
-  <script type="text/babel" src="scripts/composites/kpi-strip.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/kpi-strip.js?v=2"></script>
+  <script type="text/babel" src="scripts/composites/todo-history.js?v=1"></script>
   <!-- Sprint 2.5 (Phase E) Calendar/date picker — loaded as a dependency of
        DateField below (inline plain mode); no dedicated showcase section. -->
   <script type="text/babel" src="scripts/composites/date-picker.js?v=7"></script>
@@ -149,7 +150,7 @@
     const { Button, IconButton, Input, Textarea, Select, Card,
             Badge, NotificationDot, Avatar, AvatarGroup,
             TaskCard, UrgentCard, ActivityCard, MorningBriefCard,
-            OnSiteCard, Timeline, StatCard, KpiStrip,
+            OnSiteCard, Timeline, StatCard, KpiStrip, TodoHistory,
             /* Sprint 8 — new L5 composites */
             ErrorBanner, OverAllocationBanner, Tooltip,
             SafetyCreateModal, QualityCreateModal, SearchPalette,
@@ -1101,6 +1102,14 @@
             <Row label="single">
               <StatCard label="Revenue MTD" value="$1.2M" tone="accent" />
             </Row>
+            <Row label="compact (Timeline day header)">
+              <KpiStrip compact>
+                <StatCard label="Topics"     value="4" />
+                <StatCard label="Safety"     value="1" tone="danger" />
+                <StatCard label="Recordings" value="21" />
+                <StatCard label="Recorded"   value="9m 29s" />
+              </KpiStrip>
+            </Row>
           </Section>
 
           <Section title="TaskCard">
@@ -1676,6 +1685,34 @@
               <div style={{ flex: 1, minWidth: 0, maxWidth: '520px' }}>
                 {SuggestionReview && <SuggestionReview suggestions={[]} />}
               </div>
+            </Row>
+          </Section>
+
+          {/* spec 2026-09-15 §2 — no api chain here, so the live component
+              renders its closed state; the View shows fixture shapes. */}
+          <Section title="TodoHistory">
+            <Row label="extraction · three versions">
+              <div style={{ flex: 1, minWidth: 0, maxWidth: '520px' }}>
+                {TodoHistory && <TodoHistory.View
+                  provenance={TodoHistory.provenanceFor(
+                    { sessionId: 'Benl1_2026-04-29_07-00-00', sessionKind: 'extraction' },
+                    [{ session_id: 'Benl1_2026-04-29_07-00-00', title: 'Morning Safety Briefing', started_at: '2026-04-29T07:00:00' }])}
+                  versions={TodoHistory.versionsFor([
+                    { field: 'deadline', after_text: '2026-05-01', actor_name: 'Jack Gibson', created_at: '2026-04-29T03:00:00+00:00' },
+                    { field: 'text', before_text: 'Order boards', after_text: 'Order replacement scaffold boards from supplier', actor_name: null, created_at: '2026-04-29T02:00:00+00:00' },
+                  ], 'Order replacement scaffold boards from supplier')}
+                  onOpenMeeting={(id) => alert('open ' + id)} />}
+              </div>
+            </Row>
+            <Row label="report-sourced · never edited">
+              <div style={{ flex: 1, minWidth: 0, maxWidth: '520px' }}>
+                {TodoHistory && <TodoHistory.View
+                  provenance={TodoHistory.provenanceFor({ sessionId: null, sessionKind: 'report' }, [])}
+                  versions={[]} />}
+              </div>
+            </Row>
+            <Row label="closed (open=false) renders nothing">
+              {TodoHistory && <TodoHistory open={false} actionItemId="cd155836-49f7-44d7-8b7e-e36505140733" />}
             </Row>
           </Section>
 

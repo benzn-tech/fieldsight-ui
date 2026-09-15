@@ -488,6 +488,24 @@
     };
   }
 
+  /* spec 2026-09-15 §3.1 — ONE cached sessions read per (date, owner folder),
+     shared by Timeline's day view and every TodoHistory card, so expanding a
+     card on a day that already loaded sessions issues zero requests. */
+  function getSessionsCached(date, folder) {
+    var key = 'sessions:' + date + ':' + folder;
+    return api.cache.cached(key, undefined, function () {
+      return getSessions({ date: date, user: folder });
+    }).then(function (res) {
+      /* cached() only skips storing on a REJECTED fetch; getSessions instead
+         RESOLVES to a denial envelope, so a 403/404 would otherwise be
+         cached for the full 3-min TTL and replayed to every later caller
+         sharing this key (Timeline, every TodoHistory card). Evict it so
+         the next call retries instead of trusting a stale denial. */
+      if (res && (res._accessDenied || res._notFound)) api.cache.evict(key);
+      return res;
+    });
+  }
+
   // -------- recurring-item threading: the review queue --------
   /* The matcher proposes which earlier SUBJECT a topic restates; confirming
      is what actually links them, and it is a person's call. A wrong link
@@ -667,11 +685,25 @@
     return !api.useMocks && api.timelineSource === 'aurora' && !!api.orgBaseUrl;
   }
 
+  /* One place that builds report URLs for both scopes. A day has no session id -- it
+     is addressed by its date -- and the two must not drift (spec 2026-09-15 §5.2). */
+  function _reportPath(opts, suffix) {
+    if (opts.scope === 'day') {
+      return '/days/' + encodeURIComponent(opts.date) + '/report' + suffix;
+    }
+    return '/sessions/' + encodeURIComponent(opts.sessionId) + '/report' + suffix;
+  }
+
+  function _reportParams(opts, extra) {
+    var base = opts.scope === 'day' ? { user: opts.user } : { date: opts.date, user: opts.user };
+    return Object.assign(base, extra || {});
+  }
+
   async function getSessionReportPreview(opts) {
     opts = opts || {};
     if (sessionReportLive()) {
-      return api.orgRequest('/sessions/' + encodeURIComponent(opts.sessionId) + '/report/preview',
-        { method: 'POST', params: { date: opts.date, user: opts.user } });
+      return api.orgRequest(_reportPath(opts, '/preview'),
+        { method: 'POST', params: _reportParams(opts) });
     }
     await api.delay();
     /* The preview is READ-ONLY, so unlike generate/status below it has no
@@ -735,9 +767,9 @@
       if (Array.isArray(opts.topicRowIds) && opts.topicRowIds.length) {
         body.topicRowIds = opts.topicRowIds;
       }
-      return api.orgRequest('/sessions/' + encodeURIComponent(opts.sessionId) + '/report', {
+      return api.orgRequest(_reportPath(opts, ''), {
         method: 'POST',
-        params: { date: opts.date, user: opts.user },
+        params: _reportParams(opts),
         body: body,
       });
     }
@@ -748,8 +780,8 @@
   async function getSessionReportStatus(opts) {
     opts = opts || {};
     if (sessionReportLive()) {
-      return api.orgRequest('/sessions/' + encodeURIComponent(opts.sessionId) + '/report/status',
-        { params: { date: opts.date, user: opts.user, requestId: opts.requestId } });
+      return api.orgRequest(_reportPath(opts, '/status'),
+        { params: _reportParams(opts, { requestId: opts.requestId }) });
     }
     await api.delay();
     return { status: 'unavailable' };
@@ -838,6 +870,7 @@
     getComplianceResolutions: getComplianceResolutions,
     getLiveItems: getLiveItems,
     getSessions: getSessions,
+    getSessionsCached: getSessionsCached,
     getSessionReportPreview: getSessionReportPreview,
     generateSessionReport: generateSessionReport,
     getSessionReportStatus: getSessionReportStatus,
