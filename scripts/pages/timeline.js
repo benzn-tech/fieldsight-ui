@@ -3373,7 +3373,9 @@
         var p = {}; p[props.field] = next; return p;
       })()).then(function (res) {
         setBusy(false);
-        if (!res || res._accessDenied || res._notFound) {
+        /* spec 2026-09-15 §4 site 1 — also covers Today's title editor, which
+           mounts this same component (no call in today.js for the title). */
+        if (!window.FS.api.actions.settleSave(res, { table: props.table, id: props.id }).ok) {
           setValue(props.value || '');
           var toast = window.FS && window.FS.toast;
           if (toast) toast.show({ message: (res && res.error) || 'Could not save edit',
@@ -3591,12 +3593,17 @@
       if (!api || !api.updateAction) { return; }
       api.updateAction(a.id, { responsible: name }).then(function (res) {
         /* 403/404 resolve to envelopes rather than throwing (org.js write
-           convention), so a rejection is not always a rejected promise. */
-        if (!res || res._accessDenied || res._notFound || res.error) {
+           convention). spec 2026-09-15 §4 site 4: Saved on ok, error toast
+           (site 2's shape) on refusal, never a silent revert. */
+        if (!api.settleSave(res, { table: 'action_items', id: a.id }).ok) {
           setOwners(function (m) { var n = Object.assign({}, m); n[a.id] = before; return n; });
+          var toast = window.FS && window.FS.toast;
+          if (toast) toast.show({ message: (res && res.error) || 'Could not update task', tone: 'error', duration: 5000 });
         }
-      }).catch(function () {
+      }).catch(function (err) {
         setOwners(function (m) { var n = Object.assign({}, m); n[a.id] = before; return n; });
+        var toast = window.FS && window.FS.toast;
+        if (toast) toast.show({ message: (err && err.error) || 'Could not update task', tone: 'error', duration: 5000 });
       });
     }
 
