@@ -950,6 +950,13 @@
 
 .fs-action-item-row__priority { flex-shrink: 0; }
 
+.fs-action-item-row__history-toggle {
+  background: none; border: 0; padding: 0; font: inherit;
+  color: var(--text-secondary); text-decoration: underline; cursor: pointer;
+}
+.fs-action-item-row__history-toggle:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.fs-action-item-row-wrap > .fs-todo-history { margin: 0 10px 8px 36px; }
+
 .fs-action-item-row--checked .fs-action-item-row__text {
   color: var(--text-tertiary);
   text-decoration: line-through;

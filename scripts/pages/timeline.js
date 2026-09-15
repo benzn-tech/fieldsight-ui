@@ -3782,6 +3782,11 @@
                        already renders (topic-card.js ~228). ActionItemRow
                        already handles both props; this just feeds it. */
                     checkedAt:      state.checked_at,
+                    /* spec 2026-09-15 §2 — History disclosure; TodoHistory
+                       joins the provenance on the topic's own session. */
+                    withHistory:    true,
+                    sessionId:      topic.session_id || null,
+                    sessionKind:    topic.session_kind || null,
                   }),
                   rowEditable ? editToggle(editKey, 'action item text') : null,
                 ),
