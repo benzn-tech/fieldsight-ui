@@ -16,6 +16,13 @@
    window.FS.api.cache.clear()
      Drops all cached values and in-flight promises. Not wired to any UI
      yet — available for future "force refresh" affordances / tests.
+
+   window.FS.api.cache.evict(key)
+     Drops one cached value and any in-flight promise for that key only,
+     leaving every other key untouched. For a caller whose fetchFn can
+     resolve to a denial envelope (`_accessDenied` / `_notFound`) instead of
+     rejecting — `cached()` has no way to see that and stores it like any
+     other success, so the caller evicts it itself.
    ========================================================================== */
 
 (function () {
@@ -43,7 +50,8 @@
     return p;
   }
   function clear() { store = {}; inflight = {}; }
+  function evict(key) { delete store[key]; delete inflight[key]; }
 
   window.FS = window.FS || {}; window.FS.api = window.FS.api || {};
-  window.FS.api.cache = { cached: cached, clear: clear };
+  window.FS.api.cache = { cached: cached, clear: clear, evict: evict };
 })();

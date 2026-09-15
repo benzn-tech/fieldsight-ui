@@ -492,8 +492,17 @@
      shared by Timeline's day view and every TodoHistory card, so expanding a
      card on a day that already loaded sessions issues zero requests. */
   function getSessionsCached(date, folder) {
-    return api.cache.cached('sessions:' + date + ':' + folder, undefined, function () {
+    var key = 'sessions:' + date + ':' + folder;
+    return api.cache.cached(key, undefined, function () {
       return getSessions({ date: date, user: folder });
+    }).then(function (res) {
+      /* cached() only skips storing on a REJECTED fetch; getSessions instead
+         RESOLVES to a denial envelope, so a 403/404 would otherwise be
+         cached for the full 3-min TTL and replayed to every later caller
+         sharing this key (Timeline, every TodoHistory card). Evict it so
+         the next call retries instead of trusting a stale denial. */
+      if (res && (res._accessDenied || res._notFound)) api.cache.evict(key);
+      return res;
     });
   }
 
