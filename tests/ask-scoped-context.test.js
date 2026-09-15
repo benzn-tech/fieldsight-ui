@@ -792,6 +792,19 @@ test('8b without report.site_id the site is omitted; owner falls back to the rep
     { date: '2026-09-03', authorFolder: 'Ben_UCPK2' });
 });
 
+test('8b2 a site_id with an empty site name is omitted; with a site name both are present', () => {
+  const { mod } = loadTimeline();
+  const noName = mod.askContextForDay({ site_id: 'site-uuid', site: '', user_name: 'Ben UCPK2' },
+    '2026-09-03', undefined);
+  assert.ok(!('siteId' in noName), 'siteId set without a visible site name');
+  assert.ok(!('siteName' in noName));
+
+  const both = mod.askContextForDay({ site_id: 'site-uuid', site: 'UC PK', user_name: 'Ben UCPK2' },
+    '2026-09-03', undefined);
+  assert.strictEqual(both.siteId, 'site-uuid');
+  assert.strictEqual(both.siteName, 'UC PK');
+});
+
 test('8c a question handed off from the palette stays global', () => {
   const { mod } = loadTimeline();
   assert.deepStrictEqual(

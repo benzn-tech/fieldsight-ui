@@ -1084,13 +1084,15 @@
 
   /* The day scope for a loaded report. `report.site_id` exists only on the
      Aurora timeline path; without it the site is omitted entirely (the chip
-     shows date + owner and the request carries no site_id). */
+     shows date + owner and the request carries no site_id). siteId is only
+     set alongside a non-empty siteName so the Ask never narrows by site
+     without a visible site label on the chip. */
   function askContextForDay(report, date, routeUser) {
     var ctx = {};
     if (date) ctx.date = date;
-    if (report && report.site_id) {
+    if (report && report.site_id && report.site) {
       ctx.siteId = report.site_id;
-      if (report.site) ctx.siteName = report.site;
+      ctx.siteName = report.site;
     }
     var folder = routeUser
       || (report && report.user_name && window.FS.api.folderName(report.user_name))
