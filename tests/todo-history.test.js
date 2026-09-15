@@ -1,0 +1,135 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert');
+
+global.window = { FieldSight: {}, FS: {} };
+global.React = { createElement: () => null, useState: (v) => [v, () => {}], useEffect: () => {}, useRef: (v) => ({ current: v }), Fragment: 'Fragment' };
+const H = require('../scripts/composites/todo-history.js');
+
+const SESSIONS = [{ session_id: 'Benl1_2026-04-29_07-00-00', started_at: '2026-04-29T07:00:00', ended_at: '2026-04-29T07:30:00', title: 'Morning Safety Briefing', topic_count: 1 }];
+
+/* ---- 1: card spec acceptance 1-4 ---------------------------------------- */
+test('1.1 extraction item: provenance shows title and start time, linkable', () => {
+  assert.deepStrictEqual(
+    H.provenanceFor({ sessionId: 'Benl1_2026-04-29_07-00-00', sessionKind: 'extraction' }, SESSIONS),
+    { kind: 'extraction', text: 'From Morning Safety Briefing', time: 'Wed 7:00 am', sessionId: 'Benl1_2026-04-29_07-00-00' });
+});
+test('1.2 report item: From the daily report, no time, no link', () => {
+  assert.deepStrictEqual(H.provenanceFor({ sessionId: null, sessionKind: 'report' }, SESSIONS),
+    { kind: 'report', text: 'From the daily report', time: null, sessionId: null });
+});
+test('1.2b extraction id missing from sessions: no time, no link', () => {
+  const p = H.provenanceFor({ sessionId: 'gone', sessionKind: 'extraction' }, SESSIONS);
+  assert.strictEqual(p.time, null);
+  assert.strictEqual(p.sessionId, null);
+});
+test('1.3 no edits: no version block', () => {
+  assert.deepStrictEqual(H.versionsFor([], 'Order boards'), []);
+});
+test('1.4 history 404 loads identically to an empty list', async () => {
+  const deps = (hist) => ({ org: { getSessionsCached: async () => ({ sessions: SESSIONS }) }, actions: { getContentHistory: async () => hist } });
+  const props = { open: true, actionItemId: 'ai-1', sessionId: 'Benl1_2026-04-29_07-00-00', sessionKind: 'extraction', date: '2026-04-29', folder: 'Jarley_Trainor', currentText: 'Order boards' };
+  const a = H.modelFor(props, await H.loadTodoHistory(props, deps({ _notFound: true })));
+  const b = H.modelFor(props, await H.loadTodoHistory(props, deps({ edits: [] })));
+  assert.deepStrictEqual(a, b);
+  assert.deepStrictEqual(a.versions, []);
+});
+
+/* ---- 2: fourth provenance state ----------------------------------------- */
+test('2 unknown or absent kind with a null id: no provenance line', () => {
+  assert.strictEqual(H.provenanceFor({ sessionId: null, sessionKind: 'unknown' }, SESSIONS), null);
+  assert.strictEqual(H.provenanceFor({ sessionId: null }, SESSIONS), null);
+  assert.strictEqual(H.provenanceFor({}, []), null);
+});
+
+/* ---- 3: open:false makes no request ------------------------------------- */
+test('3 open:false for N hosts: neither getSessions nor getContentHistory called', () => {
+  let calls = 0;
+  const deps = { org: { getSessionsCached: () => { calls++; return Promise.resolve({}); } },
+                 actions: { getContentHistory: () => { calls++; return Promise.resolve({}); } } };
+  for (let i = 0; i < 35; i++) {
+    assert.strictEqual(H.loadTodoHistory({ open: false, actionItemId: 'ai-' + i, sessionId: 's', date: 'd', folder: 'f' }, deps), null);
+  }
+  assert.strictEqual(H.loadTodoHistory({ open: true, actionItemId: null }, deps), null, 'legacy row: nothing');
+  assert.strictEqual(calls, 0);
+});
+
+/* ---- 4: one sessions request per (date, folder), zero after Timeline ---- */
+function loadRealApi() {
+  const requests = [];
+  global.window = { FieldSight: {}, FS: { api: {
+    useMocks: false, timelineSource: 'aurora', orgBaseUrl: 'https://org.example/api', delay: () => Promise.resolve(),
+    orgRequest: (p) => { requests.push(p); return Promise.resolve(p === '/sessions' ? { sessions: SESSIONS } : { edits: [] }); },
+  } } };
+  for (const m of ['../scripts/api/_cache.js', '../scripts/api/org.js']) { delete require.cache[require.resolve(m)]; require(m); }
+  const deps = { org: window.FS.api.org, actions: { getContentHistory: () => { requests.push('/history'); return Promise.resolve({ edits: [] }); } } };
+  return { requests, deps };
+}
+const OPEN = { open: true, actionItemId: 'ai-1', sessionId: 'Benl1_2026-04-29_07-00-00', sessionKind: 'extraction', date: '2026-04-29', folder: 'Jarley_Trainor' };
+
+test('4a two opens with the same (date, folder): one sessions request', async () => {
+  const { requests, deps } = loadRealApi();
+  await H.loadTodoHistory(OPEN, deps);
+  await H.loadTodoHistory(Object.assign({}, OPEN, { actionItemId: 'ai-2' }), deps);
+  assert.strictEqual(requests.filter((r) => r === '/sessions').length, 1);
+  assert.strictEqual(requests.filter((r) => r === '/history').length, 2, 'history is not cached');
+});
+test('4b after the Timeline day fetch populated the key, an open makes zero sessions requests', async () => {
+  const { requests, deps } = loadRealApi();
+  await window.FS.api.org.getSessionsCached('2026-04-29', 'Jarley_Trainor');   // what timeline.js:1791 now does
+  const before = requests.filter((r) => r === '/sessions').length;
+  await H.loadTodoHistory(OPEN, deps);
+  assert.strictEqual(requests.filter((r) => r === '/sessions').length - before, 0);
+});
+
+/* ---- 5: {_notFound} = empty, no toast ------------------------------------ */
+test('5 {_notFound} history: same output as empty, no toast', async () => {
+  const toasts = [];
+  global.window = { FieldSight: {}, FS: { toast: { show: (t) => toasts.push(t) } } };
+  const deps = { org: {}, actions: { getContentHistory: async () => ({ _notFound: true }) } };
+  const loaded = await H.loadTodoHistory({ open: true, actionItemId: 'ai-1' }, deps);
+  assert.deepStrictEqual(loaded, { sessions: [], edits: [] });
+  assert.strictEqual(toasts.length, 0);
+});
+
+/* ---- 6: NULL actor_name ------------------------------------------------- */
+test('6 NULL actor_name renders edited by someone', () => {
+  assert.strictEqual(H.editedBy({ actor_name: null }), 'edited by someone');
+  assert.strictEqual(H.editedBy({ actor_name: 'Ben_UCPK2' }), 'edited by Ben_UCPK2');
+  assert.strictEqual(H.versionsFor([{ field: 'status', after_text: 'done', actor_name: null }], 'x')[0].who, 'edited by someone');
+});
+
+/* ---- 7: §3.4 numbering -------------------------------------------------- */
+test('7a edits [text, deadline, status] newest first -> v4..v2 then v1 as recorded', () => {
+  const edits = [
+    { field: 'text',     before_text: 'Book crane Wed', after_text: 'Book crane Thu', actor_name: 'A', created_at: '2026-09-15T03:00:00+00:00' },
+    { field: 'deadline', before_text: null, after_text: '2026-09-18', actor_name: 'A', created_at: '2026-09-15T02:00:00+00:00' },
+    { field: 'status',   before_text: 'open', after_text: 'done', actor_name: 'A', created_at: '2026-09-15T01:00:00+00:00' },
+  ];
+  const v = H.versionsFor(edits, 'Book crane Thu');
+  assert.deepStrictEqual(v.map((x) => [x.heading, x.body]), [
+    ['v4', 'Book crane Thu'],
+    ['v3', 'deadline changed to Fri 18 Sep'],
+    ['v2', 'status changed to done'],
+    ['v1 · as recorded', 'Book crane Wed'],
+  ]);
+});
+test('7b no text edit: v1 shows the current text', () => {
+  const v = H.versionsFor([{ field: 'priority', after_text: 'high', actor_name: 'A' }], 'Order boards');
+  assert.deepStrictEqual(v.map((x) => [x.heading, x.body]), [['v2', 'priority changed to high'], ['v1 · as recorded', 'Order boards']]);
+});
+test('7c v1 uses the OLDEST text edit before_text when there are several', () => {
+  const v = H.versionsFor([
+    { field: 'text', before_text: 'B', after_text: 'C' },
+    { field: 'text', before_text: 'A', after_text: 'B' },
+  ], 'C');
+  assert.strictEqual(v[v.length - 1].body, 'A');
+});
+test('7d responsible edits from either endpoint read the same', () => {
+  assert.strictEqual(H.fieldSentence({ field: 'responsible', after_text: 'Aaron' }), 'responsible changed to Aaron');
+  assert.strictEqual(H.fieldSentence({ field: 'deadline', after_text: null }), 'deadline cleared');
+});
+test('formatWhen: zoned ISO is shown in NZ time', () => {
+  assert.strictEqual(H.formatWhen('2026-09-15T22:23:00Z'), 'Wed 10:23 am');   // NZST +12
+  assert.strictEqual(H.formatWhen(''), '');
+});
