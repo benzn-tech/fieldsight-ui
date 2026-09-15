@@ -154,7 +154,8 @@
   function rememberPendingRegeneration(storage, key, entry) {
     try {
       var all = readPendingRegenerations(storage, entry.startedAt);
-      all[key] = { before: entry.before || '', startedAt: entry.startedAt, folder: entry.folder };
+      all[key] = { before: entry.before || '', beforeDocx: entry.beforeDocx || '',
+                   startedAt: entry.startedAt, folder: entry.folder };
       storage.setItem(PENDING_REGEN_KEY, JSON.stringify(all));
     } catch (_) { /* blocked or full: the in-memory wait still works for this view */ }
   }
@@ -176,9 +177,39 @@
   }
 
   /* Done means the report object was rewritten after the click -- never the 202. */
-  function regenerationFinished(before, row) {
+  function regenerationFinished(before, row, beforeDocx) {
     if (!row || !row.generated_at) return false;
-    return String(row.generated_at) > String(before || '');
+    if (!(String(row.generated_at) > String(before || ''))) return false;
+    /* The generator writes the .docx AFTER the JSON. Stopping on the JSON alone
+       can show a refreshed report beside the previous generation's Word file.
+       No Word file, or a backend that does not send its time, falls back to the
+       JSON so nothing waits forever on a field that will not arrive. */
+    if (!row.docx_key || !row.docx_generated_at) return true;
+    return String(row.docx_generated_at) > String(beforeDocx || '');
+  }
+
+  /* Who generated a report, from its own _report_metadata.generated_by. The
+     schedule writes "system" (and "backfill"); a regenerate request writes the
+     requester. Anything unknown is a dash, never a guess. */
+  /* The effect body for the Author row, built outside the component so the
+     component itself has no `return` above its hooks. */
+  function authorEffect(caller, sel, setAuthor) {
+    return function () {
+      setAuthor(null);
+      if (!sel || !canRegenerateReport(caller, sel)) return undefined;
+      var live = true;
+      fetchReportJson(sel).then(function (json) {
+        if (live) setAuthor(authorLabel(((json || {})._report_metadata || {}).generated_by));
+      }).catch(function () { if (live) setAuthor(null); });
+      return function () { live = false; };
+    };
+  }
+
+  function authorLabel(generatedBy) {
+    if (typeof generatedBy !== 'string' || !generatedBy.trim()) return '\u2014';
+    var v = generatedBy.trim();
+    if (v === 'system' || v === 'backfill') return 'Scheduled';
+    return v;
   }
 
   function regenerateErrorMessage(res) {
@@ -667,6 +698,14 @@
        than during the previous render", and the whole page replaced by an
        error boundary. Every test passed — the helpers are pure and the hook
        order is not something they can see. */
+    /* Author of the selected report, read from the report itself. Only for the
+       caller's own report: it is the one the caller may always open, and the
+       file can be hundreds of KB. ABOVE the early return, with the other hooks. */
+    var authorRef = React.useState(null);
+    var author = authorRef[0];
+    var setAuthor = authorRef[1];
+    React.useEffect(authorEffect(caller, sel, setAuthor), [sel && sel.id, sel && sel.generated_at]);
+
     var viewRef = React.useState({ open: false, status: 'idle', report: null, error: '' });
     var viewer  = viewRef[0];
     var setView = viewRef[1];
@@ -675,7 +714,7 @@
        "new" selection is this same report refreshed after its regenerate. */
     React.useEffect(function () {
       var pending = sel ? pendingRegenerationFor(localStore(), sel.key, caller.folder_name, Date.now()) : null;
-      if (pending && regenerationFinished(pending.before, sel)) {
+      if (pending && regenerationFinished(pending.before, sel, pending.beforeDocx)) {
         // It finished while this panel was not showing it.
         forgetPendingRegeneration(localStore(), sel.key);
         window.dispatchEvent(new CustomEvent('fs:reports-pending'));
@@ -683,7 +722,8 @@
         return;
       }
       if (pending) {
-        setConf({ phase: 'waiting', key: sel.key, before: pending.before, startedAt: pending.startedAt });
+        setConf({ phase: 'waiting', key: sel.key, before: pending.before,
+                  beforeDocx: pending.beforeDocx, startedAt: pending.startedAt });
         return;
       }
       setConf(function (c) { return c.phase === 'done' ? c : { phase: 'idle' }; });
@@ -708,7 +748,7 @@
         window.FS.api.reports.getReportsHistory(50).then(function (res) {
           if (stopped) return;
           var fresh = ((res && res.reports) || []).filter(function (r) { return r.key === conf.key; })[0];
-          if (regenerationFinished(conf.before, fresh)) {
+          if (regenerationFinished(conf.before, fresh, conf.beforeDocx)) {
             clearInterval(timer);
             forgetPendingRegeneration(localStore(), conf.key);
             window.dispatchEvent(new CustomEvent('fs:reports-pending'));
@@ -745,6 +785,7 @@
 
     function onConfirmRegenerate() {
       var before = sel.generated_at;
+      var beforeDocx = sel.docx_generated_at || '';
       var key = sel.key;
       setConf({ phase: 'submitting' });
       window.FS.api.reports.regenerate({
@@ -754,9 +795,9 @@
         if (problem) { setConf({ phase: 'error', error: { message: problem } }); return; }
         var startedAt = Date.now();
         rememberPendingRegeneration(localStore(), key,
-          { before: before, startedAt: startedAt, folder: caller.folder_name });
+          { before: before, beforeDocx: beforeDocx, startedAt: startedAt, folder: caller.folder_name });
         window.dispatchEvent(new CustomEvent('fs:reports-pending'));
-        setConf({ phase: 'waiting', key: key, before: before, startedAt: startedAt });
+        setConf({ phase: 'waiting', key: key, before: before, beforeDocx: beforeDocx, startedAt: startedAt });
       }).catch(function (err) {
         setConf({ phase: 'error', error: err });
       });
@@ -790,7 +831,7 @@
           label: 'Generated', value: fmtGeneratedAt(sel.generated_at),
         }),
         React.createElement(DetailRow, {
-          label: 'Author',    value: sel.author || '—',
+          label: 'Author',    value: author || sel.author || '—',
         }),
         React.createElement(DetailRow, {
           label: 'File',
