@@ -3462,6 +3462,8 @@
   function ContentHistoryPanel(props) {
     var dataRef = React.useState({ status: 'loading' });
     var data = dataRef[0], setData = dataRef[1];
+    var tickRef = React.useState(0);
+    var reloadTick = tickRef[0], setReloadTick = tickRef[1];
     React.useEffect(function () {
       var alive = true;
       window.FS.api.actions.getContentHistory(props.table, props.id).then(function (res) {
@@ -3469,6 +3471,15 @@
         setData({ status: 'ok', edits: (res && res.edits) || [] });
       }).catch(function () { if (alive) setData({ status: 'error', edits: [] }); });
       return function () { alive = false; };
+    }, [props.table, props.id, reloadTick]);
+    /* spec 2026-09-15 §5 — a save to THIS row re-reads the trail (the server
+       assigns created_at/actor_name; never append optimistically). */
+    React.useEffect(function () {
+      var events = window.FS && window.FS.events;
+      if (!events || !events.onContentEdited) return undefined;
+      return events.onContentEdited(props.table, props.id, function () {
+        setReloadTick(function (n) { return n + 1; });
+      });
     }, [props.table, props.id]);
     if (data.status === 'loading') return React.createElement('div', { className: 'fs-muted' }, 'Loading…');
     if (!data.edits.length) return React.createElement('div', { className: 'fs-muted' }, 'No edits yet.');

@@ -70,6 +70,16 @@ test('9: timeline EditableText.commit calls settleSave before the glossary early
   assert.ok(call < b.indexOf('props.showGlossaryConfirm && res.candidates'));
 });
 
+/* ---- 10b: SOURCE SCAN (wiring pin) — ContentHistoryPanel re-fetches on a
+   matching content:edited; the matching rule itself is FS.events.onContentEdited,
+   covered behaviourally in tests/events.test.js. */
+test('10b ContentHistoryPanel subscribes with its own table and id and re-fetches on tick', () => {
+  const src = page('timeline.js');
+  const b = block(src, 'function ContentHistoryPanel(', 'function OverviewTab(');
+  assert.match(b, /onContentEdited\(props\.table, props\.id,/);
+  assert.match(b, /\[props\.table, props\.id, reloadTick\]/);
+});
+
 test('9: timeline assignTo calls settleSave', () => {
   assert.match(block(page('timeline.js'), 'function assignTo(', 'var rosterRef'), /settleSave\(/);
 });
