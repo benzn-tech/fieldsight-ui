@@ -685,11 +685,25 @@
     return !api.useMocks && api.timelineSource === 'aurora' && !!api.orgBaseUrl;
   }
 
+  /* One place that builds report URLs for both scopes. A day has no session id -- it
+     is addressed by its date -- and the two must not drift (spec 2026-09-15 §5.2). */
+  function _reportPath(opts, suffix) {
+    if (opts.scope === 'day') {
+      return '/days/' + encodeURIComponent(opts.date) + '/report' + suffix;
+    }
+    return '/sessions/' + encodeURIComponent(opts.sessionId) + '/report' + suffix;
+  }
+
+  function _reportParams(opts, extra) {
+    var base = opts.scope === 'day' ? { user: opts.user } : { date: opts.date, user: opts.user };
+    return Object.assign(base, extra || {});
+  }
+
   async function getSessionReportPreview(opts) {
     opts = opts || {};
     if (sessionReportLive()) {
-      return api.orgRequest('/sessions/' + encodeURIComponent(opts.sessionId) + '/report/preview',
-        { method: 'POST', params: { date: opts.date, user: opts.user } });
+      return api.orgRequest(_reportPath(opts, '/preview'),
+        { method: 'POST', params: _reportParams(opts) });
     }
     await api.delay();
     /* The preview is READ-ONLY, so unlike generate/status below it has no
@@ -753,9 +767,9 @@
       if (Array.isArray(opts.topicRowIds) && opts.topicRowIds.length) {
         body.topicRowIds = opts.topicRowIds;
       }
-      return api.orgRequest('/sessions/' + encodeURIComponent(opts.sessionId) + '/report', {
+      return api.orgRequest(_reportPath(opts, ''), {
         method: 'POST',
-        params: { date: opts.date, user: opts.user },
+        params: _reportParams(opts),
         body: body,
       });
     }
@@ -766,8 +780,8 @@
   async function getSessionReportStatus(opts) {
     opts = opts || {};
     if (sessionReportLive()) {
-      return api.orgRequest('/sessions/' + encodeURIComponent(opts.sessionId) + '/report/status',
-        { params: { date: opts.date, user: opts.user, requestId: opts.requestId } });
+      return api.orgRequest(_reportPath(opts, '/status'),
+        { params: _reportParams(opts, { requestId: opts.requestId }) });
     }
     await api.delay();
     return { status: 'unavailable' };

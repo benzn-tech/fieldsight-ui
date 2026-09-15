@@ -147,8 +147,9 @@ test('All day explains why report generation is per meeting instead of vanishing
     'the old guard bundled "no meeting selected" in with "no modal" and "no '
     + 'permission" — three different situations, one silent disappearance');
 
-  assert.match(fn[0], /if \(!props\.session\) \{[\s\S]*?disabled:\s*true/,
-    'with no meeting selected the control stays, disabled');
+  assert.match(fn[0], /if \(!scope\) \{[\s\S]*?disabled:\s*true/,
+    'with nothing reportable (no meeting selected and no meeting recorded) the '
+    + 'control stays, disabled');
   assert.match(fn[0], /title:\s*generateReportUnavailableReason\(props\.sessionCount\)/,
     'and its tooltip comes from the one place that knows how many meetings the day has');
 

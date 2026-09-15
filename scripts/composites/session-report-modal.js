@@ -40,11 +40,10 @@
   // ---- pure helpers (exported for node --test) --------------------------
 
   function buildGeneratePayload(ctx) {
-    // ctx = {session, date, userFolder, form:{templateId,title,attendees,fields}, deliver, recipients}
+    // ctx = {scope?, session, date, userFolder, form:{templateId,title,attendees,fields}, deliver, recipients, topicRowIds?}
     var form = (ctx && ctx.form) || {};
     var deliver = ctx && ctx.deliver === 'email' ? 'email' : 'download';
     var payload = {
-      sessionId: ctx && ctx.session ? ctx.session.session_id : undefined,
       date: ctx ? ctx.date : undefined,
       user: ctx ? ctx.userFolder : undefined,
       templateId: form.templateId || null,
@@ -55,13 +54,35 @@
       // recipients only travel when emailing (download has no addressees)
       recipients: deliver === 'email' && Array.isArray(ctx.recipients) ? ctx.recipients : [],
     };
-    // ABSENT means "the whole meeting", which is what every report was before a
-    // selection existed. Only a real subset travels: the backend rejects an empty
-    // list (asking for nothing) and treats a missing one as everything.
+    // A day is addressed by its date and has no session id (spec 2026-09-15 §5.1).
+    // A meeting payload is exactly what it was before a day scope existed.
+    if (ctx && ctx.scope === 'day') {
+      payload.scope = 'day';
+    } else {
+      payload.sessionId = ctx && ctx.session ? ctx.session.session_id : undefined;
+    }
+    // ABSENT means "everything in scope". Only a real subset travels: the backend
+    // rejects an empty list (asking for nothing) and treats a missing one as everything.
     if (ctx && Array.isArray(ctx.topicRowIds) && ctx.topicRowIds.length) {
       payload.topicRowIds = ctx.topicRowIds.slice();
     }
     return payload;
+  }
+
+  /* What to tell the reviewer when the preview could not be built. A worker whose account
+     has no recording folder gets a 403 from the server; "unavailable" would hide the one
+     thing they can act on (spec 2026-09-15 §5.7). */
+  function previewErrorMessage(res) {
+    var raw = (res && res.error) || '';
+    if (/no folder mapping/i.test(raw)) {
+      return 'Your account has no recording folder yet, so there is nothing of yours to report on.';
+    }
+    return raw || 'Preview is unavailable here.';
+  }
+
+  /* The server's reason when a report did not start (spec §5.2), not a generic line. */
+  function generateErrorMessage(res) {
+    return (res && res.error) || 'The report did not start.';
   }
 
   function interpretReportStatus(res) {
@@ -261,6 +282,12 @@
 
     function sid() { return props.session ? props.session.session_id : null; }
 
+    function scopeOpts() {
+      return props.scope === 'day'
+        ? { scope: 'day', date: props.date, user: props.userFolder }
+        : { sessionId: sid(), date: props.date, user: props.userFolder };
+    }
+
     // Reset the wizard whenever it (re)opens.
     React.useEffect(function () {
       if (props.open) {
@@ -278,12 +305,10 @@
     React.useEffect(function () {
       if (!props.open || !org.getSessionReportPreview) return undefined;
       var alive = true;
-      Promise.resolve(org.getSessionReportPreview({
-        sessionId: sid(), date: props.date, user: props.userFolder,
-      })).then(function (res) {
+      Promise.resolve(org.getSessionReportPreview(scopeOpts())).then(function (res) {
         if (!alive) return;
         if (!res || res._accessDenied || res._notFound || res.status === 'unavailable') {
-          setPreviewErr((res && res.error) || 'Preview is unavailable here.'); return;
+          setPreviewErr(previewErrorMessage(res)); return;
         }
         setPreview(res);
         var d = previewFieldDefaults(res);
@@ -328,9 +353,8 @@
       var alive = true, timer = null;
       function tick() {
         if (!alive) return;
-        Promise.resolve(org.getSessionReportStatus({
-          sessionId: sid(), date: props.date, user: props.userFolder, requestId: reqId,
-        })).then(function (res) {
+        Promise.resolve(org.getSessionReportStatus(Object.assign(scopeOpts(), { requestId: reqId })))
+          .then(function (res) {
           if (!alive) return;
           var v = interpretReportStatus(res);
           if (v.phase === 'done') { setResult(v); setStep('done'); }
@@ -347,6 +371,7 @@
     function onGenerate() {
       setError(null); setStep('generating');
       var payload = buildGeneratePayload({
+        scope: props.scope,
         session: props.session, date: props.date, userFolder: props.userFolder,
         form: form, deliver: deliver, recipients: recipients,
         topicRowIds: selectedRowIds(preview ? preview.topics : [], checked),
@@ -356,7 +381,7 @@
         if (v.phase === 'error') { setError(v.message); setStep('error'); return; }
         if (v.phase === 'done') { setResult(v); setStep('done'); return; }
         if (res && res.requestId) { setReqId(res.requestId); }      // hands off to the poll effect
-        else { setError('The report did not start.'); setStep('error'); }
+        else { setError(generateErrorMessage(res)); setStep('error'); }
       }).catch(function () { setError('Could not start report generation.'); setStep('error'); });
     }
 
@@ -508,6 +533,7 @@
   // Pure-helper export for node --test (browser ignores this).
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = { buildGeneratePayload: buildGeneratePayload, interpretReportStatus: interpretReportStatus, previewFieldDefaults: previewFieldDefaults, parseAttendees: parseAttendees, canGenerate: canGenerate, STEPS: STEPS,
-      parseTimeRange: parseTimeRange, parseClock: parseClock, overlapsWindow: overlapsWindow, windowChecked: windowChecked, selectedRowIds: selectedRowIds };
+      parseTimeRange: parseTimeRange, parseClock: parseClock, overlapsWindow: overlapsWindow, windowChecked: windowChecked, selectedRowIds: selectedRowIds,
+      previewErrorMessage: previewErrorMessage, generateErrorMessage: generateErrorMessage };
   }
 })();
