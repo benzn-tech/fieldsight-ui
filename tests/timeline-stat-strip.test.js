@@ -43,3 +43,32 @@ test('no other KpiStrip mount in scripts/ passes compact', () => {
     });
   assert.deepStrictEqual(offenders, []);
 });
+
+/* SOURCE SCAN (wiring pin). The compact strip's 6px gap must survive the
+   `@media (max-width: 47.9375rem)` block, where `.fs-kpi-strip { gap: 8px }`
+   (equal-specificity, later in source order) would otherwise win and silently
+   revert the mobile gap to 8px. This requires EITHER the base compact gap
+   rule to be scoped at equal-or-higher specificity than plain `.fs-kpi-strip`
+   (`.fs-kpi-strip.fs-kpi-strip--compact`, not bare `.fs-kpi-strip--compact`),
+   OR a compact-gap rule declared inside the mobile media block itself. */
+const cssPath = path.join(__dirname, '..', 'styles', 'composites.css');
+const css = fs.readFileSync(cssPath, 'utf8').replace(/\r\n/g, '\n');
+
+test('compact strip gap survives the mobile media query', () => {
+  const hasHighSpecificityBaseRule =
+    /\.fs-kpi-strip\.fs-kpi-strip--compact\s*\{[^}]*gap:\s*6px/.test(css);
+
+  const mobileBlockStart = css.indexOf('@media (max-width: 47.9375rem)');
+  assert.ok(mobileBlockStart > 0, 'expected the /today mobile media query to exist');
+  const mobileBlockEnd = css.indexOf('\n}\n', mobileBlockStart);
+  const mobileBlock = css.slice(mobileBlockStart, mobileBlockEnd);
+  const hasMobileCompactGapRule =
+    /\.fs-kpi-strip(?:\.fs-kpi-strip--compact|--compact)[^{]*\{[^}]*gap:\s*6px/.test(mobileBlock);
+
+  assert.ok(
+    hasHighSpecificityBaseRule || hasMobileCompactGapRule,
+    'compact gap (6px) must be declared with selector specificity that beats ' +
+    '`.fs-kpi-strip { gap: 8px }` inside the mobile media query, or be re-declared ' +
+    'inside that media query'
+  );
+});

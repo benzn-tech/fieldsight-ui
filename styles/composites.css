@@ -829,7 +829,7 @@
 /* Compact strip: Timeline day header only (spec 2026-09-15 §10). Value and
    label share one baseline. Scoped here so the base .fs-stat-card rules (and
    Insights / strategic dashboards) are unchanged. Tone colours still apply. */
-.fs-kpi-strip--compact { gap: 6px; }
+.fs-kpi-strip.fs-kpi-strip--compact { gap: 6px; }
 .fs-kpi-strip--compact .fs-stat-card {
   flex-direction: row;
   align-items: baseline;
@@ -8182,6 +8182,15 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   .fs-kpi-strip .fs-stat-card {
     flex: 1 1 calc(50% - 4px);
     min-width: 0;
+  }
+  /* Compact strip keeps its 6px gap under this media query too (higher
+     specificity than .fs-kpi-strip above); tile basis matches that gap so
+     the 2-per-row wrap stays consistent. */
+  .fs-kpi-strip.fs-kpi-strip--compact {
+    gap: 6px;
+  }
+  .fs-kpi-strip--compact .fs-stat-card {
+    flex: 1 1 calc(50% - 3px);
   }
   /* Morning brief full width */
   .fs-morning-brief-card {
