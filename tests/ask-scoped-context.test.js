@@ -549,3 +549,160 @@ test('D-h the chip remove button names what it removes', async () => {
   const labels = h.byClass('fs-ask-chip__remove').map(n => n.props['aria-label']);
   assert.deepStrictEqual(labels, ['Remove scope: Thu 3 Sep · UC PK · Ben', 'Remove scope: Topic: Crane']);
 });
+
+/* ---- Timeline --------------------------------------------------------- */
+
+function makeReactStub(extra) {
+  return Object.assign({
+    createElement(type, props) {
+      const kids = Array.prototype.slice.call(arguments, 2);
+      const flat = [].concat.apply([], kids).filter(k => k !== null && k !== undefined && k !== false);
+      return { type: type, props: props || {}, children: flat };
+    },
+    useState(v) { return [typeof v === 'function' ? v() : v, function () {}]; },
+    useRef(v) { return { current: v }; },
+    useEffect() {}, useLayoutEffect() {}, useContext() { return null; },
+    useMemo(fn) { return fn(); }, useCallback(fn) { return fn; },
+    Fragment: 'Fragment', memo(c) { return c; },
+  }, extra || {});
+}
+
+function loadTimeline(reactExtra) {
+  global.React = makeReactStub(reactExtra);
+  global.window = {
+    FieldSight: {},
+    FS: { api: { folderName: n => String(n || '').trim().replace(/ /g, '_') } },
+    AuthMock: { currentUser: null },
+    location: { href: 'https://example.test/#/timeline' },
+    addEventListener() {}, removeEventListener() {},
+  };
+  global.document = { addEventListener() {}, removeEventListener() {},
+                      createElement() { return { style: {} }; } };
+  delete require.cache[require.resolve('../scripts/pages/timeline.js')];
+  const mod = require('../scripts/pages/timeline.js');
+  return { mod: mod, page: global.window.FieldSight.PAGES['/timeline'] };
+}
+
+const timelineSrc = () => fs.readFileSync(require.resolve('../scripts/pages/timeline.js'), 'utf8');
+
+/* ---- 6. one Ask on the page ------------------------------------------ */
+
+test('6a the topic detail tabs have no ask tab', () => {
+  const { mod } = loadTimeline();
+  assert.ok(Array.isArray(mod.DAILY_TABS) && Array.isArray(mod.MEETING_TABS), 'tabs not exported');
+  assert.ok(!mod.DAILY_TABS.some(t => t.key === 'ask'), 'DAILY_TABS still has ask');
+  assert.ok(!mod.MEETING_TABS.some(t => t.key === 'ask'), 'MEETING_TABS still has ask');
+});
+
+test('6b the page registers a Provider', () => {
+  const { page } = loadTimeline();
+  assert.strictEqual(typeof page.Provider, 'function');
+  assert.strictEqual(typeof page.Middle, 'function');
+  assert.strictEqual(typeof page.Right, 'function');
+});
+
+test('6c the Provider holds only the four ask fields', () => {
+  const { page } = loadTimeline({ createContext() { return { Provider: 'AskCtxProvider' }; } });
+  const el = page.Provider({ children: 'kids' });
+  assert.strictEqual(el.type, 'AskCtxProvider');
+  assert.deepStrictEqual(Object.keys(el.props.value).sort(),
+    ['askContext', 'askFocusNonce', 'requestAskFocus', 'setAskContext']);
+});
+
+test('6d exactly one AskChat mount remains in timeline.js', () => {
+  const mounts = timelineSrc().match(/React\.createElement\(AskChat\b/g) || [];
+  assert.strictEqual(mounts.length, 1, 'found ' + mounts.length + ' AskChat mounts');
+});
+
+/* ---- 7. Ask about this topic ------------------------------------------ */
+
+test('7a the button is hidden for a topic without topic_row_id', () => {
+  const { mod } = loadTimeline();
+  assert.strictEqual(mod.TopicAskButton({ topic: { topic_id: 2 }, onAsk() {} }), null);
+  assert.strictEqual(mod.TopicAskButton({ topic: null, onAsk() {} }), null);
+});
+
+test('7b the button renders and clicking it calls onAsk', () => {
+  const { mod } = loadTimeline();
+  let clicked = 0;
+  const el = mod.TopicAskButton({ topic: { topic_row_id: 't' }, onAsk() { clicked++; } });
+  assert.strictEqual(el.type, 'button');
+  assert.deepStrictEqual(el.children, ['Ask about this topic']);
+  el.props.onClick();
+  assert.strictEqual(clicked, 1);
+});
+
+test('7c pinning sets topicRowId on the current day and bumps the focus nonce', () => {
+  const { mod } = loadTimeline();
+  const api = {
+    askContext: DAY, askFocusNonce: 4, set: null,
+    setAskContext(next) { this.set = next; },
+    requestAskFocus() { this.askFocusNonce++; },
+  };
+  const ok = mod.pinTopicAsk(api,
+    { topic_row_id: 'topic-uuid', topic_title: 'Morning commercial chase' },
+    { date: '2026-09-03', authorFolder: 'Ben_UCPK2' });
+  assert.strictEqual(ok, true);
+  assert.strictEqual(api.set.topicRowId, 'topic-uuid');
+  assert.strictEqual(api.set.topicTitle, 'Morning commercial chase');
+  assert.strictEqual(api.set.siteName, 'UC PK', 'the current day scope is kept');
+  assert.strictEqual(api.askFocusNonce, 5);
+});
+
+test('7d pinning from an empty or other-day context uses the topic\'s own day', () => {
+  const { mod } = loadTimeline();
+  const dayCtx = { date: '2026-09-04', authorFolder: 'Ben_UCPK2' };
+  assert.deepStrictEqual(mod.askContextWithTopic({}, { topic_row_id: 't', topic_title: 'T' }, dayCtx),
+    { date: '2026-09-04', authorFolder: 'Ben_UCPK2', topicRowId: 't', topicTitle: 'T' });
+  assert.strictEqual(mod.askContextWithTopic(DAY, { topic_row_id: 't' }, dayCtx).date, '2026-09-04');
+  assert.strictEqual(mod.askContextWithTopic(DAY, { topic_id: 1 }, dayCtx), null);
+});
+
+test('7e the topic detail header mounts the button; selecting a topic does not touch the context', () => {
+  const src = timelineSrc();
+  const right = src.slice(src.indexOf('function TimelineRightDetail('), src.indexOf('/* ---------- Register'));
+  assert.match(right, /React\.createElement\(TopicAskButton/);
+  assert.match(right, /pinTopicAsk\(/);
+  /* Only the button changes the Ask context from this column. */
+  assert.strictEqual((right.match(/setAskContext\(/g) || []).length, 0,
+    'the right detail must go through pinTopicAsk, not set the context on selection');
+});
+
+/* ---- 8. day changes reset; palette hand-off is global ------------------ */
+
+test('8a the loaded day builds a fresh context: no topic survives a day change', () => {
+  const { mod } = loadTimeline();
+  const report = { site_id: 'site-uuid', site: 'UC PK', user_name: 'Ben UCPK2' };
+  const ctx = mod.askContextForLoadedDay(report, '2026-09-04', 'Ben_UCPK2', false);
+  assert.deepStrictEqual(ctx, { date: '2026-09-04', siteId: 'site-uuid', siteName: 'UC PK',
+    authorFolder: 'Ben_UCPK2', authorName: 'Ben UCPK2' });
+  assert.ok(!('topicRowId' in ctx));
+});
+
+test('8b without report.site_id the site is omitted; owner falls back to the report name', () => {
+  const { mod } = loadTimeline();
+  const ctx = mod.askContextForDay({ site: 'UC PK', user_name: 'Ben UCPK2' }, '2026-09-03', undefined);
+  assert.deepStrictEqual(ctx, { date: '2026-09-03', authorFolder: 'Ben_UCPK2', authorName: 'Ben UCPK2' });
+  assert.deepStrictEqual(mod.askContextForDay(null, '2026-09-03', 'Ben_UCPK2'),
+    { date: '2026-09-03', authorFolder: 'Ben_UCPK2' });
+});
+
+test('8c a question handed off from the palette stays global', () => {
+  const { mod } = loadTimeline();
+  assert.deepStrictEqual(
+    mod.askContextForLoadedDay({ site_id: 's', site: 'UC PK', user_name: 'B' }, '2026-09-03', 'B', true),
+    {});
+});
+
+test('8d the middle column wires the day reset and the palette rule', () => {
+  const src = timelineSrc();
+  const mid = src.slice(src.indexOf('function TimelineMiddleColumn('), src.indexOf('function SessionPicker('));
+  assert.match(mid, /React\.useRef\(!!askPrefill\)/, 'palette hand-off is not remembered');
+  assert.match(mid, /askContextForLoadedDay\(/);
+  const eff = mid.slice(mid.indexOf('askContextForLoadedDay('));
+  const deps = eff.slice(eff.indexOf('}, [') , eff.indexOf(']);') + 1);
+  assert.match(deps, /\bdate\b/, 'day change does not reset the context');
+  assert.match(deps, /askOwner/, 'owner change does not reset the context');
+  assert.match(mid, /askFromPaletteRef\.current \? \{\} : askApi\.askContext/,
+    'mount #1 can auto-send a palette question with a stale scope');
+});
