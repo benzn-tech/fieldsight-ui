@@ -1,6 +1,8 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
 
 function Card() {} Card.Body = function CardBody() {};
 function Badge() {} function Avatar() {}
@@ -53,4 +55,47 @@ test('chip renders inside the title, before the text, as a quiet neutral outline
 
 test('v1 title renders the text alone', () => {
   assert.deepStrictEqual(titleOf({ id: 't', title: 'Light poles', version: 1 }).children.filter(Boolean), ['Light poles']);
+});
+
+/* SOURCE SCAN (final review fix 1). The chip is rendered with
+   className: 'fs-task-card__version' on top of tone:'neutral'
+   variant:'outline', so it inherits `.fs-badge--outline.fs-badge--neutral`
+   from styles/components.css. That base rule's `color` is
+   `--color-neutral-600` — a palette-scale token that does NOT flip in dark
+   mode (~2.3:1 on --surface-panel there). The chip must instead resolve its
+   foreground from a scoped rule using a semantic token (e.g. --text-*),
+   which DOES flip, without touching any other outline/neutral badge. */
+const componentsCss = fs.readFileSync(
+  path.join(__dirname, '..', 'styles', 'components.css'), 'utf8'
+).replace(/\r\n/g, '\n');
+
+function ruleBodyFor(css, selectorRe) {
+  const m = selectorRe.exec(css);
+  if (!m) return null;
+  const braceStart = css.indexOf('{', m.index);
+  const braceEnd = css.indexOf('}', braceStart);
+  return css.slice(braceStart + 1, braceEnd);
+}
+
+test('the base outline/neutral badge rule keeps its palette-scale color (other badges untouched)', () => {
+  const body = ruleBodyFor(componentsCss, /\.fs-badge--outline\.fs-badge--neutral\s*\{/);
+  assert.ok(body, 'expected the base .fs-badge--outline.fs-badge--neutral rule to still exist');
+  assert.match(body, /color:\s*var\(--color-neutral-600\)/);
+});
+
+test('fs-task-card__version overrides the chip foreground with a semantic (theme-flipping) token', () => {
+  const matches = componentsCss.match(/[^{}]*\.fs-task-card__version[^{}]*\{[^}]*\}/g) || [];
+  assert.ok(matches.length > 0, 'expected a CSS rule scoped to .fs-task-card__version');
+
+  const hasSemanticColor = matches.some((rule) => /color:\s*var\(--text-[a-z-]+\)/.test(rule));
+  assert.ok(hasSemanticColor, 'expected .fs-task-card__version to set color from a --text-* semantic token');
+
+  const usesNeutralScaleForeground = matches.some((rule) => {
+    // Strip out non-color declarations (e.g. box-shadow using --border-default
+    // or a --color-neutral-* dot) before checking for a palette-scale `color:`.
+    const colorDecls = rule.match(/color:\s*[^;]+;?/g) || [];
+    return colorDecls.some((d) => /--color-neutral-\d+/.test(d));
+  });
+  assert.strictEqual(usesNeutralScaleForeground, false,
+    'the version chip must not use a --color-neutral-* token as its foreground color');
 });

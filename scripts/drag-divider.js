@@ -13,9 +13,9 @@
      <DragDivider
         value={width}
         onChange={setWidth}
-        min={280}
-        max={480}
-        storageKey="fs.appshell.middleWidth"
+        min={360}
+        max={560}
+        storageKey="fs.appshell.middleWidth.v2"
         ariaLabel="Resize middle column"
      />
 

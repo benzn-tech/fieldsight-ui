@@ -1734,7 +1734,12 @@
 
   /* spec §3.4 — the history read wins over the list's version. */
   function authoritativeVersionPatch(item, n) {
-    if (typeof n !== 'number' || n < 1 || !item) return null;
+    /* `n < 1` alone lets NaN through: typeof NaN === 'number' and
+       `NaN < 1` is false, so a NaN history read would have fallen
+       through to the comparison below and returned { version: NaN }.
+       `!(n >= 1)` rejects NaN (NaN >= 1 is false) as well as every
+       other out-of-range value `n < 1` already caught. */
+    if (typeof n !== 'number' || !(n >= 1) || !item) return null;
     return (item.version || 1) === n ? null : { version: n };
   }
 

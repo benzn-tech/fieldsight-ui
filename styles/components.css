@@ -748,6 +748,19 @@
 }
 .fs-badge--outline.fs-badge--neutral .fs-badge__prefix-dot { background: var(--color-neutral-500); }
 
+/* Final review fix 1 — the Today card version chip is an outline/neutral
+   badge, but --color-neutral-600 is a palette-scale token: it does NOT flip
+   in dark mode, so it renders at ~2.3:1 on --surface-panel (#111827) there.
+   Scoped override using semantic tokens (which DO flip) so every other
+   outline/neutral badge is untouched. --text-secondary alone clears AA in
+   both themes (light: still --color-neutral-600, same as above; dark:
+   #D1D5DB on #111827 is ~12:1) so no [data-theme="dark"] override is
+   needed here. */
+.fs-badge--outline.fs-badge--neutral.fs-task-card__version {
+  color: var(--text-secondary);
+  box-shadow: inset 0 0 0 1px var(--border-default);
+}
+
 /* ---- accent ---- */
 .fs-badge--subtle.fs-badge--accent {
   background: var(--color-accent-50);

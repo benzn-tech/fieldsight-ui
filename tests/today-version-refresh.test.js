@@ -39,6 +39,14 @@ test('history read is authoritative: patch only when it differs', () => {
   assert.strictEqual(authoritativeVersionPatch({ version: 2 }, undefined), null);
 });
 
+test('history read guard rejects NaN and null (final review fix 2)', () => {
+  // `n < 1` alone let NaN through (typeof NaN === 'number', NaN < 1 is
+  // false), which would have returned { version: NaN }.
+  assert.strictEqual(authoritativeVersionPatch({ version: 2 }, NaN), null);
+  assert.strictEqual(authoritativeVersionPatch({ version: 2 }, null), null);
+  assert.strictEqual(authoritativeVersionPatch(null, 2), null);
+});
+
 /* SOURCE SCAN (wiring pins). */
 const src = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'pages', 'today.js'), 'utf8').replace(/\r\n/g, '\n');
 test('useTodayState subscribes to content:edited and applies versionBumpFor via patchTask', () => {
