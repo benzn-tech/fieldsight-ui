@@ -826,6 +826,18 @@
   width: 100%;
 }
 
+/* Compact strip: Timeline day header only (spec 2026-09-15 §10). Value and
+   label share one baseline. Scoped here so the base .fs-stat-card rules (and
+   Insights / strategic dashboards) are unchanged. Tone colours still apply. */
+.fs-kpi-strip--compact { gap: 6px; }
+.fs-kpi-strip--compact .fs-stat-card {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 10px;
+}
+.fs-kpi-strip--compact .fs-stat-card__value { font-size: 15px; }
+
 
 /* =========================================================================
    CategoryBadge — opinionated tone wrapper over Badge

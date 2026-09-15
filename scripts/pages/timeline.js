@@ -822,7 +822,7 @@
        everywhere else in this strip, so it needs no new vocabulary. */
     var dayOnly = !props.sessionScoped;
 
-    return React.createElement(KpiStrip, null,
+    return React.createElement(KpiStrip, { compact: true },
       React.createElement(StatCard, {
         value: topics, label: 'Topics',
       }),
