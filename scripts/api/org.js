@@ -488,6 +488,24 @@
     };
   }
 
+  /* spec 2026-09-15 §3.1 — ONE cached sessions read per (date, owner folder),
+     shared by Timeline's day view and every TodoHistory card, so expanding a
+     card on a day that already loaded sessions issues zero requests. */
+  function getSessionsCached(date, folder) {
+    var key = 'sessions:' + date + ':' + folder;
+    return api.cache.cached(key, undefined, function () {
+      return getSessions({ date: date, user: folder });
+    }).then(function (res) {
+      /* cached() only skips storing on a REJECTED fetch; getSessions instead
+         RESOLVES to a denial envelope, so a 403/404 would otherwise be
+         cached for the full 3-min TTL and replayed to every later caller
+         sharing this key (Timeline, every TodoHistory card). Evict it so
+         the next call retries instead of trusting a stale denial. */
+      if (res && (res._accessDenied || res._notFound)) api.cache.evict(key);
+      return res;
+    });
+  }
+
   // -------- recurring-item threading: the review queue --------
   /* The matcher proposes which earlier SUBJECT a topic restates; confirming
      is what actually links them, and it is a person's call. A wrong link
@@ -721,17 +739,24 @@
   async function generateSessionReport(opts) {
     opts = opts || {};
     if (sessionReportLive()) {
+      var body = {
+        templateId: opts.templateId,
+        title:      opts.title,
+        attendees:  opts.attendees,
+        fields:     opts.fields || {},
+        deliver:    opts.deliver || 'download',
+        recipients: opts.recipients || [],
+      };
+      /* Only a real subset travels. Absent is "the whole meeting" on the
+         backend, and an empty list is a 400 there -- so neither [] nor null may
+         be sent, and an untouched modal sends exactly what it always did. */
+      if (Array.isArray(opts.topicRowIds) && opts.topicRowIds.length) {
+        body.topicRowIds = opts.topicRowIds;
+      }
       return api.orgRequest('/sessions/' + encodeURIComponent(opts.sessionId) + '/report', {
         method: 'POST',
         params: { date: opts.date, user: opts.user },
-        body: {
-          templateId: opts.templateId,
-          title:      opts.title,
-          attendees:  opts.attendees,
-          fields:     opts.fields || {},
-          deliver:    opts.deliver || 'download',
-          recipients: opts.recipients || [],
-        },
+        body: body,
       });
     }
     await api.delay();
@@ -831,6 +856,7 @@
     getComplianceResolutions: getComplianceResolutions,
     getLiveItems: getLiveItems,
     getSessions: getSessions,
+    getSessionsCached: getSessionsCached,
     getSessionReportPreview: getSessionReportPreview,
     generateSessionReport: generateSessionReport,
     getSessionReportStatus: getSessionReportStatus,

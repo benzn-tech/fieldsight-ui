@@ -182,6 +182,33 @@
     return !!(sessions && sessions.length >= 2);
   }
 
+  /* Which meeting a per-meeting report would be ABOUT.
+
+     The selected one -- or, when nothing is selected and the day holds exactly
+     one, that one. The picker above only renders for >=2 sessions, and the
+     report button used to require a selection, so a one-meeting day had a
+     button nothing could enable. A stale selection is never swapped for the
+     one-meeting fallback: that would report on a different meeting than the
+     user chose. */
+  function reportableSession(sessions, selectedSessionId) {
+    var list = sessions || [];
+    if (selectedSessionId != null) {
+      return list.filter(function (s) { return s.session_id === selectedSessionId; })[0] || null;
+    }
+    return list.length === 1 ? list[0] : null;
+  }
+
+  /* The disabled button's tooltip. "Pick one above" is only true when the
+     picker is actually rendered. */
+  function generateReportUnavailableReason(sessionCount) {
+    if (!sessionCount) {
+      return 'No meeting was recorded this day, so there is nothing to report on here. '
+        + 'The whole day is the daily report, on the Reports page.';
+    }
+    return 'Reports here are per meeting — pick one above. '
+      + 'The whole day is the daily report, on the Reports page.';
+  }
+
   /* null/undefined sessionId = "All day" (no filtering) — returns the list
      unchanged, INCLUDING session_kind:'report' topics (which carry no
      session_id at all and would otherwise never match anything). A real
@@ -795,7 +822,7 @@
        everywhere else in this strip, so it needs no new vocabulary. */
     var dayOnly = !props.sessionScoped;
 
-    return React.createElement(KpiStrip, null,
+    return React.createElement(KpiStrip, { compact: true },
       React.createElement(StatCard, {
         value: topics, label: 'Topics',
       }),
@@ -1761,7 +1788,7 @@
       if (!folder || !date) { setSessionsState({ status: 'idle', sessions: [], excluded: null }); return undefined; }
       var cancelled = false;
       setSessionsState({ status: 'loading', sessions: [], excluded: null });
-      window.FS.api.org.getSessions({ date: date, user: folder }).then(function (res) {
+      window.FS.api.org.getSessionsCached(date, folder).then(function (res) {
         if (cancelled) return;
         if (!res || res._accessDenied || res._notFound) {
           setSessionsState({ status: 'ok', sessions: [], excluded: null });
@@ -2387,7 +2414,9 @@
     /* Delivery-C Tier-2 generate control — sits beside the mailto draft, active
        only when a specific meeting is selected (the modal is per-session). */
     var _genReportEl = React.createElement(GenerateReportButton, {
-      session:    _selectedSession,
+      /* Not _selectedSession: a one-meeting day has no picker to select from. */
+      session:    reportableSession(daySessions, selectedSessionId),
+      sessionCount: daySessions.length,
       date:       date,
       userFolder: _draftUserFolder,
       siteName:   report.site || site || '',
@@ -2921,8 +2950,7 @@
         type:      'button',
         className: 'fs-btn fs-btn--secondary fs-btn--sm fs-generate-report',
         disabled:  true,
-        title:     'Reports here are per meeting — pick one above. '
-                   + 'The whole day is the daily report, on the Reports page.',
+        title:     generateReportUnavailableReason(props.sessionCount),
       }, 'Generate report');
     }
     return React.createElement(React.Fragment, null,
@@ -3345,7 +3373,9 @@
         var p = {}; p[props.field] = next; return p;
       })()).then(function (res) {
         setBusy(false);
-        if (!res || res._accessDenied || res._notFound) {
+        /* spec 2026-09-15 §4 site 1 — also covers Today's title editor, which
+           mounts this same component (no call in today.js for the title). */
+        if (!window.FS.api.actions.settleSave(res, { table: props.table, id: props.id }).ok) {
           setValue(props.value || '');
           var toast = window.FS && window.FS.toast;
           if (toast) toast.show({ message: (res && res.error) || 'Could not save edit',
@@ -3429,9 +3459,22 @@
   /* editable-content-correction (Task 18 Step 1) — content_edits audit
      trail for one row, mirrors tasks.js's ActionHistoryPanel (fetch on
      mount, render a list). */
+  /* spec 2026-09-15 §5 — extracted so the callback that bumps the reload
+     tick is itself under direct test (a source-scan alone can't tell an
+     emptied callback from a working one). Returns an unsubscribe fn always,
+     even when events are unavailable, so the caller never has to branch. */
+  function subscribeContentReload(events, table, id, bump) {
+    if (events && events.onContentEdited) {
+      return events.onContentEdited(table, id, function () { bump(); });
+    }
+    return function () {};
+  }
+
   function ContentHistoryPanel(props) {
     var dataRef = React.useState({ status: 'loading' });
     var data = dataRef[0], setData = dataRef[1];
+    var tickRef = React.useState(0);
+    var reloadTick = tickRef[0], setReloadTick = tickRef[1];
     React.useEffect(function () {
       var alive = true;
       window.FS.api.actions.getContentHistory(props.table, props.id).then(function (res) {
@@ -3439,6 +3482,13 @@
         setData({ status: 'ok', edits: (res && res.edits) || [] });
       }).catch(function () { if (alive) setData({ status: 'error', edits: [] }); });
       return function () { alive = false; };
+    }, [props.table, props.id, reloadTick]);
+    /* spec 2026-09-15 §5 — a save to THIS row re-reads the trail (the server
+       assigns created_at/actor_name; never append optimistically). */
+    React.useEffect(function () {
+      return subscribeContentReload(window.FS && window.FS.events, props.table, props.id, function () {
+        setReloadTick(function (n) { return n + 1; });
+      });
     }, [props.table, props.id]);
     if (data.status === 'loading') return React.createElement('div', { className: 'fs-muted' }, 'Loading…');
     if (!data.edits.length) return React.createElement('div', { className: 'fs-muted' }, 'No edits yet.');
@@ -3563,12 +3613,17 @@
       if (!api || !api.updateAction) { return; }
       api.updateAction(a.id, { responsible: name }).then(function (res) {
         /* 403/404 resolve to envelopes rather than throwing (org.js write
-           convention), so a rejection is not always a rejected promise. */
-        if (!res || res._accessDenied || res._notFound || res.error) {
+           convention). spec 2026-09-15 §4 site 4: Saved on ok, error toast
+           (site 2's shape) on refusal, never a silent revert. */
+        if (!api.settleSave(res, { table: 'action_items', id: a.id }).ok) {
           setOwners(function (m) { var n = Object.assign({}, m); n[a.id] = before; return n; });
+          var toast = window.FS && window.FS.toast;
+          if (toast) toast.show({ message: (res && res.error) || 'Could not update task', tone: 'error', duration: 5000 });
         }
-      }).catch(function () {
+      }).catch(function (err) {
         setOwners(function (m) { var n = Object.assign({}, m); n[a.id] = before; return n; });
+        var toast = window.FS && window.FS.toast;
+        if (toast) toast.show({ message: (err && err.error) || 'Could not update task', tone: 'error', duration: 5000 });
       });
     }
 
@@ -3727,6 +3782,11 @@
                        already renders (topic-card.js ~228). ActionItemRow
                        already handles both props; this just feeds it. */
                     checkedAt:      state.checked_at,
+                    /* spec 2026-09-15 §2 — History disclosure; TodoHistory
+                       joins the provenance on the topic's own session. */
+                    withHistory:    true,
+                    sessionId:      topic.session_id || null,
+                    sessionKind:    topic.session_kind || null,
                   }),
                   rowEditable ? editToggle(editKey, 'action item text') : null,
                 ),
@@ -4309,6 +4369,7 @@
       diffWords: diffWords,
       formatEditTime: formatEditTime,
       formatContentEdit: formatContentEdit,
+      subscribeContentReload: subscribeContentReload,
       findLatestReportDate: findLatestReportDate,
       capturedFolders: capturedFolders,
       /* live recording KPIs */
@@ -4321,6 +4382,8 @@
       TopicCorrectionPropagate: TopicCorrectionPropagate,
       /* session picker (feat 5) */
       shouldShowSessionPicker: shouldShowSessionPicker,
+      reportableSession: reportableSession,
+      generateReportUnavailableReason: generateReportUnavailableReason,
       filterTopicsBySession: filterTopicsBySession,
       groupSessionsByBlock: groupSessionsByBlock,
       formatParticipants: formatParticipants,

@@ -104,6 +104,25 @@ test('generateSessionReport gated off returns a NON-queued shape (never a fake s
   assert.notStrictEqual(res.status, 'queued');
 });
 
+test('generateSessionReport forwards a chosen subset as topicRowIds', async () => {
+  const org = loadOrg();
+  orgResponse = { status: 'queued', requestId: 'r', resultKey: 'k' };
+  await org.generateSessionReport({ sessionId: 'S1', date: '2026-07-25', user: 'Ada_L',
+    title: 'T', attendees: [], topicRowIds: ['t-1', 't-2'] });
+  assert.deepStrictEqual(orgCalls[0].body.topicRowIds, ['t-1', 't-2']);
+});
+
+test('generateSessionReport never sends an empty or null selection', async () => {
+  // Absent means the whole meeting; [] is a 400 on the backend.
+  for (const sel of [[], null, undefined]) {
+    const org = loadOrg();
+    orgResponse = { status: 'queued', requestId: 'r', resultKey: 'k' };
+    await org.generateSessionReport({ sessionId: 'S1', date: '2026-07-25', user: 'Ada_L',
+      title: 'T', attendees: [], topicRowIds: sel });
+    assert.ok(!('topicRowIds' in orgCalls[0].body), String(sel));
+  }
+});
+
 /* ---- F1c getSessionReportStatus (GET, the poll) ------------------------- */
 
 test('getSessionReportStatus GETs /sessions/{id}/report/status with date+user+requestId', async () => {
