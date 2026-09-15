@@ -447,6 +447,37 @@
     );
   }
 
+  /* ---- scope: what this Ask is narrowed to --------------------------------
+
+     The host owns the context ({date, siteId, siteName, authorFolder,
+     authorName, topicRowId, topicTitle}); AskChat only reads it. Everything
+     below is pure so it can be driven from Node -- this file cannot be rendered
+     there. */
+
+  function present(v) {
+    return typeof v === 'string' ? v.trim() !== '' : v != null;
+  }
+
+  function hasScope(context) {
+    var c = context || {};
+    return present(c.date) || present(c.siteId) || present(c.authorFolder)
+        || present(c.topicRowId);
+  }
+
+  /* Context -> POST /api/ask body. Omits absent fields rather than sending ''
+     or null: the backend treats a present-but-empty field as malformed and
+     reports it `dropped: invalid`, which would put a warning under every
+     answer. Never sends `scope` / `topic_id` -- the RAG path ignores both. */
+  function requestBodyFor(context, question) {
+    var c = context || {};
+    var body = { question: question };
+    if (present(c.date))         body.date          = c.date;
+    if (present(c.siteId))       body.site_id       = c.siteId;
+    if (present(c.authorFolder)) body.author_folder = c.authorFolder;
+    if (present(c.topicRowId))   body.topic_row_id  = c.topicRowId;
+    return body;
+  }
+
   function AskChat(props) {
     var date     = props.date;
     var user     = props.user;
@@ -767,4 +798,11 @@
   /* Exported so the wording can be pinned by a test without rendering React,
      and so SP-Ask's spoken variant can be written against the same dict. */
   window.FieldSight.formatAnswerBasis = formatAnswerBasis;
+  /* Pure scope helpers, exported for tests (tests/ask-scoped-context.test.js).
+     Later tasks add chipsFor / basisLinesFor / suggestionsFor / placeholderFor
+     to this same object. */
+  window.FieldSight.askScope = {
+    requestBodyFor: requestBodyFor,
+    hasScope:       hasScope,
+  };
 })();
