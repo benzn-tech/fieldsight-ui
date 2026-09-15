@@ -75,6 +75,7 @@ Pure helpers extracted from `ask-chat.js` and exported for tests:
     | `site_id` | `not_visible` / `invalid` | `Couldn't narrow to this project` |
     | `date` | `invalid` | `Couldn't narrow to this day` |
     | `date` | `overridden_by_question` | `Used the dates in your question` |
+    | `date` | `overridden_by_topic` | `Answered for this topic's day` |
     | `question_range` | `overridden_by_topic` | `Answered for this topic's day, not the dates in your question` |
 
     An unknown field/reason pair renders nothing (never a raw code).
