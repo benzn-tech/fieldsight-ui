@@ -635,6 +635,14 @@
        after the re-render, so it goes out with the NEW context rather than
        the one this render closed over. */
     var resendRef = React.useRef(null);
+    /* The same question, parked because a request was still in flight when
+       the new context arrived; sent once `busy` clears (see the busy effect). */
+    var deferredResendRef = React.useRef(null);
+    /* Bumped by the reset effect. A request remembers the generation it was
+       sent in; a response from an older generation answered a context the
+       reader is no longer looking at, so it is dropped rather than appended
+       under the new chips. */
+    var genRef = React.useRef(0);
     /* The reset effect must not run on mount: it runs after the
        initialQuestion effect and would wipe the question that effect just
        added (palette hand-off). */
@@ -673,15 +681,30 @@
        history since prior context no longer applies. */
     React.useEffect(function () {
       if (!resetMountedRef.current) { resetMountedRef.current = true; return; }
-      /* Updater form, not a bare array literal: the wiring test slices this
-         effect's deps up to the first bracket-paren-semicolon. */
-      setMsgs(function () { return []; });
+      genRef.current += 1;
+      setMsgs([]);
+      /* Always consumed here, sent or not: a question left in the ref would
+         otherwise fire on some later, unrelated context change. It is only
+         sent when the new context is the unscoped one "Ask across
+         everything" asked for -- a host that applied something else did not
+         honour the widen. */
       var pending = resendRef.current;
-      if (pending) {
-        resendRef.current = null;
-        send(pending);
+      resendRef.current = null;
+      deferredResendRef.current = null;
+      if (pending && !hasScope(context)) {
+        if (busy) deferredResendRef.current = pending;
+        else send(pending);
       }
     }, [context.date, context.siteId, context.authorFolder, context.topicRowId]);
+
+    /* A widen that landed while an older request was still in flight: send it
+       once that request settles, from a render that has the new context. */
+    React.useEffect(function () {
+      if (busy || !deferredResendRef.current) return;
+      var pending = deferredResendRef.current;
+      deferredResendRef.current = null;
+      send(pending);
+    }, [busy]);
 
     /* "Ask about this topic" — bring the one Ask into view and put the cursor
        in it. Smooth scroll only when the reader has not asked for reduced
@@ -760,7 +783,10 @@
       var scopedRequest = hasScope(context);
       var body = requestBodyFor(context, question);
       body.user = user;   /* undefined is dropped on the wire */
+      var gen = genRef.current;
+      function isStale() { return gen !== genRef.current; }
       window.FS.api.ask.ask(body).then(function (res) {
+        if (isStale()) return;
         var answerText = res.answer || '';
         /* Not on a web-derived answer: corroborating the web against the web
            is a loop that reads as confirmation. */
@@ -795,10 +821,8 @@
           zh:        askedInChinese(question),
           /* What the backend says it enforced. Stored as a response-shaped
              object so the chips and scope lines read exactly what came back;
-             `applied_scope` undefined = a backend that predates scoping.
-             The key is quoted only so the wiring test's "no `scope:` in send"
-             check does not trip on `applied_scope:`. */
-          scopeResponse: { 'applied_scope': res.applied_scope },
+             `applied_scope` undefined = a backend that predates scoping. */
+          scopeResponse: { applied_scope: res.applied_scope },
           scoped:        scopedRequest,
           question:      question,
         }]); });
@@ -813,9 +837,10 @@
            twice. */
         if (!wantsCorrob) return;
         window.FS.api.ask.corroborate({ question: question, answer: answerText })
-          .then(function (cr) { patchCorrob(mid, cr); })
-          .catch(function () { patchCorrob(mid, { _failed: true }); });
+          .then(function (cr) { if (!isStale()) patchCorrob(mid, cr); })
+          .catch(function () { if (!isStale()) patchCorrob(mid, { _failed: true }); });
       }).catch(function (err) {
+        if (isStale()) return;
         /* A timeout is not an unreachable agent, and saying so sent the reader
            at the backend while it was answering correctly. Name the two cases
            apart: one is "it is slow", the other is "it is not there". */
@@ -827,6 +852,7 @@
           error: true,
         }]); });
       }).then(function () {
+        /* Even for a stale response: the request is over either way. */
         setBusy(false);
       });
     }
@@ -921,15 +947,18 @@
             m.role === 'assistant' ? renderCitations(m.citations) : null,
             /* A scoped answer that found nothing: offer the same question
                across everything. The host clears the context; the reset
-               effect re-sends once the new (empty) context has rendered. */
-            m.role === 'assistant' && m.scoped && m.scopeResponse && !m.error
+               effect re-sends once the new (empty) context has rendered.
+               Only when the backend reported an applied_scope: one that
+               predates scoping already searched everything. */
+            m.role === 'assistant' && m.scoped && m.scopeResponse
+                && m.scopeResponse.applied_scope && !m.error
                 && !(m.citations && m.citations.length) && props.onContextChange
               ? React.createElement('button', {
                   type: 'button',
                   className: 'fs-ask-chat__widen',
                   disabled: busy,
                   onClick: function () {
-                    resendRef.current = m.question;
+                    if (hasScope(context)) resendRef.current = m.question;
                     props.onContextChange({});
                   },
                 }, 'Ask across everything')
@@ -991,8 +1020,10 @@
                     React.createElement('span', {
                       className: 'fs-ask-chip__seg'
                         + (s.enforced === false ? ' fs-ask-chip__seg--unenforced' : ''),
-                      /* Not colour alone: struck through, and said in words. */
-                      title: s.enforced === false ? 'Not applied to this answer' : null,
+                      /* Not colour alone: struck through, and said in words.
+                         The full text lives in the tooltip because a long
+                         site or owner name is ellipsised at phone width. */
+                      title: s.enforced === false ? s.text + ' — not applied to this answer' : s.text,
                     }, s.text,
                       s.enforced === false
                         ? React.createElement('span', { className: 'fs-sr-only' }, ' (not applied)')
@@ -1002,7 +1033,7 @@
                   ? React.createElement('button', {
                       type: 'button',
                       className: 'fs-ask-chip__remove',
-                      'aria-label': chip.kind === 'topic' ? 'Remove topic scope' : 'Remove day scope',
+                      'aria-label': 'Remove scope: ' + chip.label,
                       disabled: busy,
                       onClick: function () { props.onContextChange(chip.next); },
                     }, '×')

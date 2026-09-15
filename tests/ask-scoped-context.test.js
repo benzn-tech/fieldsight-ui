@@ -281,37 +281,271 @@ test('3f a duplicate {field, reason} in dropped renders only one line', () => {
 
 const askSrc = () => fs.readFileSync(require.resolve('../scripts/composites/ask-chat.js'), 'utf8');
 
-test('W1 the component sends requestBodyFor(context, ...) and no scope/topic_id', () => {
+/* What the driven tests below do not reach: the focus effect needs a DOM, and
+   the two override props are one expression each. */
+test('W4 focus and the suggestion/placeholder overrides are wired', () => {
   const src = askSrc();
-  const send = src.slice(src.indexOf('function send('), src.indexOf('function onSubmit('));
-  assert.match(send, /requestBodyFor\(/);
-  assert.doesNotMatch(send, /scope:\s/, 'send still passes scope');
-  assert.doesNotMatch(send, /topic_id:\s/, 'send still passes topic_id');
-});
-
-test('W2 the reset effect is keyed on the four context fields', () => {
-  const src = askSrc();
-  const eff = src.slice(src.indexOf('When scope keys change'));
-  const deps = eff.slice(0, eff.indexOf(']);') + 3);
-  ['context.date', 'context.siteId', 'context.authorFolder', 'context.topicRowId']
-    .forEach(k => assert.ok(deps.includes(k), 'reset effect missing ' + k));
-  assert.doesNotMatch(deps, /\bscope, topic_id\b/);
-});
-
-test('W3 scope lines render from the stored response, above the answer text', () => {
-  const src = askSrc();
-  const at = src.indexOf('basisLinesFor(m.scopeResponse)');
-  assert.ok(at > 0, 'basisLinesFor is not called with the stored response');
-  assert.ok(at < src.indexOf('fs-ask-chat__msg-text fs-ask-chat__msg-text--md'));
-  assert.doesNotMatch(src, /basisLinesFor\([^)]*context/);
-});
-
-test('W4 chips, the widen button and focus are wired', () => {
-  const src = askSrc();
-  assert.match(src, /chipsFor\(context,/);
-  assert.match(src, /Ask across everything/);
-  assert.match(src, /props\.onContextChange\(\{\}\)/);
   assert.match(src, /\[props\.focusNonce\]/);
   assert.match(src, /props\.suggestions \|\| suggestionsFor\(context\)/);
   assert.match(src, /props\.placeholder \|\| placeholderFor\(context\)/);
+});
+
+/* ---- driven: the component itself, rendered with a recording React ------
+
+   Same approach as tests/ask-timezone-and-basis.test.js (a createElement that
+   records nodes), extended with hooks that keep state between renders and
+   effects that run the way React runs them: after a render, and only when
+   their deps changed. Nothing here reads the source. */
+
+function flushMicrotasks() {
+  return new Promise(r => setImmediate(r));
+}
+
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((a, b) => { resolve = a; reject = b; });
+  return { promise, resolve, reject };
+}
+
+function mountAsk() {
+  delete require.cache[require.resolve('../scripts/composites/ask-chat.js')];
+  const h = { states: [], refs: [], effects: [], asks: [], pending: [] };
+  let si = 0, ri = 0, ei = 0;
+  global.React = {
+    Fragment: 'Fragment',
+    createElement(type, props, ...kids) { return { type, props: props || {}, kids }; },
+    useState(init) {
+      const i = si++;
+      if (!(i in h.states)) h.states[i] = init;
+      return [h.states[i], v => { h.states[i] = typeof v === 'function' ? v(h.states[i]) : v; }];
+    },
+    useRef(init) {
+      const i = ri++;
+      if (!(i in h.refs)) h.refs[i] = { current: init };
+      return h.refs[i];
+    },
+    useEffect(fn, deps) {
+      const i = ei++;
+      const prev = h.effects[i];
+      const changed = !prev || !deps || deps.some((d, k) => d !== prev.deps[k]);
+      h.effects[i] = { fn, deps, changed };
+    },
+  };
+  global.document = { addEventListener() {}, removeEventListener() {} };
+  global.window = {
+    FieldSight: { renderMarkdown: s => s },
+    FS: { api: { ask: { ask(body) {
+      h.asks.push(body);
+      const d = deferred();
+      h.pending.push(d);
+      return d.promise;
+    } } } },
+  };
+  require('../scripts/composites/ask-chat.js');
+  const AskChat = global.window.FieldSight.AskChat;
+
+  h.render = function (props) {
+    si = 0; ri = 0; ei = 0;
+    h.props = props;
+    h.tree = AskChat(props);
+    h.effects.forEach(e => { if (e.changed) { e.changed = false; e.fn(); } });
+    return h.tree;
+  };
+  h.rerender = () => h.render(h.props);
+  h.nodes = function () {
+    const out = [];
+    (function walk(n) {
+      if (Array.isArray(n)) return n.forEach(walk);
+      if (!n || typeof n !== 'object') return;
+      out.push(n);
+      n.kids.forEach(walk);
+    })(h.tree);
+    return out;
+  };
+  h.byClass = cls => h.nodes().filter(n =>
+    String(n.props.className || '').split(' ').includes(cls));
+  h.text = function (n) {
+    return n.kids.map(function t(k) {
+      if (Array.isArray(k)) return k.map(t).join('');
+      if (k && typeof k === 'object') return h.text(k);
+      return k == null || k === false ? '' : String(k);
+    }).join('');
+  };
+  h.ask = async function (question) {
+    h.byClass('fs-ask-chat__input')[0].props.onChange({ target: { value: question } });
+    h.rerender();
+    h.byClass('fs-ask-chat__form')[0].props.onSubmit({ preventDefault() {} });
+    h.rerender();
+  };
+  h.settle = async function (i, res) {
+    h.pending[i].resolve(res);
+    for (let k = 0; k < 5; k++) await flushMicrotasks();
+    h.rerender();
+  };
+  return h;
+}
+
+const SCOPED = { date: '2026-09-03', siteId: 's', siteName: 'UC PK', authorFolder: 'Ben' };
+const segOf = (h, text) => h.byClass('fs-ask-chip__seg').find(n => h.text(n).startsWith(text));
+
+test('D-a the request body is built from the context, and nothing else', async () => {
+  let h = mountAsk();
+  h.render({ user: 'Ben', context: { date: '2026-09-03', siteId: 's', authorFolder: 'Ben' } });
+  await h.ask('what happened');
+  assert.strictEqual(h.asks.length, 1);
+  assert.deepStrictEqual(h.asks[0], { question: 'what happened', date: '2026-09-03',
+    site_id: 's', author_folder: 'Ben', scoped: true, user: 'Ben' });
+  assert.ok(!('scope' in h.asks[0]) && !('topic_id' in h.asks[0]));
+
+  h = mountAsk();
+  h.render({ user: 'Ben', context: {} });
+  await h.ask('what happened');
+  assert.deepStrictEqual(h.asks[0], { question: 'what happened', user: 'Ben' });
+  assert.ok(!('scoped' in h.asks[0]), 'an unscoped Ask opted into scoping');
+});
+
+test('D-b chips and scope lines show what the backend enforced', async () => {
+  let h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED });
+  await h.ask('q');
+  await h.settle(0, { answer: 'a', citations: [], applied_scope: { date: '2026-09-03' } });
+  const unenf = n => String(n.props.className).includes('fs-ask-chip__seg--unenforced');
+  const srOnly = n => n.kids.some(k => k && k.props && k.props.className === 'fs-sr-only'
+                                     && h.text(k) === ' (not applied)');
+  assert.ok(!unenf(segOf(h, 'Thu 3 Sep')), 'the enforced date is marked not applied');
+  ['UC PK', 'Ben'].forEach(t => {
+    assert.ok(unenf(segOf(h, t)), t + ' is not marked unenforced');
+    assert.ok(srOnly(segOf(h, t)), t + ' does not say "(not applied)" in words');
+  });
+  assert.ok(!srOnly(segOf(h, 'Thu 3 Sep')));
+  assert.strictEqual(h.byClass('fs-ask-chat__scope-line').length, 0);
+
+  h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED });
+  await h.ask('q');
+  await h.settle(0, { answer: 'a', citations: [] });
+  ['Thu 3 Sep', 'UC PK', 'Ben'].forEach(t =>
+    assert.ok(unenf(segOf(h, t)), t + ' reads as scoped on a backend without applied_scope'));
+  const nodes = h.nodes();
+  const line = nodes.findIndex(n => n.props.className === 'fs-ask-chat__scope-line'
+                                    && h.text(n) === 'Searched all your projects');
+  const answer = nodes.findIndex(n => String(n.props.className).includes('fs-ask-chat__msg-text--md'));
+  assert.ok(line > -1, 'no "Searched all your projects" line');
+  assert.ok(answer > -1 && line < answer, 'the scope line is not above the answer');
+});
+
+test('D-c "Ask across everything" appears only when it means something, and re-asks unscoped', async () => {
+  const widenAfter = async function (props, res) {
+    const h = mountAsk();
+    h.render(props);
+    await h.ask('q');
+    await h.settle(0, res);
+    return h;
+  };
+  const spy = [];
+  const onContextChange = c => spy.push(c);
+  const EMPTY = { answer: 'a', citations: [], applied_scope: { date: '2026-09-03' } };
+
+  assert.strictEqual((await widenAfter({ context: SCOPED }, EMPTY))
+    .byClass('fs-ask-chat__widen').length, 0, 'shown without onContextChange');
+  assert.strictEqual((await widenAfter({ context: SCOPED, onContextChange },
+    Object.assign({}, EMPTY, { citations: [{ source_s3_key: 'reports/2026-09-03/Ben/x' }] })))
+    .byClass('fs-ask-chat__widen').length, 0, 'shown with citations');
+  assert.strictEqual((await widenAfter({ context: SCOPED, onContextChange },
+    { answer: 'a', citations: [] }))
+    .byClass('fs-ask-chat__widen').length, 0, 'shown on a backend that already searched everything');
+  assert.strictEqual((await widenAfter({ context: {}, onContextChange }, EMPTY))
+    .byClass('fs-ask-chat__widen').length, 0, 'shown on an unscoped question');
+
+  const h = await widenAfter({ user: 'Ben', context: SCOPED, onContextChange }, EMPTY);
+  const btn = h.byClass('fs-ask-chat__widen');
+  assert.strictEqual(btn.length, 1);
+  assert.strictEqual(h.text(btn[0]), 'Ask across everything');
+  btn[0].props.onClick();
+  assert.deepStrictEqual(spy, [{}]);
+  h.render({ user: 'Ben', context: {}, onContextChange });
+  assert.strictEqual(h.asks.length, 2, 'the question was not asked again');
+  assert.deepStrictEqual(h.asks[1], { question: 'q', user: 'Ben' });
+});
+
+test('D-d a scope key change clears the history; a user change does not', async () => {
+  for (const key of ['date', 'siteId', 'authorFolder', 'topicRowId']) {
+    const h = mountAsk();
+    h.render({ user: 'Ben', context: SCOPED });
+    await h.ask('q');
+    await h.settle(0, { answer: 'a', citations: [], applied_scope: {} });
+    assert.ok(h.byClass('fs-ask-chat__msg--user').length === 1);
+    h.render({ user: 'Ben', context: Object.assign({}, SCOPED, { [key]: 'changed' }) });
+    h.rerender();
+    assert.strictEqual(h.byClass('fs-ask-chat__msg').length, 0, key + ' change kept the history');
+  }
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED });
+  await h.ask('q');
+  await h.settle(0, { answer: 'a', citations: [], applied_scope: {} });
+  h.render({ user: 'Someone', context: Object.assign({}, SCOPED) });
+  h.rerender();
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--assistant').length, 1, 'a user change cleared the history');
+});
+
+test('D-e a response to an old context is dropped, but the wait still ends', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED });
+  await h.ask('q');
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--pending').length, 1);
+  h.render({ user: 'Ben', context: Object.assign({}, SCOPED, { date: '2026-09-04' }) });
+  await h.settle(0, { answer: 'stale', citations: [], applied_scope: {} });
+  assert.strictEqual(h.byClass('fs-ask-chat__msg').length, 0, 'the stale answer was appended');
+  assert.ok(!h.byClass('fs-ask-chip__seg').some(n =>
+    String(n.props.className).includes('--unenforced')), 'the chips read the stale answer');
+  assert.strictEqual(h.byClass('fs-ask-chat__input')[0].props.disabled, false, 'busy never cleared');
+
+  /* The error path is dropped the same way. */
+  const e = mountAsk();
+  e.render({ context: SCOPED });
+  await e.ask('q');
+  e.render({ context: {} });
+  e.pending[0].reject(new Error('boom'));
+  for (let k = 0; k < 5; k++) await flushMicrotasks();
+  e.rerender();
+  assert.strictEqual(e.byClass('fs-ask-chat__msg').length, 0, 'the stale error was appended');
+  assert.strictEqual(e.byClass('fs-ask-chat__input')[0].props.disabled, false);
+});
+
+test('D-f a widen that lands mid-request is sent once the request settles', async () => {
+  const onContextChange = () => {};
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED, onContextChange });
+  await h.ask('first');
+  await h.settle(0, { answer: 'a', citations: [], applied_scope: { date: '2026-09-03' } });
+  h.byClass('fs-ask-chat__widen')[0].props.onClick();
+  /* The host is slow to apply it; the reader asks something else meanwhile. */
+  await h.ask('second');
+  h.render({ user: 'Ben', context: {}, onContextChange });
+  assert.strictEqual(h.asks.length, 2, 'sent while busy (it would have been dropped)');
+  await h.settle(1, { answer: 'b', citations: [] });
+  assert.strictEqual(h.asks.length, 3, 'the widen was dropped');
+  assert.deepStrictEqual(h.asks[2], { question: 'first', user: 'Ben' });
+});
+
+test('D-g a widen the host did not apply never fires on a later change', async () => {
+  const onContextChange = () => {};
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED, onContextChange });
+  await h.ask('first');
+  await h.settle(0, { answer: 'a', citations: [], applied_scope: { date: '2026-09-03' } });
+  h.byClass('fs-ask-chat__widen')[0].props.onClick();
+  /* The host moved to another day instead of clearing the scope. */
+  h.render({ user: 'Ben', context: Object.assign({}, SCOPED, { date: '2026-09-05' }), onContextChange });
+  assert.strictEqual(h.asks.length, 1, 'the widen fired into a scoped context');
+  h.render({ user: 'Ben', context: {}, onContextChange });
+  assert.strictEqual(h.asks.length, 1, 'a stale widen fired on a later, unrelated change');
+});
+
+test('D-h the chip remove button names what it removes', async () => {
+  const h = mountAsk();
+  h.render({ context: Object.assign({}, SCOPED, { topicRowId: 't', topicTitle: 'Crane' }),
+             onContextChange() {} });
+  const labels = h.byClass('fs-ask-chip__remove').map(n => n.props['aria-label']);
+  assert.deepStrictEqual(labels, ['Remove scope: Thu 3 Sep · UC PK · Ben', 'Remove scope: Topic: Crane']);
 });

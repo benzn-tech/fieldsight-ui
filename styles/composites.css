@@ -3579,7 +3579,12 @@
   background: var(--surface-panel-muted);
   color: var(--text-secondary);
 }
-.fs-ask-chip__seg { white-space: nowrap; }
+.fs-ask-chip__seg {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .fs-ask-chip__seg--unenforced {
   text-decoration: line-through;
   color: var(--text-tertiary);
@@ -3615,6 +3620,10 @@
   background: var(--surface-panel);
   color: var(--text-primary);
   cursor: pointer;
+}
+.fs-ask-chat__widen:focus-visible { outline: 2px solid var(--border-focus, var(--border-strong)); outline-offset: 2px; }
+@media (pointer: coarse) {
+  .fs-ask-chat__widen { min-height: 44px; }
 }
 .fs-topic-detail__ask { margin-top: 8px; }
 /* Visually hidden, still read by screen readers. */
