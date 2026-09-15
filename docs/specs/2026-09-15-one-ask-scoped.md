@@ -56,7 +56,7 @@ Pure helpers extracted from `ask-chat.js` and exported for tests:
   `tests/ask-timezone-and-basis.test.js` "ask still sends what it always sent" stays green and
   unchanged. `user` and `tz` are still sent.
 * **Chips** above the input, from `chipsFor(context)`: a day chip
-  `Wed 3 Sep · UC PK · Ben_UCPK2` (date + site name if any + owner; removed as one) and a topic
+  `Thu 3 Sep · UC PK · Ben_UCPK2` (date + site name if any + owner; removed as one) and a topic
   chip `Topic: Morning commercial chase…`. Removing the topic chip → `onContextChange(context
   minus topic*)`; removing the day chip → `onContextChange({})` (a topic cannot outlive its day).
   No chips when `context` is empty.
@@ -148,7 +148,7 @@ Mutation checks: add `scope` to `requestBodyFor` → test 1 red; build the basis
 
 As Ben_UCPK2, Timeline 2026-09-03:
 
-1. Exactly one Ask on the page; day chip `Wed 3 Sep · UC PK · Ben_UCPK2`.
+1. Exactly one Ask on the page; day chip `Thu 3 Sep · UC PK · Ben_UCPK2`.
 2. "Which actions are still open?" → every citation is 2026-09-03 / UC PK; no basis warning.
    Remove the day chip, ask again → citations span days.
 3. Topic "Morning commercial chase and landscaping cost escalation" → `Ask about this topic` →
