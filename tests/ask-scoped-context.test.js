@@ -239,3 +239,40 @@ test('3e the line comes from the response, not the request', () => {
   assert.notDeepStrictEqual(a, b);
   assert.strictEqual(S.basisLinesFor.length, 1, 'basisLinesFor must take the response only');
 });
+
+/* ---- 5. suggestions and placeholder follow the scope --------------------- */
+
+test('5a three contexts, three suggestion sets', () => {
+  const S = loadScope();
+  assert.deepStrictEqual(S.suggestionsFor(TOPIC),
+    ['What was decided?', 'Who is responsible for follow-ups?', 'Were any risks flagged?']);
+  assert.deepStrictEqual(S.suggestionsFor(DAY),
+    ['What were the safety issues?', 'Which actions are still open?', 'What was decided?']);
+  assert.deepStrictEqual(S.suggestionsFor({}),
+    ['What happened this week?', 'Which actions are overdue?']);
+});
+
+test('5b three contexts, three placeholders', () => {
+  const S = loadScope();
+  assert.strictEqual(S.placeholderFor(TOPIC), 'Ask about this topic…');
+  assert.strictEqual(S.placeholderFor(DAY), 'Ask about this day…');
+  assert.strictEqual(S.placeholderFor({}), 'Ask across all your projects…');
+});
+
+test('5c no suggestion is the fixture scaffold question', () => {
+  const S = loadScope();
+  [TOPIC, DAY, {}].forEach(function (ctx) {
+    S.suggestionsFor(ctx).concat([S.placeholderFor(ctx)]).forEach(function (s) {
+      assert.ok(!/scaffold/i.test(s), s);
+    });
+  });
+});
+
+test('3f a duplicate {field, reason} in dropped renders only one line', () => {
+  const S = loadScope();
+  const out = S.basisLinesFor({ applied_scope: { dropped: [
+    { field: 'site_id', reason: 'not_visible' },
+    { field: 'site_id', reason: 'not_visible' },
+  ] } });
+  assert.deepStrictEqual(out, ["Couldn't narrow to this project"]);
+});

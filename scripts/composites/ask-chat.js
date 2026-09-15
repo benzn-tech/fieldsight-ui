@@ -588,6 +588,26 @@
     return out;
   }
 
+  function scopeKind(context) {
+    var c = context || {};
+    if (present(c.topicRowId)) return 'topic';
+    return hasScope(c) ? 'day' : 'none';
+  }
+
+  var SCOPE_SUGGESTIONS = {
+    topic: ['What was decided?', 'Who is responsible for follow-ups?', 'Were any risks flagged?'],
+    day:   ['What were the safety issues?', 'Which actions are still open?', 'What was decided?'],
+    none:  ['What happened this week?', 'Which actions are overdue?'],
+  };
+  var SCOPE_PLACEHOLDER = {
+    topic: 'Ask about this topic…',
+    day:   'Ask about this day…',
+    none:  'Ask across all your projects…',
+  };
+
+  function suggestionsFor(context) { return SCOPE_SUGGESTIONS[scopeKind(context)].slice(); }
+  function placeholderFor(context) { return SCOPE_PLACEHOLDER[scopeKind(context)]; }
+
   function AskChat(props) {
     var date     = props.date;
     var user     = props.user;
@@ -908,13 +928,14 @@
   /* Exported so the wording can be pinned by a test without rendering React,
      and so SP-Ask's spoken variant can be written against the same dict. */
   window.FieldSight.formatAnswerBasis = formatAnswerBasis;
-  /* Pure scope helpers, exported for tests (tests/ask-scoped-context.test.js).
-     A later task adds suggestionsFor / placeholderFor to this same object. */
+  /* Pure scope helpers, exported for tests (tests/ask-scoped-context.test.js). */
   window.FieldSight.askScope = {
     requestBodyFor: requestBodyFor,
     hasScope:       hasScope,
     shortDay:       shortDay,
     chipsFor:       chipsFor,
     basisLinesFor:  basisLinesFor,
+    suggestionsFor: suggestionsFor,
+    placeholderFor: placeholderFor,
   };
 })();
