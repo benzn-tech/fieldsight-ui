@@ -952,6 +952,35 @@
   text-decoration: line-through;
 }
 
+/* =========================================================================
+   TodoHistory — provenance + version list (spec 2026-09-15 §2)
+   ========================================================================= */
+.fs-todo-history {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fs-todo-history--loading { color: var(--text-tertiary); }
+.fs-todo-history__link {
+  background: none; border: 0; padding: 0; font: inherit;
+  color: var(--text-link, var(--text-primary));
+  text-decoration: underline; cursor: pointer;
+}
+.fs-todo-history__link:focus-visible { outline: 2px solid var(--border-focus, currentColor); outline-offset: 2px; }
+.fs-todo-history__versions {
+  list-style: none; margin: 0; padding: 0 0 0 10px;
+  border-left: 2px solid var(--border-subtle);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.fs-todo-history__heading { display: flex; gap: 8px; align-items: baseline; }
+.fs-todo-history__tag { font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.fs-todo-history__when { color: var(--text-tertiary); }
+.fs-todo-history__body { color: var(--text-primary); word-break: break-word; }
+.fs-todo-history__body--field { color: var(--text-secondary); font-style: italic; }
+.fs-todo-history__who { color: var(--text-tertiary); }
+
 
 /* =========================================================================
    SafetyFlagRow — risk badge + observation + recommended action

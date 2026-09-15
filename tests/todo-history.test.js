@@ -133,3 +133,44 @@ test('formatWhen: zoned ISO is shown in NZ time', () => {
   assert.strictEqual(H.formatWhen('2026-09-15T22:23:00Z'), 'Wed 10:23 am');   // NZST +12
   assert.strictEqual(H.formatWhen(''), '');
 });
+
+/* ---- 10a: TodoHistory refreshes on a matching content:edited ------------- */
+const fsx = require('node:fs');
+const pathx = require('node:path');
+const todoSrc = fsx.readFileSync(pathx.join(__dirname, '..', 'scripts', 'composites', 'todo-history.js'), 'utf8').replace(/\r\n/g, '\n');
+
+test('10a SOURCE SCAN: TodoHistory subscribes via onContentEdited on its own id while open', () => {
+  const b = todoSrc.slice(todoSrc.indexOf('function TodoHistory('));
+  assert.match(b, /onContentEdited\('action_items', props\.actionItemId,/);
+  assert.match(b, /if \(!props\.open \|\| !props\.actionItemId/);
+});
+
+test('10a matching id re-runs the loader, a different id does not (real FS.events)', async () => {
+  const { createEvents } = require('../scripts/api/events.js');
+  const ev = createEvents();
+  let loads = 0;
+  const reload = () => { loads++; };
+  ev.onContentEdited('action_items', 'ai-1', reload);          // exactly what TodoHistory registers
+  ev.emit('content:edited', { table: 'action_items', id: 'ai-2' });
+  assert.strictEqual(loads, 0);
+  ev.emit('content:edited', { table: 'action_items', id: 'ai-1' });
+  assert.strictEqual(loads, 1);
+});
+
+test('TodoHistory statics exist on the window registration', () => {
+  global.window = { FieldSight: {}, FS: {} };
+  delete require.cache[require.resolve('../scripts/composites/todo-history.js')];
+  require('../scripts/composites/todo-history.js');
+  const T = window.FieldSight.TodoHistory;
+  assert.strictEqual(typeof T, 'function');
+  assert.strictEqual(typeof T.View, 'function');
+  assert.strictEqual(typeof T.provenanceFor, 'function');
+});
+
+test('TodoHistory closed renders nothing without FS.api (components-preview posture)', () => {
+  global.window = { FieldSight: {}, FS: {} };
+  delete require.cache[require.resolve('../scripts/composites/todo-history.js')];
+  require('../scripts/composites/todo-history.js');
+  assert.strictEqual(window.FieldSight.TodoHistory({ open: false, actionItemId: 'x' }), null);
+  assert.strictEqual(window.FieldSight.TodoHistory({ open: true }), null);
+});
