@@ -174,3 +174,134 @@ test('TodoHistory closed renders nothing without FS.api (components-preview post
   assert.strictEqual(window.FieldSight.TodoHistory({ open: false, actionItemId: 'x' }), null);
   assert.strictEqual(window.FieldSight.TodoHistory({ open: true }), null);
 });
+
+/* ---- review fix: drive the REAL component through a recording React ------
+   10a's coverage above pins wiring only (a regex, and FS.events exercised
+   directly without ever importing todo-history.js) — an emptied subscription
+   callback, or `tick` dropped from the fetch effect's deps, would still pass
+   both. This harness actually calls TodoHistory(props), runs the hooks it
+   registers, and re-renders to pick up state changes and re-run effects
+   whose deps changed — the same contract React itself gives components. */
+function makeHookHarness() {
+  const stateSlots = [];
+  const refSlots = [];
+  const effectSlots = []; // { deps, cleanup }
+  let stateIdx, refIdx, effectIdx, pending;
+
+  function shallowDiff(a, b) {
+    if (!a || !b || a.length !== b.length) return true;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return true;
+    return false;
+  }
+
+  function render(Component, props) {
+    stateIdx = 0; refIdx = 0; effectIdx = 0; pending = [];
+    const HookReact = {
+      createElement(type, p, ...children) { return { type: type, props: p || {}, children: children }; },
+      Fragment: 'Fragment',
+      useState(initial) {
+        const i = stateIdx++;
+        if (!(i in stateSlots)) stateSlots[i] = (typeof initial === 'function') ? initial() : initial;
+        const setter = (updater) => {
+          stateSlots[i] = (typeof updater === 'function') ? updater(stateSlots[i]) : updater;
+        };
+        return [stateSlots[i], setter];
+      },
+      useRef(v) {
+        const i = refIdx++;
+        if (!(i in refSlots)) refSlots[i] = { current: v };
+        return refSlots[i];
+      },
+      useEffect(fn, deps) {
+        const i = effectIdx++;
+        const prev = effectSlots[i];
+        const changed = !prev || shallowDiff(prev.deps, deps);
+        pending.push({ i: i, fn: fn, deps: deps, changed: changed, prevCleanup: prev && prev.cleanup });
+      },
+    };
+    global.React = HookReact;
+    const tree = Component(props);
+    pending.forEach(function (e) {
+      if (!e.changed) return;
+      if (e.prevCleanup) e.prevCleanup();
+      const cleanup = e.fn();
+      effectSlots[e.i] = { deps: e.deps, cleanup: cleanup };
+    });
+    return tree;
+  }
+
+  return { render: render };
+}
+
+async function flush() {
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+}
+
+function loadDrivenTodoHistory(events, getContentHistory, getSessionsCached) {
+  global.window = {
+    FieldSight: {},
+    FS: { api: { org: { getSessionsCached: getSessionsCached }, actions: { getContentHistory: getContentHistory } }, events: events },
+  };
+  delete require.cache[require.resolve('../scripts/composites/todo-history.js')];
+  require('../scripts/composites/todo-history.js');
+  return window.FieldSight.TodoHistory;
+}
+
+test('10b DRIVEN: matching content:edited re-runs the loader and re-fires onVersion; other id/table do not', async () => {
+  const { createEvents } = require('../scripts/api/events.js');
+  const events = createEvents();
+  let historyCalls = 0, sessionsCalls = 0;
+  const edits = [{ field: 'text', before_text: 'Order boards', after_text: 'Order replacement boards', actor_name: 'A', created_at: '2026-04-29T02:00:00+00:00' }];
+  const getContentHistory = async () => { historyCalls++; return { edits: edits }; };
+  const getSessionsCached = async () => { sessionsCalls++; return { sessions: [] }; };
+  const TodoHistory = loadDrivenTodoHistory(events, getContentHistory, getSessionsCached);
+
+  const versionCalls = [];
+  const props = {
+    open: true, actionItemId: 'ai-1', sessionId: 'S1', sessionKind: 'extraction',
+    date: '2026-04-29', folder: 'Benl1', currentText: 'Order replacement boards',
+    onVersion: (n) => versionCalls.push(n),
+  };
+
+  const h = makeHookHarness();
+  h.render(TodoHistory, props);
+  await flush();
+  assert.strictEqual(historyCalls, 1, 'opening should call getContentHistory once');
+  assert.deepStrictEqual(versionCalls, [1 + edits.length], 'onVersion must fire with 1 + edits.length after the initial load');
+
+  events.emit('content:edited', { table: 'action_items', id: 'ai-1' });   // matching -> bumps tick
+  h.render(TodoHistory, props);   // re-render: fetch effect deps include tick, must re-run
+  await flush();
+  assert.strictEqual(historyCalls, 2, 'a matching content:edited must re-run the loader');
+  assert.deepStrictEqual(versionCalls, [1 + edits.length, 1 + edits.length]);
+
+  events.emit('content:edited', { table: 'action_items', id: 'ai-2' });   // different id
+  events.emit('content:edited', { table: 'topics', id: 'ai-1' });         // different table
+  h.render(TodoHistory, props);
+  await flush();
+  assert.strictEqual(historyCalls, 2, 'a different id or table must not re-run the loader');
+  assert.strictEqual(sessionsCalls, 2, 'sessions is fetched alongside history each real load, not on the no-op renders');
+});
+
+test('10b DRIVEN: open:false makes zero calls and subscribes to nothing', async () => {
+  const { createEvents } = require('../scripts/api/events.js');
+  const events = createEvents();
+  let historyCalls = 0, sessionsCalls = 0;
+  const getContentHistory = async () => { historyCalls++; return { edits: [] }; };
+  const getSessionsCached = async () => { sessionsCalls++; return { sessions: [] }; };
+  const TodoHistory = loadDrivenTodoHistory(events, getContentHistory, getSessionsCached);
+
+  const h = makeHookHarness();
+  h.render(TodoHistory, { open: false, actionItemId: 'ai-1', sessionId: 'S1', date: '2026-04-29', folder: 'Benl1' });
+  await flush();
+  assert.strictEqual(historyCalls, 0);
+  assert.strictEqual(sessionsCalls, 0);
+
+  /* No subscription: emitting a matching event must not cause a later
+     re-render to see any additional calls (there is nothing to bump). */
+  events.emit('content:edited', { table: 'action_items', id: 'ai-1' });
+  h.render(TodoHistory, { open: false, actionItemId: 'ai-1', sessionId: 'S1', date: '2026-04-29', folder: 'Benl1' });
+  await flush();
+  assert.strictEqual(historyCalls, 0);
+  assert.strictEqual(sessionsCalls, 0);
+});
