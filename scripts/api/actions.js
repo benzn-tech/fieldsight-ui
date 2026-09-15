@@ -521,7 +521,32 @@
         '/content/' + encodeURIComponent(table) + '/' + encodeURIComponent(id) + '/history');
     }
     await window.FS.api.delay(40);
-    return { edits: [] };
+    return { edits: table === 'action_items' ? mockActionEdits(id) : [] };
+  }
+
+  /* Mock read serves the fixture's own data (CLAUDE.md "a read stub should
+     serve the day's own fixture"): an item stamped version N gets N-1
+     priority edits, newest first, so opening it under mocks agrees with its
+     chip instead of resetting it to v1 (spec 2026-09-15 §3.4/§8.3). */
+  function mockActionEdits(id) {
+    var reports = (((window.FieldSight || {}).fixtures || {}).reports) || {};
+    var version = 1;
+    Object.keys(reports).forEach(function (d) {
+      Object.keys(reports[d]).forEach(function (f) {
+        (reports[d][f].topics || []).forEach(function (t) {
+          (t.action_items || []).forEach(function (a) { if (a.id === id && a.version) version = a.version; });
+        });
+      });
+    });
+    var edits = [];
+    for (var k = version - 1; k >= 1; k--) {
+      edits.push({
+        id: 'mock-edit-' + id + '-' + k, field: 'priority',
+        before_text: k % 2 ? 'medium' : 'high', after_text: k % 2 ? 'high' : 'medium',
+        actor_name: 'Jack Gibson', created_at: '2026-04-29T0' + k + ':00:00+00:00',
+      });
+    }
+    return edits;
   }
 
   /* editable-content-correction — confirm a glossary candidate into a scoped
