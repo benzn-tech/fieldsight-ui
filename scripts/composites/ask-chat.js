@@ -486,6 +486,76 @@
     return body;
   }
 
+  var SCOPE_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var SCOPE_DAYS   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+  /* 'YYYY-MM-DD' -> 'Thu 3 Sep'. UTC arithmetic only (BUG-19): a date string
+     parsed as local time drifts a day in New Zealand. */
+  function shortDay(iso) {
+    var p = String(iso || '').split('-').map(Number);
+    if (p.length !== 3 || !p[0] || !p[1] || !p[2]) return String(iso || '');
+    var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+    return SCOPE_DAYS[d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + SCOPE_MONTHS[d.getUTCMonth()];
+  }
+
+  var TOPIC_CHIP_MAX = 24;
+  function truncateTitle(title) {
+    var t = String(title || '').trim();
+    if (t.length <= TOPIC_CHIP_MAX) return t;
+    var cut = t.slice(0, TOPIC_CHIP_MAX + 1);
+    var sp = cut.lastIndexOf(' ');
+    return (sp > 0 ? cut.slice(0, sp) : t.slice(0, TOPIC_CHIP_MAX)).trim() + '…';
+  }
+
+  /* null  = no answer yet: the chip shows the request, unmarked.
+     true  = the backend says it enforced this field.
+     false = it did not -- including a backend that predates applied_scope,
+             which must read as "not scoped" rather than silently scoped. */
+  function isEnforced(response, field) {
+    if (response === undefined) return null;
+    var applied = response && response.applied_scope;
+    return !!(applied && typeof applied === 'object'
+              && Object.prototype.hasOwnProperty.call(applied, field));
+  }
+
+  function chipsFor(context, response) {
+    var c = context || {};
+    var chips = [];
+
+    var segs = [];
+    if (present(c.date)) segs.push({ field: 'date', text: shortDay(c.date) });
+    if (present(c.siteId) && present(c.siteName)) segs.push({ field: 'site_id', text: c.siteName });
+    if (present(c.authorFolder)) segs.push({ field: 'author_folder', text: c.authorFolder });
+    if (segs.length) {
+      segs.forEach(function (s) { s.enforced = isEnforced(response, s.field); });
+      chips.push({
+        kind: 'day',
+        label: segs.map(function (s) { return s.text; }).join(' · '),
+        title: '',
+        segments: segs,
+        /* Removed as one, and it takes the topic with it: a topic is pinned
+           to its own day, so it cannot outlive the day chip. */
+        next: {},
+      });
+    }
+
+    if (present(c.topicRowId)) {
+      var rest = Object.assign({}, c);
+      delete rest.topicRowId;
+      delete rest.topicTitle;
+      var label = 'Topic: ' + (truncateTitle(c.topicTitle) || 'this topic');
+      chips.push({
+        kind: 'topic',
+        label: label,
+        title: c.topicTitle || '',
+        segments: [{ field: 'topic_row_id', text: label,
+                     enforced: isEnforced(response, 'topic_row_id') }],
+        next: rest,
+      });
+    }
+    return chips;
+  }
+
   function AskChat(props) {
     var date     = props.date;
     var user     = props.user;
@@ -812,5 +882,7 @@
   window.FieldSight.askScope = {
     requestBodyFor: requestBodyFor,
     hasScope:       hasScope,
+    shortDay:       shortDay,
+    chipsFor:       chipsFor,
   };
 })();

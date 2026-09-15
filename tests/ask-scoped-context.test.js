@@ -108,3 +108,76 @@ test('1e the api forwards scoped:true, and the real ask.js body carries it end t
   await api2.ask({ question: 'q', scoped: false, tz: null });
   assert.ok(!('scoped' in JSON.parse(JSON.stringify(cap2.body))), 'scoped:false leaked onto the wire');
 });
+
+/* ---- 2. chipsFor --------------------------------------------------------- */
+
+test('2a an empty context has no chips', () => {
+  const S = loadScope();
+  assert.deepStrictEqual(S.chipsFor({}), []);
+  assert.deepStrictEqual(S.chipsFor(undefined), []);
+});
+
+test('2b a day context is one chip: date · site · owner', () => {
+  const S = loadScope();
+  const chips = S.chipsFor(DAY);
+  assert.strictEqual(chips.length, 1);
+  assert.strictEqual(chips[0].kind, 'day');
+  /* 2026-09-03 is a Thursday (the spec example said Wed; computed, not typed). */
+  assert.strictEqual(chips[0].label, 'Thu 3 Sep · UC PK · Ben_UCPK2');
+  assert.deepStrictEqual(chips[0].segments.map(s => s.field), ['date', 'site_id', 'author_folder']);
+});
+
+test('2c a topic context is two chips, the topic title truncated', () => {
+  const S = loadScope();
+  const chips = S.chipsFor(TOPIC);
+  assert.deepStrictEqual(chips.map(c => c.kind), ['day', 'topic']);
+  assert.strictEqual(chips[1].label, 'Topic: Morning commercial chase…');
+  assert.strictEqual(chips[1].title, TOPIC.topicTitle, 'the full title belongs in the tooltip');
+});
+
+test('2d a day without siteId has no site segment', () => {
+  const S = loadScope();
+  const ctx = { date: '2026-09-03', authorFolder: 'Ben_UCPK2', siteName: 'UC PK' };
+  const chips = S.chipsFor(ctx);
+  assert.strictEqual(chips[0].label, 'Thu 3 Sep · Ben_UCPK2');
+  assert.ok(!chips[0].segments.some(s => s.field === 'site_id'));
+});
+
+test('2e removing the day clears the topic; removing the topic keeps the day', () => {
+  const S = loadScope();
+  const chips = S.chipsFor(TOPIC);
+  assert.deepStrictEqual(chips[0].next, {}, 'a topic cannot outlive its day');
+  assert.deepStrictEqual(chips[1].next, DAY);
+  assert.ok(!('topicRowId' in chips[1].next) && !('topicTitle' in chips[1].next));
+});
+
+test('2f the date label never goes through new Date(string)', () => {
+  const src = fs.readFileSync(require.resolve('../scripts/composites/ask-chat.js'), 'utf8');
+  const fn = src.slice(src.indexOf('function shortDay'), src.indexOf('function shortDay') + 400);
+  assert.match(fn, /Date\.UTC/);
+  assert.doesNotMatch(fn, /new Date\(iso/);
+});
+
+/* ---- 4. chips say what was enforced once an answer exists ---------------- */
+
+test('4a before any answer the chips show the request, unmarked', () => {
+  const S = loadScope();
+  S.chipsFor(TOPIC).forEach(c => c.segments.forEach(s =>
+    assert.strictEqual(s.enforced, null, s.field + ' marked before an answer')));
+});
+
+test('4b an answer whose applied_scope lacks author_folder marks the owner segment', () => {
+  const S = loadScope();
+  const res = { applied_scope: { date: '2026-09-03', site_id: 'site-uuid',
+    dropped: [{ field: 'author_folder', reason: 'not_visible' }] } };
+  const seg = f => S.chipsFor(DAY, res)[0].segments.find(s => s.field === f);
+  assert.strictEqual(seg('author_folder').enforced, false);
+  assert.strictEqual(seg('date').enforced, true);
+  assert.strictEqual(seg('site_id').enforced, true);
+});
+
+test('4c an answer with no applied_scope at all marks every segment not enforced', () => {
+  const S = loadScope();
+  S.chipsFor(TOPIC, { answer: 'x' }).forEach(c => c.segments.forEach(s =>
+    assert.strictEqual(s.enforced, false, s.field)));
+});
