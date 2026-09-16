@@ -1157,15 +1157,23 @@
      `kind` is a discriminator ('user' | 'site'), always the first segment,
      so the day branch's key and the site branch's key CANNOT collide by
      format alone (Task 6 fix round, minor). Before this they only avoided
-     colliding by coincidence: the site branch always passed '' for `owner`,
-     which only the day branch could also produce, and only when `site` was
-     itself falsy. A bare string equality can't tell "day branch, no owner"
-     from "site branch" apart once both omit the third segment; the prefix
-     makes that structurally impossible regardless of what either branch
-     ever passes as `owner`/`extra`. */
-  function askDayResetKey(kind, status, date, owner, siteId) {
+     colliding by coincidence: the site branch always passed '' for the
+     third segment, which only the day branch could also produce, and only
+     when `site` was itself falsy. A bare string equality can't tell "day
+     branch, no owner" from "site branch" apart once both omit that segment;
+     the prefix makes that structurally impossible regardless of what either
+     branch passes.
+
+     `subject` and `detail` are deliberately neutral: the two call sites put
+     different things in them. The 'user' branch passes the author folder as
+     `subject` and the report's resolved site_id (or a falsy value) as
+     `detail`, so a site re-attribution on the same day still changes the
+     key. The 'site' branch passes the site uuid as `subject` and a '1'/'0'
+     "name resolved yet" flag as `detail`, so the key changes once
+     `sitesList` fills in the name and the same uuid republishes with it. */
+  function askDayResetKey(kind, status, date, subject, detail) {
     if (status === 'loading') return null;
-    return [kind, date || '', owner || '', siteId || ''].join('|');
+    return [kind, date || '', subject || '', detail || ''].join('|');
   }
 
   /* Is a day's content actually resolved on screen? The dock gates on this,
@@ -2343,7 +2351,15 @@
          swallowed the second run, and the visit stayed unscoped by project
          for the rest of the visit (Task 6 review). The bit only ever moves
          0 -> 1 once, so a later `sitesList` refresh that still resolves the
-         same name republishes nothing further. */
+         same name republishes nothing further.
+
+         Known, not fixed: this republish (the 0 -> 1 name-resolved one, in
+         particular) can land AFTER a reader has clicked "Ask across
+         everything" (which sets context to {} in ask-chat.js). If it does,
+         it clears the widened answer the reader is looking at. The window
+         is sub-second — a network response beating the seconds a human
+         needs to read an empty answer and click the button — so this is
+         recorded rather than chased with more state. */
       if (site && teamView) {
         var siteName = (sitesList.find(function (s) { return s.site_id === site; }) || {}).name;
         var siteDayKey = askDayResetKey('site', state.status, date, site, siteName ? '1' : '0');

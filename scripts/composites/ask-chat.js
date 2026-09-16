@@ -737,18 +737,29 @@
       if (!resetMountedRef.current) { resetMountedRef.current = true; return; }
       var enrichedSiteOnly = !!(prevScope && prevScope.date === context.date
         && prevScope.authorFolder === context.authorFolder && !prevScope.siteId && context.siteId);
-      if (enrichedSiteOnly) return;
-      dayChangeTokenRef.current = renderCommitToken;
-      genRef.current += 1;
-      setMsgs([]);
-      /* Always consumed here, sent or not: a question left in the ref would
-         otherwise fire on some later, unrelated context change. It is only
-         sent when the new context is the unscoped one "Ask across
-         everything" asked for -- a host that applied something else did not
-         honour the widen. */
+      /* Consumed here on EVERY republish this effect handles, enrichment
+         included, sent or not: a question left in the ref would otherwise
+         fire on some later, unrelated context change. It is only sent when
+         the new context is the unscoped one "Ask across everything" asked
+         for -- a host that applied something else did not honour the
+         widen. This has to happen before the enrichment return below:
+         enrichment does not clear the conversation, but a pending widen
+         must not be allowed to survive it and fire on a later, unrelated
+         change either -- otherwise the reader's "Ask across everything"
+         can silently do nothing until then. */
       var pending = resendRef.current;
       resendRef.current = null;
       deferredResendRef.current = null;
+      if (enrichedSiteOnly) {
+        if (pending && !hasScope(context)) {
+          if (busy) deferredResendRef.current = pending;
+          else send(pending);
+        }
+        return;
+      }
+      dayChangeTokenRef.current = renderCommitToken;
+      genRef.current += 1;
+      setMsgs([]);
       if (pending && !hasScope(context)) {
         if (busy) deferredResendRef.current = pending;
         else send(pending);

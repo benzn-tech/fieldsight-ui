@@ -1177,10 +1177,56 @@ test('S14 the republish that only fills in the site name keeps the conversation'
     'the site name resolving announced itself as a switch');
 });
 
+test('S16 a pending widen does not survive an enrichment publish', async () => {
+  /* Regression for the finding: the enrichment early return used to skip
+     consuming resendRef/deferredResendRef entirely. If a site-name republish
+     (enrichment) lands between a widen click and the {} it asked for, the
+     OLD question must not sit in the ref waiting to fire on some later,
+     unrelated context change -- it must be gone by the time that change
+     arrives. */
+  const NO_SITE_YET = { date: '2026-09-04', authorFolder: 'Ben' };
+  const NAMED = { date: '2026-09-04', authorFolder: 'Ben', siteId: 'site-uuid', siteName: 'UC PK' };
+  const spy = [];
+  const onContextChange = c => spy.push(c);
+
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: NO_SITE_YET, onContextChange });
+  await h.ask('q');
+  await h.settle(0, { answer: 'a', citations: [], applied_scope: { date: '2026-09-04' } });
+  h.byClass('fs-ask-chat__widen')[0].props.onClick();
+  assert.deepStrictEqual(spy, [{}], 'the widen did not ask the host to clear scope');
+  assert.strictEqual(h.asks.length, 1, 'sanity: only the first ask happened so far');
+
+  /* The host's own site effect wins the race and republishes the newly
+     resolved name INSTEAD of the {} the widen asked for -- same date and
+     author, siteId arriving for the first time: an enrichment, not the
+     switch the widen wanted. */
+  h.render({ user: 'Ben', context: NAMED, onContextChange });
+  h.rerender();
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1,
+    'enrichment cleared the conversation');
+
+  /* Some later, wholly unrelated navigation drops scope to {}. Under the
+     bug this resends the STALE widen question into a context the reader
+     never asked about; fixed, the pending ref was already cleared at the
+     enrichment step above and nothing fires. */
+  h.render({ user: 'Ben', context: {}, onContextChange });
+  h.rerender();
+  assert.strictEqual(h.asks.length, 1,
+    'a stale widen resent itself on an unrelated later context change');
+});
+
 test('S15 access-denied gets no dock, and it is folded into the shared readiness rule', () => {
+  /* This first assertion only re-proves "askReady=false renders no dock"
+     (already covered by 9f/9g/9h) -- it passes askReady=false directly, not
+     the 'access_denied' status. The real new coverage for access-denied is
+     the askDockHasContent assertion below. Kept because a real
+     TimelineAskDock render with askReady=false is still a cheap sanity
+     check that the dock component itself has no separate access-denied
+     branch of its own. */
   const mod = loadDock(DAY_ONLY, false);
   assert.strictEqual(mod.TimelineAskDock({ selectedItem: null }), null,
-    'access-denied rendered a date-only Ask over "you cannot see this"');
+    'the dock rendered something even with askReady=false');
 
   const { mod: pure } = loadTimeline();
   assert.strictEqual(pure.askDockHasContent('access_denied', false, false), false,
