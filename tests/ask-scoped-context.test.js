@@ -712,6 +712,42 @@ test('D-q a topic-only change still appends a divider after an EARLIER day-only 
   assert.strictEqual(h.text(dividers[0]), 'Now asking about: Crane');
 });
 
+test('D-o suggestions are absent until the input is focused', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED, variant: 'dock' });
+  assert.strictEqual(h.byClass('fs-ask-chat__suggestion').length, 0,
+    'the dock showed suggestions before the input was focused');
+
+  h.byClass('fs-ask-chat__input')[0].props.onFocus();
+  h.rerender();
+  assert.strictEqual(h.byClass('fs-ask-chat__suggestion').length, 3,
+    'focusing the input did not reveal the suggestions');
+
+  await h.ask('what happened');
+  assert.strictEqual(h.byClass('fs-ask-chat__suggestion').length, 0,
+    'suggestions stayed once there was history, even though the input is still focused');
+
+  /* The non-dock (search palette) mount must be byte-for-byte unaffected:
+     suggestions still show on an empty log without focus (spec 2026-09-16
+     §5 -- `focused` only narrows the dock's rule, it never widens anyone
+     else's). */
+  const p = mountAsk();
+  p.render({ user: 'Ben', context: SCOPED });
+  assert.strictEqual(p.byClass('fs-ask-chat__suggestion').length, 3,
+    'the palette mount regressed: it now requires focus for suggestions');
+});
+
+test('D-p the message log is not rendered until there is something in it', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED, variant: 'dock' });
+  assert.strictEqual(h.byClass('fs-ask-chat__overlay').length, 0,
+    'the dock rendered an overlay with nothing in it');
+
+  await h.ask('what happened');
+  assert.strictEqual(h.byClass('fs-ask-chat__overlay').length, 1,
+    'asking a question did not open the overlay');
+});
+
 /* ---- Timeline --------------------------------------------------------- */
 
 function makeReactStub(extra) {

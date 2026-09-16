@@ -25,6 +25,13 @@
                      everything"; without it chips have no remove button
      focusNonce      number — a change scrolls the Ask into view and focuses
                      its input (Timeline's "Ask about this topic")
+     variant         'dock' — the docked bar (docs/specs/2026-09-16-ask-dock.md
+                     §5): chips + input row only; suggestions show only while
+                     the input is focused or empty-log-and-non-dock; the
+                     message log renders in an absolutely-positioned overlay
+                     anchored above the bar, shown only while it has
+                     something in it, so the bar's own height never changes
+                     and nothing below it ever reflows.
      user            folder-name string (optional — server handles default)
      placeholder     overrides placeholderFor(context)
      suggestions     overrides suggestionsFor(context)
@@ -627,6 +634,17 @@
     var busy    = refBusy[0];
     var setBusy = refBusy[1];
 
+    /* Dock-only state (docs/specs/2026-09-16-ask-dock.md §5). Declared
+       unconditionally, same as every other hook here, so the hook order
+       never depends on `dock` -- a non-dock mount just never reads them. */
+    var dock = props.variant === 'dock';
+    var refFocus = React.useState(false);
+    var focused    = refFocus[0];
+    var setFocused = refFocus[1];
+    var refCollapsed = React.useState(false);
+    var collapsed    = refCollapsed[0];
+    var setCollapsed = refCollapsed[1];
+
     var listRef = React.useRef(null);
     var rootRef  = React.useRef(null);
     var inputRef = React.useRef(null);
@@ -790,6 +808,9 @@
       setMsgs(function (m) { return m.concat([userMsg]); });
       setQ('');
       setBusy(true);
+      /* A new question always re-opens the overlay: closing it (dock only)
+         hides the conversation, not the ability to ask another one. */
+      setCollapsed(false);
 
       /* The alerts route (routing spec 3.5). Answered here rather than by
          the agent because every signal is already on the client and none of
@@ -914,26 +935,42 @@
     }
     var chips = chipsFor(context, lastAnswer ? lastAnswer.scopeResponse : undefined);
 
-    var className = 'fs-ask-chat' + (props.compact ? ' fs-ask-chat--compact' : '');
+    var className = 'fs-ask-chat'
+      + (props.compact ? ' fs-ask-chat--compact' : '')
+      + (dock ? ' fs-ask-chat--dock' : '');
 
     return React.createElement('div', { className: className, ref: rootRef },
 
-      /* Suggestions row — only shown while history is empty. */
-      suggestions && suggestions.length > 0 && msgs.length === 0
+      /* Suggestions row — only shown while history is empty, and in dock
+         mode only while the input is focused (spec 2026-09-16 §5): `focused`
+         narrows the shipped rule and never widens it, so the palette mount
+         (dock === false) keeps showing suggestions on an empty log without
+         focus, exactly as it does today. */
+      suggestions && suggestions.length > 0 && msgs.length === 0 && (!dock || focused)
         ? React.createElement('div', { className: 'fs-ask-chat__suggestions' },
             suggestions.map(function (s, i) {
               return React.createElement('button', {
                 key: i, type: 'button',
                 className: 'fs-ask-chat__suggestion',
                 onClick:   function () { send(s); },
+                /* Without this, the input's blur (triggered by the mousedown
+                   moving focus) hides this row before the click lands, and
+                   the buttons become unclickable — a real trap, not a
+                   nicety. preventDefault on mousedown stops focus moving at
+                   all, so no blur ever fires. */
+                onMouseDown: function (e) { e.preventDefault(); },
                 disabled:  busy,
               }, s);
             })
           )
         : null,
 
-      /* Message log */
-      React.createElement('div', {
+      /* Message log — an OVERLAY in dock mode, rendered only when it has
+         something to show and never as a normal flow child, so the bar's
+         own height never changes and nothing below it ever reflows (spec
+         2026-09-16 §5, the no-reflow seam). Unchanged inline log otherwise. */
+      (function () {
+        var messagesDiv = React.createElement('div', {
         className: 'fs-ask-chat__messages',
         ref:       listRef,
       },
@@ -1055,7 +1092,18 @@
           React.createElement('span', { className: 'fs-ask-chat__pending-label' },
             'Looking through your records…'),
         ) : null,
-      ),
+      );
+        if (!dock) return messagesDiv;
+        var closeBtn = React.createElement('button', {
+          type: 'button',
+          className: 'fs-ask-chat__overlay-close',
+          'aria-label': 'Hide the conversation',
+          onClick: function () { setCollapsed(true); },
+        }, 'Hide');
+        return (msgs.length > 0 || busy) && !collapsed
+          ? React.createElement('div', { className: 'fs-ask-chat__overlay' }, closeBtn, messagesDiv)
+          : null;
+      })(),
 
       chips.length
         ? React.createElement('div', {
@@ -1110,6 +1158,10 @@
           placeholder: props.placeholder || placeholderFor(context),
           value:     q,
           onChange:  function (e) { setQ(e.target.value); },
+          /* Dock only in effect (suggestions and the overlay's open/closed
+             state don't exist outside `dock`), harmless to set elsewhere. */
+          onFocus:   function () { setFocused(true); setCollapsed(false); },
+          onBlur:    function () { setFocused(false); },
           disabled:  busy,
         }),
         React.createElement('button', {

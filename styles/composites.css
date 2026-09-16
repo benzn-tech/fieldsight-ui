@@ -3676,6 +3676,63 @@
   .fs-ask-chat__widen { min-height: 44px; }
 }
 .fs-topic-detail__ask { margin-top: 8px; }
+
+/* The docked Ask (docs/specs/2026-09-16-ask-dock.md).
+   The conversation is an OVERLAY: absolutely positioned against the dock and
+   rendered only when there is something in it, so the topic list above never
+   moves and never reflows. A flow child here would push the list up and
+   restore the complaint this spec exists to answer. */
+.fs-ask-chat--dock {
+  position: relative;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  padding: 10px 20px;
+  gap: 6px;
+  background: var(--surface-panel);
+}
+.fs-ask-chat--dock .fs-ask-chat__overlay {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 50vh;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-bottom: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-lg);
+}
+.fs-ask-chat--dock .fs-ask-chat__messages {
+  max-height: none;
+  padding: 8px 12px 12px;
+}
+.fs-ask-chat__overlay-close {
+  align-self: flex-end;
+  font: inherit;
+  font-size: 12px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.fs-ask-chat__overlay-close:hover { color: var(--text-primary); }
+.fs-ask-chat__msg--divider {
+  align-self: center;
+  max-width: 100%;
+}
+.fs-ask-chat__divider-text {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: center;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
 /* Visually hidden, still read by screen readers. */
 .fs-sr-only {
   position: absolute;

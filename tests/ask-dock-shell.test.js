@@ -14,6 +14,7 @@ const read = (...p) => fs.readFileSync(path.join(__dirname, '..', ...p), 'utf8')
 const js  = read('scripts', 'app-shell.js');
 const css = read('styles', 'app-shell.css');
 const registry = read('scripts', 'pages', '_page-registry.js');
+const composites = read('styles', 'composites.css');
 
 function sliceMiddleColumn() {
   const start = js.indexOf('function MiddleColumn(');
@@ -124,4 +125,33 @@ test('S4 the footer class has a rule and it does not shrink', () => {
 
 test('S5 the registry documents the slot', () => {
   assert.match(registry, /Footer/);
+});
+
+/* Slice the dock's own CSS out of the shared composites.css file, so S6/S7
+   pin only what this task added, not the whole file (which already has
+   unrelated @media (max-width:) rules from before this branch). */
+function sliceDockCss() {
+  const start = composites.indexOf('.fs-ask-chat--dock');
+  assert.ok(start >= 0, '.fs-ask-chat--dock rule not found');
+  const end = composites.indexOf('/* Visually hidden, still read by screen readers. */', start);
+  assert.ok(end > start, 'end marker after the dock CSS block not found');
+  return composites.slice(start, end);
+}
+
+test('S6 the overlay is absolutely positioned against a relatively positioned dock', () => {
+  const slice = sliceDockCss();
+  const dockBlock = slice.match(/\.fs-ask-chat--dock\s*\{([^}]*)\}/);
+  assert.ok(dockBlock, '.fs-ask-chat--dock rule not found');
+  assert.match(dockBlock[1], /position:\s*relative/);
+
+  const overlayBlock = slice.match(/\.fs-ask-chat--dock \.fs-ask-chat__overlay\s*\{([^}]*)\}/);
+  assert.ok(overlayBlock, '.fs-ask-chat--dock .fs-ask-chat__overlay rule not found');
+  assert.match(overlayBlock[1], /position:\s*absolute/);
+  assert.match(overlayBlock[1], /bottom:\s*100%/);
+});
+
+test('S7 the dock CSS has no phone-width media query', () => {
+  const slice = sliceDockCss();
+  assert.doesNotMatch(slice, /@media \(max-width:/,
+    'phone layouts are out of scope for the dock (spec 2026-09-16 §2)');
 });
