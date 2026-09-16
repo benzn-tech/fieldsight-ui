@@ -1417,9 +1417,23 @@ test('S10 the middle column publishes readiness from the same predicates it rend
   assert.match(mid, /setAskReady\(/, 'the column never publishes readiness to the dock');
 
   /* The inline copies must be gone, or a later edit can change one and not
-     the other. */
-  assert.doesNotMatch(mid, /if \(!site && teamView && sitesList\.length > 1\)/,
-    'the picker branch still carries its own copy of the condition');
-  assert.doesNotMatch(mid, /if \(report && report\.available_users && !hasMeeting\)/,
-    'the user-picker branch still carries its own copy of the condition');
+     the other. A wording-level regex (`doesNotMatch` against a literal
+     `if (...)` string) is defeated by any equivalent rewrite — reordered
+     operands, extra parens, a renamed local, or a second predicate spelled
+     differently in a third branch. Counting the distinctive tokens instead
+     catches all of those: the correct source has exactly one
+     `sitesList.length > 1` (inside `showSitePicker`'s own declaration) and
+     exactly nine `available_users` occurrences (the picker predicate plus
+     every other legitimate read of that field in this function) — a second,
+     reworded copy of either predicate raises its count regardless of how
+     it is phrased. */
+  function countOccurrences(haystack, needle) {
+    let count = 0, i = 0;
+    while ((i = haystack.indexOf(needle, i)) !== -1) { count += 1; i += needle.length; }
+    return count;
+  }
+  assert.strictEqual(countOccurrences(mid, 'sitesList.length > 1'), 1,
+    'sitesList.length > 1 appears more than once — a second copy of the site-picker predicate');
+  assert.strictEqual(countOccurrences(mid, 'available_users'), 9,
+    'available_users appears a different number of times than the known-good source — a second copy of the user-picker predicate');
 });
