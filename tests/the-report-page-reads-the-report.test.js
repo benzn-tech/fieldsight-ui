@@ -122,7 +122,7 @@ test('a field the backend did not declare never reaches a reader', () => {
 
 test('the sections come out in the order the backend put them', () => {
   assert.deepStrictEqual(titles(REPORT),
-    ['Summary', 'On Site', 'Actions', 'Issues & Quality', 'Open Questions']);
+    ['Summary', 'Actions', 'Issues & Quality', 'Open Questions']);
 });
 
 test('a narrative section is its text', () => {
@@ -131,13 +131,16 @@ test('a narrative section is its text', () => {
   assert.strictEqual(s.body, 'A day on level three.');
 });
 
-test('a kpi section is labelled values', () => {
-  const s = byTitle(REPORT, 'On Site');
-  assert.deepStrictEqual(s.body, [
-    { label: 'Recordings', value: '3' },
-    { label: 'Duration', value: '2m 52s' },
-    { label: 'Photos', value: '6' },
-  ]);
+test('the recording counts never reach a reader, from any report', () => {
+  /* The backend stopped building this section, but every report generated
+     before that still carries one, and regenerating a year of reports to
+     remove three numbers is not the fix. */
+  assert.ok(titles(REPORT).indexOf('On Site') === -1);
+  const r = Object.assign({}, REPORT, { sections: [
+    { title: 'Recording', kind: 'kpi', fields: ['recordings'], values: { recordings: 229 } },
+    { title: 'Summary', kind: 'narrative', body: 'A day.' },
+  ] });
+  assert.deepStrictEqual(titles(r), ['Summary']);
 });
 
 test('a list section is its items', () => {
@@ -168,13 +171,13 @@ test('a column every row leaves blank is dropped, not left as an empty header', 
 });
 
 test('a zero is a value and is kept', () => {
-  /* "Photos 0" is a fact about the day. Treating falsy as absent would hide
-     it and leave the reader to assume nobody looked. */
+  /* A cell that happens to be 0 or false is a measurement, not an absence.
+     Treating falsy as empty would drop a column that says "none found". */
   const r = Object.assign({}, REPORT, { sections: [{
-    title: 'On Site', kind: 'kpi', fields: ['photos'], values: { photos: 0 },
+    title: 'Counts', kind: 'table', fields: ['item', 'found'],
+    rows: [{ item: 'Defects', found: 0 }],
   }] });
-  assert.deepStrictEqual(byTitle(r, 'On Site').body,
-    [{ label: 'Photos', value: '0' }]);
+  assert.deepStrictEqual(byTitle(r, 'Counts').body.rows, [['Defects', '0']]);
 });
 
 /* ---------- degrading ---------------------------------------------------- */
@@ -331,11 +334,13 @@ test('a weekly report keeps its span in the subtitle', () => {
   assert.ok(vm.reportSubtitle(weekly).indexOf('→') !== -1, vm.reportSubtitle(weekly));
 });
 
-test('the header is site, user, date and time — and nothing about the recording', () => {
+test('the header is site, user and date — nothing about the recording', () => {
+  /* `Time` went too. A span from the first recording to the last describes
+     when the device was on, which is the same kind of fact as the counts that
+     went before it. */
   const map = {};
   vm.headerFacts(REPORT).forEach(function (f) { map[f.label] = f.value; });
-  assert.deepStrictEqual(Object.keys(map), ['Site', 'User', 'Date', 'Time']);
-  assert.strictEqual(map.Time, '07:02 – 17:45');
+  assert.deepStrictEqual(Object.keys(map), ['Site', 'User', 'Date']);
 });
 
 test('one recording is a time, not a span that reads as a stuck clock', () => {
