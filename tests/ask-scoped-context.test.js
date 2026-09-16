@@ -283,9 +283,8 @@ const askSrc = () => fs.readFileSync(require.resolve('../scripts/composites/ask-
 
 /* What the driven tests below do not reach: the focus effect needs a DOM, and
    the two override props are one expression each. */
-test('W4 focus and the suggestion/placeholder overrides are wired', () => {
+test('W4 the suggestion/placeholder overrides are wired', () => {
   const src = askSrc();
-  assert.match(src, /\[props\.focusNonce\]/);
   assert.match(src, /props\.suggestions \|\| suggestionsFor\(context\)/);
   assert.match(src, /props\.placeholder \|\| placeholderFor\(context\)/);
 });
@@ -561,31 +560,6 @@ test('D-g a widen the host did not apply never fires on a later change', async (
   assert.strictEqual(h.asks.length, 1, 'the widen fired into a scoped context');
   h.render({ user: 'Ben', context: {}, onContextChange });
   assert.strictEqual(h.asks.length, 1, 'a stale widen fired on a later, unrelated change');
-});
-
-test('D-i a focus request fires once; a remount with the same nonce does not refire it', () => {
-  const h = mountAsk();
-  h.render({ user: 'Ben', context: SCOPED, focusNonce: 0 });
-  assert.strictEqual(h.dom.scrolls.length + h.dom.focuses.length, 0, 'focused on a plain mount');
-
-  h.render({ user: 'Ben', context: SCOPED, focusNonce: 1 });
-  assert.strictEqual(h.dom.scrolls.length, 1, 'a nonce bump did not scroll the Ask into view');
-  assert.strictEqual(h.dom.focuses.length, 1, 'a nonce bump did not focus the input');
-  assert.strictEqual(h.dom.scrolls[0].behavior, 'smooth');
-
-  h.rerender();
-  assert.strictEqual(h.dom.scrolls.length, 1, 'a rerender with the same nonce scrolled again');
-
-  /* Day change / refetch: the middle column unmounts AskChat and mounts it
-     again, while the Provider still holds nonce 1. */
-  h.unmount();
-  h.render({ user: 'Ben', context: SCOPED, focusNonce: 1 });
-  assert.strictEqual(h.dom.scrolls.length, 1, 'a remount with an old nonce scrolled the page');
-  assert.strictEqual(h.dom.focuses.length, 1, 'a remount with an old nonce focused the input');
-
-  /* The remounted Ask still answers a new request. */
-  h.render({ user: 'Ben', context: SCOPED, focusNonce: 2 });
-  assert.strictEqual(h.dom.focuses.length, 2, 'a new request after a remount was ignored');
 });
 
 test('D-h the chip remove button names what it removes', async () => {
@@ -875,14 +849,14 @@ test('6c the Provider holds only the ask fields', () => {
   const { page } = loadTimeline({ createContext() { return { Provider: 'AskCtxProvider' }; } });
   const el = page.Provider({ children: 'kids' });
   assert.strictEqual(el.type, 'AskCtxProvider');
-  assert.deepStrictEqual(Object.keys(el.props.value).sort(),
-    ['askContext', 'askFocusNonce', 'hasAsk', 'requestAskFocus', 'setAskContext', 'setHasAsk']);
-  assert.strictEqual(el.props.value.hasAsk, false, 'a fresh page claims an Ask is mounted');
+  assert.deepStrictEqual(Object.keys(el.props.value).sort(), ['askContext', 'setAskContext']);
 });
 
-test('6e outside a Provider there is no Ask to point a topic button at', () => {
+test('6e outside a Provider there is no hasAsk to gate on', () => {
   const { mod } = loadTimeline();
-  assert.strictEqual(mod.useTimelineAsk().hasAsk, false);
+  const api = mod.useTimelineAsk();
+  assert.ok(!('hasAsk' in api), 'hasAsk still exists outside a Provider');
+  assert.doesNotThrow(() => api.setAskContext({}));
 });
 
 test('6d exactly one AskChat mount remains, and it is inside the dock', () => {
@@ -897,69 +871,27 @@ test('6d exactly one AskChat mount remains, and it is inside the dock', () => {
     'the one AskChat mount is not inside TimelineAskDock');
 });
 
-/* ---- 7. Ask about this topic ------------------------------------------ */
-
-test('7a the button is hidden for a topic without topic_row_id', () => {
+test('6f nothing exported names a deleted function', () => {
   const { mod } = loadTimeline();
-  assert.strictEqual(mod.TopicAskButton({ topic: { topic_id: 2 }, hasAsk: true, onAsk() {} }), null);
-  assert.strictEqual(mod.TopicAskButton({ topic: null, hasAsk: true, onAsk() {} }), null);
+  Object.values(mod).forEach(v => assert.ok(v !== undefined));
 });
 
-test('7a2 the button is hidden when no Ask is mounted (aggregated site view)', () => {
+test('6g the right detail no longer pins anything', () => {
+  const src = timelineSrc();
+  const right = src.slice(src.indexOf('function TimelineRightDetail('), src.indexOf('/* ---------- Register'));
+  assert.doesNotMatch(right, /TopicAskButton/);
+  assert.doesNotMatch(right, /pinTopicAsk\(/);
+  assert.doesNotMatch(right, /hasAsk/);
+  assert.strictEqual((right.match(/setAskContext\(/g) || []).length, 0,
+    'the right detail must not set the context on selection');
+});
+
+test('6h useTimelineAsk outside a Provider is inert and complete', () => {
   const { mod } = loadTimeline();
-  assert.strictEqual(mod.topicAskVisible(true, { topic_row_id: 't' }), true);
-  assert.strictEqual(mod.topicAskVisible(false, { topic_row_id: 't' }), false);
-  assert.strictEqual(mod.topicAskVisible(undefined, { topic_row_id: 't' }), false);
-  assert.strictEqual(mod.topicAskVisible(true, { topic_id: 2 }), false);
-  /* Driven through the component, not only the helper. */
-  assert.strictEqual(mod.TopicAskButton({ topic: { topic_row_id: 't' }, hasAsk: false, onAsk() {} }), null,
-    'a topic button rendered with no Ask on the page');
+  assert.deepStrictEqual(Object.keys(mod.useTimelineAsk()).sort(), ['askContext', 'setAskContext']);
 });
 
-test('7a3 AskPresence publishes hasAsk for exactly as long as it is mounted', () => {
-  const effects = [];
-  const { mod } = loadTimeline({ useEffect(fn) { effects.push(fn); } });
-  const seen = [];
-  assert.strictEqual(mod.AskPresence({ setHasAsk: v => seen.push(v) }), null);
-  assert.strictEqual(effects.length, 1);
-  const cleanup = effects[0]();
-  assert.deepStrictEqual(seen, [true], 'mounting the Ask did not publish hasAsk');
-  assert.strictEqual(typeof cleanup, 'function', 'unmounting the Ask would leave hasAsk true');
-  cleanup();
-  assert.deepStrictEqual(seen, [true, false]);
-});
-
-/* 7a4 ("the presence marker sits next to the one AskChat mount") is deleted
-   here rather than in Task 5: Task 4 removes the in-body mount that AskPresence
-   was mounted beside, so the wiring it pinned no longer exists. It is on Task
-   5's delete list already (plan, "What happens to every test"). */
-
-test('7b the button renders and clicking it calls onAsk', () => {
-  const { mod } = loadTimeline();
-  let clicked = 0;
-  const el = mod.TopicAskButton({ topic: { topic_row_id: 't' }, hasAsk: true, onAsk() { clicked++; } });
-  assert.strictEqual(el.type, 'button');
-  assert.deepStrictEqual(el.children, ['Ask about this topic']);
-  el.props.onClick();
-  assert.strictEqual(clicked, 1);
-});
-
-test('7c pinning sets topicRowId on the current day and bumps the focus nonce', () => {
-  const { mod } = loadTimeline();
-  const api = {
-    askContext: DAY, askFocusNonce: 4, set: null,
-    setAskContext(next) { this.set = next; },
-    requestAskFocus() { this.askFocusNonce++; },
-  };
-  const ok = mod.pinTopicAsk(api,
-    { topic_row_id: 'topic-uuid', topic_title: 'Morning commercial chase' },
-    { date: '2026-09-03', authorFolder: 'Ben_UCPK2' });
-  assert.strictEqual(ok, true);
-  assert.strictEqual(api.set.topicRowId, 'topic-uuid');
-  assert.strictEqual(api.set.topicTitle, 'Morning commercial chase');
-  assert.strictEqual(api.set.siteName, 'UC PK', 'the current day scope is kept');
-  assert.strictEqual(api.askFocusNonce, 5);
-});
+/* ---- 7. topic scope helpers -------------------------------------------- */
 
 test('7d pinning from an empty or other-day context uses the topic\'s own day', () => {
   const { mod } = loadTimeline();
@@ -988,16 +920,6 @@ test('7d2 the current scope is kept only when it is the topic\'s own day, owner 
   /* Site known on one side only is not a mismatch. */
   assert.strictEqual(mod.askContextWithTopic(DAY, T,
     { date: '2026-09-03', authorFolder: 'Ben_UCPK2' }).siteName, 'UC PK');
-});
-
-test('7e the topic detail header mounts the button; selecting a topic does not touch the context', () => {
-  const src = timelineSrc();
-  const right = src.slice(src.indexOf('function TimelineRightDetail('), src.indexOf('/* ---------- Register'));
-  assert.match(right, /React\.createElement\(TopicAskButton/);
-  assert.match(right, /pinTopicAsk\(/);
-  /* Only the button changes the Ask context from this column. */
-  assert.strictEqual((right.match(/setAskContext\(/g) || []).length, 0,
-    'the right detail must go through pinTopicAsk, not set the context on selection');
 });
 
 /* ---- 8. day changes reset; palette hand-off is global ------------------ */

@@ -3675,7 +3675,6 @@
 @media (pointer: coarse) {
   .fs-ask-chat__widen { min-height: 44px; }
 }
-.fs-topic-detail__ask { margin-top: 8px; }
 
 /* The docked Ask (docs/specs/2026-09-16-ask-dock.md).
    The conversation is an OVERLAY: absolutely positioned against the dock and

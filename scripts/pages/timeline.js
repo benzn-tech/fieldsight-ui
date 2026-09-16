@@ -1053,13 +1053,13 @@
   }
 
   /* =====================================================================
-     One Ask, scoped (docs/specs/2026-09-15-one-ask-scoped.md §3)
+     The docked Ask (docs/specs/2026-09-16-ask-dock.md §4)
      ---------------------------------------------------------------------
-     The page's single AskChat lives in the middle column, the "Ask about
-     this topic" button lives in the right column; they share the context
-     through this Provider (same slot TodayProvider uses, app-shell.js
-     ~1365). It holds ONLY the ask context and a focus nonce — it does not
-     move any existing Timeline state.
+     The page's single AskChat lives in the dock (TimelineAskDock below,
+     mounted as the page Footer); the Provider only shares the ask context
+     between the dock and whatever reads the current selection (same slot
+     TodayProvider uses, app-shell.js ~1365). It holds ONLY the ask context
+     — it does not move any existing Timeline state.
 
      createContext is guarded because Node tests load this file with a
      React stub that has none; without a context, useTimelineAsk returns an
@@ -1071,27 +1071,13 @@
   var NO_TIMELINE_ASK = {
     askContext: {},
     setAskContext: function () {},
-    askFocusNonce: 0,
-    requestAskFocus: function () {},
-    hasAsk: false,
-    setHasAsk: function () {},
   };
 
   function TimelineAskProvider(props) {
-    var refCtx    = React.useState({});
-    var refNonce  = React.useState(0);
-    var refHasAsk = React.useState(false);
+    var refCtx = React.useState({});
     var value = {
-      askContext:      refCtx[0],
-      setAskContext:   function (next) { refCtx[1](next || {}); },
-      askFocusNonce:   refNonce[0],
-      requestAskFocus: function () { refNonce[1](function (n) { return n + 1; }); },
-      /* True only while the middle column actually has the one Ask mounted
-         (AskPresence below). The aggregated site view, the meeting view and
-         the error / no-report states mount none, and a topic button there
-         would do nothing. */
-      hasAsk:          refHasAsk[0],
-      setHasAsk:       refHasAsk[1],
+      askContext:    refCtx[0],
+      setAskContext: function (next) { refCtx[1](next || {}); },
     };
     if (!TimelineAskContext) return React.createElement(React.Fragment, null, props.children);
     return React.createElement(TimelineAskContext.Provider, { value: value }, props.children);
@@ -1136,32 +1122,6 @@
       topicRowId: topic.topic_row_id,
       topicTitle: topic.topic_title || '',
     });
-  }
-
-  function pinTopicAsk(askApi, topic, dayContext) {
-    var next = askContextWithTopic(askApi.askContext, topic, dayContext);
-    if (!next) return false;
-    askApi.setAskContext(next);
-    askApi.requestAskFocus();
-    return true;
-  }
-
-  /* Meeting topics carry no topic_row_id → no button; the day Ask still
-     covers their day. No mounted Ask (aggregated site view, meeting view,
-     error states, outside the Provider) → no button either. */
-  function topicAskVisible(hasAsk, topic) {
-    return !!(hasAsk && topic && topic.topic_row_id);
-  }
-
-  /* Mounted next to the one AskChat: publishes "an Ask is on the page" for
-     exactly as long as it is. */
-  function AskPresence(props) {
-    var set = props.setHasAsk;
-    React.useEffect(function () {
-      set(true);
-      return function () { set(false); };
-    }, [set]);
-    return null;
   }
 
   /* The day scope is rebuilt only when the day actually changes: a refetch
@@ -1225,15 +1185,6 @@
         initialQuestion: prefill,
       }),
     );
-  }
-
-  function TopicAskButton(props) {
-    if (!topicAskVisible(props.hasAsk, props.topic)) return null;
-    return React.createElement('button', {
-      type: 'button',
-      className: 'fs-btn fs-btn--secondary fs-btn--sm fs-topic-detail__ask',
-      onClick: function () { props.onAsk(); },
-    }, 'Ask about this topic');
   }
 
   function AggregatedDayView(props) {
@@ -4248,7 +4199,6 @@
 
     var refActions = React.useState({});
     var setActions = refActions[1];
-    var askApi = useTimelineAsk();
 
     var sel = props.selectedItem;
     var isMeeting = sel && sel.kind === 'meeting_topic';
@@ -4446,23 +4396,6 @@
                 }, (topic.participants || []).join(' · '))
               : null,
           ),
-          React.createElement(TopicAskButton, {
-            topic: topic,
-            hasAsk: askApi.hasAsk,
-            onAsk: function () {
-              pinTopicAsk(askApi, topic, askContextForDay(
-                { site_id: sel.site_id || null, user_name: sel.user_name },
-                sel.date, sel.user));
-              /* Single-column mobile: the middle column is hidden while a
-                 topic is selected (app-shell.css `.has-selection`, max-width
-                 48rem). Close the detail so the one Ask is on screen; the
-                 focus effect runs after this same batched render. */
-              if (window.matchMedia && window.matchMedia('(max-width: 48rem)').matches
-                  && props.onClose) {
-                props.onClose();
-              }
-            },
-          }),
         ),
         IconBtn ? React.createElement(IconBtn, {
           icon: 'x', ariaLabel: 'Close detail', size: 'sm',
@@ -4574,7 +4507,7 @@
       formatActionLine: formatActionLine,
       assembleEmailBody: assembleEmailBody,
       buildSessionEmailDraft: buildSessionEmailDraft,
-      /* one Ask, scoped (spec 2026-09-15) */
+      /* the docked Ask (spec 2026-09-16) */
       DAILY_TABS: DAILY_TABS,
       MEETING_TABS: MEETING_TABS,
       TimelineAskProvider: TimelineAskProvider,
@@ -4582,10 +4515,6 @@
       askContextForDay: askContextForDay,
       askContextWithTopic: askContextWithTopic,
       TimelineAskDock: TimelineAskDock,
-      pinTopicAsk: pinTopicAsk,
-      TopicAskButton: TopicAskButton,
-      topicAskVisible: topicAskVisible,
-      AskPresence: AskPresence,
       askDayResetKey: askDayResetKey,
     };
   }

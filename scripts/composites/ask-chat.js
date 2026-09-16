@@ -23,8 +23,6 @@
                       topicRowId?, topicTitle?} — omitted = unscoped
      onContextChange function(nextContext) — chip removal / "Ask across
                      everything"; without it chips have no remove button
-     focusNonce      number — a change scrolls the Ask into view and focuses
-                     its input (Timeline's "Ask about this topic")
      variant         'dock' — the docked bar (docs/specs/2026-09-16-ask-dock.md
                      §5): chips + input row only; suggestions show only while
                      the input is focused or empty-log-and-non-dock; the
@@ -777,26 +775,6 @@
       deferredResendRef.current = null;
       send(pending);
     }, [busy]);
-
-    /* "Ask about this topic" — bring the one Ask into view and put the cursor
-       in it. Smooth scroll only when the reader has not asked for reduced
-       motion. The nonce lives in the page Provider and never resets, while
-       this component remounts on every day change or refetch: act only on a
-       change seen by THIS mount, never on the value it was mounted with. */
-    var seenFocusNonceRef = React.useRef(props.focusNonce);
-    React.useEffect(function () {
-      if (props.focusNonce === seenFocusNonceRef.current) return;
-      seenFocusNonceRef.current = props.focusNonce;
-      if (!props.focusNonce) return;
-      var root = rootRef.current;
-      var input = inputRef.current;
-      var reduce = !!(window.matchMedia
-        && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-      if (root && root.scrollIntoView) {
-        root.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
-      }
-      if (input && input.focus) input.focus({ preventScroll: true });
-    }, [props.focusNonce]);
 
     /* Attach a corroboration result to the answer it belongs to.
 
