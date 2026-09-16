@@ -698,8 +698,32 @@
        owner change, or "Ask across everything"), drop history since prior
        context no longer applies. A topic change is handled by the effect
        below and deliberately does NOT clear (spec 2026-09-16 §5). */
+    /* `renderCommitToken` is a plain local -- NOT a ref -- created fresh on
+       every call of this function, including a call React later throws away
+       (StrictMode / Suspense / concurrent double-invoke). It is not written
+       anywhere; it is only ever compared by identity. Effects defined in
+       this same call close over this exact object, so it stands in for
+       "which commit are we in" without ever touching a ref in the render
+       body. This repo mounts via plain `createRoot` with no StrictMode
+       wrapper today (grep-verified), so a double-invoked render can't
+       happen yet -- but nothing here depends on that being true.
+
+       The day effect below, when it actually runs (i.e. the day genuinely
+       changed -- React only invokes an effect whose deps changed), stamps
+       `dayChangeTokenRef.current = renderCommitToken`. The topic effect
+       then asks "is the token the day effect just stamped IDENTICAL to the
+       token of the commit I am running in right now?" A same-commit
+       day+topic change: yes, same object, same call. A day change followed,
+       in a LATER separate commit, by a topic-only change: no -- the token
+       the day effect stamped belongs to that earlier commit's object, and
+       this commit made its own new one. A plain dayKey string comparison
+       cannot tell these two cases apart (the key just differs from before,
+       either way); identity of a per-commit object can. */
+    var renderCommitToken = {};
+    var dayChangeTokenRef = React.useRef(null);
     React.useEffect(function () {
       if (!resetMountedRef.current) { resetMountedRef.current = true; return; }
+      dayChangeTokenRef.current = renderCommitToken;
       genRef.current += 1;
       setMsgs([]);
       /* Always consumed here, sent or not: a question left in the ref would
@@ -719,29 +743,21 @@
     /* A topic change alone KEEPS the messages and says so in one line. The
        generation still bumps, so an answer already in flight for the old
        topic is dropped rather than appended under the new chip.
-       Declared after the day effect on purpose: React runs them in order, so
-       a commit that changed BOTH has already cleared by the time this runs,
-       and `dayAlsoChangedThisRender` below stops a divider landing under an
-       empty log.
-       `dayKey` is recomputed, and stashed into `prevDayKeyRef`, on EVERY
-       render -- not only when this effect happens to run. It used to be
-       written only from inside this effect (deps [context.topicRowId]), so
-       a day-only change (which never runs this effect) left it stale; a
-       later topic-only change then compared the current day key against
-       that stale value, wrongly concluded "the day also changed", and
-       swallowed the divider (found by driving the component through:
-       mount day A -> ask -> change to day B -> ask -> change ONLY the
-       topic -> divider missing). Computing it in the render body makes
-       `dayAlsoChangedThisRender` reflect the commit actually in flight. */
+       Declared after the day effect ON PURPOSE, and the ordering is now
+       load-bearing (not just a defensive habit): React runs effects from
+       the same commit in declaration order, so the day effect above
+       stamps `dayChangeTokenRef.current` BEFORE this effect reads it, only
+       if the day effect is declared first. Swap the order and, in a commit
+       that changed both day and topic, this effect would run first and
+       read whatever token the day effect stamped in some earlier commit
+       (or null) -- never the current one -- so it would wrongly conclude
+       "the day did not also change" and append a divider that must not
+       appear. */
     var topicMountedRef = React.useRef(false);
-    var dayKey = [context.date, context.siteId, context.authorFolder].join('|');
-    var prevDayKeyRef = React.useRef(null);
-    var dayAlsoChangedThisRender = prevDayKeyRef.current !== null && prevDayKeyRef.current !== dayKey;
-    prevDayKeyRef.current = dayKey;
     React.useEffect(function () {
       if (!topicMountedRef.current) { topicMountedRef.current = true; return; }
       genRef.current += 1;
-      if (dayAlsoChangedThisRender) return;
+      if (dayChangeTokenRef.current === renderCommitToken) return;
       var title = (context.topicTitle || '').trim();
       setMsgs(function (m) {
         return m.length ? m.concat([{
