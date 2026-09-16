@@ -6,13 +6,13 @@
 /* global React, ReactDOM, window */
 
 const STORAGE_KEYS = {
-  middleWidth:  'fs.appshell.middleWidth.v2',
+  middleWidth:  'fs.appshell.middleWidth.v3',
   navCollapsed: 'fs.appshell.navCollapsed',
   theme:        'fs.settings.theme',
   density:      'fs.settings.density',
 };
 
-const MIDDLE_WIDTH_DEFAULT = 420;
+const MIDDLE_WIDTH_DEFAULT = 560;
 
 /* ---------- Mobile bottom-nav item icons (mirrors NAV_ICONS in left-nav.js) */
 const NAV_ICONS_BOTTOM = {
@@ -762,7 +762,7 @@ function WeatherPopover(props) {
   );
 }
 const MIDDLE_WIDTH_MIN     = 360;
-const MIDDLE_WIDTH_MAX     = 560;
+const MIDDLE_WIDTH_MAX     = 896;
 
 /* ---------- Date subtitle helper ------------------------------------------ */
 function formatTodayDate() {
