@@ -283,9 +283,8 @@ const askSrc = () => fs.readFileSync(require.resolve('../scripts/composites/ask-
 
 /* What the driven tests below do not reach: the focus effect needs a DOM, and
    the two override props are one expression each. */
-test('W4 focus and the suggestion/placeholder overrides are wired', () => {
+test('W4 the suggestion/placeholder overrides are wired', () => {
   const src = askSrc();
-  assert.match(src, /\[props\.focusNonce\]/);
   assert.match(src, /props\.suggestions \|\| suggestionsFor\(context\)/);
   assert.match(src, /props\.placeholder \|\| placeholderFor\(context\)/);
 });
@@ -483,7 +482,7 @@ test('D-c "Ask across everything" appears only when it means something, and re-a
 });
 
 test('D-d a scope key change clears the history; a user change does not', async () => {
-  for (const key of ['date', 'siteId', 'authorFolder', 'topicRowId']) {
+  for (const key of ['date', 'siteId', 'authorFolder']) {
     const h = mountAsk();
     h.render({ user: 'Ben', context: SCOPED });
     await h.ask('q');
@@ -563,37 +562,234 @@ test('D-g a widen the host did not apply never fires on a later change', async (
   assert.strictEqual(h.asks.length, 1, 'a stale widen fired on a later, unrelated change');
 });
 
-test('D-i a focus request fires once; a remount with the same nonce does not refire it', () => {
-  const h = mountAsk();
-  h.render({ user: 'Ben', context: SCOPED, focusNonce: 0 });
-  assert.strictEqual(h.dom.scrolls.length + h.dom.focuses.length, 0, 'focused on a plain mount');
-
-  h.render({ user: 'Ben', context: SCOPED, focusNonce: 1 });
-  assert.strictEqual(h.dom.scrolls.length, 1, 'a nonce bump did not scroll the Ask into view');
-  assert.strictEqual(h.dom.focuses.length, 1, 'a nonce bump did not focus the input');
-  assert.strictEqual(h.dom.scrolls[0].behavior, 'smooth');
-
-  h.rerender();
-  assert.strictEqual(h.dom.scrolls.length, 1, 'a rerender with the same nonce scrolled again');
-
-  /* Day change / refetch: the middle column unmounts AskChat and mounts it
-     again, while the Provider still holds nonce 1. */
-  h.unmount();
-  h.render({ user: 'Ben', context: SCOPED, focusNonce: 1 });
-  assert.strictEqual(h.dom.scrolls.length, 1, 'a remount with an old nonce scrolled the page');
-  assert.strictEqual(h.dom.focuses.length, 1, 'a remount with an old nonce focused the input');
-
-  /* The remounted Ask still answers a new request. */
-  h.render({ user: 'Ben', context: SCOPED, focusNonce: 2 });
-  assert.strictEqual(h.dom.focuses.length, 2, 'a new request after a remount was ignored');
-});
-
 test('D-h the chip remove button names what it removes', async () => {
   const h = mountAsk();
   h.render({ context: Object.assign({}, SCOPED, { topicRowId: 't', topicTitle: 'Crane' }),
              onContextChange() {} });
   const labels = h.byClass('fs-ask-chip__remove').map(n => n.props['aria-label']);
   assert.deepStrictEqual(labels, ['Remove scope: Thu 3 Sep · UC PK · Ben', 'Remove scope: Topic: Crane']);
+});
+
+test('D-j selecting a topic adds topic_row_id to the next request and keeps the prior messages', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED });
+  await h.ask('first question');
+  await h.settle(0, { answer: 'a', citations: [], applied_scope: {} });
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1);
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--assistant').length, 1);
+
+  h.render({ user: 'Ben', context: Object.assign({}, SCOPED, { topicRowId: 't', topicTitle: 'Crane' }) });
+  h.rerender();
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1, 'the prior question was dropped');
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--assistant').length, 1, 'the prior answer was dropped');
+  const dividers = h.byClass('fs-ask-chat__msg--divider');
+  assert.strictEqual(dividers.length, 1, 'no divider, or more than one');
+  assert.strictEqual(h.text(dividers[0]), 'Now asking about: Crane');
+
+  await h.ask('second question');
+  assert.strictEqual(h.asks[1].topic_row_id, 't');
+});
+
+test('D-k deselecting adds a divider and drops topic_row_id', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: Object.assign({}, SCOPED, { topicRowId: 't', topicTitle: 'Crane' }) });
+  await h.ask('first question');
+  await h.settle(0, { answer: 'a', citations: [], applied_scope: {} });
+
+  h.render({ user: 'Ben', context: SCOPED });
+  h.rerender();
+  const dividers = h.byClass('fs-ask-chat__msg--divider');
+  assert.strictEqual(dividers.length, 1);
+  assert.strictEqual(h.text(dividers[0]), 'Now asking about the whole day');
+
+  await h.ask('second question');
+  assert.ok(!('topic_row_id' in h.asks[1]), 'topic_row_id survived deselection');
+});
+
+test('D-l a date/site/owner change still clears the conversation and appends no divider', async () => {
+  for (const key of ['date', 'siteId', 'authorFolder']) {
+    const h = mountAsk();
+    h.render({ user: 'Ben', context: Object.assign({}, SCOPED, { topicRowId: 't', topicTitle: 'Crane' }) });
+    await h.ask('q');
+    await h.settle(0, { answer: 'a', citations: [], applied_scope: {} });
+    h.render({ user: 'Ben', context: Object.assign({}, SCOPED,
+      { topicRowId: 't', topicTitle: 'Crane', [key]: 'changed' }) });
+    h.rerender();
+    assert.strictEqual(h.byClass('fs-ask-chat__msg').length, 0,
+      key + ' change left a message or a divider behind');
+  }
+});
+
+test('D-m a late answer from the pre-switch scope is not appended after a topic switch', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED });
+  await h.ask('first question');
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--pending').length, 1);
+
+  h.render({ user: 'Ben', context: Object.assign({}, SCOPED, { topicRowId: 't', topicTitle: 'Crane' }) });
+  h.rerender();
+
+  await h.settle(0, { answer: 'a', citations: [], applied_scope: {} });
+
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--assistant').length, 0, 'the stale answer was appended');
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1, 'the original question is gone');
+  const dividers = h.byClass('fs-ask-chat__msg--divider');
+  assert.strictEqual(dividers.length, 1, 'the divider from the switch is gone');
+  assert.strictEqual(h.byClass('fs-ask-chat__input')[0].props.disabled, false, 'busy never cleared');
+});
+
+test('D-n a day change that also changes the topic appends no divider', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: Object.assign({}, SCOPED, { topicRowId: 't', topicTitle: 'Crane' }) });
+  await h.ask('q');
+  await h.settle(0, { answer: 'a', citations: [], applied_scope: {} });
+
+  h.render({ user: 'Ben', context: Object.assign({}, SCOPED, { date: '2026-09-04' }) });
+  h.rerender();
+  assert.strictEqual(h.byClass('fs-ask-chat__msg').length, 0,
+    'a divider or message survived a same-commit day+topic change');
+});
+
+test('D-q a topic-only change still appends a divider after an EARLIER day-only change', async () => {
+  const h = mountAsk();
+  /* 1. mount on day A, no topic; ask; answer arrives. */
+  h.render({ user: 'Ben', context: SCOPED });
+  await h.ask('first question');
+  await h.settle(0, { answer: 'a', citations: [], applied_scope: {} });
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1);
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--assistant').length, 1);
+
+  /* 2. change to day B: the day effect clears (deps [date] changed); the
+     topic effect does NOT run (topicRowId is still undefined). */
+  const DAY_B = Object.assign({}, SCOPED, { date: '2026-09-04' });
+  h.render({ user: 'Ben', context: DAY_B });
+  h.rerender();
+  assert.strictEqual(h.byClass('fs-ask-chat__msg').length, 0, 'day change did not clear');
+
+  /* 3. ask again on day B; answer arrives. */
+  await h.ask('second question');
+  await h.settle(1, { answer: 'b', citations: [], applied_scope: {} });
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1);
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--assistant').length, 1);
+
+  /* 4. change ONLY the topic -- the topic effect finally runs. It must
+     compare the CURRENT day key against the day key as of THIS commit, not
+     a bookmark from whenever it last happened to run (day A). */
+  h.render({ user: 'Ben', context: Object.assign({}, DAY_B, { topicRowId: 't', topicTitle: 'Crane' }) });
+  h.rerender();
+
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1, 'the prior question was lost');
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--assistant').length, 1, 'the prior answer was lost');
+  const dividers = h.byClass('fs-ask-chat__msg--divider');
+  assert.strictEqual(dividers.length, 1,
+    'a topic-only change after an earlier day-only change dropped the divider');
+  assert.strictEqual(h.text(dividers[0]), 'Now asking about: Crane');
+});
+
+test('D-o suggestions are absent until the input is focused', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED, variant: 'dock' });
+  assert.strictEqual(h.byClass('fs-ask-chat__suggestion').length, 0,
+    'the dock showed suggestions before the input was focused');
+
+  h.byClass('fs-ask-chat__input')[0].props.onFocus();
+  h.rerender();
+  assert.strictEqual(h.byClass('fs-ask-chat__suggestion').length, 3,
+    'focusing the input did not reveal the suggestions');
+
+  await h.ask('what happened');
+  assert.strictEqual(h.byClass('fs-ask-chat__suggestion').length, 0,
+    'suggestions stayed once there was history, even though the input is still focused');
+
+  /* The non-dock (search palette) mount must be byte-for-byte unaffected:
+     suggestions still show on an empty log without focus (spec 2026-09-16
+     §5 -- `focused` only narrows the dock's rule, it never widens anyone
+     else's). */
+  const p = mountAsk();
+  p.render({ user: 'Ben', context: SCOPED });
+  assert.strictEqual(p.byClass('fs-ask-chat__suggestion').length, 3,
+    'the palette mount regressed: it now requires focus for suggestions');
+});
+
+test('D-p the message log is not rendered until there is something in it', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED, variant: 'dock' });
+  assert.strictEqual(h.byClass('fs-ask-chat__overlay').length, 0,
+    'the dock rendered an overlay with nothing in it');
+
+  await h.ask('what happened');
+  assert.strictEqual(h.byClass('fs-ask-chat__overlay').length, 1,
+    'asking a question did not open the overlay');
+});
+
+test('D-r focusing the input after Hide does not reopen the overlay; sending a new question does', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED, variant: 'dock' });
+  await h.ask('first question');
+  await h.settle(0, { answer: 'a', citations: [], applied_scope: {} });
+  assert.strictEqual(h.byClass('fs-ask-chat__overlay').length, 1, 'the answer did not open the overlay');
+
+  h.byClass('fs-ask-chat__overlay-close')[0].props.onClick();
+  h.rerender();
+  assert.strictEqual(h.byClass('fs-ask-chat__overlay').length, 0, 'Hide did not close the overlay');
+
+  h.byClass('fs-ask-chat__input')[0].props.onFocus();
+  h.rerender();
+  assert.strictEqual(h.byClass('fs-ask-chat__overlay').length, 0,
+    'focusing the input after Hide reopened the overlay over the topic list');
+
+  await h.ask('second question');
+  assert.strictEqual(h.byClass('fs-ask-chat__overlay').length, 1,
+    'sending a new question did not reopen the overlay');
+});
+
+/* M3 -- the suggestion row's onMouseDown preventDefault is what stops the
+   input's blur from hiding the row before a click on a suggestion lands.
+   Nothing in this harness fires a real blur on mousedown (there is no DOM,
+   `onBlur` is only ever invoked directly by a test), so a test that just
+   focuses, clicks a suggestion and asserts the question was sent would pass
+   identically whether or not the preventDefault call is there -- it proves
+   nothing about the guard it is meant to cover. Kept anyway as a basic
+   regression for "clicking a suggestion sends it"; D-t below is the test
+   that can actually go red on this specific guard, because it drives the
+   handler itself rather than a downstream effect this harness can't
+   reproduce. */
+test('D-s clicking a suggestion after focusing the input sends it (does not exercise the blur race)', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED, variant: 'dock' });
+  h.byClass('fs-ask-chat__input')[0].props.onFocus();
+  h.rerender();
+  const btn = h.byClass('fs-ask-chat__suggestion')[0];
+  assert.ok(btn, 'no suggestion button rendered while the input is focused');
+  const question = h.text(btn);
+  btn.props.onMouseDown({ preventDefault() {} });
+  btn.props.onClick();
+  assert.strictEqual(h.asks.length, 1, 'clicking the suggestion did not send it');
+  assert.strictEqual(h.asks[0].question, question);
+});
+
+/* The guard itself, pinned directly: every rendered suggestion button's
+   onMouseDown handler calls preventDefault when invoked. This is weaker
+   than proving the row survives a real mousedown-then-blur-then-click
+   sequence (this harness has no DOM and cannot reproduce that race), but
+   unlike D-s it does drive the actual handler and fails if the
+   preventDefault call is removed -- verified by temporarily deleting it and
+   re-running this file (see task-3-fix-report.md). */
+test('D-t every suggestion button prevents default on mousedown, so a blur cannot hide the row first', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED, variant: 'dock' });
+  h.byClass('fs-ask-chat__input')[0].props.onFocus();
+  h.rerender();
+  const buttons = h.byClass('fs-ask-chat__suggestion');
+  assert.ok(buttons.length > 0, 'no suggestion buttons rendered to check');
+  buttons.forEach(function (btn) {
+    assert.strictEqual(typeof btn.props.onMouseDown, 'function',
+      'a suggestion button has no onMouseDown handler');
+    let prevented = false;
+    btn.props.onMouseDown({ preventDefault() { prevented = true; } });
+    assert.ok(prevented,
+      'onMouseDown did not call preventDefault -- the blur-before-click trap is back');
+  });
 });
 
 /* ---- Timeline --------------------------------------------------------- */
@@ -640,11 +836,13 @@ test('6a the topic detail tabs have no ask tab', () => {
   assert.ok(!mod.MEETING_TABS.some(t => t.key === 'ask'), 'MEETING_TABS still has ask');
 });
 
-test('6b the page registers a Provider', () => {
+test('6b the page registers a Provider, a Middle, a Right and a Footer', () => {
   const { page } = loadTimeline();
   assert.strictEqual(typeof page.Provider, 'function');
   assert.strictEqual(typeof page.Middle, 'function');
   assert.strictEqual(typeof page.Right, 'function');
+  assert.strictEqual(typeof page.Footer, 'function',
+    'the dock is not registered as the page Footer, so nothing mounts it');
 });
 
 test('6c the Provider holds only the ask fields', () => {
@@ -652,87 +850,50 @@ test('6c the Provider holds only the ask fields', () => {
   const el = page.Provider({ children: 'kids' });
   assert.strictEqual(el.type, 'AskCtxProvider');
   assert.deepStrictEqual(Object.keys(el.props.value).sort(),
-    ['askContext', 'askFocusNonce', 'hasAsk', 'requestAskFocus', 'setAskContext', 'setHasAsk']);
-  assert.strictEqual(el.props.value.hasAsk, false, 'a fresh page claims an Ask is mounted');
+    ['askContext', 'askReady', 'setAskContext', 'setAskReady']);
 });
 
-test('6e outside a Provider there is no Ask to point a topic button at', () => {
+test('6e outside a Provider there is no hasAsk to gate on', () => {
   const { mod } = loadTimeline();
-  assert.strictEqual(mod.useTimelineAsk().hasAsk, false);
+  const api = mod.useTimelineAsk();
+  assert.ok(!('hasAsk' in api), 'hasAsk still exists outside a Provider');
+  assert.doesNotThrow(() => api.setAskContext({}));
 });
 
-test('6d exactly one AskChat mount remains in timeline.js', () => {
-  const mounts = timelineSrc().match(/React\.createElement\(AskChat\b/g) || [];
-  assert.strictEqual(mounts.length, 1, 'found ' + mounts.length + ' AskChat mounts');
-});
-
-/* ---- 7. Ask about this topic ------------------------------------------ */
-
-test('7a the button is hidden for a topic without topic_row_id', () => {
-  const { mod } = loadTimeline();
-  assert.strictEqual(mod.TopicAskButton({ topic: { topic_id: 2 }, hasAsk: true, onAsk() {} }), null);
-  assert.strictEqual(mod.TopicAskButton({ topic: null, hasAsk: true, onAsk() {} }), null);
-});
-
-test('7a2 the button is hidden when no Ask is mounted (aggregated site view)', () => {
-  const { mod } = loadTimeline();
-  assert.strictEqual(mod.topicAskVisible(true, { topic_row_id: 't' }), true);
-  assert.strictEqual(mod.topicAskVisible(false, { topic_row_id: 't' }), false);
-  assert.strictEqual(mod.topicAskVisible(undefined, { topic_row_id: 't' }), false);
-  assert.strictEqual(mod.topicAskVisible(true, { topic_id: 2 }), false);
-  /* Driven through the component, not only the helper. */
-  assert.strictEqual(mod.TopicAskButton({ topic: { topic_row_id: 't' }, hasAsk: false, onAsk() {} }), null,
-    'a topic button rendered with no Ask on the page');
-});
-
-test('7a3 AskPresence publishes hasAsk for exactly as long as it is mounted', () => {
-  const effects = [];
-  const { mod } = loadTimeline({ useEffect(fn) { effects.push(fn); } });
-  const seen = [];
-  assert.strictEqual(mod.AskPresence({ setHasAsk: v => seen.push(v) }), null);
-  assert.strictEqual(effects.length, 1);
-  const cleanup = effects[0]();
-  assert.deepStrictEqual(seen, [true], 'mounting the Ask did not publish hasAsk');
-  assert.strictEqual(typeof cleanup, 'function', 'unmounting the Ask would leave hasAsk true');
-  cleanup();
-  assert.deepStrictEqual(seen, [true, false]);
-});
-
-test('7a4 the presence marker sits next to the one AskChat mount', () => {
+test('6d exactly one AskChat mount remains, and it is inside the dock', () => {
   const src = timelineSrc();
-  const at = src.indexOf('React.createElement(AskChat,');
-  const before = src.slice(at - 200, at);
-  assert.match(before, /React\.createElement\(AskPresence, \{ setHasAsk: askApi\.setHasAsk \}\)/);
+  const mounts = src.match(/React\.createElement\(AskChat\b/g) || [];
+  assert.strictEqual(mounts.length, 1, 'found ' + mounts.length + ' AskChat mounts');
+  const start = src.indexOf('function TimelineAskDock(');
+  assert.ok(start > 0, 'function TimelineAskDock( not found');
+  const end = src.indexOf('\n  function ', start + 1);
+  assert.ok(end > start, 'no module-level function follows TimelineAskDock');
+  assert.match(src.slice(start, end), /React\.createElement\(AskChat\b/,
+    'the one AskChat mount is not inside TimelineAskDock');
+});
+
+test('6f nothing exported names a deleted function', () => {
+  const { mod } = loadTimeline();
+  Object.values(mod).forEach(v => assert.ok(v !== undefined));
+});
+
+test('6g the right detail no longer pins anything', () => {
+  const src = timelineSrc();
   const right = src.slice(src.indexOf('function TimelineRightDetail('), src.indexOf('/* ---------- Register'));
-  assert.match(right, /hasAsk: askApi\.hasAsk/, 'the topic button is not told whether an Ask exists');
+  assert.doesNotMatch(right, /TopicAskButton/);
+  assert.doesNotMatch(right, /pinTopicAsk\(/);
+  assert.doesNotMatch(right, /hasAsk/);
+  assert.strictEqual((right.match(/setAskContext\(/g) || []).length, 0,
+    'the right detail must not set the context on selection');
 });
 
-test('7b the button renders and clicking it calls onAsk', () => {
+test('6h useTimelineAsk outside a Provider is inert and complete', () => {
   const { mod } = loadTimeline();
-  let clicked = 0;
-  const el = mod.TopicAskButton({ topic: { topic_row_id: 't' }, hasAsk: true, onAsk() { clicked++; } });
-  assert.strictEqual(el.type, 'button');
-  assert.deepStrictEqual(el.children, ['Ask about this topic']);
-  el.props.onClick();
-  assert.strictEqual(clicked, 1);
+  assert.deepStrictEqual(Object.keys(mod.useTimelineAsk()).sort(),
+    ['askContext', 'askReady', 'setAskContext', 'setAskReady']);
 });
 
-test('7c pinning sets topicRowId on the current day and bumps the focus nonce', () => {
-  const { mod } = loadTimeline();
-  const api = {
-    askContext: DAY, askFocusNonce: 4, set: null,
-    setAskContext(next) { this.set = next; },
-    requestAskFocus() { this.askFocusNonce++; },
-  };
-  const ok = mod.pinTopicAsk(api,
-    { topic_row_id: 'topic-uuid', topic_title: 'Morning commercial chase' },
-    { date: '2026-09-03', authorFolder: 'Ben_UCPK2' });
-  assert.strictEqual(ok, true);
-  assert.strictEqual(api.set.topicRowId, 'topic-uuid');
-  assert.strictEqual(api.set.topicTitle, 'Morning commercial chase');
-  assert.strictEqual(api.set.siteName, 'UC PK', 'the current day scope is kept');
-  assert.strictEqual(api.askFocusNonce, 5);
-});
+/* ---- 7. topic scope helpers -------------------------------------------- */
 
 test('7d pinning from an empty or other-day context uses the topic\'s own day', () => {
   const { mod } = loadTimeline();
@@ -763,22 +924,12 @@ test('7d2 the current scope is kept only when it is the topic\'s own day, owner 
     { date: '2026-09-03', authorFolder: 'Ben_UCPK2' }).siteName, 'UC PK');
 });
 
-test('7e the topic detail header mounts the button; selecting a topic does not touch the context', () => {
-  const src = timelineSrc();
-  const right = src.slice(src.indexOf('function TimelineRightDetail('), src.indexOf('/* ---------- Register'));
-  assert.match(right, /React\.createElement\(TopicAskButton/);
-  assert.match(right, /pinTopicAsk\(/);
-  /* Only the button changes the Ask context from this column. */
-  assert.strictEqual((right.match(/setAskContext\(/g) || []).length, 0,
-    'the right detail must go through pinTopicAsk, not set the context on selection');
-});
-
 /* ---- 8. day changes reset; palette hand-off is global ------------------ */
 
 test('8a the loaded day builds a fresh context: no topic survives a day change', () => {
   const { mod } = loadTimeline();
   const report = { site_id: 'site-uuid', site: 'UC PK', user_name: 'Ben UCPK2' };
-  const ctx = mod.askContextForLoadedDay(report, '2026-09-04', 'Ben_UCPK2', false);
+  const ctx = mod.askContextForDay(report, '2026-09-04', 'Ben_UCPK2');
   assert.deepStrictEqual(ctx, { date: '2026-09-04', siteId: 'site-uuid', siteName: 'UC PK',
     authorFolder: 'Ben_UCPK2', authorName: 'Ben UCPK2' });
   assert.ok(!('topicRowId' in ctx));
@@ -805,40 +956,363 @@ test('8b2 a site_id with an empty site name is omitted; with a site name both ar
   assert.strictEqual(both.siteName, 'UC PK');
 });
 
-test('8c a question handed off from the palette stays global', () => {
-  const { mod } = loadTimeline();
-  assert.deepStrictEqual(
-    mod.askContextForLoadedDay({ site_id: 's', site: 'UC PK', user_name: 'B' }, '2026-09-03', 'B', true),
-    {});
-});
+/* 8c ("a question handed off from the palette stays global") is deleted: the
+   palette rule moved out of askContextForLoadedDay (deleted with it) and into
+   the dock itself, where 9c now pins it. */
 
-test('8d the middle column wires the day reset and the palette rule', () => {
+test('8d the middle column still resets the day scope, and no longer owns the palette', () => {
   const src = timelineSrc();
   const mid = src.slice(src.indexOf('function TimelineMiddleColumn('), src.indexOf('function SessionPicker('));
-  assert.match(mid, /React\.useRef\(!!askPrefill\)/, 'palette hand-off is not remembered');
-  assert.match(mid, /askContextForLoadedDay\(/);
-  const eff = mid.slice(mid.indexOf('askContextForLoadedDay('));
+  assert.match(mid, /askContextForDay\(/);
+  const eff = mid.slice(mid.indexOf('askContextForDay('));
   const deps = eff.slice(eff.indexOf('}, [') , eff.indexOf(']);') + 1);
   assert.match(deps, /\bdate\b/, 'day change does not reset the context');
   assert.match(deps, /askOwner/, 'owner change does not reset the context');
-  assert.match(mid, /askFromPaletteRef\.current \? \{\} : askApi\.askContext/,
-    'mount #1 can auto-send a palette question with a stale scope');
   assert.match(mid, /dayKey === askDayKeyRef\.current\) return;/,
     'the reset does not compare against the last applied day');
+  /* The palette hand-off moved into the dock. As a Footer SIBLING the dock
+     first renders (and AskChat auto-sends) without this column's day-reset
+     effect having any way to reach it in time, so a flag read or published
+     here would arrive one commit too late and scope the question to the day. */
+  assert.doesNotMatch(mid, /fs\.ask\.prefill/,
+    'the middle column still reads the palette prefill');
+  assert.doesNotMatch(mid, /askFromPaletteRef/,
+    'the middle column still carries the palette flag');
 });
 
 test('8f a refetch of the same day keeps a pinned topic; a real day change resets', () => {
   const { mod } = loadTimeline();
   const k = mod.askDayResetKey;
-  assert.strictEqual(k('loading', '2026-09-03', 'Ben', 's'), null, 'a loading render reset the scope');
-  const applied = k('ok', '2026-09-03', 'Ben', 's');
+  assert.strictEqual(k('user', 'loading', '2026-09-03', 'Ben', 's'), null, 'a loading render reset the scope');
+  const applied = k('user', 'ok', '2026-09-03', 'Ben', 's');
   /* loading → ok on the same day (content edit refresh, retry). */
-  assert.strictEqual(k('ok', '2026-09-03', 'Ben', 's'), applied, 'a refetch rebuilt the day and dropped the topic');
-  assert.notStrictEqual(k('ok', '2026-09-04', 'Ben', 's'), applied, 'a date change kept the old scope');
-  assert.notStrictEqual(k('ok', '2026-09-03', 'Someone', 's'), applied, 'an owner change kept the old scope');
-  assert.notStrictEqual(k('ok', '2026-09-03', 'Ben', 'other'), applied, 'a site change kept the old scope');
+  assert.strictEqual(k('user', 'ok', '2026-09-03', 'Ben', 's'), applied, 'a refetch rebuilt the day and dropped the topic');
+  assert.notStrictEqual(k('user', 'ok', '2026-09-04', 'Ben', 's'), applied, 'a date change kept the old scope');
+  assert.notStrictEqual(k('user', 'ok', '2026-09-03', 'Someone', 's'), applied, 'an owner change kept the old scope');
+  assert.notStrictEqual(k('user', 'ok', '2026-09-03', 'Ben', 'other'), applied, 'a site change kept the old scope');
   /* A missing site reads the same whether it came as false, undefined or ''. */
-  assert.strictEqual(k('ok', '2026-09-03', 'Ben', false), k('ok', '2026-09-03', 'Ben', undefined));
+  assert.strictEqual(k('user', 'ok', '2026-09-03', 'Ben', false), k('user', 'ok', '2026-09-03', 'Ben', undefined));
+});
+
+/* ---- Task 6 fix round: the site-name race, key collision, access-denied -- */
+
+test('S11 the site and day branches key off a discriminator, so they cannot collide',
+  () => {
+    const { mod } = loadTimeline();
+    const k = mod.askDayResetKey;
+    /* Before the prefix, the day branch's owner ('') and the site branch's
+       fixed '' owner argument produced the exact same joined string whenever
+       the day/site/status lined up -- the two branches only ever avoided it
+       because askOwner === '' implies site is falsy in the real component,
+       never because the key format forbade it. Drive the key function with
+       inputs chosen to force that collision under the OLD (kind-less) shape
+       and assert the new one keeps them apart. */
+    const dayKey = k('user', 'ok', '2026-09-04', '', 'site-uuid');
+    const siteKey = k('site', 'ok', '2026-09-04', 'site-uuid', '1');
+    assert.notStrictEqual(dayKey, siteKey);
+    assert.ok(dayKey.startsWith('user|'), 'the day key does not carry the discriminator');
+    assert.ok(siteKey.startsWith('site|'), 'the site key does not carry the discriminator');
+    /* A day key and a site key built from otherwise-identical remaining
+       segments must still differ SOLELY because of the prefix. */
+    assert.notStrictEqual(k('user', 'ok', 'D', 'X', 'Y'), k('site', 'ok', 'D', 'X', 'Y'));
+  });
+
+test('S12 the site key changes once the project name resolves, and not again',
+  () => {
+    const { mod } = loadTimeline();
+    const k = mod.askDayResetKey;
+    /* sitesList still [] -> askContextForSite is called with siteName
+       undefined -> the reset effect passes the "named yet" bit as '0'. */
+    const beforeName = k('site', 'ok', '2026-09-04', 'site-uuid', '0');
+    /* sitesList has landed and named the project -> '1'. */
+    const afterName = k('site', 'ok', '2026-09-04', 'site-uuid', '1');
+    assert.notStrictEqual(beforeName, afterName,
+      'the key is identical before and after the name resolves, so the republish never fires');
+    /* A later sitesList refresh that resolves the SAME name must not look
+       like a new event -- the effect's dedup only sees the joined key. */
+    assert.strictEqual(afterName, k('site', 'ok', '2026-09-04', 'site-uuid', '1'),
+      'a repeat resolution of the same name produced a new key');
+  });
+
+/* Drives the real reset effect inside TimelineMiddleColumn (not a read of
+   its source, and not a parallel re-implementation of its logic) by
+   supplying a small hook runtime that actually executes effects and lets
+   state updates trigger another render pass, the way React does. `site &&
+   !user` (AggregatedDayView's fetch path) resolves synchronously to
+   `{status:'ok', aggregated:true}` with no network call, which is what
+   makes this reachable without mocking the report/session/actions fetches
+   the ordinary single-person day needs. */
+function driveMiddleReset(opts) {
+  const path = require.resolve('../scripts/pages/timeline.js');
+  delete require.cache[path];
+
+  const h = { states: [], refs: [], effects: [], dirty: false, memoI: 0 };
+  let si = 0, ri = 0, ei = 0;
+  const askApi = {
+    askContext: {}, askReady: false,
+    contexts: [],
+    setAskContext(next) { askApi.contexts.push(next); askApi.askContext = next; },
+    setAskReady(v) { askApi.askReady = v; },
+  };
+
+  global.React = {
+    Fragment: 'Fragment',
+    createElement(type) { const kids = Array.prototype.slice.call(arguments, 2);
+      return { type, props: arguments[1] || {}, kids }; },
+    createContext() { return { Provider: 'AskCtxProvider' }; },
+    useContext() { return askApi; },
+    useState(init) {
+      const i = si++;
+      if (!(i in h.states)) h.states[i] = (typeof init === 'function') ? init() : init;
+      return [h.states[i], (v) => {
+        const next = (typeof v === 'function') ? v(h.states[i]) : v;
+        if (next !== h.states[i]) { h.states[i] = next; h.dirty = true; }
+      }];
+    },
+    useRef(init) {
+      const i = ri++;
+      if (!(i in h.refs)) h.refs[i] = { current: init };
+      return h.refs[i];
+    },
+    useEffect(fn, deps) {
+      const i = ei++;
+      const prev = h.effects[i];
+      const changed = !prev || !deps || deps.some((d, k) => d !== prev.deps[k]);
+      h.effects[i] = { fn, deps, changed, cleanup: prev && prev.cleanup };
+    },
+    useMemo(fn) { return fn(); },
+    useCallback(fn) { return fn; },
+  };
+  global.document = { addEventListener() {}, removeEventListener() {},
+                      createElement() { return { style: {} }; } };
+  global.window = {
+    FieldSight: {},
+    FS: {
+      api: {
+        folderName: n => String(n || '').trim().replace(/ /g, '_'),
+        org: { getOrgSites: () => opts.orgSitesPromise() },
+        programme: { getSuggestions: () => Promise.resolve({ suggestions: [] }) },
+        programmeMentions: { indexByTopic: () => ({}) },
+        useMocks: false,
+      },
+      Router: { subscribe: () => () => {}, getCurrentRoute: () => ({ params: opts.params }) },
+    },
+    AuthMock: { currentUser: null },
+    location: { href: 'https://example.test/#/timeline' },
+    addEventListener() {}, removeEventListener() {},
+  };
+
+  delete require.cache[path];
+  const mod = require(path);
+  const Middle = global.window.FieldSight.PAGES['/timeline'].Middle;
+
+  function render() {
+    si = 0; ri = 0; ei = 0; h.dirty = false;
+    Middle({ selectedItem: null, onSelect() {} });
+    h.effects.forEach((e) => {
+      if (!e.changed) return;
+      if (e.cleanup) e.cleanup();
+      const c = e.fn();
+      e.cleanup = (typeof c === 'function') ? c : null;
+      e.changed = false;
+    });
+  }
+  function settle() { render(); while (h.dirty) render(); }
+
+  return { settle, askApi, mod };
+}
+
+test('S13 the site view republishes date + site once sitesList loads, keeping the day, and republishes only once', async () => {
+  let resolveSites;
+  const orgSitesPromise = () => new Promise((res) => { resolveSites = res; });
+  const h = driveMiddleReset({
+    params: { date: '2026-09-04', site: 'site-uuid' },
+    orgSitesPromise,
+  });
+
+  h.settle();
+  assert.strictEqual(h.askApi.contexts.length, 1, 'the direct link never published a first scope');
+  assert.deepStrictEqual(h.askApi.contexts[0], { date: '2026-09-04' },
+    'the unresolved name leaked a siteId/siteName anyway');
+
+  resolveSites({ sites: [{ site_id: 'site-uuid', name: 'UC PK' }] });
+  await Promise.resolve(); await Promise.resolve();
+  h.settle();
+
+  assert.strictEqual(h.askApi.contexts.length, 2,
+    'the scope was never republished once the project name resolved');
+  assert.deepStrictEqual(h.askApi.contexts[1],
+    { date: '2026-09-04', siteId: 'site-uuid', siteName: 'UC PK' });
+
+  /* A later sitesList refresh (a poll, a re-fetch) that resolves the SAME
+     name must not republish again. */
+  h.mod; // (silence unused-var lint in older node; mod not otherwise needed)
+  h.settle();
+  assert.strictEqual(h.askApi.contexts.length, 2,
+    'a stable sitesList still republished the scope');
+});
+
+test('S14 the republish that only fills in the site name keeps the conversation', async () => {
+  /* Feeds the exact two contexts S13 proves timeline.js publishes -- {date}
+     then {date, siteId, siteName} -- through the REAL ask-chat.js reset
+     effect (mountAsk), so this checks the actual runtime consequence of the
+     republish rather than asserting an intention. */
+  const before = { date: '2026-09-04' };
+  const after = { date: '2026-09-04', siteId: 'site-uuid', siteName: 'UC PK' };
+  const h = mountAsk();
+  h.render({ context: before });
+  await h.ask('what happened this morning');
+  await h.settle(0, { answer: 'a report', citations: [], applied_scope: {} });
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1);
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--assistant').length, 1);
+
+  h.render({ context: after });
+  h.rerender();
+
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1,
+    'the site name resolving cleared the question');
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--assistant').length, 1,
+    'the site name resolving cleared the answer');
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--divider').length, 0,
+    'the site name resolving announced itself as a switch');
+});
+
+test('S16 a pending widen does not survive an enrichment publish', async () => {
+  /* Regression for the finding: the enrichment early return used to skip
+     consuming resendRef/deferredResendRef entirely. If a site-name republish
+     (enrichment) lands between a widen click and the {} it asked for, the
+     OLD question must not sit in the ref waiting to fire on some later,
+     unrelated context change -- it must be gone by the time that change
+     arrives. */
+  const NO_SITE_YET = { date: '2026-09-04', authorFolder: 'Ben' };
+  const NAMED = { date: '2026-09-04', authorFolder: 'Ben', siteId: 'site-uuid', siteName: 'UC PK' };
+  const spy = [];
+  const onContextChange = c => spy.push(c);
+
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: NO_SITE_YET, onContextChange });
+  await h.ask('q');
+  await h.settle(0, { answer: 'a', citations: [], applied_scope: { date: '2026-09-04' } });
+  h.byClass('fs-ask-chat__widen')[0].props.onClick();
+  assert.deepStrictEqual(spy, [{}], 'the widen did not ask the host to clear scope');
+  assert.strictEqual(h.asks.length, 1, 'sanity: only the first ask happened so far');
+
+  /* The host's own site effect wins the race and republishes the newly
+     resolved name INSTEAD of the {} the widen asked for -- same date and
+     author, siteId arriving for the first time: an enrichment, not the
+     switch the widen wanted. */
+  h.render({ user: 'Ben', context: NAMED, onContextChange });
+  h.rerender();
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1,
+    'enrichment cleared the conversation');
+
+  /* Some later, wholly unrelated navigation drops scope to {}. Under the
+     bug this resends the STALE widen question into a context the reader
+     never asked about; fixed, the pending ref was already cleared at the
+     enrichment step above and nothing fires. */
+  h.render({ user: 'Ben', context: {}, onContextChange });
+  h.rerender();
+  assert.strictEqual(h.asks.length, 1,
+    'a stale widen resent itself on an unrelated later context change');
+});
+
+test('S15 access-denied gets no dock, and it is folded into the shared readiness rule', () => {
+  /* This first assertion only re-proves "askReady=false renders no dock"
+     (already covered by 9f/9g/9h) -- it passes askReady=false directly, not
+     the 'access_denied' status. The real new coverage for access-denied is
+     the askDockHasContent assertion below. Kept because a real
+     TimelineAskDock render with askReady=false is still a cheap sanity
+     check that the dock component itself has no separate access-denied
+     branch of its own. */
+  const mod = loadDock(DAY_ONLY, false);
+  assert.strictEqual(mod.TimelineAskDock({ selectedItem: null }), null,
+    'the dock rendered something even with askReady=false');
+
+  const { mod: pure } = loadTimeline();
+  assert.strictEqual(pure.askDockHasContent('access_denied', false, false), false,
+    'askDockHasContent does not know about access_denied');
+  /* It is folded into the SAME predicate the picker states use, not a
+     parallel inline check -- the whole point of the readiness gate. */
+  assert.strictEqual(pure.askDockHasContent('loading', false, false), false);
+  assert.strictEqual(pure.askDockHasContent('ok', false, false), true);
+});
+
+/* ---- 9. the docked Ask (spec 2026-09-16 §1, §4) ----------------------- */
+
+const DOCK_DAY = { date: '2026-09-03', siteId: 'site-uuid', siteName: 'UC PK',
+                   authorFolder: 'Ben_UCPK2', authorName: 'Ben UCPK2' };
+
+/* The dock reads its scope through useTimelineAsk(), so drive it with a stub
+   context rather than a real Provider: the module only builds a context when
+   React.createContext exists, so both overrides are needed together.
+
+   `askReady` is the middle column's published "a day's content is resolved on
+   screen" fact, so it has to be stubbed as deliberately as the context: the
+   dock gates on it and must never re-derive it from the scope. */
+function loadDock(askContext, askReady, extra) {
+  const { mod } = loadTimeline(Object.assign({
+    createContext() { return { Provider: 'AskCtxProvider' }; },
+    useContext() {
+      return { askContext: askContext, setAskContext() {},
+               askReady: askReady, setAskReady() {} };
+    },
+  }, extra || {}));
+  global.window.FieldSight.AskChat = 'AskChatStub';
+  return mod;
+}
+
+function askElOf(el) {
+  assert.ok(el, 'the dock rendered nothing');
+  assert.strictEqual(el.props.className, 'fs-ask-dock');
+  const ask = el.children.find(c => c && c.type === 'AskChatStub');
+  assert.ok(ask, 'no AskChat inside the dock');
+  return ask;
+}
+
+test('9a the dock\'s scope follows the selection', () => {
+  const mod = loadDock(DOCK_DAY, true);
+  const withTopic = askElOf(mod.TimelineAskDock({
+    selectedItem: { kind: 'topic', topic: { topic_row_id: 't', topic_title: 'Crane' } },
+  }));
+  assert.strictEqual(withTopic.props.variant, 'dock');
+  assert.strictEqual(withTopic.props.context.topicRowId, 't');
+  assert.strictEqual(withTopic.props.context.topicTitle, 'Crane');
+  assert.strictEqual(withTopic.props.context.date, '2026-09-03', 'the day scope was dropped');
+
+  /* A meeting topic carries no topic_row_id -> the day context (spec §4). */
+  const meeting = askElOf(mod.TimelineAskDock({
+    selectedItem: { kind: 'meeting_topic', topic: { topic_id: 2, topic_title: 'Standup' } },
+  }));
+  assert.deepStrictEqual(meeting.props.context, DOCK_DAY);
+
+  const none = askElOf(mod.TimelineAskDock({ selectedItem: null }));
+  assert.deepStrictEqual(none.props.context, DOCK_DAY);
+});
+
+test('9b the dock renders nothing without a day', () => {
+  const mod = loadDock({}, false);
+  assert.strictEqual(mod.TimelineAskDock({ selectedItem: null }), null,
+    'a bar with nothing to narrow to reads as a global Ask (controller ruling 1)');
+  assert.strictEqual(mod.TimelineAskDock({
+    selectedItem: { kind: 'topic', topic: { topic_row_id: 't', topic_title: 'Crane' } },
+  }), null, 'a selection without a resolved day still rendered a bar');
+});
+
+test('9c a palette hand-off is asked unscoped', () => {
+  const store = { 'fs.ask.prefill': 'what happened on the crane?' };
+  global.sessionStorage = {
+    getItem: k => (k in store ? store[k] : null),
+    removeItem: k => { delete store[k]; },
+  };
+  try {
+    const mod = loadDock(DOCK_DAY, true);
+    const ask = askElOf(mod.TimelineAskDock({ selectedItem: null }));
+    assert.deepStrictEqual(ask.props.context, {},
+      'the palette question was sent with the day scope');
+    assert.strictEqual(ask.props.initialQuestion, 'what happened on the crane?');
+    assert.ok(!('fs.ask.prefill' in store),
+      'the prefill was not cleared, so it replays on the next mount');
+  } finally { delete global.sessionStorage; }
 });
 
 test('8e the palette mount passes no scope, no context and no suggestions', () => {
@@ -850,4 +1324,162 @@ test('8e the palette mount passes no scope, no context and no suggestions', () =
   assert.doesNotMatch(mount, /\bcontext:/);
   assert.doesNotMatch(mount, /\bsuggestions:/);
   assert.doesNotMatch(mount, /\btopic_id:/);
+});
+
+/* ---- 9d/9e. the site view's dock (spec 2026-09-16 §2.1) ---------------- */
+
+test('9d the site view publishes a date + site scope with no author', () => {
+  const { mod } = loadTimeline();
+  const ctx = mod.askContextForSite('site-uuid', 'UC PK', '2026-09-04');
+  assert.deepStrictEqual(ctx, { date: '2026-09-04', siteId: 'site-uuid', siteName: 'UC PK' });
+  assert.ok(!('authorFolder' in ctx), 'the site view scoped the dock by author');
+
+  /* No visible site name -> the id is omitted too (the #311 rule: never
+     narrow by a project the chip cannot name — askContextForDay, above). */
+  const noName = mod.askContextForSite('site-uuid', '', '2026-09-04');
+  assert.ok(!('siteId' in noName));
+  assert.ok(!('siteName' in noName));
+  assert.deepStrictEqual(noName, { date: '2026-09-04' });
+});
+
+test('9e selecting another person\'s topic in the site view does not change the day keys', () => {
+  const { mod } = loadTimeline();
+  const siteCtx = { date: '2026-09-04', siteId: 'site-uuid', siteName: 'UC PK' };
+  const topicOfPersonB = { topic_row_id: 't2', topic_title: 'Formwork' };
+  const withTopic = mod.askContextWithTopic(siteCtx, topicOfPersonB, siteCtx);
+  assert.strictEqual(withTopic.date, siteCtx.date);
+  assert.strictEqual(withTopic.siteId, siteCtx.siteId);
+  assert.strictEqual(withTopic.siteName, siteCtx.siteName);
+  assert.strictEqual(withTopic.topicRowId, 't2');
+  assert.strictEqual(withTopic.topicTitle, 'Formwork');
+  assert.ok(!('authorFolder' in withTopic), 'a topic pin added an author to the site scope');
+});
+
+/* ---- 9f-9k. the dock only appears where a day's content is resolved ----
+
+   The Task 4 review found the original `if (!context.date) return null` guard
+   suppressed nothing: `askContextForDay` sets `ctx.date` from `date` alone,
+   whatever the report is, and the fetch effect has resolved `date` long before
+   these branches render. So the dock rendered a `{date}`-only bar — no site, no
+   author — on three states that never had an Ask before the redesign.
+
+   These drive the dock with the exact context each of those branches really
+   publishes, which is the shape 9b (an EMPTY context) could not reach. */
+
+const DAY_ONLY = { date: '2026-09-03' };
+
+test('9f the project picker gets no dock', () => {
+  /* Multi-project caller, no project chosen (SitePickerState). The day-reset
+     effect has still published a date, so the scope looks "resolved" and is
+     not: there is no project to narrow to and nothing on screen to ask about. */
+  const mod = loadDock(DAY_ONLY, false);
+  assert.strictEqual(mod.TimelineAskDock({ selectedItem: null }), null,
+    'a {date}-only bar on the project picker reads as a global Ask (controller ruling 1)');
+});
+
+test('9g the admin available-users disambiguation gets no dock', () => {
+  /* { date, available_users:[...] } is a disambiguation envelope, not a day:
+     askReportReady is false, yet askContextForDay still published the date. */
+  const mod = loadDock(DAY_ONLY, false);
+  assert.strictEqual(mod.TimelineAskDock({ selectedItem: null }), null,
+    'the user-picker screen rendered an Ask over a list of people');
+  assert.strictEqual(mod.TimelineAskDock({
+    selectedItem: { kind: 'topic', topic: { topic_row_id: 't', topic_title: 'Crane' } },
+  }), null, 'a stale selection brought the dock back on the user picker');
+});
+
+test('9h first paint and a day still loading get no dock', () => {
+  /* askDayResetKey returns null while loading, so the context is whatever the
+     PREVIOUS day left behind — navigating to a new date leaves a stale
+     {date} in place. Under the old guard that stale date rendered a dock
+     scoped to the day the reader just left. */
+  const stale = loadDock({ date: '2026-09-02' }, false);
+  assert.strictEqual(stale.TimelineAskDock({ selectedItem: null }), null,
+    'a day still loading kept a dock scoped to the previous day');
+
+  const firstPaint = loadDock({}, false);
+  assert.strictEqual(firstPaint.TimelineAskDock({ selectedItem: null }), null,
+    'the first paint rendered a dock before any day existed');
+});
+
+test('9i a day with no report keeps its day-scoped dock', () => {
+  /* The one state that LOOKS like the leaks and is not: the day resolved, it
+     simply holds nothing. Spec intent is unchanged — the dock stays. */
+  const { mod: pure } = loadTimeline();
+  const noReport = pure.askContextForDay(null, '2026-09-03', 'Ben_UCPK2');
+  assert.deepStrictEqual(noReport, { date: '2026-09-03', authorFolder: 'Ben_UCPK2' });
+
+  const mod = loadDock(noReport, true);
+  const ask = askElOf(mod.TimelineAskDock({ selectedItem: null }));
+  assert.deepStrictEqual(ask.props.context, noReport,
+    'the no-report day lost its day scope');
+  assert.strictEqual(ask.props.user, 'Ben_UCPK2');
+});
+
+test('9j the aggregated site view keeps its dock, scoped date + site, no author', () => {
+  /* Task 6 (commit 7d9b737) publishes this context; the readiness gate must
+     not take the dock away again. */
+  const { mod: pure } = loadTimeline();
+  const siteCtx = pure.askContextForSite('site-uuid', 'UC PK', '2026-09-04');
+
+  const mod = loadDock(siteCtx, true);
+  const ask = askElOf(mod.TimelineAskDock({ selectedItem: null }));
+  assert.strictEqual(ask.props.context.date, '2026-09-04');
+  assert.strictEqual(ask.props.context.siteId, 'site-uuid');
+  assert.strictEqual(ask.props.context.siteName, 'UC PK');
+  assert.ok(!('authorFolder' in ask.props.context),
+    'the aggregated view scoped the dock by author');
+  assert.ok(!ask.props.user, 'the aggregated view passed an owner to AskChat');
+});
+
+test('9k askDockHasContent is the readiness rule, and it is about the SCREEN', () => {
+  const { mod } = loadTimeline();
+  const ready = mod.askDockHasContent;
+  assert.strictEqual(typeof ready, 'function', 'the readiness rule is not exported');
+
+  /* Not resolved: still loading, the project picker, the user picker. */
+  assert.strictEqual(ready('loading', false, false), false);
+  assert.strictEqual(ready('ok', true, false), false, 'the project picker was called resolved');
+  assert.strictEqual(ready('ok', false, true), false, 'the user picker was called resolved');
+
+  /* Resolved: an ordinary day (report or not) and the aggregated site view,
+     both of which reach this with status 'ok' and neither picker showing. */
+  assert.strictEqual(ready('ok', false, false), true, 'a resolved day lost its dock');
+});
+
+test('S10 the middle column publishes readiness from the same predicates it renders', () => {
+  /* The dock must not guess, so the column has to publish the fact — and it
+     has to be the SAME expression the branch renders from, or the two drift
+     apart silently and the guard goes back to being decorative. */
+  const src = timelineSrc();
+  const mid = src.slice(src.indexOf('function TimelineMiddleColumn('),
+                        src.indexOf('function SessionPicker('));
+
+  assert.match(mid, /var showSitePicker\s*=/, 'the project-picker predicate is not named once');
+  assert.match(mid, /var showUserPicker\s*=/, 'the user-picker predicate is not named once');
+  assert.match(mid, /if \(showSitePicker\)/, 'the picker branch does not read the named predicate');
+  assert.match(mid, /if \(showUserPicker\)/, 'the user-picker branch does not read the named predicate');
+  assert.match(mid, /askDockHasContent\(/, 'readiness is not computed from the shared rule');
+  assert.match(mid, /setAskReady\(/, 'the column never publishes readiness to the dock');
+
+  /* The inline copies must be gone, or a later edit can change one and not
+     the other. A wording-level regex (`doesNotMatch` against a literal
+     `if (...)` string) is defeated by any equivalent rewrite — reordered
+     operands, extra parens, a renamed local, or a second predicate spelled
+     differently in a third branch. Counting the distinctive tokens instead
+     catches all of those: the correct source has exactly one
+     `sitesList.length > 1` (inside `showSitePicker`'s own declaration) and
+     exactly nine `available_users` occurrences (the picker predicate plus
+     every other legitimate read of that field in this function) — a second,
+     reworded copy of either predicate raises its count regardless of how
+     it is phrased. */
+  function countOccurrences(haystack, needle) {
+    let count = 0, i = 0;
+    while ((i = haystack.indexOf(needle, i)) !== -1) { count += 1; i += needle.length; }
+    return count;
+  }
+  assert.strictEqual(countOccurrences(mid, 'sitesList.length > 1'), 1,
+    'sitesList.length > 1 appears more than once — a second copy of the site-picker predicate');
+  assert.strictEqual(countOccurrences(mid, 'available_users'), 9,
+    'available_users appears a different number of times than the known-good source — a second copy of the user-picker predicate');
 });
