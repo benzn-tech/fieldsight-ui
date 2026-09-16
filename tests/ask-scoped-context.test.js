@@ -849,7 +849,8 @@ test('6c the Provider holds only the ask fields', () => {
   const { page } = loadTimeline({ createContext() { return { Provider: 'AskCtxProvider' }; } });
   const el = page.Provider({ children: 'kids' });
   assert.strictEqual(el.type, 'AskCtxProvider');
-  assert.deepStrictEqual(Object.keys(el.props.value).sort(), ['askContext', 'setAskContext']);
+  assert.deepStrictEqual(Object.keys(el.props.value).sort(),
+    ['askContext', 'askReady', 'setAskContext', 'setAskReady']);
 });
 
 test('6e outside a Provider there is no hasAsk to gate on', () => {
@@ -888,7 +889,8 @@ test('6g the right detail no longer pins anything', () => {
 
 test('6h useTimelineAsk outside a Provider is inert and complete', () => {
   const { mod } = loadTimeline();
-  assert.deepStrictEqual(Object.keys(mod.useTimelineAsk()).sort(), ['askContext', 'setAskContext']);
+  assert.deepStrictEqual(Object.keys(mod.useTimelineAsk()).sort(),
+    ['askContext', 'askReady', 'setAskContext', 'setAskReady']);
 });
 
 /* ---- 7. topic scope helpers -------------------------------------------- */
@@ -999,11 +1001,18 @@ const DOCK_DAY = { date: '2026-09-03', siteId: 'site-uuid', siteName: 'UC PK',
 
 /* The dock reads its scope through useTimelineAsk(), so drive it with a stub
    context rather than a real Provider: the module only builds a context when
-   React.createContext exists, so both overrides are needed together. */
-function loadDock(askContext, extra) {
+   React.createContext exists, so both overrides are needed together.
+
+   `askReady` is the middle column's published "a day's content is resolved on
+   screen" fact, so it has to be stubbed as deliberately as the context: the
+   dock gates on it and must never re-derive it from the scope. */
+function loadDock(askContext, askReady, extra) {
   const { mod } = loadTimeline(Object.assign({
     createContext() { return { Provider: 'AskCtxProvider' }; },
-    useContext() { return { askContext: askContext, setAskContext() {} }; },
+    useContext() {
+      return { askContext: askContext, setAskContext() {},
+               askReady: askReady, setAskReady() {} };
+    },
   }, extra || {}));
   global.window.FieldSight.AskChat = 'AskChatStub';
   return mod;
@@ -1018,7 +1027,7 @@ function askElOf(el) {
 }
 
 test('9a the dock\'s scope follows the selection', () => {
-  const mod = loadDock(DOCK_DAY);
+  const mod = loadDock(DOCK_DAY, true);
   const withTopic = askElOf(mod.TimelineAskDock({
     selectedItem: { kind: 'topic', topic: { topic_row_id: 't', topic_title: 'Crane' } },
   }));
@@ -1038,7 +1047,7 @@ test('9a the dock\'s scope follows the selection', () => {
 });
 
 test('9b the dock renders nothing without a day', () => {
-  const mod = loadDock({});
+  const mod = loadDock({}, false);
   assert.strictEqual(mod.TimelineAskDock({ selectedItem: null }), null,
     'a bar with nothing to narrow to reads as a global Ask (controller ruling 1)');
   assert.strictEqual(mod.TimelineAskDock({
@@ -1053,7 +1062,7 @@ test('9c a palette hand-off is asked unscoped', () => {
     removeItem: k => { delete store[k]; },
   };
   try {
-    const mod = loadDock(DOCK_DAY);
+    const mod = loadDock(DOCK_DAY, true);
     const ask = askElOf(mod.TimelineAskDock({ selectedItem: null }));
     assert.deepStrictEqual(ask.props.context, {},
       'the palette question was sent with the day scope');
@@ -1101,4 +1110,119 @@ test('9e selecting another person\'s topic in the site view does not change the 
   assert.strictEqual(withTopic.topicRowId, 't2');
   assert.strictEqual(withTopic.topicTitle, 'Formwork');
   assert.ok(!('authorFolder' in withTopic), 'a topic pin added an author to the site scope');
+});
+
+/* ---- 9f-9k. the dock only appears where a day's content is resolved ----
+
+   The Task 4 review found the original `if (!context.date) return null` guard
+   suppressed nothing: `askContextForDay` sets `ctx.date` from `date` alone,
+   whatever the report is, and the fetch effect has resolved `date` long before
+   these branches render. So the dock rendered a `{date}`-only bar — no site, no
+   author — on three states that never had an Ask before the redesign.
+
+   These drive the dock with the exact context each of those branches really
+   publishes, which is the shape 9b (an EMPTY context) could not reach. */
+
+const DAY_ONLY = { date: '2026-09-03' };
+
+test('9f the project picker gets no dock', () => {
+  /* Multi-project caller, no project chosen (SitePickerState). The day-reset
+     effect has still published a date, so the scope looks "resolved" and is
+     not: there is no project to narrow to and nothing on screen to ask about. */
+  const mod = loadDock(DAY_ONLY, false);
+  assert.strictEqual(mod.TimelineAskDock({ selectedItem: null }), null,
+    'a {date}-only bar on the project picker reads as a global Ask (controller ruling 1)');
+});
+
+test('9g the admin available-users disambiguation gets no dock', () => {
+  /* { date, available_users:[...] } is a disambiguation envelope, not a day:
+     askReportReady is false, yet askContextForDay still published the date. */
+  const mod = loadDock(DAY_ONLY, false);
+  assert.strictEqual(mod.TimelineAskDock({ selectedItem: null }), null,
+    'the user-picker screen rendered an Ask over a list of people');
+  assert.strictEqual(mod.TimelineAskDock({
+    selectedItem: { kind: 'topic', topic: { topic_row_id: 't', topic_title: 'Crane' } },
+  }), null, 'a stale selection brought the dock back on the user picker');
+});
+
+test('9h first paint and a day still loading get no dock', () => {
+  /* askDayResetKey returns null while loading, so the context is whatever the
+     PREVIOUS day left behind — navigating to a new date leaves a stale
+     {date} in place. Under the old guard that stale date rendered a dock
+     scoped to the day the reader just left. */
+  const stale = loadDock({ date: '2026-09-02' }, false);
+  assert.strictEqual(stale.TimelineAskDock({ selectedItem: null }), null,
+    'a day still loading kept a dock scoped to the previous day');
+
+  const firstPaint = loadDock({}, false);
+  assert.strictEqual(firstPaint.TimelineAskDock({ selectedItem: null }), null,
+    'the first paint rendered a dock before any day existed');
+});
+
+test('9i a day with no report keeps its day-scoped dock', () => {
+  /* The one state that LOOKS like the leaks and is not: the day resolved, it
+     simply holds nothing. Spec intent is unchanged — the dock stays. */
+  const { mod: pure } = loadTimeline();
+  const noReport = pure.askContextForDay(null, '2026-09-03', 'Ben_UCPK2');
+  assert.deepStrictEqual(noReport, { date: '2026-09-03', authorFolder: 'Ben_UCPK2' });
+
+  const mod = loadDock(noReport, true);
+  const ask = askElOf(mod.TimelineAskDock({ selectedItem: null }));
+  assert.deepStrictEqual(ask.props.context, noReport,
+    'the no-report day lost its day scope');
+  assert.strictEqual(ask.props.user, 'Ben_UCPK2');
+});
+
+test('9j the aggregated site view keeps its dock, scoped date + site, no author', () => {
+  /* Task 6 (commit 7d9b737) publishes this context; the readiness gate must
+     not take the dock away again. */
+  const { mod: pure } = loadTimeline();
+  const siteCtx = pure.askContextForSite('site-uuid', 'UC PK', '2026-09-04');
+
+  const mod = loadDock(siteCtx, true);
+  const ask = askElOf(mod.TimelineAskDock({ selectedItem: null }));
+  assert.strictEqual(ask.props.context.date, '2026-09-04');
+  assert.strictEqual(ask.props.context.siteId, 'site-uuid');
+  assert.strictEqual(ask.props.context.siteName, 'UC PK');
+  assert.ok(!('authorFolder' in ask.props.context),
+    'the aggregated view scoped the dock by author');
+  assert.ok(!ask.props.user, 'the aggregated view passed an owner to AskChat');
+});
+
+test('9k askDockHasContent is the readiness rule, and it is about the SCREEN', () => {
+  const { mod } = loadTimeline();
+  const ready = mod.askDockHasContent;
+  assert.strictEqual(typeof ready, 'function', 'the readiness rule is not exported');
+
+  /* Not resolved: still loading, the project picker, the user picker. */
+  assert.strictEqual(ready('loading', false, false), false);
+  assert.strictEqual(ready('ok', true, false), false, 'the project picker was called resolved');
+  assert.strictEqual(ready('ok', false, true), false, 'the user picker was called resolved');
+
+  /* Resolved: an ordinary day (report or not) and the aggregated site view,
+     both of which reach this with status 'ok' and neither picker showing. */
+  assert.strictEqual(ready('ok', false, false), true, 'a resolved day lost its dock');
+});
+
+test('S10 the middle column publishes readiness from the same predicates it renders', () => {
+  /* The dock must not guess, so the column has to publish the fact — and it
+     has to be the SAME expression the branch renders from, or the two drift
+     apart silently and the guard goes back to being decorative. */
+  const src = timelineSrc();
+  const mid = src.slice(src.indexOf('function TimelineMiddleColumn('),
+                        src.indexOf('function SessionPicker('));
+
+  assert.match(mid, /var showSitePicker\s*=/, 'the project-picker predicate is not named once');
+  assert.match(mid, /var showUserPicker\s*=/, 'the user-picker predicate is not named once');
+  assert.match(mid, /if \(showSitePicker\)/, 'the picker branch does not read the named predicate');
+  assert.match(mid, /if \(showUserPicker\)/, 'the user-picker branch does not read the named predicate');
+  assert.match(mid, /askDockHasContent\(/, 'readiness is not computed from the shared rule');
+  assert.match(mid, /setAskReady\(/, 'the column never publishes readiness to the dock');
+
+  /* The inline copies must be gone, or a later edit can change one and not
+     the other. */
+  assert.doesNotMatch(mid, /if \(!site && teamView && sitesList\.length > 1\)/,
+    'the picker branch still carries its own copy of the condition');
+  assert.doesNotMatch(mid, /if \(report && report\.available_users && !hasMeeting\)/,
+    'the user-picker branch still carries its own copy of the condition');
 });

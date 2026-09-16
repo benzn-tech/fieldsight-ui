@@ -1071,13 +1071,21 @@
   var NO_TIMELINE_ASK = {
     askContext: {},
     setAskContext: function () {},
+    askReady: false,
+    setAskReady: function () {},
   };
 
   function TimelineAskProvider(props) {
-    var refCtx = React.useState({});
+    var refCtx   = React.useState({});
+    var refReady = React.useState(false);
     var value = {
       askContext:    refCtx[0],
       setAskContext: function (next) { refCtx[1](next || {}); },
+      /* "A day's content is resolved on screen" — published by the middle
+         column, read by the dock. It is a separate fact from the scope on
+         purpose: see askDockHasContent below. */
+      askReady:      refReady[0],
+      setAskReady:   function (next) { refReady[1](!!next); },
     };
     if (!TimelineAskContext) return React.createElement(React.Fragment, null, props.children);
     return React.createElement(TimelineAskContext.Provider, { value: value }, props.children);
@@ -1150,6 +1158,23 @@
     return [date || '', owner || '', siteId || ''].join('|');
   }
 
+  /* Is a day's content actually resolved on screen? The dock gates on this,
+     published by the middle column, instead of re-deriving it from the scope.
+     A non-empty scope is NOT evidence that anything resolved: askContextForDay
+     sets `ctx.date` from the route's date alone, whatever the report turned
+     out to be, so the first version of this gate (`if (!context.date)`)
+     suppressed nothing and shipped a {date}-only bar — no site, no author —
+     onto the project picker and the admin user picker (Task 4 review).
+
+     Loading and either picker resolve nothing. An ordinary day resolves even
+     when it holds no report (the dock stays, day-scoped, unchanged intent),
+     and so does the aggregated site view (spec §2.1, Task 6). */
+  function askDockHasContent(status, showSitePicker, showUserPicker) {
+    if (status === 'loading') return false;
+    if (showSitePicker || showUserPicker) return false;
+    return true;
+  }
+
   /* The page's one Ask, docked under the middle column's scroll area (spec
      2026-09-16 §1, §4). Mounted by the shell's Footer slot, so it is a
      SIBLING of the list and never something the reader can scroll to.
@@ -1185,10 +1210,13 @@
     var context = fromPaletteRef.current ? {} : (withTopic || day);
 
     if (!AskChat) return null;
-    /* No day resolved yet (project picker, first paint, admin available-users
-       disambiguation): an Ask with nothing to narrow to is not the day Ask, so
-       render nothing rather than a silently global bar (controller ruling 1). */
-    if (!context.date && !fromPaletteRef.current) return null;
+    /* Nothing resolved on screen (project picker, first paint, admin
+       available-users disambiguation): an Ask with nothing to narrow to is not
+       the day Ask, so render nothing rather than a silently global bar
+       (controller ruling 1). The dock reads the column's published fact and
+       does not infer it — a truthy context.date is not evidence of anything,
+       which is exactly why the first version of this guard never fired. */
+    if (!askApi.askReady && !fromPaletteRef.current) return null;
 
     return React.createElement('div', { className: 'fs-ask-dock' },
       React.createElement(AskChat, {
@@ -2274,6 +2302,13 @@
        date+site scope instead of the day+owner one. */
     var teamView = !user || !!state.aggregated;
 
+    /* The two "this screen is a picker, not a day" predicates, named once and
+       read BOTH by the readiness fact below and by the branches that render
+       them. A second copy of either condition is how the dock and the screen
+       drift apart without anything throwing. */
+    var showSitePicker = !site && teamView && sitesList.length > 1;
+    var showUserPicker = !!(askReport && askReport.available_users && !state.meeting);
+
     var askDayKeyRef = React.useRef(null);
     React.useEffect(function () {
       /* The aggregated site view has no single owner (the reader moves
@@ -2297,6 +2332,14 @@
       askApi.setAskContext(askContextForDay(askReportReady ? askReport : null, date, user));
     }, [state.status, date, askOwner, askReportReady && askReport.site_id,
         site, teamView, sitesList]);
+
+    /* Tell the dock whether this screen resolved anything. The dock is a
+       SIBLING (the shell's Footer slot), so it cannot see this column's state
+       and must not guess it from the scope — askDockHasContent says why. */
+    var askDockReady = askDockHasContent(state.status, showSitePicker, showUserPicker);
+    React.useEffect(function () {
+      askApi.setAskReady(askDockReady);
+    }, [askDockReady]);
 
     /* Loading */
     if (state.status === 'loading') {
@@ -2355,7 +2398,7 @@
        branch simply doesn't match yet — the 'loading' branch above (from
        the still-in-flight, non-short-circuited fetch below) covers that
        window without any extra state. */
-    if (!site && teamView && sitesList.length > 1) {
+    if (showSitePicker) {
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: null,
@@ -2402,7 +2445,7 @@
     var hasMeeting = !!meeting;
 
     /* Admin disambiguation shape: { date, available_users:[...] } */
-    if (report && report.available_users && !hasMeeting) {
+    if (showUserPicker) {
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: null,
@@ -4553,6 +4596,7 @@
       askContextForSite: askContextForSite,
       TimelineAskDock: TimelineAskDock,
       askDayResetKey: askDayResetKey,
+      askDockHasContent: askDockHasContent,
     };
   }
 

@@ -3676,6 +3676,15 @@
   .fs-ask-chat__widen { min-height: 44px; }
 }
 
+/* `.fs-ask-dock` — the dock's wrapper element (scripts/pages/timeline.js,
+   TimelineAskDock) is deliberately UNSTYLED, and this block is here so that a
+   reader who greps for the class finds that on purpose rather than a gap.
+   Its box comes from `.middle-column__footer` (styles/app-shell.css) and
+   everything inside it from `.fs-ask-chat--dock` below; a rule here would only
+   be a second place to look. The class is kept because spec §8's manual
+   checklist uses it as the DevTools hook for confirming the bar is a SIBLING
+   of the scroll area, not a child of it. Do not give it layout. */
+
 /* The docked Ask (docs/specs/2026-09-16-ask-dock.md).
    The conversation is an OVERLAY: absolutely positioned against the dock and
    rendered only when there is something in it, so the topic list above never
