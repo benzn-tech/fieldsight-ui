@@ -676,9 +676,10 @@
       }
     }, [msgs.length, busy]);
 
-    /* When scope keys change (the host changed the context: a day/owner
-       change, a pinned or removed topic, "Ask across everything"), drop
-       history since prior context no longer applies. */
+    /* When scope keys change (the host changed the DAY: a date, project or
+       owner change, or "Ask across everything"), drop history since prior
+       context no longer applies. A topic change is handled by the effect
+       below and deliberately does NOT clear (spec 2026-09-16 §5). */
     React.useEffect(function () {
       if (!resetMountedRef.current) { resetMountedRef.current = true; return; }
       genRef.current += 1;
@@ -695,7 +696,34 @@
         if (busy) deferredResendRef.current = pending;
         else send(pending);
       }
-    }, [context.date, context.siteId, context.authorFolder, context.topicRowId]);
+    }, [context.date, context.siteId, context.authorFolder]);
+
+    /* A topic change alone KEEPS the messages and says so in one line. The
+       generation still bumps, so an answer already in flight for the old
+       topic is dropped rather than appended under the new chip.
+       Declared after the day effect on purpose: React runs them in order, so
+       a commit that changed BOTH has already cleared by the time this runs,
+       and the day-key comparison below stops a divider landing under an
+       empty log. */
+    var topicMountedRef = React.useRef(false);
+    var seenDayKeyRef   = React.useRef(null);
+    React.useEffect(function () {
+      var dayKey = [context.date, context.siteId, context.authorFolder].join('|');
+      var dayAlsoChanged = seenDayKeyRef.current !== null && seenDayKeyRef.current !== dayKey;
+      seenDayKeyRef.current = dayKey;
+      if (!topicMountedRef.current) { topicMountedRef.current = true; return; }
+      genRef.current += 1;
+      if (dayAlsoChanged) return;
+      var title = (context.topicTitle || '').trim();
+      setMsgs(function (m) {
+        return m.length ? m.concat([{
+          role: 'divider',
+          text: present(context.topicRowId)
+            ? 'Now asking about: ' + (title || 'this topic')
+            : 'Now asking about the whole day',
+        }]) : m;
+      });
+    }, [context.topicRowId]);
 
     /* A widen that landed while an older request was still in flight: send it
        once that request settles, from a render that has the new context. */
@@ -918,6 +946,13 @@
                (it HTML-escapes first, then emits only a fixed tag set, so
                dangerouslySetInnerHTML carries no LLM-supplied markup). User
                messages are the person's own typed question → keep plain. */
+            /* A topic switch outside the assistant chain below: it is its own
+               branch, never nested inside the origin/answer/corroboration
+               ordering those tests slice on (spec 2026-09-16 §5). */
+            m.role === 'divider'
+              ? React.createElement('div', { className: 'fs-ask-chat__divider-text' }, m.text)
+              : null,
+
             /* FIRST, above the answer — not after it, and not at the end of the
                prose. The reader asked about a period; if that period is empty
                they learn it before they read a word about another day.
@@ -942,13 +977,20 @@
                 })
               : null,
             m.role === 'assistant' ? renderWebOrigin(m) : null,
-            m.role === 'assistant' && window.FieldSight.renderMarkdown
-              ? React.createElement('div', {
-                  className: 'fs-ask-chat__msg-text fs-ask-chat__msg-text--md',
-                  dangerouslySetInnerHTML: { __html: window.FieldSight.renderMarkdown(m.text) },
-                })
-              : React.createElement('div', { className: 'fs-ask-chat__msg-text' },
-                  m.text),
+            /* The plain-text fallback below is also what renders the user's
+               own question; a divider already rendered its one line above
+               and must not get a second copy of it here (m.role !== 'divider'
+               guard — not in the plan's illustrative snippet, found by
+               running D-j/D-k: the old else-branch had no role guard at all). */
+            m.role === 'divider'
+              ? null
+              : (m.role === 'assistant' && window.FieldSight.renderMarkdown
+                  ? React.createElement('div', {
+                      className: 'fs-ask-chat__msg-text fs-ask-chat__msg-text--md',
+                      dangerouslySetInnerHTML: { __html: window.FieldSight.renderMarkdown(m.text) },
+                    })
+                  : React.createElement('div', { className: 'fs-ask-chat__msg-text' },
+                      m.text)),
             m.role === 'assistant' ? renderCitations(m.citations) : null,
             /* A scoped answer that found nothing: offer the same question
                across everything. The host clears the context; the reset

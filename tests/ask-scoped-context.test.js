@@ -483,7 +483,7 @@ test('D-c "Ask across everything" appears only when it means something, and re-a
 });
 
 test('D-d a scope key change clears the history; a user change does not', async () => {
-  for (const key of ['date', 'siteId', 'authorFolder', 'topicRowId']) {
+  for (const key of ['date', 'siteId', 'authorFolder']) {
     const h = mountAsk();
     h.render({ user: 'Ben', context: SCOPED });
     await h.ask('q');
@@ -594,6 +594,86 @@ test('D-h the chip remove button names what it removes', async () => {
              onContextChange() {} });
   const labels = h.byClass('fs-ask-chip__remove').map(n => n.props['aria-label']);
   assert.deepStrictEqual(labels, ['Remove scope: Thu 3 Sep · UC PK · Ben', 'Remove scope: Topic: Crane']);
+});
+
+test('D-j selecting a topic adds topic_row_id to the next request and keeps the prior messages', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED });
+  await h.ask('first question');
+  await h.settle(0, { answer: 'a', citations: [], applied_scope: {} });
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1);
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--assistant').length, 1);
+
+  h.render({ user: 'Ben', context: Object.assign({}, SCOPED, { topicRowId: 't', topicTitle: 'Crane' }) });
+  h.rerender();
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1, 'the prior question was dropped');
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--assistant').length, 1, 'the prior answer was dropped');
+  const dividers = h.byClass('fs-ask-chat__msg--divider');
+  assert.strictEqual(dividers.length, 1, 'no divider, or more than one');
+  assert.strictEqual(h.text(dividers[0]), 'Now asking about: Crane');
+
+  await h.ask('second question');
+  assert.strictEqual(h.asks[1].topic_row_id, 't');
+});
+
+test('D-k deselecting adds a divider and drops topic_row_id', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: Object.assign({}, SCOPED, { topicRowId: 't', topicTitle: 'Crane' }) });
+  await h.ask('first question');
+  await h.settle(0, { answer: 'a', citations: [], applied_scope: {} });
+
+  h.render({ user: 'Ben', context: SCOPED });
+  h.rerender();
+  const dividers = h.byClass('fs-ask-chat__msg--divider');
+  assert.strictEqual(dividers.length, 1);
+  assert.strictEqual(h.text(dividers[0]), 'Now asking about the whole day');
+
+  await h.ask('second question');
+  assert.ok(!('topic_row_id' in h.asks[1]), 'topic_row_id survived deselection');
+});
+
+test('D-l a date/site/owner change still clears the conversation and appends no divider', async () => {
+  for (const key of ['date', 'siteId', 'authorFolder']) {
+    const h = mountAsk();
+    h.render({ user: 'Ben', context: Object.assign({}, SCOPED, { topicRowId: 't', topicTitle: 'Crane' }) });
+    await h.ask('q');
+    await h.settle(0, { answer: 'a', citations: [], applied_scope: {} });
+    h.render({ user: 'Ben', context: Object.assign({}, SCOPED,
+      { topicRowId: 't', topicTitle: 'Crane', [key]: 'changed' }) });
+    h.rerender();
+    assert.strictEqual(h.byClass('fs-ask-chat__msg').length, 0,
+      key + ' change left a message or a divider behind');
+  }
+});
+
+test('D-m a late answer from the pre-switch scope is not appended after a topic switch', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED });
+  await h.ask('first question');
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--pending').length, 1);
+
+  h.render({ user: 'Ben', context: Object.assign({}, SCOPED, { topicRowId: 't', topicTitle: 'Crane' }) });
+  h.rerender();
+
+  await h.settle(0, { answer: 'a', citations: [], applied_scope: {} });
+
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--assistant').length, 0, 'the stale answer was appended');
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1, 'the original question is gone');
+  const dividers = h.byClass('fs-ask-chat__msg--divider');
+  assert.strictEqual(dividers.length, 1, 'the divider from the switch is gone');
+  assert.strictEqual(h.byClass('fs-ask-chat__input')[0].props.disabled, false, 'busy never cleared');
+});
+
+test('D-n a day change that also changes the topic appends no divider', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: Object.assign({}, SCOPED, { topicRowId: 't', topicTitle: 'Crane' }) });
+  await h.ask('q');
+  await h.settle(0, { answer: 'a', citations: [], applied_scope: {} });
+
+  h.render({ user: 'Ben', context: Object.assign({}, SCOPED, { date: '2026-09-04' }) });
+  h.rerender();
+  assert.strictEqual(h.byClass('fs-ask-chat__msg').length, 0,
+    'a divider or message survived a same-commit day+topic change');
 });
 
 /* ---- Timeline --------------------------------------------------------- */
