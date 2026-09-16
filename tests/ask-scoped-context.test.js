@@ -1073,3 +1073,32 @@ test('8e the palette mount passes no scope, no context and no suggestions', () =
   assert.doesNotMatch(mount, /\bsuggestions:/);
   assert.doesNotMatch(mount, /\btopic_id:/);
 });
+
+/* ---- 9d/9e. the site view's dock (spec 2026-09-16 §2.1) ---------------- */
+
+test('9d the site view publishes a date + site scope with no author', () => {
+  const { mod } = loadTimeline();
+  const ctx = mod.askContextForSite('site-uuid', 'UC PK', '2026-09-04');
+  assert.deepStrictEqual(ctx, { date: '2026-09-04', siteId: 'site-uuid', siteName: 'UC PK' });
+  assert.ok(!('authorFolder' in ctx), 'the site view scoped the dock by author');
+
+  /* No visible site name -> the id is omitted too (the #311 rule: never
+     narrow by a project the chip cannot name — askContextForDay, above). */
+  const noName = mod.askContextForSite('site-uuid', '', '2026-09-04');
+  assert.ok(!('siteId' in noName));
+  assert.ok(!('siteName' in noName));
+  assert.deepStrictEqual(noName, { date: '2026-09-04' });
+});
+
+test('9e selecting another person\'s topic in the site view does not change the day keys', () => {
+  const { mod } = loadTimeline();
+  const siteCtx = { date: '2026-09-04', siteId: 'site-uuid', siteName: 'UC PK' };
+  const topicOfPersonB = { topic_row_id: 't2', topic_title: 'Formwork' };
+  const withTopic = mod.askContextWithTopic(siteCtx, topicOfPersonB, siteCtx);
+  assert.strictEqual(withTopic.date, siteCtx.date);
+  assert.strictEqual(withTopic.siteId, siteCtx.siteId);
+  assert.strictEqual(withTopic.siteName, siteCtx.siteName);
+  assert.strictEqual(withTopic.topicRowId, 't2');
+  assert.strictEqual(withTopic.topicTitle, 'Formwork');
+  assert.ok(!('authorFolder' in withTopic), 'a topic pin added an author to the site scope');
+});

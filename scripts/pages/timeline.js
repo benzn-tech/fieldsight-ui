@@ -1124,6 +1124,24 @@
     });
   }
 
+  /* The aggregated site view's day scope (spec 2026-09-16 §2.1): date + site,
+     never an author. An owner change clears the conversation (askDayResetKey
+     below), but the aggregated view has no single owner — the reader moves
+     between people's topics constantly, so putting one in scope would clear
+     the conversation on every cross-person click, contradicting "switching
+     topics does not clear" (Task 6 controller ruling). siteId is only set
+     alongside a non-empty siteName, same rule as askContextForDay: never
+     narrow by a project the chip cannot name. */
+  function askContextForSite(site, siteName, date) {
+    var ctx = {};
+    if (date) ctx.date = date;
+    if (site && siteName) {
+      ctx.siteId = site;
+      ctx.siteName = siteName;
+    }
+    return ctx;
+  }
+
   /* The day scope is rebuilt only when the day actually changes: a refetch
      of the same day (content edit refresh, retry) goes loading → ok again
      and must keep a pinned topic. null while loading = do nothing. */
@@ -2243,14 +2261,42 @@
     var askReport = state.report;
     var askReportReady = !!(askReport && !askReport._notFound && !askReport.available_users);
     var askOwner = user || (askReportReady && askReport.user_name) || '';
+
+    /* "Is this the multi-person view?" — asked once, because it is NOT the
+       same as `!user` any more. The own-day handover deliberately leaves
+       `user` set to the caller (so moving to a date where they DID record
+       shows their own day again, with no URL rewrite) and signals itself
+       through state. Every branch that used to test `!user` has to test this
+       instead, or the handover sets a state nothing renders and the page
+       falls through to the very empty day it was trying to avoid — which is
+       exactly what it did. Read here, before the reset effect below, since
+       the aggregated site view (Task 6, spec §2.1) needs it to publish a
+       date+site scope instead of the day+owner one. */
+    var teamView = !user || !!state.aggregated;
+
     var askDayKeyRef = React.useRef(null);
     React.useEffect(function () {
+      /* The aggregated site view has no single owner (the reader moves
+         between people's topics), so it publishes date+site only, never an
+         author — putting one in scope would clear the conversation on every
+         cross-person topic click (Task 6 controller ruling, spec §2.1).
+         Same effect, same ref, same "loading" gate as the day+owner path
+         below — only the built context and the dedup key differ. */
+      if (site && teamView) {
+        var siteName = (sitesList.find(function (s) { return s.site_id === site; }) || {}).name;
+        var siteDayKey = askDayResetKey(state.status, date, '', site);
+        if (siteDayKey === null || siteDayKey === askDayKeyRef.current) return;
+        askDayKeyRef.current = siteDayKey;
+        askApi.setAskContext(askContextForSite(site, siteName, date));
+        return;
+      }
       var dayKey = askDayResetKey(state.status, date, askOwner,
                                   askReportReady && askReport.site_id);
       if (dayKey === null || dayKey === askDayKeyRef.current) return;
       askDayKeyRef.current = dayKey;
       askApi.setAskContext(askContextForDay(askReportReady ? askReport : null, date, user));
-    }, [state.status, date, askOwner, askReportReady && askReport.site_id]);
+    }, [state.status, date, askOwner, askReportReady && askReport.site_id,
+        site, teamView, sitesList]);
 
     /* Loading */
     if (state.status === 'loading') {
@@ -2301,16 +2347,6 @@
           : React.createElement(NoReportState, { message: state.message || 'Access denied.' }),
       );
     }
-
-    /* "Is this the multi-person view?" — asked once, because it is NOT the
-       same as `!user` any more. The own-day handover deliberately leaves
-       `user` set to the caller (so moving to a date where they DID record
-       shows their own day again, with no URL rewrite) and signals itself
-       through state. Every branch that used to test `!user` has to test this
-       instead, or the handover sets a state nothing renders and the page
-       falls through to the very empty day it was trying to avoid — which is
-       exactly what it did. */
-    var teamView = !user || !!state.aggregated;
 
     /* Batch A — multi-project caller with no project chosen: offer the
        project picker instead of the raw cross-site user list
@@ -4514,6 +4550,7 @@
       useTimelineAsk: useTimelineAsk,
       askContextForDay: askContextForDay,
       askContextWithTopic: askContextWithTopic,
+      askContextForSite: askContextForSite,
       TimelineAskDock: TimelineAskDock,
       askDayResetKey: askDayResetKey,
     };
