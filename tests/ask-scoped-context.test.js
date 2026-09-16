@@ -676,6 +676,42 @@ test('D-n a day change that also changes the topic appends no divider', async ()
     'a divider or message survived a same-commit day+topic change');
 });
 
+test('D-q a topic-only change still appends a divider after an EARLIER day-only change', async () => {
+  const h = mountAsk();
+  /* 1. mount on day A, no topic; ask; answer arrives. */
+  h.render({ user: 'Ben', context: SCOPED });
+  await h.ask('first question');
+  await h.settle(0, { answer: 'a', citations: [], applied_scope: {} });
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1);
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--assistant').length, 1);
+
+  /* 2. change to day B: the day effect clears (deps [date] changed); the
+     topic effect does NOT run (topicRowId is still undefined). */
+  const DAY_B = Object.assign({}, SCOPED, { date: '2026-09-04' });
+  h.render({ user: 'Ben', context: DAY_B });
+  h.rerender();
+  assert.strictEqual(h.byClass('fs-ask-chat__msg').length, 0, 'day change did not clear');
+
+  /* 3. ask again on day B; answer arrives. */
+  await h.ask('second question');
+  await h.settle(1, { answer: 'b', citations: [], applied_scope: {} });
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1);
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--assistant').length, 1);
+
+  /* 4. change ONLY the topic -- the topic effect finally runs. It must
+     compare the CURRENT day key against the day key as of THIS commit, not
+     a bookmark from whenever it last happened to run (day A). */
+  h.render({ user: 'Ben', context: Object.assign({}, DAY_B, { topicRowId: 't', topicTitle: 'Crane' }) });
+  h.rerender();
+
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1, 'the prior question was lost');
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--assistant').length, 1, 'the prior answer was lost');
+  const dividers = h.byClass('fs-ask-chat__msg--divider');
+  assert.strictEqual(dividers.length, 1,
+    'a topic-only change after an earlier day-only change dropped the divider');
+  assert.strictEqual(h.text(dividers[0]), 'Now asking about: Crane');
+});
+
 /* ---- Timeline --------------------------------------------------------- */
 
 function makeReactStub(extra) {

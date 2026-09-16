@@ -703,17 +703,27 @@
        topic is dropped rather than appended under the new chip.
        Declared after the day effect on purpose: React runs them in order, so
        a commit that changed BOTH has already cleared by the time this runs,
-       and the day-key comparison below stops a divider landing under an
-       empty log. */
+       and `dayAlsoChangedThisRender` below stops a divider landing under an
+       empty log.
+       `dayKey` is recomputed, and stashed into `prevDayKeyRef`, on EVERY
+       render -- not only when this effect happens to run. It used to be
+       written only from inside this effect (deps [context.topicRowId]), so
+       a day-only change (which never runs this effect) left it stale; a
+       later topic-only change then compared the current day key against
+       that stale value, wrongly concluded "the day also changed", and
+       swallowed the divider (found by driving the component through:
+       mount day A -> ask -> change to day B -> ask -> change ONLY the
+       topic -> divider missing). Computing it in the render body makes
+       `dayAlsoChangedThisRender` reflect the commit actually in flight. */
     var topicMountedRef = React.useRef(false);
-    var seenDayKeyRef   = React.useRef(null);
+    var dayKey = [context.date, context.siteId, context.authorFolder].join('|');
+    var prevDayKeyRef = React.useRef(null);
+    var dayAlsoChangedThisRender = prevDayKeyRef.current !== null && prevDayKeyRef.current !== dayKey;
+    prevDayKeyRef.current = dayKey;
     React.useEffect(function () {
-      var dayKey = [context.date, context.siteId, context.authorFolder].join('|');
-      var dayAlsoChanged = seenDayKeyRef.current !== null && seenDayKeyRef.current !== dayKey;
-      seenDayKeyRef.current = dayKey;
       if (!topicMountedRef.current) { topicMountedRef.current = true; return; }
       genRef.current += 1;
-      if (dayAlsoChanged) return;
+      if (dayAlsoChangedThisRender) return;
       var title = (context.topicTitle || '').trim();
       setMsgs(function (m) {
         return m.length ? m.concat([{
