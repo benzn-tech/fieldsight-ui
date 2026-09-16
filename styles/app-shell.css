@@ -53,6 +53,13 @@ body {
   overflow: hidden;
 }
 
+/* The docked page footer (spec 2026-09-16). A sibling of the scroll area,
+   never inside it: it must never be something the reader can scroll to. */
+.middle-column__footer {
+  flex-shrink: 0;
+  min-width: 0;
+}
+
 /* ---------- Resize handle ------------------------------------------------- */
 .resize-handle {
   position: absolute;

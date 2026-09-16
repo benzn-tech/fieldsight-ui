@@ -1,11 +1,14 @@
 /* ==========================================================================
-   FieldSight Page Registry — route → { Middle, Right }
+   FieldSight Page Registry — route → { Provider, Middle, Right, Footer }
    --------------------------------------------------------------------------
    Each page module attaches itself to window.FieldSight.PAGES.<key>
    AFTER this registry loads. The registry just defines the mapping.
 
+   Footer is optional: a route with none renders nothing there (spec
+   2026-09-16 §3 — the docked Ask lives here for /timeline).
+
    Exported to:
-     window.FieldSight.getPageForRoute(routePath) → { Middle, Right } | null
+     window.FieldSight.getPageForRoute(routePath) → { Provider, Middle, Right, Footer } | null
    ========================================================================== */
 
 (function () {
@@ -15,7 +18,7 @@
   if (!window.FieldSight) window.FieldSight = {};
   if (!window.FieldSight.PAGES) window.FieldSight.PAGES = {};
 
-  /* Resolve a route to { Middle, Right } components */
+  /* Resolve a route to { Provider, Middle, Right, Footer } components */
   function getPageForRoute(routePath) {
     var pages = window.FieldSight.PAGES || {};
     /* Direct match */
