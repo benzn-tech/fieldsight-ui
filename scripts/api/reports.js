@@ -2,8 +2,11 @@
    FieldSight API · Reports archive — BACKEND-CONTEXT §4.11
    --------------------------------------------------------------------------
    GET  /api/reports/history?limit=20      → { reports: [{ key, type, date, generated_at, size }] }
-   POST /api/reports/generate body { report_type, date?, force? }
-                                           → 202 { message, status:'pending' }
+   POST /api/org/reports/regenerate body { report_type, date }
+                                           → 202 { status:'queued', requestId }
+        Regenerates the CALLER'S OWN report only; the folder comes from the
+        caller's identity on the server. The legacy /api/reports/generate
+        answers 410 (2026-09-15).
    ========================================================================== */
 
 (function () {
@@ -37,14 +40,19 @@
   async function regenerate(opts) {
     opts = opts || {};
     if (!window.FS.api.useMocks) {
-      return window.FS.api.request('/reports/generate', {
-        method: 'POST',
-        body: {
-          report_type: opts.report_type,
-          date:        opts.date,
-          force:       !!opts.force,
-        },
-      });
+      /* Only the type and the date travel. No folder: the server takes it from
+         the caller, so there is nothing a client could send to reach someone
+         else's report. retry:false because a lost 202 retried is a second
+         generation of the same report. The legacy gateway route this used to
+         call is closed; off the org API there is nothing to call. */
+      if (window.FS.api.timelineSource === 'aurora' && window.FS.api.orgBaseUrl) {
+        return window.FS.api.orgRequest('/reports/regenerate', {
+          method: 'POST',
+          body:   { report_type: opts.report_type, date: opts.date },
+          retry:  false,
+        });
+      }
+      return { status: 'unavailable', error: 'Regenerate needs the org API.' };
     }
     await window.FS.api.delay(150);
     return {

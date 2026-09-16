@@ -182,6 +182,45 @@
     return !!(sessions && sessions.length >= 2);
   }
 
+  /* Which meeting a per-meeting report would be ABOUT.
+
+     The selected one -- or, when nothing is selected and the day holds exactly
+     one, that one. The picker above only renders for >=2 sessions, and the
+     report button used to require a selection, so a one-meeting day had a
+     button nothing could enable. A stale selection is never swapped for the
+     one-meeting fallback: that would report on a different meeting than the
+     user chose. */
+  function reportableSession(sessions, selectedSessionId) {
+    var list = sessions || [];
+    if (selectedSessionId != null) {
+      return list.filter(function (s) { return s.session_id === selectedSessionId; })[0] || null;
+    }
+    return list.length === 1 ? list[0] : null;
+  }
+
+  /* Which report a Generate click makes, or null when there is nothing to report.
+     A selected meeting is a meeting report; "All day" with at least one meeting is a
+     day report (spec 2026-09-15 §5.1); a day with no meeting has neither. */
+  function generateReportScope(session, sessionCount) {
+    if (session) return 'session';
+    return sessionCount > 0 ? 'day' : null;
+  }
+
+  /* The disabled button's tooltip. "Pick one above" is only true when the
+     picker is actually rendered. */
+  function generateReportUnavailableReason(sessionCount) {
+    if (!sessionCount) {
+      return 'No meeting was recorded this day, so there is nothing to report on here. '
+        + 'The whole day is the daily report, on the Reports page.';
+    }
+    // Unreachable from GenerateReportButton now that a day with at least one
+    // meeting reports on the whole day (generateReportScope returns 'day', so
+    // the button is never disabled here for sessionCount > 0) — kept for the
+    // sessionCount > 0 case still exercised directly by tests below.
+    return 'Reports here are per meeting — pick one above. '
+      + 'The whole day is the daily report, on the Reports page.';
+  }
+
   /* null/undefined sessionId = "All day" (no filtering) — returns the list
      unchanged, INCLUDING session_kind:'report' topics (which carry no
      session_id at all and would otherwise never match anything). A real
@@ -795,7 +834,7 @@
        everywhere else in this strip, so it needs no new vocabulary. */
     var dayOnly = !props.sessionScoped;
 
-    return React.createElement(KpiStrip, null,
+    return React.createElement(KpiStrip, { compact: true },
       React.createElement(StatCard, {
         value: topics, label: 'Topics',
       }),
@@ -975,16 +1014,11 @@
      Q&A is Phase 4.
      ===================================================================== */
   /* ---- alerts Ask route (routing spec §3.5) ------------------------------
-     AskChat is mounted in THREE places on this page — once in
-     AggregatedDayView and twice in TimelineRightDetail — and only the page's
-     day view is in a position to fetch the programme. Wiring the provider to
-     one mount would have made the route work on one route and be silently
-     absent on the other two, which is the same mistake the topic-link
-     placement made and had to be corrected for.
-
-     So the tasks live at module scope, written by whichever view fetched
-     them, and every mount reads the same provider. An empty cache means the
-     route does not exist and the question goes to the agent — the designed
+     Timeline has ONE AskChat (the day view, TimelineMiddleColumn); topic
+     detail pins a topic onto it instead of mounting its own (spec
+     2026-09-15-one-ask-scoped §3). The tasks still live at module scope,
+     written by whichever view fetched them. An empty cache means the route
+     does not exist and the question goes to the agent — the designed
      degradation, not a bug. */
   var _programmeTasks = null;
 
@@ -1008,6 +1042,142 @@
         lateness: null,
       };
     };
+  }
+
+  /* =====================================================================
+     One Ask, scoped (docs/specs/2026-09-15-one-ask-scoped.md §3)
+     ---------------------------------------------------------------------
+     The page's single AskChat lives in the middle column, the "Ask about
+     this topic" button lives in the right column; they share the context
+     through this Provider (same slot TodayProvider uses, app-shell.js
+     ~1365). It holds ONLY the ask context and a focus nonce — it does not
+     move any existing Timeline state.
+
+     createContext is guarded because Node tests load this file with a
+     React stub that has none; without a context, useTimelineAsk returns an
+     inert value and the page still renders. */
+  var TimelineAskContext = (typeof React !== 'undefined' && React && React.createContext)
+    ? React.createContext(null)
+    : null;
+
+  var NO_TIMELINE_ASK = {
+    askContext: {},
+    setAskContext: function () {},
+    askFocusNonce: 0,
+    requestAskFocus: function () {},
+    hasAsk: false,
+    setHasAsk: function () {},
+  };
+
+  function TimelineAskProvider(props) {
+    var refCtx    = React.useState({});
+    var refNonce  = React.useState(0);
+    var refHasAsk = React.useState(false);
+    var value = {
+      askContext:      refCtx[0],
+      setAskContext:   function (next) { refCtx[1](next || {}); },
+      askFocusNonce:   refNonce[0],
+      requestAskFocus: function () { refNonce[1](function (n) { return n + 1; }); },
+      /* True only while the middle column actually has the one Ask mounted
+         (AskPresence below). The aggregated site view, the meeting view and
+         the error / no-report states mount none, and a topic button there
+         would do nothing. */
+      hasAsk:          refHasAsk[0],
+      setHasAsk:       refHasAsk[1],
+    };
+    if (!TimelineAskContext) return React.createElement(React.Fragment, null, props.children);
+    return React.createElement(TimelineAskContext.Provider, { value: value }, props.children);
+  }
+
+  function useTimelineAsk() {
+    var v = (TimelineAskContext && React.useContext) ? React.useContext(TimelineAskContext) : null;
+    return v || NO_TIMELINE_ASK;
+  }
+
+  /* The day scope for a loaded report. `report.site_id` exists only on the
+     Aurora timeline path; without it the site is omitted entirely (the chip
+     shows date + owner and the request carries no site_id). siteId is only
+     set alongside a non-empty siteName so the Ask never narrows by site
+     without a visible site label on the chip. */
+  function askContextForDay(report, date, routeUser) {
+    var ctx = {};
+    if (date) ctx.date = date;
+    if (report && report.site_id && report.site) {
+      ctx.siteId = report.site_id;
+      ctx.siteName = report.site;
+    }
+    var folder = routeUser
+      || (report && report.user_name && window.FS.api.folderName(report.user_name))
+      || '';
+    if (folder) ctx.authorFolder = folder;
+    if (report && report.user_name) ctx.authorName = report.user_name;
+    return ctx;
+  }
+
+  /* A question typed in the global palette stays global: when the page was
+     opened by the palette's prefill hand-off, the first loaded day does not
+     scope the Ask. */
+  function askContextForLoadedDay(report, date, routeUser, fromPalette) {
+    return fromPalette ? {} : askContextForDay(report, date, routeUser);
+  }
+
+  /* Current context + a pinned topic. A topic is only ever pinned alongside
+     its own day, so when the current context is empty (palette hand-off,
+     day chip removed) or on another day, the topic's day scope is used. */
+  function askContextWithTopic(current, topic, dayContext) {
+    if (!topic || !topic.topic_row_id) return null;
+    var day = dayContext || {};
+    var sameDay = !!(current && current.date && current.date === day.date
+      && current.authorFolder === day.authorFolder
+      && (!(current.siteId && day.siteId) || current.siteId === day.siteId));
+    var base = sameDay ? current : day;
+    return Object.assign({}, base, {
+      topicRowId: topic.topic_row_id,
+      topicTitle: topic.topic_title || '',
+    });
+  }
+
+  function pinTopicAsk(askApi, topic, dayContext) {
+    var next = askContextWithTopic(askApi.askContext, topic, dayContext);
+    if (!next) return false;
+    askApi.setAskContext(next);
+    askApi.requestAskFocus();
+    return true;
+  }
+
+  /* Meeting topics carry no topic_row_id → no button; the day Ask still
+     covers their day. No mounted Ask (aggregated site view, meeting view,
+     error states, outside the Provider) → no button either. */
+  function topicAskVisible(hasAsk, topic) {
+    return !!(hasAsk && topic && topic.topic_row_id);
+  }
+
+  /* Mounted next to the one AskChat: publishes "an Ask is on the page" for
+     exactly as long as it is. */
+  function AskPresence(props) {
+    var set = props.setHasAsk;
+    React.useEffect(function () {
+      set(true);
+      return function () { set(false); };
+    }, [set]);
+    return null;
+  }
+
+  /* The day scope is rebuilt only when the day actually changes: a refetch
+     of the same day (content edit refresh, retry) goes loading → ok again
+     and must keep a pinned topic. null while loading = do nothing. */
+  function askDayResetKey(status, date, owner, siteId) {
+    if (status === 'loading') return null;
+    return [date || '', owner || '', siteId || ''].join('|');
+  }
+
+  function TopicAskButton(props) {
+    if (!topicAskVisible(props.hasAsk, props.topic)) return null;
+    return React.createElement('button', {
+      type: 'button',
+      className: 'fs-btn fs-btn--secondary fs-btn--sm fs-topic-detail__ask',
+      onClick: function () { props.onAsk(); },
+    }, 'Ask about this topic');
   }
 
   function AggregatedDayView(props) {
@@ -1761,7 +1931,7 @@
       if (!folder || !date) { setSessionsState({ status: 'idle', sessions: [], excluded: null }); return undefined; }
       var cancelled = false;
       setSessionsState({ status: 'loading', sessions: [], excluded: null });
-      window.FS.api.org.getSessions({ date: date, user: folder }).then(function (res) {
+      window.FS.api.org.getSessionsCached(date, folder).then(function (res) {
         if (cancelled) return;
         if (!res || res._accessDenied || res._notFound) {
           setSessionsState({ status: 'ok', sessions: [], excluded: null });
@@ -2068,6 +2238,27 @@
       } catch (_) { return ''; }
     });
     var askPrefill = refAskPrefill[0];
+
+    /* One Ask, scoped — the viewed day/site/owner is the default scope.
+       Reset whenever the loaded day or owner changes (which also ends a
+       pinned topic). Selecting a topic does NOT change it; only the topic
+       detail's "Ask about this topic" button does. */
+    var askApi = useTimelineAsk();
+    var askFromPaletteRef = React.useRef(!!askPrefill);
+    var askReport = state.report;
+    var askReportReady = !!(askReport && !askReport._notFound && !askReport.available_users);
+    var askOwner = user || (askReportReady && askReport.user_name) || '';
+    var askDayKeyRef = React.useRef(null);
+    React.useEffect(function () {
+      var dayKey = askDayResetKey(state.status, date, askOwner,
+                                  askReportReady && askReport.site_id);
+      if (dayKey === null || dayKey === askDayKeyRef.current) return;
+      askDayKeyRef.current = dayKey;
+      var fromPalette = askFromPaletteRef.current;
+      askFromPaletteRef.current = false;
+      askApi.setAskContext(askContextForLoadedDay(askReportReady ? askReport : null,
+                                                  date, user, fromPalette));
+    }, [state.status, date, askOwner, askReportReady && askReport.site_id]);
 
     /* Loading */
     if (state.status === 'loading') {
@@ -2387,7 +2578,9 @@
     /* Delivery-C Tier-2 generate control — sits beside the mailto draft, active
        only when a specific meeting is selected (the modal is per-session). */
     var _genReportEl = React.createElement(GenerateReportButton, {
-      session:    _selectedSession,
+      /* Not _selectedSession: a one-meeting day has no picker to select from. */
+      session:    reportableSession(daySessions, selectedSessionId),
+      sessionCount: daySessions.length,
       date:       date,
       userFolder: _draftUserFolder,
       siteName:   report.site || site || '',
@@ -2648,16 +2841,20 @@
           )
         : null,
 
-      /* Per-report Ask Agent (PLAN Phase G). Stateless — each question
-         is independent. Scope='both' grounds across transcript +
-         report. */
+      /* The page's one Ask (spec 2026-09-15-one-ask-scoped). Scoped to this
+         day · site · owner by default; topic detail pins a topic onto it.
+         While a palette hand-off is pending the context is forced to {} for
+         this render: AskChat's mount effect auto-sends before this column's
+         reset effect has run, and must not send the previous day's scope. */
       AskChat ? React.createElement(React.Fragment, null,
         React.createElement('div', { className: 'fs-timeline-page__section-label' },
           'Ask agent'),
+        React.createElement(AskPresence, { setHasAsk: askApi.setHasAsk }),
         React.createElement(AskChat, {
-          date:            date,
           user:            user || (report && report.user_name && window.FS.api.folderName(report.user_name)),
-          scope:           'both',
+          context:         askFromPaletteRef.current ? {} : askApi.askContext,
+          onContextChange: askApi.setAskContext,
+          focusNonce:      askApi.askFocusNonce,
           /* Supplied only when the programme actually loaded. AskChat treats
              an absent provider as "this route does not exist", so a failed
              fetch degrades to the agent rather than to a wrong answer.
@@ -2665,15 +2862,9 @@
              `silent` is passed as null unless the suggestion fetch used
              state:'all' — programmeMentions refuses to claim silence without
              that coverage, and flattening it here would undo the refusal. */
-          alertsProvider: makeAlertsProvider(suggestions),
-          placeholder:     'Ask anything about today’s report…',
+          alertsProvider:  makeAlertsProvider(suggestions),
           compact:         true,
           initialQuestion: askPrefill,
-          suggestions: [
-            'What were today’s safety highlights?',
-            'Which actions are still open?',
-            'Any decisions about the scaffold inspection?',
-          ],
         }),
       ) : null,
     );
@@ -2916,13 +3107,13 @@
        — had no answer on screen. It does have an answer: the whole day IS a
        report, the nightly daily one, and /reports can regenerate it. Say that
        instead of disappearing. */
-    if (!props.session) {
+    var scope = generateReportScope(props.session, props.sessionCount);
+    if (!scope) {
       return React.createElement('button', {
         type:      'button',
         className: 'fs-btn fs-btn--secondary fs-btn--sm fs-generate-report',
         disabled:  true,
-        title:     'Reports here are per meeting — pick one above. '
-                   + 'The whole day is the daily report, on the Reports page.',
+        title:     generateReportUnavailableReason(props.sessionCount),
       }, 'Generate report');
     }
     return React.createElement(React.Fragment, null,
@@ -2930,11 +3121,13 @@
         type:      'button',
         className: 'fs-btn fs-btn--primary fs-btn--sm fs-generate-report',
         onClick:   function () { setOpen(true); },
-        title:     'Generate a report for this meeting',
+        title:     scope === 'day' ? 'Generate a report for this whole day'
+                                   : 'Generate a report for this meeting',
       }, 'Generate report'),
       React.createElement(Modal, {
         open:       open,
         onClose:    function () { setOpen(false); },
+        scope:      scope,
         session:    props.session,
         date:       props.date,
         userFolder: props.userFolder,
@@ -2987,11 +3180,9 @@
     { key: 'audio',      label: 'Audio' },
     { key: 'video',      label: 'Video' },
     { key: 'photos',     label: 'Photos' },
-    { key: 'ask',        label: 'Ask' },
   ];
   var MEETING_TABS = [
     { key: 'overview', label: 'Overview' },
-    { key: 'ask',      label: 'Ask' },
   ];
 
   /* Status / category palettes for meeting topics — kept in sync with
@@ -3345,7 +3536,9 @@
         var p = {}; p[props.field] = next; return p;
       })()).then(function (res) {
         setBusy(false);
-        if (!res || res._accessDenied || res._notFound) {
+        /* spec 2026-09-15 §4 site 1 — also covers Today's title editor, which
+           mounts this same component (no call in today.js for the title). */
+        if (!window.FS.api.actions.settleSave(res, { table: props.table, id: props.id }).ok) {
           setValue(props.value || '');
           var toast = window.FS && window.FS.toast;
           if (toast) toast.show({ message: (res && res.error) || 'Could not save edit',
@@ -3429,9 +3622,22 @@
   /* editable-content-correction (Task 18 Step 1) — content_edits audit
      trail for one row, mirrors tasks.js's ActionHistoryPanel (fetch on
      mount, render a list). */
+  /* spec 2026-09-15 §5 — extracted so the callback that bumps the reload
+     tick is itself under direct test (a source-scan alone can't tell an
+     emptied callback from a working one). Returns an unsubscribe fn always,
+     even when events are unavailable, so the caller never has to branch. */
+  function subscribeContentReload(events, table, id, bump) {
+    if (events && events.onContentEdited) {
+      return events.onContentEdited(table, id, function () { bump(); });
+    }
+    return function () {};
+  }
+
   function ContentHistoryPanel(props) {
     var dataRef = React.useState({ status: 'loading' });
     var data = dataRef[0], setData = dataRef[1];
+    var tickRef = React.useState(0);
+    var reloadTick = tickRef[0], setReloadTick = tickRef[1];
     React.useEffect(function () {
       var alive = true;
       window.FS.api.actions.getContentHistory(props.table, props.id).then(function (res) {
@@ -3439,6 +3645,13 @@
         setData({ status: 'ok', edits: (res && res.edits) || [] });
       }).catch(function () { if (alive) setData({ status: 'error', edits: [] }); });
       return function () { alive = false; };
+    }, [props.table, props.id, reloadTick]);
+    /* spec 2026-09-15 §5 — a save to THIS row re-reads the trail (the server
+       assigns created_at/actor_name; never append optimistically). */
+    React.useEffect(function () {
+      return subscribeContentReload(window.FS && window.FS.events, props.table, props.id, function () {
+        setReloadTick(function (n) { return n + 1; });
+      });
     }, [props.table, props.id]);
     if (data.status === 'loading') return React.createElement('div', { className: 'fs-muted' }, 'Loading…');
     if (!data.edits.length) return React.createElement('div', { className: 'fs-muted' }, 'No edits yet.');
@@ -3563,12 +3776,17 @@
       if (!api || !api.updateAction) { return; }
       api.updateAction(a.id, { responsible: name }).then(function (res) {
         /* 403/404 resolve to envelopes rather than throwing (org.js write
-           convention), so a rejection is not always a rejected promise. */
-        if (!res || res._accessDenied || res._notFound || res.error) {
+           convention). spec 2026-09-15 §4 site 4: Saved on ok, error toast
+           (site 2's shape) on refusal, never a silent revert. */
+        if (!api.settleSave(res, { table: 'action_items', id: a.id }).ok) {
           setOwners(function (m) { var n = Object.assign({}, m); n[a.id] = before; return n; });
+          var toast = window.FS && window.FS.toast;
+          if (toast) toast.show({ message: (res && res.error) || 'Could not update task', tone: 'error', duration: 5000 });
         }
-      }).catch(function () {
+      }).catch(function (err) {
         setOwners(function (m) { var n = Object.assign({}, m); n[a.id] = before; return n; });
+        var toast = window.FS && window.FS.toast;
+        if (toast) toast.show({ message: (err && err.error) || 'Could not update task', tone: 'error', duration: 5000 });
       });
     }
 
@@ -3727,6 +3945,11 @@
                        already renders (topic-card.js ~228). ActionItemRow
                        already handles both props; this just feeds it. */
                     checkedAt:      state.checked_at,
+                    /* spec 2026-09-15 §2 — History disclosure; TodoHistory
+                       joins the provenance on the topic's own session. */
+                    withHistory:    true,
+                    sessionId:      topic.session_id || null,
+                    sessionKind:    topic.session_kind || null,
                   }),
                   rowEditable ? editToggle(editKey, 'action item text') : null,
                 ),
@@ -4006,6 +4229,7 @@
 
     var refActions = React.useState({});
     var setActions = refActions[1];
+    var askApi = useTimelineAsk();
 
     var sel = props.selectedItem;
     var isMeeting = sel && sel.kind === 'meeting_topic';
@@ -4079,7 +4303,6 @@
     var AudioPlaylist  = fs.AudioPlaylist;
     var VideoPlayer    = fs.VideoPlayer;
     var PhotoGrid      = fs.PhotoGrid;
-    var AskChat        = fs.AskChat;
 
     /* user-dimension audit key plan (Task 5) — report OWNER's folder,
        never the caller. sel.user is the section/topic owner folder set
@@ -4126,19 +4349,6 @@
     if (isMeeting) {
       bodyByTab = {
         overview: React.createElement(MeetingOverviewTab, { topic: topic }),
-        ask:      AskChat ? React.createElement(AskChat, {
-          alertsProvider: makeAlertsProvider(null),
-          date:        sel.date,
-          user:        mediaProps.user,
-          scope:       'both',  /* meeting transcripts may sit alongside; widen scope */
-          topic_id:    topic.topic_id,
-          placeholder: 'Ask about this meeting topic…',
-          suggestions: [
-            'What was decided?',
-            'Who owns the follow-ups?',
-            'Any open questions?',
-          ],
-        }) : null,
       };
     } else {
       bodyByTab = {
@@ -4164,19 +4374,6 @@
           userDisplayName: ownerFolder || sel.user_name,
           date:            sel.date,
           canEditContent:  canEditContent,
-        }) : null,
-        ask:        AskChat        ? React.createElement(AskChat, {
-          alertsProvider: makeAlertsProvider(null),
-          date:        sel.date,
-          user:        mediaProps.user,
-          scope:       'both',
-          topic_id:    topic.topic_id,
-          placeholder: 'Ask about this topic…',
-          suggestions: [
-            'What was decided?',
-            'Who is responsible for follow-ups?',
-            'Were any risks flagged?',
-          ],
         }) : null,
       };
     }
@@ -4230,6 +4427,23 @@
                 }, (topic.participants || []).join(' · '))
               : null,
           ),
+          React.createElement(TopicAskButton, {
+            topic: topic,
+            hasAsk: askApi.hasAsk,
+            onAsk: function () {
+              pinTopicAsk(askApi, topic, askContextForDay(
+                { site_id: sel.site_id || null, user_name: sel.user_name },
+                sel.date, sel.user));
+              /* Single-column mobile: the middle column is hidden while a
+                 topic is selected (app-shell.css `.has-selection`, max-width
+                 48rem). Close the detail so the one Ask is on screen; the
+                 focus effect runs after this same batched render. */
+              if (window.matchMedia && window.matchMedia('(max-width: 48rem)').matches
+                  && props.onClose) {
+                props.onClose();
+              }
+            },
+          }),
         ),
         IconBtn ? React.createElement(IconBtn, {
           icon: 'x', ariaLabel: 'Close detail', size: 'sm',
@@ -4267,8 +4481,11 @@
   if (!window.FieldSight) window.FieldSight = {};
   if (!window.FieldSight.PAGES) window.FieldSight.PAGES = {};
   window.FieldSight.PAGES['/timeline'] = {
-    Middle: TimelineMiddleColumn,
-    Right:  TimelineRightDetail,
+    /* One Ask, scoped — shares the ask context between the middle column's
+       AskChat and the right column's "Ask about this topic". */
+    Provider: TimelineAskProvider,
+    Middle:   TimelineMiddleColumn,
+    Right:    TimelineRightDetail,
   };
 
   /* fix/closed-by-display — ContentHistoryPanel is generic over
@@ -4309,6 +4526,7 @@
       diffWords: diffWords,
       formatEditTime: formatEditTime,
       formatContentEdit: formatContentEdit,
+      subscribeContentReload: subscribeContentReload,
       findLatestReportDate: findLatestReportDate,
       capturedFolders: capturedFolders,
       /* live recording KPIs */
@@ -4321,6 +4539,9 @@
       TopicCorrectionPropagate: TopicCorrectionPropagate,
       /* session picker (feat 5) */
       shouldShowSessionPicker: shouldShowSessionPicker,
+      reportableSession: reportableSession,
+      generateReportUnavailableReason: generateReportUnavailableReason,
+      generateReportScope: generateReportScope,
       filterTopicsBySession: filterTopicsBySession,
       groupSessionsByBlock: groupSessionsByBlock,
       formatParticipants: formatParticipants,
@@ -4332,6 +4553,19 @@
       formatActionLine: formatActionLine,
       assembleEmailBody: assembleEmailBody,
       buildSessionEmailDraft: buildSessionEmailDraft,
+      /* one Ask, scoped (spec 2026-09-15) */
+      DAILY_TABS: DAILY_TABS,
+      MEETING_TABS: MEETING_TABS,
+      TimelineAskProvider: TimelineAskProvider,
+      useTimelineAsk: useTimelineAsk,
+      askContextForDay: askContextForDay,
+      askContextForLoadedDay: askContextForLoadedDay,
+      askContextWithTopic: askContextWithTopic,
+      pinTopicAsk: pinTopicAsk,
+      TopicAskButton: TopicAskButton,
+      topicAskVisible: topicAskVisible,
+      AskPresence: AskPresence,
+      askDayResetKey: askDayResetKey,
     };
   }
 

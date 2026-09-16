@@ -72,6 +72,154 @@
      for. Presigning a .docx that does not exist would hand the browser a URL
      that answers 403, and this bucket answers 403 for absent keys, so it
      would not even read as "no Word file". */
+  /* WHAT THE DETAIL PANEL IS HANDED WHEN A ROW IS CLICKED.
+
+     The whole row, plus the two fields that say what kind of selection it is.
+     This used to be a hand-built object with a fixed field list, and docx_key
+     was not on it: the history endpoint named the Word file, the click threw
+     it away, and every report in the archive offered its .json. A longer list
+     would lose the next field the same way, so the row is passed through. */
+  function reportSelection(r) {
+    return Object.assign({}, r, { kind: 'report', id: r.key });
+  }
+
+  /* WHOSE REPORT THIS IS. A per-person report lives at
+     reports/<date>/<folder>/<type>_report.json. Summary, site and combined
+     reports have no folder segment, so they belong to nobody -- and nobody
+     regenerates them by hand. */
+  function reportFolder(key) {
+    var m = /^reports\/[^/]+\/([^/]+)\/(daily|weekly|monthly)_report\.json$/.exec(key || '');
+    return m ? m[1] : null;
+  }
+
+  /* Owner rule: each person regenerates only their own reports. The server
+     enforces it; this only decides whether to offer the button -- and which row
+     the page then waits on. */
+  function canRegenerateReport(caller, report) {
+    var mine = caller && caller.folder_name;
+    if (!mine || !report) return false;
+    if (['daily', 'weekly', 'monthly'].indexOf(report.type) < 0) return false;
+    return reportFolder(report.key) === mine;
+  }
+
+  /* The archive-level buttons generate your own LATEST period: yesterday, the
+     last completed week (ending Sunday), the previous month. Local calendar. */
+  function defaultPeriodEnd(type, now) {
+    var d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (type === 'weekly') {
+      var back = d.getDay() === 0 ? 7 : d.getDay();
+      d.setDate(d.getDate() - back);
+    } else if (type === 'monthly') {
+      d = new Date(d.getFullYear(), d.getMonth(), 0);
+    } else {
+      d.setDate(d.getDate() - 1);
+    }
+    var mm = String(d.getMonth() + 1), dd = String(d.getDate());
+    return d.getFullYear() + '-' + (mm.length < 2 ? '0' + mm : mm) + '-' + (dd.length < 2 ? '0' + dd : dd);
+  }
+
+  /* A REGENERATE OUTLIVES THE PANEL THAT STARTED IT.
+
+     The waiting state used to live only in the detail panel, so a reload, a route
+     change or selecting another report showed the Regenerate button again while
+     the generator was still running -- which reads as "it failed" and invites a
+     second click, i.e. a second generation. So the click is recorded here, per
+     report key, and the panel resumes from it. Records expire with the
+     generator's own timeout and belong to the folder that clicked, so a shared
+     browser with a different login never sees them. Storage that is blocked or
+     corrupt means "nothing pending", never an error. */
+  var PENDING_REGEN_KEY = 'fs.reports.pendingRegenerate';
+  var PENDING_REGEN_TTL_MS = 15 * 60 * 1000;
+
+  function readPendingRegenerations(storage, now) {
+    var all = {};
+    try {
+      all = JSON.parse((storage && storage.getItem(PENDING_REGEN_KEY)) || '{}') || {};
+    } catch (_) { return {}; }
+    if (typeof all !== 'object') return {};
+    var live = {};
+    Object.keys(all).forEach(function (k) {
+      var e = all[k];
+      if (e && typeof e.startedAt === 'number' && now - e.startedAt <= PENDING_REGEN_TTL_MS) live[k] = e;
+    });
+    return live;
+  }
+
+  function pendingRegenerationFor(storage, key, folder, now) {
+    if (!key || !folder) return null;
+    var e = readPendingRegenerations(storage, now)[key];
+    return e && e.folder === folder ? e : null;
+  }
+
+  function rememberPendingRegeneration(storage, key, entry) {
+    try {
+      var all = readPendingRegenerations(storage, entry.startedAt);
+      all[key] = { before: entry.before || '', beforeDocx: entry.beforeDocx || '',
+                   startedAt: entry.startedAt, folder: entry.folder };
+      storage.setItem(PENDING_REGEN_KEY, JSON.stringify(all));
+    } catch (_) { /* blocked or full: the in-memory wait still works for this view */ }
+  }
+
+  function forgetPendingRegeneration(storage, key) {
+    /* Removes exactly this key. It reads the raw record rather than the live view:
+       clearing one report must never also drop another report's record by judging
+       it against this call's clock. */
+    try {
+      var all = JSON.parse(storage.getItem(PENDING_REGEN_KEY) || '{}') || {};
+      if (typeof all !== 'object') return;
+      delete all[key];
+      storage.setItem(PENDING_REGEN_KEY, JSON.stringify(all));
+    } catch (_) { /* nothing to clear */ }
+  }
+
+  function localStore() {
+    try { return window.localStorage; } catch (_) { return null; }
+  }
+
+  /* Done means the report object was rewritten after the click -- never the 202. */
+  function regenerationFinished(before, row, beforeDocx) {
+    if (!row || !row.generated_at) return false;
+    if (!(String(row.generated_at) > String(before || ''))) return false;
+    /* The generator writes the .docx AFTER the JSON. Stopping on the JSON alone
+       can show a refreshed report beside the previous generation's Word file.
+       No Word file, or a backend that does not send its time, falls back to the
+       JSON so nothing waits forever on a field that will not arrive. */
+    if (!row.docx_key || !row.docx_generated_at) return true;
+    return String(row.docx_generated_at) > String(beforeDocx || '');
+  }
+
+  /* Who generated a report, from its own _report_metadata.generated_by. The
+     schedule writes "system" (and "backfill"); a regenerate request writes the
+     requester. Anything unknown is a dash, never a guess. */
+  /* The effect body for the Author row, built outside the component so the
+     component itself has no `return` above its hooks. */
+  function authorEffect(caller, sel, setAuthor) {
+    return function () {
+      setAuthor(null);
+      if (!sel || !canRegenerateReport(caller, sel)) return undefined;
+      var live = true;
+      fetchReportJson(sel).then(function (json) {
+        if (live) setAuthor(authorLabel(((json || {})._report_metadata || {}).generated_by));
+      }).catch(function () { if (live) setAuthor(null); });
+      return function () { live = false; };
+    };
+  }
+
+  function authorLabel(generatedBy) {
+    if (typeof generatedBy !== 'string' || !generatedBy.trim()) return '\u2014';
+    var v = generatedBy.trim();
+    if (v === 'system' || v === 'backfill') return 'Scheduled';
+    return v;
+  }
+
+  function regenerateErrorMessage(res) {
+    if (!res) return 'Could not start the report.';
+    if (res._accessDenied) return res.error || 'You can only regenerate your own reports.';
+    if (res._notFound) return res.error || 'No recordings for that date.';
+    if (res.status === 'unavailable') return res.error || 'Regenerate is unavailable here.';
+    return null;
+  }
+
   function downloadKeyFor(report) {
     return (report && report.docx_key) || (report && report.key) || null;
   }
@@ -252,7 +400,8 @@
     var Card   = fs.Card;
 
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
-    var canRegenerate = window.FS.can(caller, window.FS.P('report','create'));
+    /* Own reports only: anyone with a recording folder can regenerate theirs. */
+    var canRegenerate = !!caller.folder_name;
 
     var refState = React.useState({ status: 'loading', rows: [] });
     var state    = refState[0];
@@ -265,6 +414,28 @@
     var refFilter = React.useState('all');
     var filter    = refFilter[0];
     var setFilter = refFilter[1];
+
+    /* A regenerate in the detail panel finished: refetch, and re-select the
+       report so the panel shows its new Generated and Size. */
+    var reselectRef = React.useRef(null);
+    React.useEffect(function () {
+      function onRefresh(e) {
+        reselectRef.current = (e && e.detail && e.detail.key) || null;
+        setRetry(function (n) { return n + 1; });
+      }
+      window.addEventListener('fs:reports-refresh', onRefresh);
+      return function () { window.removeEventListener('fs:reports-refresh', onRefresh); };
+    }, []);
+
+    /* Re-read pending regenerates when one starts or ends, so the row label
+       follows without a reload. */
+    var pendingTickRef = React.useState(0);
+    var setPendingTick = pendingTickRef[1];
+    React.useEffect(function () {
+      function onPending() { setPendingTick(function (n) { return n + 1; }); }
+      window.addEventListener('fs:reports-pending', onPending);
+      return function () { window.removeEventListener('fs:reports-pending', onPending); };
+    }, []);
 
     /* Inline regenerate panel: 'closed' | 'pick' | 'submitting' | 'done' */
     var refReg = React.useState({ phase: 'closed' });
@@ -291,6 +462,11 @@
           return (b.generated_at || '').localeCompare(a.generated_at || '');
         });
         setState({ status: 'ok', rows: sorted });
+        if (reselectRef.current && props.onSelect) {
+          var fresh = sorted.filter(function (r) { return r.key === reselectRef.current; })[0];
+          reselectRef.current = null;
+          if (fresh) props.onSelect(reportSelection(fresh));
+        }
       }).catch(function (err) {
         if (cancelled) return;
         setState({ status: 'error', error: { code: (err && err.status) || 0, message: (err && err.message) || 'Could not load reports', retryable: true }, retry: function () { setRetry(function (n) { return n + 1; }); }, rows: [] });
@@ -300,10 +476,13 @@
 
     function regenerate(type) {
       setReg({ phase: 'submitting', type: type });
-      var payload = { report_type: type, force: true };
-      if (selTplId) payload.template_id = selTplId;
-      window.FS.api.reports.regenerate(payload).then(function (res) {
-        setReg({ phase: 'done', type: type, message: res.message });
+      var date = defaultPeriodEnd(type, new Date());
+      window.FS.api.reports.regenerate({ report_type: type, date: date }).then(function (res) {
+        var problem = regenerateErrorMessage(res);
+        if (problem) { setReg({ phase: 'error', type: type, error: { message: problem } }); return; }
+        setReg({ phase: 'done', type: type,
+                 message: 'Queued your ' + type + ' report for ' + date + ' — it appears here when ready.' });
+        setTimeout(function () { setRetry(function (n) { return n + 1; }); }, 60000);
         /* Clear the success message after a moment without dismissing
            the panel — gives the user a beat to see the confirmation. */
         setTimeout(function () { setReg({ phase: 'closed' }); }, 2400);
@@ -397,7 +576,7 @@
               React.createElement('div', { className: 'fs-reports__regen-title' },
                 'Generate report'),
               React.createElement('div', { className: 'fs-reports__regen-body' },
-                'Queue a fresh report; existing copies are overwritten.'),
+                'Regenerate your own latest report. It replaces your previous copy; nobody else\u2019s report is touched.'),
             ),
             reg.phase === 'closed' ? React.createElement('div', { className: 'fs-reports__regen-actions' },
               React.createElement(Button, {
@@ -462,17 +641,7 @@
                 className: 'fs-reports__row' + (selected ? ' fs-reports__row--selected' : ''),
                 onClick:   function () {
                   if (props.onSelect) {
-                    props.onSelect({
-                      kind:         'report',
-                      id:           r.key,
-                      key:          r.key,
-                      type:         r.type,
-                      date:         r.date,
-                      generated_at: r.generated_at,
-                      size:         r.size,
-                      author:       r.author,
-                      site:         r.site,
-                    });
+                    props.onSelect(reportSelection(r));
                   }
                 },
               },
@@ -487,7 +656,9 @@
                   React.createElement('div', { className: 'fs-reports__row-date' },
                     fmtDate(r.date)),
                   React.createElement('div', { className: 'fs-reports__row-meta' },
-                    (r.author || '—') + ' · ' + fmtGeneratedAt(r.generated_at)),
+                    pendingRegenerationFor(localStore(), r.key, caller.folder_name, Date.now())
+                      ? 'Generating… · ' + fmtGeneratedAt(r.generated_at)
+                      : (r.author || '—') + ' · ' + fmtGeneratedAt(r.generated_at)),
                 ),
 
                 React.createElement('div', { className: 'fs-reports__row-size' },
@@ -510,7 +681,7 @@
 
     var sel = props.selectedItem;
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
-    var canRegenerate = window.FS.can(caller, window.FS.P('report','create'));
+    var canRegenerate = canRegenerateReport(caller, sel);
 
     var refConfirm = React.useState({ phase: 'idle' });
     var conf = refConfirm[0];
@@ -527,14 +698,67 @@
        than during the previous render", and the whole page replaced by an
        error boundary. Every test passed — the helpers are pure and the hook
        order is not something they can see. */
+    /* Author of the selected report, read from the report itself. Only for the
+       caller's own report: it is the one the caller may always open, and the
+       file can be hundreds of KB. ABOVE the early return, with the other hooks. */
+    var authorRef = React.useState(null);
+    var author = authorRef[0];
+    var setAuthor = authorRef[1];
+    React.useEffect(authorEffect(caller, sel, setAuthor), [sel && sel.id, sel && sel.generated_at]);
+
     var viewRef = React.useState({ open: false, status: 'idle', report: null, error: '' });
     var viewer  = viewRef[0];
     var setView = viewRef[1];
 
-    /* Reset the confirm state whenever a new report is selected. */
+    /* Reset the confirm state whenever a new report is selected -- unless the
+       "new" selection is this same report refreshed after its regenerate. */
     React.useEffect(function () {
-      setConf({ phase: 'idle' });
+      var pending = sel ? pendingRegenerationFor(localStore(), sel.key, caller.folder_name, Date.now()) : null;
+      if (pending && regenerationFinished(pending.before, sel, pending.beforeDocx)) {
+        // It finished while this panel was not showing it.
+        forgetPendingRegeneration(localStore(), sel.key);
+        window.dispatchEvent(new CustomEvent('fs:reports-pending'));
+        setConf({ phase: 'done', message: 'Updated ' + fmtGeneratedAt(sel.generated_at) });
+        return;
+      }
+      if (pending) {
+        setConf({ phase: 'waiting', key: sel.key, before: pending.before,
+                  beforeDocx: pending.beforeDocx, startedAt: pending.startedAt });
+        return;
+      }
+      setConf(function (c) { return c.phase === 'done' ? c : { phase: 'idle' }; });
     }, [sel && sel.id]);
+
+    /* Follow a regenerate to completion. ABOVE the early return with the other
+       hooks. Polls history until THIS report's generated_at moves past the value
+       captured at click time; the generator can take up to 15 minutes. */
+    React.useEffect(function () {
+      if (conf.phase !== 'waiting') return undefined;
+      var stopped = false;
+      var deadline = conf.startedAt + 15 * 60 * 1000;
+      var timer = setInterval(function () {
+        if (stopped) return;
+        if (Date.now() > deadline) {
+          clearInterval(timer);
+          forgetPendingRegeneration(localStore(), conf.key);
+          window.dispatchEvent(new CustomEvent('fs:reports-pending'));
+          setConf({ phase: 'timeout' });
+          return;
+        }
+        window.FS.api.reports.getReportsHistory(50).then(function (res) {
+          if (stopped) return;
+          var fresh = ((res && res.reports) || []).filter(function (r) { return r.key === conf.key; })[0];
+          if (regenerationFinished(conf.before, fresh, conf.beforeDocx)) {
+            clearInterval(timer);
+            forgetPendingRegeneration(localStore(), conf.key);
+            window.dispatchEvent(new CustomEvent('fs:reports-pending'));
+            setConf({ phase: 'done', message: 'Updated ' + fmtGeneratedAt(fresh.generated_at) });
+            window.dispatchEvent(new CustomEvent('fs:reports-refresh', { detail: { key: conf.key } }));
+          }
+        });
+      }, 10000);
+      return function () { stopped = true; clearInterval(timer); };
+    }, [conf.phase]);
 
     if (!sel || sel.kind !== 'report') {
       return React.createElement('div', { className: 'fs-reports-detail__placeholder' },
@@ -560,11 +784,20 @@
     }
 
     function onConfirmRegenerate() {
+      var before = sel.generated_at;
+      var beforeDocx = sel.docx_generated_at || '';
+      var key = sel.key;
       setConf({ phase: 'submitting' });
       window.FS.api.reports.regenerate({
-        report_type: sel.type, date: sel.date, force: true,
+        report_type: sel.type, date: sel.date,
       }).then(function (res) {
-        setConf({ phase: 'done', message: res.message });
+        var problem = regenerateErrorMessage(res);
+        if (problem) { setConf({ phase: 'error', error: { message: problem } }); return; }
+        var startedAt = Date.now();
+        rememberPendingRegeneration(localStore(), key,
+          { before: before, beforeDocx: beforeDocx, startedAt: startedAt, folder: caller.folder_name });
+        window.dispatchEvent(new CustomEvent('fs:reports-pending'));
+        setConf({ phase: 'waiting', key: key, before: before, beforeDocx: beforeDocx, startedAt: startedAt });
       }).catch(function (err) {
         setConf({ phase: 'error', error: err });
       });
@@ -598,7 +831,7 @@
           label: 'Generated', value: fmtGeneratedAt(sel.generated_at),
         }),
         React.createElement(DetailRow, {
-          label: 'Author',    value: sel.author || '—',
+          label: 'Author',    value: author || sel.author || '—',
         }),
         React.createElement(DetailRow, {
           label: 'File',
@@ -654,6 +887,12 @@
               : conf.phase === 'submitting'
               ? React.createElement('span', { className: 'fs-reports-detail__msg' },
                   'Queueing…')
+              : conf.phase === 'waiting'
+              ? React.createElement('span', { className: 'fs-reports-detail__msg' },
+                  'Generating your report… this can take a few minutes.')
+              : conf.phase === 'timeout'
+              ? React.createElement('span', { className: 'fs-reports-detail__msg fs-reports-detail__msg--err' },
+                  'No new report yet — check again later.')
               : conf.phase === 'done'
               ? React.createElement('span', {
                   className: 'fs-reports-detail__msg fs-reports-detail__msg--ok',

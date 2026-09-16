@@ -28,14 +28,18 @@ const NAV_ICONS = {
 const NAV_SECTIONS = [
   {
     key: 'DAILY',
-    /* Timeline is intentionally NOT a top-level nav item (user decision
+    /* Timeline was intentionally NOT a top-level nav item (user decision
        2026-07-13): it's the per-day RECORD you drill INTO, reached via
        Today's "Open timeline" / "View daily report" CTAs, Tasks rows, and
        search/Ask citations — a contextual deep-link (?date=&user=&topic…),
-       not a parallel destination. The /timeline route still exists; it's
-       just not surfaced as a sidebar entry. (It was briefly added here in
-       fix/today-timeline-and-focus after being found unregistered, then
-       removed once we settled that button/deep-link access is the model.) */
+       not a parallel destination. The /timeline route still exists; it was
+       just not surfaced as a sidebar entry.
+
+       REOPENED 2026-09-11 behind `navDailyV2`: Timeline takes Activity's
+       slot and Activity leaves the sidebar. This list is the DEFAULT — the
+       one that ships when the flag is off — so the 2026-07-13 model is
+       still what an unflagged environment gets. `navSections()` below is
+       what the flag rewrites. */
     label: 'Daily',
     items: ['today', 'mywork', 'activity'],
   },
@@ -66,6 +70,39 @@ const NAV_SECTIONS = [
     items: ['portfolio', 'regional', 'executive'],
   },
 ];
+
+/* ---------- navDailyV2 (2026-09-11) -------------------------------------
+   Swap Activity out of the DAILY section and Timeline into its slot.
+
+   READ AT RENDER, NEVER AT MODULE LOAD. `env.js` is the LAST script the page
+   loads (app-shell-preview.html:184) and this module is the 56th, so a
+   module-level `window.FS_ENV.navDailyV2` is read before the object exists:
+   the flag would be permanently undefined and the switch would silently never
+   turn on. That is the CLAUDE.md load-order trap, and it fails green — the
+   nav renders perfectly, just always in the old shape.
+
+   Absent flag -> false -> NAV_SECTIONS is returned unchanged, so an
+   environment that never sets FS_NAV_DAILY_V2 is byte-identical to before. */
+function navDailyV2() {
+  var env = (typeof window !== 'undefined' && window.FS_ENV) || {};
+  return !!env.navDailyV2;
+}
+
+/* NAV_SECTIONS with the DAILY items rewritten when the flag is on.
+   Non-destructive: builds a new section object rather than mutating the
+   module-level const, so toggling the flag at runtime (or a second consumer
+   reading NAV_SECTIONS directly) still sees the shipped default. */
+function navSections() {
+  if (!navDailyV2()) return NAV_SECTIONS;
+  return NAV_SECTIONS.map(function (s) {
+    if (s.key !== 'DAILY') return s;
+    return Object.assign({}, s, {
+      items: s.items
+        .filter(function (k) { return k !== 'activity'; })
+        .concat(['timeline']),
+    });
+  });
+}
 
 /* ---------- Icon component ------------------------------------------------ */
 function NavIcon({ name, size, color, style: extraStyle }) {
@@ -428,7 +465,7 @@ function LeftNav({ user, currentRoute, isCollapsed, onToggleCollapse, onNavigate
 
     /* Scrollable nav sections */
     React.createElement('div', { style: scrollAreaStyle },
-      NAV_SECTIONS.map(function(section) {
+      navSections().map(function(section) {
         const allKeys = [
           ...(section.items || []),
           ...((section.subgroups || []).flatMap(function(g) { return g.items; })),
@@ -515,3 +552,10 @@ function LeftNav({ user, currentRoute, isCollapsed, onToggleCollapse, onNavigate
 if (!window.FieldSight) window.FieldSight = {};
 window.FieldSight.LeftNav = LeftNav;
 window.FieldSight.NavIcon = NavIcon;
+
+/* Node test runner only; no-op in the browser (Babel-standalone leaves
+   `module` undefined). navSections is exported rather than the flag helper:
+   the thing worth asserting is the list that gets rendered, not the boolean. */
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { navSections: navSections, NAV_SECTIONS: NAV_SECTIONS };
+}

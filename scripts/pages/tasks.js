@@ -966,7 +966,7 @@
         });
       }
       api.updateAction(row.actionItemId, patch).then(function (res) {
-        if (!res || res._accessDenied || res._notFound) {
+        if (!api.settleSave(res, { table: 'action_items', id: row.actionItemId }).ok) {
           clearDraft();
           var toast = window.FS && window.FS.toast;
           if (toast) {

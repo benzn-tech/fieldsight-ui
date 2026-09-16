@@ -147,14 +147,26 @@ test('All day explains why report generation is per meeting instead of vanishing
     'the old guard bundled "no meeting selected" in with "no modal" and "no '
     + 'permission" — three different situations, one silent disappearance');
 
-  assert.match(fn[0], /if \(!props\.session\) \{[\s\S]*?disabled:\s*true/,
-    'with no meeting selected the control stays, disabled');
-  assert.match(fn[0], /per meeting/i,
-    'and says that reports here are per meeting');
-  assert.match(fn[0], /Reports page/,
-    'and points at where the whole day actually lives — the question was '
-    + '"why can I not generate a report for all meetings", and the answer is '
-    + 'that the daily report already is one');
+  assert.match(fn[0], /if \(!scope\) \{[\s\S]*?disabled:\s*true/,
+    'with nothing reportable (no meeting selected and no meeting recorded) the '
+    + 'control stays, disabled');
+  assert.match(fn[0], /title:\s*generateReportUnavailableReason\(props\.sessionCount\)/,
+    'and its tooltip comes from the one place that knows how many meetings the day has');
+
+  /* The wording moved into generateReportUnavailableReason when a day with no
+     meeting at all stopped being told to "pick one above". Checked by calling
+     it, not by scanning for the words -- a scan is satisfied by a comment. */
+  global.window = global.window || {};
+  global.React = global.React || {};
+  const { generateReportUnavailableReason } = require('../scripts/pages/timeline.js');
+  const several = generateReportUnavailableReason(3);
+  assert.match(several, /per meeting/i, 'and says that reports here are per meeting');
+  for (const n of [0, 3]) {
+    assert.match(generateReportUnavailableReason(n), /Reports page/,
+      'and points at where the whole day actually lives — the question was '
+      + '"why can I not generate a report for all meetings", and the answer is '
+      + 'that the daily report already is one');
+  }
 });
 
 test('permission and a missing modal still remove the control entirely', () => {
