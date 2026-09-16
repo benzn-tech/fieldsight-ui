@@ -1116,7 +1116,12 @@
           'aria-label': 'Hide the conversation',
           onClick: function () { setCollapsed(true); },
         }, 'Hide');
-        return (msgs.length > 0 || busy) && !collapsed
+        /* `busy` is dropped from this condition: `send()` always pushes the
+           user's message into `msgs` before it sets `busy`, on every path
+           (the normal request, the initialQuestion auto-send, and the
+           alerts short-circuit), so `busy` never becomes true while `msgs`
+           is still empty -- `msgs.length > 0` already covers it. */
+        return msgs.length > 0 && !collapsed
           ? React.createElement('div', { className: 'fs-ask-chat__overlay' }, closeBtn, messagesDiv)
           : null;
       })(),
@@ -1175,8 +1180,12 @@
           value:     q,
           onChange:  function (e) { setQ(e.target.value); },
           /* Dock only in effect (suggestions and the overlay's open/closed
-             state don't exist outside `dock`), harmless to set elsewhere. */
-          onFocus:   function () { setFocused(true); setCollapsed(false); },
+             state don't exist outside `dock`), harmless to set elsewhere.
+             Focus alone must NOT reopen a Hidden overlay -- only sending a
+             new question does (see `send()`). Otherwise clicking back into
+             the input after "Hide" pops the old conversation straight back
+             over the topic list, which is the thing Hide was for. */
+          onFocus:   function () { setFocused(true); },
           onBlur:    function () { setFocused(false); },
           disabled:  busy,
         }),

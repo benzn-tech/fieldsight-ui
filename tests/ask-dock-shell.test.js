@@ -155,3 +155,39 @@ test('S7 the dock CSS has no phone-width media query', () => {
   assert.doesNotMatch(slice, /@media \(max-width:/,
     'phone layouts are out of scope for the dock (spec 2026-09-16 §2)');
 });
+
+/* S6 only proves the no-reflow rule holds INSIDE the region sliceDockCss()
+   cuts out. A later rule elsewhere in composites.css -- outside that slice,
+   so invisible to S6 -- could still target the same two selectors with
+   equal or higher specificity and override `position`, defeating the seam
+   without S6 ever failing. This walks the WHOLE file (not the slice) and
+   counts, for every rule, the rightmost simple selector of each
+   comma-separated selector -- i.e. what class the rule is actually keyed
+   on, independent of ancestor combinators -- so a second rule anywhere,
+   in any selector shape, that targets `.fs-ask-chat--dock` or
+   `.fs-ask-chat__overlay` is caught. */
+function ruleSelectors(css) {
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const out = [];
+  const re = /([^{}]+)\{/g;
+  let m;
+  while ((m = re.exec(stripped)) !== null) {
+    const raw = m[1].trim();
+    if (!raw || raw.charAt(0) === '@') continue; // @media / @keyframes header, not a rule selector
+    raw.split(',').forEach(function (sel) { out.push(sel.trim()); });
+  }
+  return out;
+}
+
+test('S8 .fs-ask-chat--dock and .fs-ask-chat__overlay each key exactly one rule in the whole file', () => {
+  const rightmost = sel => sel.split(/\s+/).pop();
+  const selectors = ruleSelectors(composites);
+  const dockCount = selectors.filter(s => rightmost(s) === '.fs-ask-chat--dock').length;
+  const overlayCount = selectors.filter(s => rightmost(s) === '.fs-ask-chat__overlay').length;
+  assert.strictEqual(dockCount, 1,
+    'expected exactly one rule keyed on .fs-ask-chat--dock, found ' + dockCount +
+    ' -- a second one can override `position: relative` and break the no-reflow seam');
+  assert.strictEqual(overlayCount, 1,
+    'expected exactly one rule keyed on .fs-ask-chat__overlay, found ' + overlayCount +
+    ' -- a second one can override `position: absolute` and break the no-reflow seam');
+});

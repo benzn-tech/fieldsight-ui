@@ -748,6 +748,76 @@ test('D-p the message log is not rendered until there is something in it', async
     'asking a question did not open the overlay');
 });
 
+test('D-r focusing the input after Hide does not reopen the overlay; sending a new question does', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED, variant: 'dock' });
+  await h.ask('first question');
+  await h.settle(0, { answer: 'a', citations: [], applied_scope: {} });
+  assert.strictEqual(h.byClass('fs-ask-chat__overlay').length, 1, 'the answer did not open the overlay');
+
+  h.byClass('fs-ask-chat__overlay-close')[0].props.onClick();
+  h.rerender();
+  assert.strictEqual(h.byClass('fs-ask-chat__overlay').length, 0, 'Hide did not close the overlay');
+
+  h.byClass('fs-ask-chat__input')[0].props.onFocus();
+  h.rerender();
+  assert.strictEqual(h.byClass('fs-ask-chat__overlay').length, 0,
+    'focusing the input after Hide reopened the overlay over the topic list');
+
+  await h.ask('second question');
+  assert.strictEqual(h.byClass('fs-ask-chat__overlay').length, 1,
+    'sending a new question did not reopen the overlay');
+});
+
+/* M3 -- the suggestion row's onMouseDown preventDefault is what stops the
+   input's blur from hiding the row before a click on a suggestion lands.
+   Nothing in this harness fires a real blur on mousedown (there is no DOM,
+   `onBlur` is only ever invoked directly by a test), so a test that just
+   focuses, clicks a suggestion and asserts the question was sent would pass
+   identically whether or not the preventDefault call is there -- it proves
+   nothing about the guard it is meant to cover. Kept anyway as a basic
+   regression for "clicking a suggestion sends it"; D-t below is the test
+   that can actually go red on this specific guard, because it drives the
+   handler itself rather than a downstream effect this harness can't
+   reproduce. */
+test('D-s clicking a suggestion after focusing the input sends it (does not exercise the blur race)', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED, variant: 'dock' });
+  h.byClass('fs-ask-chat__input')[0].props.onFocus();
+  h.rerender();
+  const btn = h.byClass('fs-ask-chat__suggestion')[0];
+  assert.ok(btn, 'no suggestion button rendered while the input is focused');
+  const question = h.text(btn);
+  btn.props.onMouseDown({ preventDefault() {} });
+  btn.props.onClick();
+  assert.strictEqual(h.asks.length, 1, 'clicking the suggestion did not send it');
+  assert.strictEqual(h.asks[0].question, question);
+});
+
+/* The guard itself, pinned directly: every rendered suggestion button's
+   onMouseDown handler calls preventDefault when invoked. This is weaker
+   than proving the row survives a real mousedown-then-blur-then-click
+   sequence (this harness has no DOM and cannot reproduce that race), but
+   unlike D-s it does drive the actual handler and fails if the
+   preventDefault call is removed -- verified by temporarily deleting it and
+   re-running this file (see task-3-fix-report.md). */
+test('D-t every suggestion button prevents default on mousedown, so a blur cannot hide the row first', async () => {
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED, variant: 'dock' });
+  h.byClass('fs-ask-chat__input')[0].props.onFocus();
+  h.rerender();
+  const buttons = h.byClass('fs-ask-chat__suggestion');
+  assert.ok(buttons.length > 0, 'no suggestion buttons rendered to check');
+  buttons.forEach(function (btn) {
+    assert.strictEqual(typeof btn.props.onMouseDown, 'function',
+      'a suggestion button has no onMouseDown handler');
+    let prevented = false;
+    btn.props.onMouseDown({ preventDefault() { prevented = true; } });
+    assert.ok(prevented,
+      'onMouseDown did not call preventDefault -- the blur-before-click trap is back');
+  });
+});
+
 /* ---- Timeline --------------------------------------------------------- */
 
 function makeReactStub(extra) {
