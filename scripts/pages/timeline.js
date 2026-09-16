@@ -1152,10 +1152,20 @@
 
   /* The day scope is rebuilt only when the day actually changes: a refetch
      of the same day (content edit refresh, retry) goes loading → ok again
-     and must keep a pinned topic. null while loading = do nothing. */
-  function askDayResetKey(status, date, owner, siteId) {
+     and must keep a pinned topic. null while loading = do nothing.
+
+     `kind` is a discriminator ('user' | 'site'), always the first segment,
+     so the day branch's key and the site branch's key CANNOT collide by
+     format alone (Task 6 fix round, minor). Before this they only avoided
+     colliding by coincidence: the site branch always passed '' for `owner`,
+     which only the day branch could also produce, and only when `site` was
+     itself falsy. A bare string equality can't tell "day branch, no owner"
+     from "site branch" apart once both omit the third segment; the prefix
+     makes that structurally impossible regardless of what either branch
+     ever passes as `owner`/`extra`. */
+  function askDayResetKey(kind, status, date, owner, siteId) {
     if (status === 'loading') return null;
-    return [date || '', owner || '', siteId || ''].join('|');
+    return [kind, date || '', owner || '', siteId || ''].join('|');
   }
 
   /* Is a day's content actually resolved on screen? The dock gates on this,
@@ -1168,9 +1178,13 @@
 
      Loading and either picker resolve nothing. An ordinary day resolves even
      when it holds no report (the dock stays, day-scoped, unchanged intent),
-     and so does the aggregated site view (spec §2.1, Task 6). */
+     and so does the aggregated site view (spec §2.1, Task 6). access_denied
+     is ALSO nothing resolved (Task 6 fix round, ruling): it is another
+     "no content on screen" screen, same class as the two pickers, so a
+     date-only Ask there is the same misleading state the readiness gate was
+     built to remove. */
   function askDockHasContent(status, showSitePicker, showUserPicker) {
-    if (status === 'loading') return false;
+    if (status === 'loading' || status === 'access_denied') return false;
     if (showSitePicker || showUserPicker) return false;
     return true;
   }
@@ -2316,16 +2330,29 @@
          author — putting one in scope would clear the conversation on every
          cross-person topic click (Task 6 controller ruling, spec §2.1).
          Same effect, same ref, same "loading" gate as the day+owner path
-         below — only the built context and the dedup key differ. */
+         below — only the built context and the dedup key differ.
+
+         `sitesList` starts [] and fills asynchronously, so on a direct link
+         (site from the URL or FS.siteContext) this branch commonly runs
+         ONCE before the list has landed, with `siteName` still undefined —
+         askContextForSite correctly omits siteId/siteName then. The key
+         carries whether the name resolved yet ('1'/'0') so that when
+         `sitesList` lands and this effect re-runs, the key is DIFFERENT and
+         the scope republishes with the name; without that bit the key was
+         identical before and after the list loaded, the dedup below
+         swallowed the second run, and the visit stayed unscoped by project
+         for the rest of the visit (Task 6 review). The bit only ever moves
+         0 -> 1 once, so a later `sitesList` refresh that still resolves the
+         same name republishes nothing further. */
       if (site && teamView) {
         var siteName = (sitesList.find(function (s) { return s.site_id === site; }) || {}).name;
-        var siteDayKey = askDayResetKey(state.status, date, '', site);
+        var siteDayKey = askDayResetKey('site', state.status, date, site, siteName ? '1' : '0');
         if (siteDayKey === null || siteDayKey === askDayKeyRef.current) return;
         askDayKeyRef.current = siteDayKey;
         askApi.setAskContext(askContextForSite(site, siteName, date));
         return;
       }
-      var dayKey = askDayResetKey(state.status, date, askOwner,
+      var dayKey = askDayResetKey('user', state.status, date, askOwner,
                                   askReportReady && askReport.site_id);
       if (dayKey === null || dayKey === askDayKeyRef.current) return;
       askDayKeyRef.current = dayKey;

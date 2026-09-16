@@ -719,8 +719,25 @@
        either way); identity of a per-commit object can. */
     var renderCommitToken = {};
     var dayChangeTokenRef = React.useRef(null);
+    /* Task 6 fix round (spec 2026-09-16 §2.1): the aggregated site view's
+       siteId/siteName can arrive AFTER the day scope first publishes --
+       sitesList starts empty and fills async, so timeline.js republishes the
+       context once the project name resolves (askDayResetKey's "named yet"
+       bit). That republish is not a day change: the date and the author are
+       the same, only a previously-unknown site got a name. Clearing here
+       would drop the reader's conversation on nothing more than a network
+       response landing late, so this one transition is read as enrichment,
+       not a switch, and is the only exception to "date/siteId/authorFolder
+       change clears" -- a siteId changing between two REAL values (or
+       disappearing) still clears exactly as before. */
+    var prevScopeRef = React.useRef(null);
     React.useEffect(function () {
+      var prevScope = prevScopeRef.current;
+      prevScopeRef.current = { date: context.date, siteId: context.siteId, authorFolder: context.authorFolder };
       if (!resetMountedRef.current) { resetMountedRef.current = true; return; }
+      var enrichedSiteOnly = !!(prevScope && prevScope.date === context.date
+        && prevScope.authorFolder === context.authorFolder && !prevScope.siteId && context.siteId);
+      if (enrichedSiteOnly) return;
       dayChangeTokenRef.current = renderCommitToken;
       genRef.current += 1;
       setMsgs([]);

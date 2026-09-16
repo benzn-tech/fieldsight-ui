@@ -983,15 +983,212 @@ test('8d the middle column still resets the day scope, and no longer owns the pa
 test('8f a refetch of the same day keeps a pinned topic; a real day change resets', () => {
   const { mod } = loadTimeline();
   const k = mod.askDayResetKey;
-  assert.strictEqual(k('loading', '2026-09-03', 'Ben', 's'), null, 'a loading render reset the scope');
-  const applied = k('ok', '2026-09-03', 'Ben', 's');
+  assert.strictEqual(k('user', 'loading', '2026-09-03', 'Ben', 's'), null, 'a loading render reset the scope');
+  const applied = k('user', 'ok', '2026-09-03', 'Ben', 's');
   /* loading → ok on the same day (content edit refresh, retry). */
-  assert.strictEqual(k('ok', '2026-09-03', 'Ben', 's'), applied, 'a refetch rebuilt the day and dropped the topic');
-  assert.notStrictEqual(k('ok', '2026-09-04', 'Ben', 's'), applied, 'a date change kept the old scope');
-  assert.notStrictEqual(k('ok', '2026-09-03', 'Someone', 's'), applied, 'an owner change kept the old scope');
-  assert.notStrictEqual(k('ok', '2026-09-03', 'Ben', 'other'), applied, 'a site change kept the old scope');
+  assert.strictEqual(k('user', 'ok', '2026-09-03', 'Ben', 's'), applied, 'a refetch rebuilt the day and dropped the topic');
+  assert.notStrictEqual(k('user', 'ok', '2026-09-04', 'Ben', 's'), applied, 'a date change kept the old scope');
+  assert.notStrictEqual(k('user', 'ok', '2026-09-03', 'Someone', 's'), applied, 'an owner change kept the old scope');
+  assert.notStrictEqual(k('user', 'ok', '2026-09-03', 'Ben', 'other'), applied, 'a site change kept the old scope');
   /* A missing site reads the same whether it came as false, undefined or ''. */
-  assert.strictEqual(k('ok', '2026-09-03', 'Ben', false), k('ok', '2026-09-03', 'Ben', undefined));
+  assert.strictEqual(k('user', 'ok', '2026-09-03', 'Ben', false), k('user', 'ok', '2026-09-03', 'Ben', undefined));
+});
+
+/* ---- Task 6 fix round: the site-name race, key collision, access-denied -- */
+
+test('S11 the site and day branches key off a discriminator, so they cannot collide',
+  () => {
+    const { mod } = loadTimeline();
+    const k = mod.askDayResetKey;
+    /* Before the prefix, the day branch's owner ('') and the site branch's
+       fixed '' owner argument produced the exact same joined string whenever
+       the day/site/status lined up -- the two branches only ever avoided it
+       because askOwner === '' implies site is falsy in the real component,
+       never because the key format forbade it. Drive the key function with
+       inputs chosen to force that collision under the OLD (kind-less) shape
+       and assert the new one keeps them apart. */
+    const dayKey = k('user', 'ok', '2026-09-04', '', 'site-uuid');
+    const siteKey = k('site', 'ok', '2026-09-04', 'site-uuid', '1');
+    assert.notStrictEqual(dayKey, siteKey);
+    assert.ok(dayKey.startsWith('user|'), 'the day key does not carry the discriminator');
+    assert.ok(siteKey.startsWith('site|'), 'the site key does not carry the discriminator');
+    /* A day key and a site key built from otherwise-identical remaining
+       segments must still differ SOLELY because of the prefix. */
+    assert.notStrictEqual(k('user', 'ok', 'D', 'X', 'Y'), k('site', 'ok', 'D', 'X', 'Y'));
+  });
+
+test('S12 the site key changes once the project name resolves, and not again',
+  () => {
+    const { mod } = loadTimeline();
+    const k = mod.askDayResetKey;
+    /* sitesList still [] -> askContextForSite is called with siteName
+       undefined -> the reset effect passes the "named yet" bit as '0'. */
+    const beforeName = k('site', 'ok', '2026-09-04', 'site-uuid', '0');
+    /* sitesList has landed and named the project -> '1'. */
+    const afterName = k('site', 'ok', '2026-09-04', 'site-uuid', '1');
+    assert.notStrictEqual(beforeName, afterName,
+      'the key is identical before and after the name resolves, so the republish never fires');
+    /* A later sitesList refresh that resolves the SAME name must not look
+       like a new event -- the effect's dedup only sees the joined key. */
+    assert.strictEqual(afterName, k('site', 'ok', '2026-09-04', 'site-uuid', '1'),
+      'a repeat resolution of the same name produced a new key');
+  });
+
+/* Drives the real reset effect inside TimelineMiddleColumn (not a read of
+   its source, and not a parallel re-implementation of its logic) by
+   supplying a small hook runtime that actually executes effects and lets
+   state updates trigger another render pass, the way React does. `site &&
+   !user` (AggregatedDayView's fetch path) resolves synchronously to
+   `{status:'ok', aggregated:true}` with no network call, which is what
+   makes this reachable without mocking the report/session/actions fetches
+   the ordinary single-person day needs. */
+function driveMiddleReset(opts) {
+  const path = require.resolve('../scripts/pages/timeline.js');
+  delete require.cache[path];
+
+  const h = { states: [], refs: [], effects: [], dirty: false, memoI: 0 };
+  let si = 0, ri = 0, ei = 0;
+  const askApi = {
+    askContext: {}, askReady: false,
+    contexts: [],
+    setAskContext(next) { askApi.contexts.push(next); askApi.askContext = next; },
+    setAskReady(v) { askApi.askReady = v; },
+  };
+
+  global.React = {
+    Fragment: 'Fragment',
+    createElement(type) { const kids = Array.prototype.slice.call(arguments, 2);
+      return { type, props: arguments[1] || {}, kids }; },
+    createContext() { return { Provider: 'AskCtxProvider' }; },
+    useContext() { return askApi; },
+    useState(init) {
+      const i = si++;
+      if (!(i in h.states)) h.states[i] = (typeof init === 'function') ? init() : init;
+      return [h.states[i], (v) => {
+        const next = (typeof v === 'function') ? v(h.states[i]) : v;
+        if (next !== h.states[i]) { h.states[i] = next; h.dirty = true; }
+      }];
+    },
+    useRef(init) {
+      const i = ri++;
+      if (!(i in h.refs)) h.refs[i] = { current: init };
+      return h.refs[i];
+    },
+    useEffect(fn, deps) {
+      const i = ei++;
+      const prev = h.effects[i];
+      const changed = !prev || !deps || deps.some((d, k) => d !== prev.deps[k]);
+      h.effects[i] = { fn, deps, changed, cleanup: prev && prev.cleanup };
+    },
+    useMemo(fn) { return fn(); },
+    useCallback(fn) { return fn; },
+  };
+  global.document = { addEventListener() {}, removeEventListener() {},
+                      createElement() { return { style: {} }; } };
+  global.window = {
+    FieldSight: {},
+    FS: {
+      api: {
+        folderName: n => String(n || '').trim().replace(/ /g, '_'),
+        org: { getOrgSites: () => opts.orgSitesPromise() },
+        programme: { getSuggestions: () => Promise.resolve({ suggestions: [] }) },
+        programmeMentions: { indexByTopic: () => ({}) },
+        useMocks: false,
+      },
+      Router: { subscribe: () => () => {}, getCurrentRoute: () => ({ params: opts.params }) },
+    },
+    AuthMock: { currentUser: null },
+    location: { href: 'https://example.test/#/timeline' },
+    addEventListener() {}, removeEventListener() {},
+  };
+
+  delete require.cache[path];
+  const mod = require(path);
+  const Middle = global.window.FieldSight.PAGES['/timeline'].Middle;
+
+  function render() {
+    si = 0; ri = 0; ei = 0; h.dirty = false;
+    Middle({ selectedItem: null, onSelect() {} });
+    h.effects.forEach((e) => {
+      if (!e.changed) return;
+      if (e.cleanup) e.cleanup();
+      const c = e.fn();
+      e.cleanup = (typeof c === 'function') ? c : null;
+      e.changed = false;
+    });
+  }
+  function settle() { render(); while (h.dirty) render(); }
+
+  return { settle, askApi, mod };
+}
+
+test('S13 the site view republishes date + site once sitesList loads, keeping the day, and republishes only once', async () => {
+  let resolveSites;
+  const orgSitesPromise = () => new Promise((res) => { resolveSites = res; });
+  const h = driveMiddleReset({
+    params: { date: '2026-09-04', site: 'site-uuid' },
+    orgSitesPromise,
+  });
+
+  h.settle();
+  assert.strictEqual(h.askApi.contexts.length, 1, 'the direct link never published a first scope');
+  assert.deepStrictEqual(h.askApi.contexts[0], { date: '2026-09-04' },
+    'the unresolved name leaked a siteId/siteName anyway');
+
+  resolveSites({ sites: [{ site_id: 'site-uuid', name: 'UC PK' }] });
+  await Promise.resolve(); await Promise.resolve();
+  h.settle();
+
+  assert.strictEqual(h.askApi.contexts.length, 2,
+    'the scope was never republished once the project name resolved');
+  assert.deepStrictEqual(h.askApi.contexts[1],
+    { date: '2026-09-04', siteId: 'site-uuid', siteName: 'UC PK' });
+
+  /* A later sitesList refresh (a poll, a re-fetch) that resolves the SAME
+     name must not republish again. */
+  h.mod; // (silence unused-var lint in older node; mod not otherwise needed)
+  h.settle();
+  assert.strictEqual(h.askApi.contexts.length, 2,
+    'a stable sitesList still republished the scope');
+});
+
+test('S14 the republish that only fills in the site name keeps the conversation', async () => {
+  /* Feeds the exact two contexts S13 proves timeline.js publishes -- {date}
+     then {date, siteId, siteName} -- through the REAL ask-chat.js reset
+     effect (mountAsk), so this checks the actual runtime consequence of the
+     republish rather than asserting an intention. */
+  const before = { date: '2026-09-04' };
+  const after = { date: '2026-09-04', siteId: 'site-uuid', siteName: 'UC PK' };
+  const h = mountAsk();
+  h.render({ context: before });
+  await h.ask('what happened this morning');
+  await h.settle(0, { answer: 'a report', citations: [], applied_scope: {} });
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1);
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--assistant').length, 1);
+
+  h.render({ context: after });
+  h.rerender();
+
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1,
+    'the site name resolving cleared the question');
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--assistant').length, 1,
+    'the site name resolving cleared the answer');
+  assert.strictEqual(h.byClass('fs-ask-chat__msg--divider').length, 0,
+    'the site name resolving announced itself as a switch');
+});
+
+test('S15 access-denied gets no dock, and it is folded into the shared readiness rule', () => {
+  const mod = loadDock(DAY_ONLY, false);
+  assert.strictEqual(mod.TimelineAskDock({ selectedItem: null }), null,
+    'access-denied rendered a date-only Ask over "you cannot see this"');
+
+  const { mod: pure } = loadTimeline();
+  assert.strictEqual(pure.askDockHasContent('access_denied', false, false), false,
+    'askDockHasContent does not know about access_denied');
+  /* It is folded into the SAME predicate the picker states use, not a
+     parallel inline check -- the whole point of the readiness gate. */
+  assert.strictEqual(pure.askDockHasContent('loading', false, false), false);
+  assert.strictEqual(pure.askDockHasContent('ok', false, false), true);
 });
 
 /* ---- 9. the docked Ask (spec 2026-09-16 §1, §4) ----------------------- */
