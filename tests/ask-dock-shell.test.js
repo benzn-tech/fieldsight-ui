@@ -191,3 +191,18 @@ test('S8 .fs-ask-chat--dock and .fs-ask-chat__overlay each key exactly one rule 
     'expected exactly one rule keyed on .fs-ask-chat__overlay, found ' + overlayCount +
     ' -- a second one can override `position: absolute` and break the no-reflow seam');
 });
+
+/* The plan calls the next test "S8", but S8 is already taken above by the Task
+   3 fix round (the "defined exactly once" CSS guard), so it ships as S9. */
+test('S9 the timeline registers the dock as its Footer and mounts it in dock mode', () => {
+  const timeline = read('scripts', 'pages', 'timeline.js');
+  assert.match(timeline, /Footer:\s*TimelineAskDock/,
+    'the dock is not registered in the page entry, so the Footer slot renders nothing');
+  const start = timeline.indexOf('function TimelineAskDock(');
+  assert.ok(start > 0, 'function TimelineAskDock( not found');
+  const end = timeline.indexOf('\n  function ', start + 1);
+  assert.ok(end > start, 'no module-level function follows TimelineAskDock');
+  const slice = timeline.slice(start, end);
+  assert.match(slice, /React\.createElement\(AskChat\b/, 'the dock mounts no AskChat');
+  assert.match(slice, /variant:\s*'dock'/, 'the dock mounts AskChat in its panel variant');
+});

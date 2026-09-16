@@ -862,11 +862,13 @@ test('6a the topic detail tabs have no ask tab', () => {
   assert.ok(!mod.MEETING_TABS.some(t => t.key === 'ask'), 'MEETING_TABS still has ask');
 });
 
-test('6b the page registers a Provider', () => {
+test('6b the page registers a Provider, a Middle, a Right and a Footer', () => {
   const { page } = loadTimeline();
   assert.strictEqual(typeof page.Provider, 'function');
   assert.strictEqual(typeof page.Middle, 'function');
   assert.strictEqual(typeof page.Right, 'function');
+  assert.strictEqual(typeof page.Footer, 'function',
+    'the dock is not registered as the page Footer, so nothing mounts it');
 });
 
 test('6c the Provider holds only the ask fields', () => {
@@ -883,9 +885,16 @@ test('6e outside a Provider there is no Ask to point a topic button at', () => {
   assert.strictEqual(mod.useTimelineAsk().hasAsk, false);
 });
 
-test('6d exactly one AskChat mount remains in timeline.js', () => {
-  const mounts = timelineSrc().match(/React\.createElement\(AskChat\b/g) || [];
+test('6d exactly one AskChat mount remains, and it is inside the dock', () => {
+  const src = timelineSrc();
+  const mounts = src.match(/React\.createElement\(AskChat\b/g) || [];
   assert.strictEqual(mounts.length, 1, 'found ' + mounts.length + ' AskChat mounts');
+  const start = src.indexOf('function TimelineAskDock(');
+  assert.ok(start > 0, 'function TimelineAskDock( not found');
+  const end = src.indexOf('\n  function ', start + 1);
+  assert.ok(end > start, 'no module-level function follows TimelineAskDock');
+  assert.match(src.slice(start, end), /React\.createElement\(AskChat\b/,
+    'the one AskChat mount is not inside TimelineAskDock');
 });
 
 /* ---- 7. Ask about this topic ------------------------------------------ */
@@ -920,14 +929,10 @@ test('7a3 AskPresence publishes hasAsk for exactly as long as it is mounted', ()
   assert.deepStrictEqual(seen, [true, false]);
 });
 
-test('7a4 the presence marker sits next to the one AskChat mount', () => {
-  const src = timelineSrc();
-  const at = src.indexOf('React.createElement(AskChat,');
-  const before = src.slice(at - 200, at);
-  assert.match(before, /React\.createElement\(AskPresence, \{ setHasAsk: askApi\.setHasAsk \}\)/);
-  const right = src.slice(src.indexOf('function TimelineRightDetail('), src.indexOf('/* ---------- Register'));
-  assert.match(right, /hasAsk: askApi\.hasAsk/, 'the topic button is not told whether an Ask exists');
-});
+/* 7a4 ("the presence marker sits next to the one AskChat mount") is deleted
+   here rather than in Task 5: Task 4 removes the in-body mount that AskPresence
+   was mounted beside, so the wiring it pinned no longer exists. It is on Task
+   5's delete list already (plan, "What happens to every test"). */
 
 test('7b the button renders and clicking it calls onAsk', () => {
   const { mod } = loadTimeline();
@@ -1000,7 +1005,7 @@ test('7e the topic detail header mounts the button; selecting a topic does not t
 test('8a the loaded day builds a fresh context: no topic survives a day change', () => {
   const { mod } = loadTimeline();
   const report = { site_id: 'site-uuid', site: 'UC PK', user_name: 'Ben UCPK2' };
-  const ctx = mod.askContextForLoadedDay(report, '2026-09-04', 'Ben_UCPK2', false);
+  const ctx = mod.askContextForDay(report, '2026-09-04', 'Ben_UCPK2');
   assert.deepStrictEqual(ctx, { date: '2026-09-04', siteId: 'site-uuid', siteName: 'UC PK',
     authorFolder: 'Ben_UCPK2', authorName: 'Ben UCPK2' });
   assert.ok(!('topicRowId' in ctx));
@@ -1027,26 +1032,28 @@ test('8b2 a site_id with an empty site name is omitted; with a site name both ar
   assert.strictEqual(both.siteName, 'UC PK');
 });
 
-test('8c a question handed off from the palette stays global', () => {
-  const { mod } = loadTimeline();
-  assert.deepStrictEqual(
-    mod.askContextForLoadedDay({ site_id: 's', site: 'UC PK', user_name: 'B' }, '2026-09-03', 'B', true),
-    {});
-});
+/* 8c ("a question handed off from the palette stays global") is deleted: the
+   palette rule moved out of askContextForLoadedDay (deleted with it) and into
+   the dock itself, where 9c now pins it. */
 
-test('8d the middle column wires the day reset and the palette rule', () => {
+test('8d the middle column still resets the day scope, and no longer owns the palette', () => {
   const src = timelineSrc();
   const mid = src.slice(src.indexOf('function TimelineMiddleColumn('), src.indexOf('function SessionPicker('));
-  assert.match(mid, /React\.useRef\(!!askPrefill\)/, 'palette hand-off is not remembered');
-  assert.match(mid, /askContextForLoadedDay\(/);
-  const eff = mid.slice(mid.indexOf('askContextForLoadedDay('));
+  assert.match(mid, /askContextForDay\(/);
+  const eff = mid.slice(mid.indexOf('askContextForDay('));
   const deps = eff.slice(eff.indexOf('}, [') , eff.indexOf(']);') + 1);
   assert.match(deps, /\bdate\b/, 'day change does not reset the context');
   assert.match(deps, /askOwner/, 'owner change does not reset the context');
-  assert.match(mid, /askFromPaletteRef\.current \? \{\} : askApi\.askContext/,
-    'mount #1 can auto-send a palette question with a stale scope');
   assert.match(mid, /dayKey === askDayKeyRef\.current\) return;/,
     'the reset does not compare against the last applied day');
+  /* The palette hand-off moved into the dock. As a Footer SIBLING the dock
+     first renders (and AskChat auto-sends) without this column's day-reset
+     effect having any way to reach it in time, so a flag read or published
+     here would arrive one commit too late and scope the question to the day. */
+  assert.doesNotMatch(mid, /fs\.ask\.prefill/,
+    'the middle column still reads the palette prefill');
+  assert.doesNotMatch(mid, /askFromPaletteRef/,
+    'the middle column still carries the palette flag');
 });
 
 test('8f a refetch of the same day keeps a pinned topic; a real day change resets', () => {
@@ -1061,6 +1068,77 @@ test('8f a refetch of the same day keeps a pinned topic; a real day change reset
   assert.notStrictEqual(k('ok', '2026-09-03', 'Ben', 'other'), applied, 'a site change kept the old scope');
   /* A missing site reads the same whether it came as false, undefined or ''. */
   assert.strictEqual(k('ok', '2026-09-03', 'Ben', false), k('ok', '2026-09-03', 'Ben', undefined));
+});
+
+/* ---- 9. the docked Ask (spec 2026-09-16 §1, §4) ----------------------- */
+
+const DOCK_DAY = { date: '2026-09-03', siteId: 'site-uuid', siteName: 'UC PK',
+                   authorFolder: 'Ben_UCPK2', authorName: 'Ben UCPK2' };
+
+/* The dock reads its scope through useTimelineAsk(), so drive it with a stub
+   context rather than a real Provider: the module only builds a context when
+   React.createContext exists, so both overrides are needed together. */
+function loadDock(askContext, extra) {
+  const { mod } = loadTimeline(Object.assign({
+    createContext() { return { Provider: 'AskCtxProvider' }; },
+    useContext() { return { askContext: askContext, setAskContext() {} }; },
+  }, extra || {}));
+  global.window.FieldSight.AskChat = 'AskChatStub';
+  return mod;
+}
+
+function askElOf(el) {
+  assert.ok(el, 'the dock rendered nothing');
+  assert.strictEqual(el.props.className, 'fs-ask-dock');
+  const ask = el.children.find(c => c && c.type === 'AskChatStub');
+  assert.ok(ask, 'no AskChat inside the dock');
+  return ask;
+}
+
+test('9a the dock\'s scope follows the selection', () => {
+  const mod = loadDock(DOCK_DAY);
+  const withTopic = askElOf(mod.TimelineAskDock({
+    selectedItem: { kind: 'topic', topic: { topic_row_id: 't', topic_title: 'Crane' } },
+  }));
+  assert.strictEqual(withTopic.props.variant, 'dock');
+  assert.strictEqual(withTopic.props.context.topicRowId, 't');
+  assert.strictEqual(withTopic.props.context.topicTitle, 'Crane');
+  assert.strictEqual(withTopic.props.context.date, '2026-09-03', 'the day scope was dropped');
+
+  /* A meeting topic carries no topic_row_id -> the day context (spec §4). */
+  const meeting = askElOf(mod.TimelineAskDock({
+    selectedItem: { kind: 'meeting_topic', topic: { topic_id: 2, topic_title: 'Standup' } },
+  }));
+  assert.deepStrictEqual(meeting.props.context, DOCK_DAY);
+
+  const none = askElOf(mod.TimelineAskDock({ selectedItem: null }));
+  assert.deepStrictEqual(none.props.context, DOCK_DAY);
+});
+
+test('9b the dock renders nothing without a day', () => {
+  const mod = loadDock({});
+  assert.strictEqual(mod.TimelineAskDock({ selectedItem: null }), null,
+    'a bar with nothing to narrow to reads as a global Ask (controller ruling 1)');
+  assert.strictEqual(mod.TimelineAskDock({
+    selectedItem: { kind: 'topic', topic: { topic_row_id: 't', topic_title: 'Crane' } },
+  }), null, 'a selection without a resolved day still rendered a bar');
+});
+
+test('9c a palette hand-off is asked unscoped', () => {
+  const store = { 'fs.ask.prefill': 'what happened on the crane?' };
+  global.sessionStorage = {
+    getItem: k => (k in store ? store[k] : null),
+    removeItem: k => { delete store[k]; },
+  };
+  try {
+    const mod = loadDock(DOCK_DAY);
+    const ask = askElOf(mod.TimelineAskDock({ selectedItem: null }));
+    assert.deepStrictEqual(ask.props.context, {},
+      'the palette question was sent with the day scope');
+    assert.strictEqual(ask.props.initialQuestion, 'what happened on the crane?');
+    assert.ok(!('fs.ask.prefill' in store),
+      'the prefill was not cleared, so it replays on the next mount');
+  } finally { delete global.sessionStorage; }
 });
 
 test('8e the palette mount passes no scope, no context and no suggestions', () => {

@@ -1022,6 +1022,14 @@
      degradation, not a bug. */
   var _programmeTasks = null;
 
+  /* The dock is a SIBLING of the middle column (it mounts in the shell's
+     Footer slot) and cannot see that column's state, so the suggestions the
+     alerts route needs are cached here, the way _programmeTasks already is.
+     Written on success only: an empty list is not a neutral default here --
+     silentTasks would read it as "every task is silent" -- so a failed or
+     in-flight fetch keeps the last known list rather than claiming silence. */
+  var _askSuggestions = [];
+
   function makeAlertsProvider(suggestions) {
     if (!_programmeTasks || !_programmeTasks.length) return null;
     return function () {
@@ -1114,13 +1122,6 @@
     return ctx;
   }
 
-  /* A question typed in the global palette stays global: when the page was
-     opened by the palette's prefill hand-off, the first loaded day does not
-     scope the Ask. */
-  function askContextForLoadedDay(report, date, routeUser, fromPalette) {
-    return fromPalette ? {} : askContextForDay(report, date, routeUser);
-  }
-
   /* Current context + a pinned topic. A topic is only ever pinned alongside
      its own day, so when the current context is empty (palette hand-off,
      day chip removed) or on another day, the topic's day scope is used. */
@@ -1171,6 +1172,61 @@
     return [date || '', owner || '', siteId || ''].join('|');
   }
 
+  /* The page's one Ask, docked under the middle column's scroll area (spec
+     2026-09-16 §1, §4). Mounted by the shell's Footer slot, so it is a
+     SIBLING of the list and never something the reader can scroll to.
+     The scope is derived from the selection, never clicked. */
+  function TimelineAskDock(props) {
+    var AskChat = window.FieldSight.AskChat;
+    var askApi  = useTimelineAsk();
+    var day     = askApi.askContext || {};
+
+    /* The palette hand-off lives HERE, not in the middle column: as a sibling
+       the dock's first render happens with no chance for that column's
+       day-reset effect to reach it in time, so a question typed in the global
+       palette would otherwise be auto-sent with the day scope. Read-and-clear
+       once, on the first render (a lazy useState initializer, not an effect),
+       exactly as the middle column used to — AskChat's own mount effect
+       auto-sends, so the value must be right on its FIRST render. */
+    var refPrefill = React.useState(function () {
+      try {
+        var v = sessionStorage.getItem('fs.ask.prefill');
+        if (v) sessionStorage.removeItem('fs.ask.prefill');
+        return v || '';
+      } catch (_) { return ''; }
+    });
+    var prefill = refPrefill[0];
+    var fromPaletteRef = React.useRef(!!prefill);
+    React.useEffect(function () { fromPaletteRef.current = false; }, []);
+
+    var sel   = props.selectedItem;
+    var topic = (sel && (sel.kind === 'topic' || sel.kind === 'meeting_topic')) ? sel.topic : null;
+    /* Returns null for a topic with no topic_row_id (meeting topics), which is
+       exactly spec §4's "a topic without one -> the day context". */
+    var withTopic = topic ? askContextWithTopic(day, topic, day) : null;
+    var context = fromPaletteRef.current ? {} : (withTopic || day);
+
+    if (!AskChat) return null;
+    /* No day resolved yet (project picker, first paint, admin available-users
+       disambiguation): an Ask with nothing to narrow to is not the day Ask, so
+       render nothing rather than a silently global bar (controller ruling 1). */
+    if (!context.date && !fromPaletteRef.current) return null;
+
+    return React.createElement('div', { className: 'fs-ask-dock' },
+      React.createElement(AskChat, {
+        variant:         'dock',
+        user:            context.authorFolder,
+        context:         context,
+        onContextChange: askApi.setAskContext,
+        /* Supplied only when the programme actually loaded. AskChat treats an
+           absent provider as "this route does not exist", so a failed fetch
+           degrades to the agent rather than to a wrong answer. */
+        alertsProvider:  makeAlertsProvider(_askSuggestions),
+        initialQuestion: prefill,
+      }),
+    );
+  }
+
   function TopicAskButton(props) {
     if (!topicAskVisible(props.hasAsk, props.topic)) return null;
     return React.createElement('button', {
@@ -1215,7 +1271,9 @@
       var cancelled = false;
       window.FS.api.programme.getSuggestions({ site: site, state: 'all' })
         .then(function (res) {
-          if (!cancelled) setSuggestions((res && res.suggestions) || []);
+          if (cancelled) return;
+          _askSuggestions = (res && res.suggestions) || [];
+          setSuggestions(_askSuggestions);
         })
         .catch(function () { if (!cancelled) setSuggestions([]); });
       return function () { cancelled = true; };
@@ -1878,7 +1936,9 @@
       var cancelled = false;
       window.FS.api.programme.getSuggestions({ site: suggSite, state: 'all' })
         .then(function (res) {
-          if (!cancelled) setSuggestions((res && res.suggestions) || []);
+          if (cancelled) return;
+          _askSuggestions = (res && res.suggestions) || [];
+          setSuggestions(_askSuggestions);
         })
         .catch(function () { if (!cancelled) setSuggestions([]); });
       return function () { cancelled = true; };
@@ -2222,29 +2282,13 @@
       }
     }, [state.status, targetTopicId, targetTopicTitle, targetTurnTime, date]);
 
-    /* Task C — Search's "Ask FieldSight" hand-off (search-palette.js).
-       Read-and-clear the sessionStorage prefill exactly once per mount,
-       via a lazy useState initializer rather than an effect so the value
-       is ready in time for AskChat's own mount-time prefill effect
-       (ask-chat.js) — that effect only runs once on ITS mount too, so it
-       must see the real value on AskChat's first render, not one render
-       later. Threaded into the report-level AskChat mount below. Must
-       sit above the early returns (:401+) — rules of hooks. */
-    var refAskPrefill = React.useState(function () {
-      try {
-        var v = sessionStorage.getItem('fs.ask.prefill');
-        if (v) sessionStorage.removeItem('fs.ask.prefill');
-        return v || '';
-      } catch (_) { return ''; }
-    });
-    var askPrefill = refAskPrefill[0];
-
-    /* One Ask, scoped — the viewed day/site/owner is the default scope.
-       Reset whenever the loaded day or owner changes (which also ends a
-       pinned topic). Selecting a topic does NOT change it; only the topic
-       detail's "Ask about this topic" button does. */
+    /* One Ask, scoped — the viewed day/site/owner is the default scope this
+       column publishes; the dock (TimelineAskDock, mounted in the shell's
+       Footer slot) reads it and narrows it by the selection. Reset whenever
+       the loaded day or owner changes. The palette hand-off is NOT read here
+       any more: it lives in the dock, which is the component whose first
+       render the auto-send actually depends on (spec 2026-09-16 §4). */
     var askApi = useTimelineAsk();
-    var askFromPaletteRef = React.useRef(!!askPrefill);
     var askReport = state.report;
     var askReportReady = !!(askReport && !askReport._notFound && !askReport.available_users);
     var askOwner = user || (askReportReady && askReport.user_name) || '';
@@ -2254,10 +2298,7 @@
                                   askReportReady && askReport.site_id);
       if (dayKey === null || dayKey === askDayKeyRef.current) return;
       askDayKeyRef.current = dayKey;
-      var fromPalette = askFromPaletteRef.current;
-      askFromPaletteRef.current = false;
-      askApi.setAskContext(askContextForLoadedDay(askReportReady ? askReport : null,
-                                                  date, user, fromPalette));
+      askApi.setAskContext(askContextForDay(askReportReady ? askReport : null, date, user));
     }, [state.status, date, askOwner, askReportReady && askReport.site_id]);
 
     /* Loading */
@@ -2428,7 +2469,6 @@
         && window.FS.api.folderName(caller.name) === ownerFolder);
     var canEditContent = hasContentEditPerm || isOwnReport;
 
-    var AskChat            = window.FieldSight.AskChat;
     var MeetingTopicCard   = window.FieldSight.MeetingTopicCard;
     var PhotoGrid          = window.FieldSight.PhotoGrid;
     var mentionedDates     = window.FS && window.FS.api
@@ -2841,32 +2881,11 @@
           )
         : null,
 
-      /* The page's one Ask (spec 2026-09-15-one-ask-scoped). Scoped to this
-         day · site · owner by default; topic detail pins a topic onto it.
-         While a palette hand-off is pending the context is forced to {} for
-         this render: AskChat's mount effect auto-sends before this column's
-         reset effect has run, and must not send the previous day's scope. */
-      AskChat ? React.createElement(React.Fragment, null,
-        React.createElement('div', { className: 'fs-timeline-page__section-label' },
-          'Ask agent'),
-        React.createElement(AskPresence, { setHasAsk: askApi.setHasAsk }),
-        React.createElement(AskChat, {
-          user:            user || (report && report.user_name && window.FS.api.folderName(report.user_name)),
-          context:         askFromPaletteRef.current ? {} : askApi.askContext,
-          onContextChange: askApi.setAskContext,
-          focusNonce:      askApi.askFocusNonce,
-          /* Supplied only when the programme actually loaded. AskChat treats
-             an absent provider as "this route does not exist", so a failed
-             fetch degrades to the agent rather than to a wrong answer.
-
-             `silent` is passed as null unless the suggestion fetch used
-             state:'all' — programmeMentions refuses to claim silence without
-             that coverage, and flattening it here would undo the refusal. */
-          alertsProvider:  makeAlertsProvider(suggestions),
-          compact:         true,
-          initialQuestion: askPrefill,
-        }),
-      ) : null,
+      /* The page's one Ask is no longer in the body: it is docked under this
+         column's scroll area, mounted by the shell's Footer slot as
+         TimelineAskDock (spec 2026-09-16 §1). Nothing takes its place here —
+         a bar the reader has to scroll to is the problem the spec exists to
+         fix. */
     );
   }
 
@@ -4481,11 +4500,13 @@
   if (!window.FieldSight) window.FieldSight = {};
   if (!window.FieldSight.PAGES) window.FieldSight.PAGES = {};
   window.FieldSight.PAGES['/timeline'] = {
-    /* One Ask, scoped — shares the ask context between the middle column's
-       AskChat and the right column's "Ask about this topic". */
+    /* One Ask, scoped — the Provider shares the ask context, and the dock
+       mounts in the shell's Footer slot so it sits OUTSIDE the middle
+       column's scroll area (spec 2026-09-16 §3). */
     Provider: TimelineAskProvider,
     Middle:   TimelineMiddleColumn,
     Right:    TimelineRightDetail,
+    Footer:   TimelineAskDock,
   };
 
   /* fix/closed-by-display — ContentHistoryPanel is generic over
@@ -4559,8 +4580,8 @@
       TimelineAskProvider: TimelineAskProvider,
       useTimelineAsk: useTimelineAsk,
       askContextForDay: askContextForDay,
-      askContextForLoadedDay: askContextForLoadedDay,
       askContextWithTopic: askContextWithTopic,
+      TimelineAskDock: TimelineAskDock,
       pinTopicAsk: pinTopicAsk,
       TopicAskButton: TopicAskButton,
       topicAskVisible: topicAskVisible,
