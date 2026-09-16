@@ -9,27 +9,29 @@
    state for display, but each request sends only the one question.
    No prior turns are forwarded in the body.
 
-   Two scoping modes:
-     • scope='transcript' + topic_id → grounds answers to ONE topic's
-       time range (used in TopicDetail's Ask tab)
-     • scope='both' (default) → grounds to the whole report (transcript
-       + report) — used by the per-report Ask card on /timeline
+   Scope (spec docs/specs/2026-09-15-one-ask-scoped.md): the HOST owns a
+   `context` and AskChat only reads it. The request carries date / site_id /
+   author_folder / topic_row_id; what was actually enforced comes back as
+   `applied_scope` and is what the chips and scope lines show.
 
    Worker rule (BACKEND-CONTEXT §3, §8.5): the server forces user=self
    for workers. We pass the user param along and trust the API to
    override; no UI gating needed beyond that.
 
    Props:
-     date            'YYYY-MM-DD'
+     context         {date?, siteId?, siteName?, authorFolder?, authorName?,
+                      topicRowId?, topicTitle?} — omitted = unscoped
+     onContextChange function(nextContext) — chip removal / "Ask across
+                     everything"; without it chips have no remove button
+     focusNonce      number — a change scrolls the Ask into view and focuses
+                     its input (Timeline's "Ask about this topic")
      user            folder-name string (optional — server handles default)
-     scope           'report' | 'transcript' | 'both'  (default 'both')
-     topic_id        number | null
-     placeholder     string for the input (e.g. "Ask about this topic…")
-     suggestions     string[] of pre-canned questions (clickable chips)
-     compact         boolean — render in a tighter layout for sidebars
+     placeholder     overrides placeholderFor(context)
+     suggestions     overrides suggestionsFor(context)
+     compact         boolean — tighter layout
+     alertsProvider  optional programme alerts route (unchanged)
      initialQuestion optional string — auto-sends once on mount (Search's
-                     "Ask FieldSight" hand-off: the question was already
-                     committed in the palette, so it fires immediately).
+                     "Ask FieldSight" hand-off).
 
    Exported to:
      window.FieldSight.AskChat
@@ -63,7 +65,7 @@
      first thing lost to a screenshot, a printout, or a colour-blind reader. */
 
   /* Module-scope so ids stay unique across every AskChat on the page. There
-     are four mounts (three on Timeline, one in the search palette) and a
+     are two mounts (Timeline and the search palette) and a
      per-instance counter would hand two of them the same id. */
   var _midSeq = 0;
 
@@ -447,11 +449,170 @@
     );
   }
 
+  /* ---- scope: what this Ask is narrowed to --------------------------------
+
+     The host owns the context ({date, siteId, siteName, authorFolder,
+     authorName, topicRowId, topicTitle}); AskChat only reads it. Everything
+     below is pure so it can be driven from Node -- this file cannot be rendered
+     there. */
+
+  function present(v) {
+    return typeof v === 'string' ? v.trim() !== '' : v != null;
+  }
+
+  function hasScope(context) {
+    var c = context || {};
+    return present(c.date) || present(c.siteId) || present(c.authorFolder)
+        || present(c.topicRowId);
+  }
+
+  /* Context -> POST /api/ask body. Omits absent fields rather than sending ''
+     or null: the backend treats a present-but-empty field as malformed and
+     reports it `dropped: invalid`, which would put a warning under every
+     answer. Never sends `scope` / `topic_id` -- the RAG path ignores both.
+
+     `scoped: true` is only added when at least one narrowing field went on
+     the body -- it tells the backend "honour date/site/author/topic for
+     narrowing", and an unscoped question must not opt into that by accident
+     (user decision 2026-09-16). */
+  function requestBodyFor(context, question) {
+    var c = context || {};
+    var body = { question: question };
+    if (present(c.date))         body.date          = c.date;
+    if (present(c.siteId))       body.site_id       = c.siteId;
+    if (present(c.authorFolder)) body.author_folder = c.authorFolder;
+    if (present(c.topicRowId))   body.topic_row_id  = c.topicRowId;
+    if (present(c.date) || present(c.siteId) || present(c.authorFolder) || present(c.topicRowId)) {
+      body.scoped = true;
+    }
+    return body;
+  }
+
+  var SCOPE_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var SCOPE_DAYS   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+  /* 'YYYY-MM-DD' -> 'Thu 3 Sep'. UTC arithmetic only (BUG-19): a date string
+     parsed as local time drifts a day in New Zealand. */
+  function shortDay(iso) {
+    var p = String(iso || '').split('-').map(Number);
+    if (p.length !== 3 || !p[0] || !p[1] || !p[2]) return String(iso || '');
+    var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+    return SCOPE_DAYS[d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + SCOPE_MONTHS[d.getUTCMonth()];
+  }
+
+  var TOPIC_CHIP_MAX = 24;
+  function truncateTitle(title) {
+    var t = String(title || '').trim();
+    if (t.length <= TOPIC_CHIP_MAX) return t;
+    var cut = t.slice(0, TOPIC_CHIP_MAX + 1);
+    var sp = cut.lastIndexOf(' ');
+    return (sp > 0 ? cut.slice(0, sp) : t.slice(0, TOPIC_CHIP_MAX)).trim() + '…';
+  }
+
+  /* null  = no answer yet: the chip shows the request, unmarked.
+     true  = the backend says it enforced this field.
+     false = it did not -- including a backend that predates applied_scope,
+             which must read as "not scoped" rather than silently scoped. */
+  function isEnforced(response, field) {
+    if (response === undefined) return null;
+    var applied = response && response.applied_scope;
+    return !!(applied && typeof applied === 'object'
+              && Object.prototype.hasOwnProperty.call(applied, field));
+  }
+
+  function chipsFor(context, response) {
+    var c = context || {};
+    var chips = [];
+
+    var segs = [];
+    if (present(c.date)) segs.push({ field: 'date', text: shortDay(c.date) });
+    if (present(c.siteId) && present(c.siteName)) segs.push({ field: 'site_id', text: c.siteName });
+    if (present(c.authorFolder)) segs.push({ field: 'author_folder', text: c.authorFolder });
+    if (segs.length) {
+      segs.forEach(function (s) { s.enforced = isEnforced(response, s.field); });
+      chips.push({
+        kind: 'day',
+        label: segs.map(function (s) { return s.text; }).join(' · '),
+        title: '',
+        segments: segs,
+        /* Removed as one, and it takes the topic with it: a topic is pinned
+           to its own day, so it cannot outlive the day chip. */
+        next: {},
+      });
+    }
+
+    if (present(c.topicRowId)) {
+      var rest = Object.assign({}, c);
+      delete rest.topicRowId;
+      delete rest.topicTitle;
+      var label = 'Topic: ' + (truncateTitle(c.topicTitle) || 'this topic');
+      chips.push({
+        kind: 'topic',
+        label: label,
+        title: c.topicTitle || '',
+        segments: [{ field: 'topic_row_id', text: label,
+                     enforced: isEnforced(response, 'topic_row_id') }],
+        next: rest,
+      });
+    }
+    return chips;
+  }
+
+  /* Copy for each `applied_scope.dropped` entry (spec §2 table). Keyed on the
+     exact field:reason pair; anything else renders nothing -- a raw code under
+     an answer is worse than silence, and the chips already grey the field. */
+  var SCOPE_DROP_COPY = {
+    'topic_row_id:not_visible':  'Topic not available — answered for the day',
+    'topic_row_id:invalid':      'Topic not available — answered for the day',
+    'author_folder:not_visible': "Couldn't narrow to this person — answered for the project and day",
+    'author_folder:invalid':     "Couldn't narrow to this person — answered for the project and day",
+    'site_id:not_visible':       "Couldn't narrow to this project",
+    'site_id:invalid':           "Couldn't narrow to this project",
+    'date:invalid':              "Couldn't narrow to this day",
+    'date:overridden_by_question':        'Used the dates in your question',
+    'date:overridden_by_topic':           "Answered for this topic's day",
+    'question_range:overridden_by_topic': "Answered for this topic's day, not the dates in your question",
+  };
+
+  /* Built from the RESPONSE only. The UI renders what the backend enforced,
+     never its own request: a backend that predates applied_scope must read as
+     visibly unscoped, not as silently scoped. */
+  function basisLinesFor(response) {
+    var applied = response && response.applied_scope;
+    if (!applied || typeof applied !== 'object') return ['Searched all your projects'];
+    var out = [];
+    (Array.isArray(applied.dropped) ? applied.dropped : []).forEach(function (d) {
+      if (!d) return;
+      var key = d.field + ':' + d.reason;
+      if (!Object.prototype.hasOwnProperty.call(SCOPE_DROP_COPY, key)) return;
+      if (out.indexOf(SCOPE_DROP_COPY[key]) === -1) out.push(SCOPE_DROP_COPY[key]);
+    });
+    return out;
+  }
+
+  function scopeKind(context) {
+    var c = context || {};
+    if (present(c.topicRowId)) return 'topic';
+    return hasScope(c) ? 'day' : 'none';
+  }
+
+  var SCOPE_SUGGESTIONS = {
+    topic: ['What was decided?', 'Who is responsible for follow-ups?', 'Were any risks flagged?'],
+    day:   ['What were the safety issues?', 'Which actions are still open?', 'What was decided?'],
+    none:  ['What happened this week?', 'Which actions are overdue?'],
+  };
+  var SCOPE_PLACEHOLDER = {
+    topic: 'Ask about this topic…',
+    day:   'Ask about this day…',
+    none:  'Ask across all your projects…',
+  };
+
+  function suggestionsFor(context) { return SCOPE_SUGGESTIONS[scopeKind(context)].slice(); }
+  function placeholderFor(context) { return SCOPE_PLACEHOLDER[scopeKind(context)]; }
+
   function AskChat(props) {
-    var date     = props.date;
-    var user     = props.user;
-    var scope    = props.scope || 'both';
-    var topic_id = props.topic_id != null ? props.topic_id : null;
+    var user    = props.user;
+    var context = props.context || {};
 
     /* messages: [{ role: 'user'|'assistant', text, citations?, model? }] */
     var refMsgs = React.useState([]);
@@ -467,6 +628,25 @@
     var setBusy = refBusy[1];
 
     var listRef = React.useRef(null);
+    var rootRef  = React.useRef(null);
+    var inputRef = React.useRef(null);
+    /* A question waiting to be re-sent once the host has applied a new
+       context ("Ask across everything"). Sent from the reset effect, i.e.
+       after the re-render, so it goes out with the NEW context rather than
+       the one this render closed over. */
+    var resendRef = React.useRef(null);
+    /* The same question, parked because a request was still in flight when
+       the new context arrived; sent once `busy` clears (see the busy effect). */
+    var deferredResendRef = React.useRef(null);
+    /* Bumped by the reset effect. A request remembers the generation it was
+       sent in; a response from an older generation answered a context the
+       reader is no longer looking at, so it is dropped rather than appended
+       under the new chips. */
+    var genRef = React.useRef(0);
+    /* The reset effect must not run on mount: it runs after the
+       initialQuestion effect and would wipe the question that effect just
+       added (palette hand-off). */
+    var resetMountedRef = React.useRef(false);
 
     /* Task C — one-shot hand-off from Search's "Ask FieldSight" row. Runs
        once on mount only ([] deps). AUTO-SENDS: the user already typed and
@@ -496,11 +676,55 @@
       }
     }, [msgs.length, busy]);
 
-    /* When scope keys change (e.g. user switched topics), drop history
-       since prior context no longer applies. */
+    /* When scope keys change (the host changed the context: a day/owner
+       change, a pinned or removed topic, "Ask across everything"), drop
+       history since prior context no longer applies. */
     React.useEffect(function () {
+      if (!resetMountedRef.current) { resetMountedRef.current = true; return; }
+      genRef.current += 1;
       setMsgs([]);
-    }, [date, user, scope, topic_id]);
+      /* Always consumed here, sent or not: a question left in the ref would
+         otherwise fire on some later, unrelated context change. It is only
+         sent when the new context is the unscoped one "Ask across
+         everything" asked for -- a host that applied something else did not
+         honour the widen. */
+      var pending = resendRef.current;
+      resendRef.current = null;
+      deferredResendRef.current = null;
+      if (pending && !hasScope(context)) {
+        if (busy) deferredResendRef.current = pending;
+        else send(pending);
+      }
+    }, [context.date, context.siteId, context.authorFolder, context.topicRowId]);
+
+    /* A widen that landed while an older request was still in flight: send it
+       once that request settles, from a render that has the new context. */
+    React.useEffect(function () {
+      if (busy || !deferredResendRef.current) return;
+      var pending = deferredResendRef.current;
+      deferredResendRef.current = null;
+      send(pending);
+    }, [busy]);
+
+    /* "Ask about this topic" — bring the one Ask into view and put the cursor
+       in it. Smooth scroll only when the reader has not asked for reduced
+       motion. The nonce lives in the page Provider and never resets, while
+       this component remounts on every day change or refetch: act only on a
+       change seen by THIS mount, never on the value it was mounted with. */
+    var seenFocusNonceRef = React.useRef(props.focusNonce);
+    React.useEffect(function () {
+      if (props.focusNonce === seenFocusNonceRef.current) return;
+      seenFocusNonceRef.current = props.focusNonce;
+      if (!props.focusNonce) return;
+      var root = rootRef.current;
+      var input = inputRef.current;
+      var reduce = !!(window.matchMedia
+        && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+      if (root && root.scrollIntoView) {
+        root.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
+      }
+      if (input && input.focus) input.focus({ preventScroll: true });
+    }, [props.focusNonce]);
 
     /* Attach a corroboration result to the answer it belongs to.
 
@@ -560,13 +784,14 @@
            this product's normal answer, and it is the recoverable one. */
       }
 
-      window.FS.api.ask.ask({
-        date:     date,
-        user:     user,
-        scope:    scope,
-        topic_id: topic_id,
-        question: question,
-      }).then(function (res) {
+      /* Captured at send time: the context may change while this is in flight. */
+      var scopedRequest = hasScope(context);
+      var body = requestBodyFor(context, question);
+      body.user = user;   /* undefined is dropped on the wire */
+      var gen = genRef.current;
+      function isStale() { return gen !== genRef.current; }
+      window.FS.api.ask.ask(body).then(function (res) {
+        if (isStale()) return;
         var answerText = res.answer || '';
         /* Not on a web-derived answer: corroborating the web against the web
            is a loop that reads as confirmation. */
@@ -599,6 +824,12 @@
              Chinese question came back in English 2 runs out of 3), and the
              basis line must not inherit that coin flip. */
           zh:        askedInChinese(question),
+          /* What the backend says it enforced. Stored as a response-shaped
+             object so the chips and scope lines read exactly what came back;
+             `applied_scope` undefined = a backend that predates scoping. */
+          scopeResponse: { applied_scope: res.applied_scope },
+          scoped:        scopedRequest,
+          question:      question,
         }]); });
 
         /* The second pass. Fired after the answer is already on screen and
@@ -611,9 +842,10 @@
            twice. */
         if (!wantsCorrob) return;
         window.FS.api.ask.corroborate({ question: question, answer: answerText })
-          .then(function (cr) { patchCorrob(mid, cr); })
-          .catch(function () { patchCorrob(mid, { _failed: true }); });
+          .then(function (cr) { if (!isStale()) patchCorrob(mid, cr); })
+          .catch(function () { if (!isStale()) patchCorrob(mid, { _failed: true }); });
       }).catch(function (err) {
+        if (isStale()) return;
         /* A timeout is not an unreachable agent, and saying so sent the reader
            at the backend while it was answering correctly. Name the two cases
            apart: one is "it is slow", the other is "it is not there". */
@@ -625,6 +857,7 @@
           error: true,
         }]); });
       }).then(function () {
+        /* Even for a stale response: the request is over either way. */
         setBusy(false);
       });
     }
@@ -636,14 +869,21 @@
       send(trimmed);
     }
 
+    var suggestions = props.suggestions || suggestionsFor(context);
+    var lastAnswer = null;
+    for (var li = msgs.length - 1; li >= 0; li--) {
+      if (msgs[li].scopeResponse) { lastAnswer = msgs[li]; break; }
+    }
+    var chips = chipsFor(context, lastAnswer ? lastAnswer.scopeResponse : undefined);
+
     var className = 'fs-ask-chat' + (props.compact ? ' fs-ask-chat--compact' : '');
 
-    return React.createElement('div', { className: className },
+    return React.createElement('div', { className: className, ref: rootRef },
 
       /* Suggestions row — only shown while history is empty. */
-      props.suggestions && props.suggestions.length > 0 && msgs.length === 0
+      suggestions && suggestions.length > 0 && msgs.length === 0
         ? React.createElement('div', { className: 'fs-ask-chat__suggestions' },
-            props.suggestions.map(function (s, i) {
+            suggestions.map(function (s, i) {
               return React.createElement('button', {
                 key: i, type: 'button',
                 className: 'fs-ask-chat__suggestion',
@@ -659,9 +899,9 @@
         className: 'fs-ask-chat__messages',
         ref:       listRef,
       },
-        msgs.length === 0 && (!props.suggestions || props.suggestions.length === 0)
+        msgs.length === 0 && (!suggestions || suggestions.length === 0)
           ? React.createElement('div', { className: 'fs-ask-chat__empty' },
-              'Ask anything grounded in this ' + (topic_id != null ? 'topic.' : 'report.'))
+              placeholderFor(context))
           : null,
 
         msgs.map(function (m, i) {
@@ -691,6 +931,16 @@
                     + (m.basis && m.basis.widened ? ' fs-ask-chat__basis--widened' : ''),
                 }, formatAnswerBasis(m.basis, m.zh))
               : null,
+            /* What the scope turned out to be. Above the answer for the same
+               reason as the basis line: the reader learns the answer is not
+               about what they were looking at BEFORE reading it. */
+            m.role === 'assistant' && m.scopeResponse
+              ? basisLinesFor(m.scopeResponse).map(function (line, li2) {
+                  return React.createElement('div', {
+                    key: 'scope-' + li2, className: 'fs-ask-chat__scope-line',
+                  }, line);
+                })
+              : null,
             m.role === 'assistant' ? renderWebOrigin(m) : null,
             m.role === 'assistant' && window.FieldSight.renderMarkdown
               ? React.createElement('div', {
@@ -700,6 +950,24 @@
               : React.createElement('div', { className: 'fs-ask-chat__msg-text' },
                   m.text),
             m.role === 'assistant' ? renderCitations(m.citations) : null,
+            /* A scoped answer that found nothing: offer the same question
+               across everything. The host clears the context; the reset
+               effect re-sends once the new (empty) context has rendered.
+               Only when the backend reported an applied_scope: one that
+               predates scoping already searched everything. */
+            m.role === 'assistant' && m.scoped && m.scopeResponse
+                && m.scopeResponse.applied_scope && !m.error
+                && !(m.citations && m.citations.length) && props.onContextChange
+              ? React.createElement('button', {
+                  type: 'button',
+                  className: 'fs-ask-chat__widen',
+                  disabled: busy,
+                  onClick: function () {
+                    if (hasScope(context)) resendRef.current = m.question;
+                    props.onContextChange({});
+                  },
+                }, 'Ask across everything')
+              : null,
 
             /* Below the citations, deliberately: citations point back into the
                customer's own recordings, and this points out of them. Reading
@@ -737,6 +1005,47 @@
         ) : null,
       ),
 
+      chips.length
+        ? React.createElement('div', {
+            className: 'fs-ask-chat__chips',
+            role: 'group',
+            'aria-label': 'This Ask is narrowed to',
+          },
+            chips.map(function (chip) {
+              return React.createElement('span', {
+                key: chip.kind,
+                className: 'fs-ask-chip fs-ask-chip--' + chip.kind,
+                title: chip.title || null,
+              },
+                chip.segments.map(function (s, si) {
+                  return React.createElement(React.Fragment, { key: s.field },
+                    si > 0
+                      ? React.createElement('span', { className: 'fs-ask-chip__sep', 'aria-hidden': 'true' }, ' · ')
+                      : null,
+                    React.createElement('span', {
+                      className: 'fs-ask-chip__seg'
+                        + (s.enforced === false ? ' fs-ask-chip__seg--unenforced' : ''),
+                      /* Not colour alone: struck through, and said in words.
+                         The full text lives in the tooltip because a long
+                         site or owner name is ellipsised at phone width. */
+                      title: s.enforced === false ? s.text + ' — not applied to this answer' : s.text,
+                    }, s.text,
+                      s.enforced === false
+                        ? React.createElement('span', { className: 'fs-sr-only' }, ' (not applied)')
+                        : null));
+                }),
+                props.onContextChange
+                  ? React.createElement('button', {
+                      type: 'button',
+                      className: 'fs-ask-chip__remove',
+                      'aria-label': 'Remove scope: ' + chip.label,
+                      disabled: busy,
+                      onClick: function () { props.onContextChange(chip.next); },
+                    }, '×')
+                  : null);
+            }))
+        : null,
+
       /* Input */
       React.createElement('form', {
         className: 'fs-ask-chat__form',
@@ -744,8 +1053,9 @@
       },
         React.createElement('input', {
           type:      'text',
+          ref:       inputRef,
           className: 'fs-ask-chat__input',
-          placeholder: props.placeholder || 'Ask the agent…',
+          placeholder: props.placeholder || placeholderFor(context),
           value:     q,
           onChange:  function (e) { setQ(e.target.value); },
           disabled:  busy,
@@ -767,4 +1077,14 @@
   /* Exported so the wording can be pinned by a test without rendering React,
      and so SP-Ask's spoken variant can be written against the same dict. */
   window.FieldSight.formatAnswerBasis = formatAnswerBasis;
+  /* Pure scope helpers, exported for tests (tests/ask-scoped-context.test.js). */
+  window.FieldSight.askScope = {
+    requestBodyFor: requestBodyFor,
+    hasScope:       hasScope,
+    shortDay:       shortDay,
+    chipsFor:       chipsFor,
+    basisLinesFor:  basisLinesFor,
+    suggestionsFor: suggestionsFor,
+    placeholderFor: placeholderFor,
+  };
 })();

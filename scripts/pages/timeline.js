@@ -1014,16 +1014,11 @@
      Q&A is Phase 4.
      ===================================================================== */
   /* ---- alerts Ask route (routing spec §3.5) ------------------------------
-     AskChat is mounted in THREE places on this page — once in
-     AggregatedDayView and twice in TimelineRightDetail — and only the page's
-     day view is in a position to fetch the programme. Wiring the provider to
-     one mount would have made the route work on one route and be silently
-     absent on the other two, which is the same mistake the topic-link
-     placement made and had to be corrected for.
-
-     So the tasks live at module scope, written by whichever view fetched
-     them, and every mount reads the same provider. An empty cache means the
-     route does not exist and the question goes to the agent — the designed
+     Timeline has ONE AskChat (the day view, TimelineMiddleColumn); topic
+     detail pins a topic onto it instead of mounting its own (spec
+     2026-09-15-one-ask-scoped §3). The tasks still live at module scope,
+     written by whichever view fetched them. An empty cache means the route
+     does not exist and the question goes to the agent — the designed
      degradation, not a bug. */
   var _programmeTasks = null;
 
@@ -1047,6 +1042,142 @@
         lateness: null,
       };
     };
+  }
+
+  /* =====================================================================
+     One Ask, scoped (docs/specs/2026-09-15-one-ask-scoped.md §3)
+     ---------------------------------------------------------------------
+     The page's single AskChat lives in the middle column, the "Ask about
+     this topic" button lives in the right column; they share the context
+     through this Provider (same slot TodayProvider uses, app-shell.js
+     ~1365). It holds ONLY the ask context and a focus nonce — it does not
+     move any existing Timeline state.
+
+     createContext is guarded because Node tests load this file with a
+     React stub that has none; without a context, useTimelineAsk returns an
+     inert value and the page still renders. */
+  var TimelineAskContext = (typeof React !== 'undefined' && React && React.createContext)
+    ? React.createContext(null)
+    : null;
+
+  var NO_TIMELINE_ASK = {
+    askContext: {},
+    setAskContext: function () {},
+    askFocusNonce: 0,
+    requestAskFocus: function () {},
+    hasAsk: false,
+    setHasAsk: function () {},
+  };
+
+  function TimelineAskProvider(props) {
+    var refCtx    = React.useState({});
+    var refNonce  = React.useState(0);
+    var refHasAsk = React.useState(false);
+    var value = {
+      askContext:      refCtx[0],
+      setAskContext:   function (next) { refCtx[1](next || {}); },
+      askFocusNonce:   refNonce[0],
+      requestAskFocus: function () { refNonce[1](function (n) { return n + 1; }); },
+      /* True only while the middle column actually has the one Ask mounted
+         (AskPresence below). The aggregated site view, the meeting view and
+         the error / no-report states mount none, and a topic button there
+         would do nothing. */
+      hasAsk:          refHasAsk[0],
+      setHasAsk:       refHasAsk[1],
+    };
+    if (!TimelineAskContext) return React.createElement(React.Fragment, null, props.children);
+    return React.createElement(TimelineAskContext.Provider, { value: value }, props.children);
+  }
+
+  function useTimelineAsk() {
+    var v = (TimelineAskContext && React.useContext) ? React.useContext(TimelineAskContext) : null;
+    return v || NO_TIMELINE_ASK;
+  }
+
+  /* The day scope for a loaded report. `report.site_id` exists only on the
+     Aurora timeline path; without it the site is omitted entirely (the chip
+     shows date + owner and the request carries no site_id). siteId is only
+     set alongside a non-empty siteName so the Ask never narrows by site
+     without a visible site label on the chip. */
+  function askContextForDay(report, date, routeUser) {
+    var ctx = {};
+    if (date) ctx.date = date;
+    if (report && report.site_id && report.site) {
+      ctx.siteId = report.site_id;
+      ctx.siteName = report.site;
+    }
+    var folder = routeUser
+      || (report && report.user_name && window.FS.api.folderName(report.user_name))
+      || '';
+    if (folder) ctx.authorFolder = folder;
+    if (report && report.user_name) ctx.authorName = report.user_name;
+    return ctx;
+  }
+
+  /* A question typed in the global palette stays global: when the page was
+     opened by the palette's prefill hand-off, the first loaded day does not
+     scope the Ask. */
+  function askContextForLoadedDay(report, date, routeUser, fromPalette) {
+    return fromPalette ? {} : askContextForDay(report, date, routeUser);
+  }
+
+  /* Current context + a pinned topic. A topic is only ever pinned alongside
+     its own day, so when the current context is empty (palette hand-off,
+     day chip removed) or on another day, the topic's day scope is used. */
+  function askContextWithTopic(current, topic, dayContext) {
+    if (!topic || !topic.topic_row_id) return null;
+    var day = dayContext || {};
+    var sameDay = !!(current && current.date && current.date === day.date
+      && current.authorFolder === day.authorFolder
+      && (!(current.siteId && day.siteId) || current.siteId === day.siteId));
+    var base = sameDay ? current : day;
+    return Object.assign({}, base, {
+      topicRowId: topic.topic_row_id,
+      topicTitle: topic.topic_title || '',
+    });
+  }
+
+  function pinTopicAsk(askApi, topic, dayContext) {
+    var next = askContextWithTopic(askApi.askContext, topic, dayContext);
+    if (!next) return false;
+    askApi.setAskContext(next);
+    askApi.requestAskFocus();
+    return true;
+  }
+
+  /* Meeting topics carry no topic_row_id → no button; the day Ask still
+     covers their day. No mounted Ask (aggregated site view, meeting view,
+     error states, outside the Provider) → no button either. */
+  function topicAskVisible(hasAsk, topic) {
+    return !!(hasAsk && topic && topic.topic_row_id);
+  }
+
+  /* Mounted next to the one AskChat: publishes "an Ask is on the page" for
+     exactly as long as it is. */
+  function AskPresence(props) {
+    var set = props.setHasAsk;
+    React.useEffect(function () {
+      set(true);
+      return function () { set(false); };
+    }, [set]);
+    return null;
+  }
+
+  /* The day scope is rebuilt only when the day actually changes: a refetch
+     of the same day (content edit refresh, retry) goes loading → ok again
+     and must keep a pinned topic. null while loading = do nothing. */
+  function askDayResetKey(status, date, owner, siteId) {
+    if (status === 'loading') return null;
+    return [date || '', owner || '', siteId || ''].join('|');
+  }
+
+  function TopicAskButton(props) {
+    if (!topicAskVisible(props.hasAsk, props.topic)) return null;
+    return React.createElement('button', {
+      type: 'button',
+      className: 'fs-btn fs-btn--secondary fs-btn--sm fs-topic-detail__ask',
+      onClick: function () { props.onAsk(); },
+    }, 'Ask about this topic');
   }
 
   function AggregatedDayView(props) {
@@ -2108,6 +2239,27 @@
     });
     var askPrefill = refAskPrefill[0];
 
+    /* One Ask, scoped — the viewed day/site/owner is the default scope.
+       Reset whenever the loaded day or owner changes (which also ends a
+       pinned topic). Selecting a topic does NOT change it; only the topic
+       detail's "Ask about this topic" button does. */
+    var askApi = useTimelineAsk();
+    var askFromPaletteRef = React.useRef(!!askPrefill);
+    var askReport = state.report;
+    var askReportReady = !!(askReport && !askReport._notFound && !askReport.available_users);
+    var askOwner = user || (askReportReady && askReport.user_name) || '';
+    var askDayKeyRef = React.useRef(null);
+    React.useEffect(function () {
+      var dayKey = askDayResetKey(state.status, date, askOwner,
+                                  askReportReady && askReport.site_id);
+      if (dayKey === null || dayKey === askDayKeyRef.current) return;
+      askDayKeyRef.current = dayKey;
+      var fromPalette = askFromPaletteRef.current;
+      askFromPaletteRef.current = false;
+      askApi.setAskContext(askContextForLoadedDay(askReportReady ? askReport : null,
+                                                  date, user, fromPalette));
+    }, [state.status, date, askOwner, askReportReady && askReport.site_id]);
+
     /* Loading */
     if (state.status === 'loading') {
       return React.createElement('div', {
@@ -2689,16 +2841,20 @@
           )
         : null,
 
-      /* Per-report Ask Agent (PLAN Phase G). Stateless — each question
-         is independent. Scope='both' grounds across transcript +
-         report. */
+      /* The page's one Ask (spec 2026-09-15-one-ask-scoped). Scoped to this
+         day · site · owner by default; topic detail pins a topic onto it.
+         While a palette hand-off is pending the context is forced to {} for
+         this render: AskChat's mount effect auto-sends before this column's
+         reset effect has run, and must not send the previous day's scope. */
       AskChat ? React.createElement(React.Fragment, null,
         React.createElement('div', { className: 'fs-timeline-page__section-label' },
           'Ask agent'),
+        React.createElement(AskPresence, { setHasAsk: askApi.setHasAsk }),
         React.createElement(AskChat, {
-          date:            date,
           user:            user || (report && report.user_name && window.FS.api.folderName(report.user_name)),
-          scope:           'both',
+          context:         askFromPaletteRef.current ? {} : askApi.askContext,
+          onContextChange: askApi.setAskContext,
+          focusNonce:      askApi.askFocusNonce,
           /* Supplied only when the programme actually loaded. AskChat treats
              an absent provider as "this route does not exist", so a failed
              fetch degrades to the agent rather than to a wrong answer.
@@ -2706,15 +2862,9 @@
              `silent` is passed as null unless the suggestion fetch used
              state:'all' — programmeMentions refuses to claim silence without
              that coverage, and flattening it here would undo the refusal. */
-          alertsProvider: makeAlertsProvider(suggestions),
-          placeholder:     'Ask anything about today’s report…',
+          alertsProvider:  makeAlertsProvider(suggestions),
           compact:         true,
           initialQuestion: askPrefill,
-          suggestions: [
-            'What were today’s safety highlights?',
-            'Which actions are still open?',
-            'Any decisions about the scaffold inspection?',
-          ],
         }),
       ) : null,
     );
@@ -3030,11 +3180,9 @@
     { key: 'audio',      label: 'Audio' },
     { key: 'video',      label: 'Video' },
     { key: 'photos',     label: 'Photos' },
-    { key: 'ask',        label: 'Ask' },
   ];
   var MEETING_TABS = [
     { key: 'overview', label: 'Overview' },
-    { key: 'ask',      label: 'Ask' },
   ];
 
   /* Status / category palettes for meeting topics — kept in sync with
@@ -4081,6 +4229,7 @@
 
     var refActions = React.useState({});
     var setActions = refActions[1];
+    var askApi = useTimelineAsk();
 
     var sel = props.selectedItem;
     var isMeeting = sel && sel.kind === 'meeting_topic';
@@ -4154,7 +4303,6 @@
     var AudioPlaylist  = fs.AudioPlaylist;
     var VideoPlayer    = fs.VideoPlayer;
     var PhotoGrid      = fs.PhotoGrid;
-    var AskChat        = fs.AskChat;
 
     /* user-dimension audit key plan (Task 5) — report OWNER's folder,
        never the caller. sel.user is the section/topic owner folder set
@@ -4201,19 +4349,6 @@
     if (isMeeting) {
       bodyByTab = {
         overview: React.createElement(MeetingOverviewTab, { topic: topic }),
-        ask:      AskChat ? React.createElement(AskChat, {
-          alertsProvider: makeAlertsProvider(null),
-          date:        sel.date,
-          user:        mediaProps.user,
-          scope:       'both',  /* meeting transcripts may sit alongside; widen scope */
-          topic_id:    topic.topic_id,
-          placeholder: 'Ask about this meeting topic…',
-          suggestions: [
-            'What was decided?',
-            'Who owns the follow-ups?',
-            'Any open questions?',
-          ],
-        }) : null,
       };
     } else {
       bodyByTab = {
@@ -4239,19 +4374,6 @@
           userDisplayName: ownerFolder || sel.user_name,
           date:            sel.date,
           canEditContent:  canEditContent,
-        }) : null,
-        ask:        AskChat        ? React.createElement(AskChat, {
-          alertsProvider: makeAlertsProvider(null),
-          date:        sel.date,
-          user:        mediaProps.user,
-          scope:       'both',
-          topic_id:    topic.topic_id,
-          placeholder: 'Ask about this topic…',
-          suggestions: [
-            'What was decided?',
-            'Who is responsible for follow-ups?',
-            'Were any risks flagged?',
-          ],
         }) : null,
       };
     }
@@ -4305,6 +4427,23 @@
                 }, (topic.participants || []).join(' · '))
               : null,
           ),
+          React.createElement(TopicAskButton, {
+            topic: topic,
+            hasAsk: askApi.hasAsk,
+            onAsk: function () {
+              pinTopicAsk(askApi, topic, askContextForDay(
+                { site_id: sel.site_id || null, user_name: sel.user_name },
+                sel.date, sel.user));
+              /* Single-column mobile: the middle column is hidden while a
+                 topic is selected (app-shell.css `.has-selection`, max-width
+                 48rem). Close the detail so the one Ask is on screen; the
+                 focus effect runs after this same batched render. */
+              if (window.matchMedia && window.matchMedia('(max-width: 48rem)').matches
+                  && props.onClose) {
+                props.onClose();
+              }
+            },
+          }),
         ),
         IconBtn ? React.createElement(IconBtn, {
           icon: 'x', ariaLabel: 'Close detail', size: 'sm',
@@ -4342,8 +4481,11 @@
   if (!window.FieldSight) window.FieldSight = {};
   if (!window.FieldSight.PAGES) window.FieldSight.PAGES = {};
   window.FieldSight.PAGES['/timeline'] = {
-    Middle: TimelineMiddleColumn,
-    Right:  TimelineRightDetail,
+    /* One Ask, scoped — shares the ask context between the middle column's
+       AskChat and the right column's "Ask about this topic". */
+    Provider: TimelineAskProvider,
+    Middle:   TimelineMiddleColumn,
+    Right:    TimelineRightDetail,
   };
 
   /* fix/closed-by-display — ContentHistoryPanel is generic over
@@ -4411,6 +4553,19 @@
       formatActionLine: formatActionLine,
       assembleEmailBody: assembleEmailBody,
       buildSessionEmailDraft: buildSessionEmailDraft,
+      /* one Ask, scoped (spec 2026-09-15) */
+      DAILY_TABS: DAILY_TABS,
+      MEETING_TABS: MEETING_TABS,
+      TimelineAskProvider: TimelineAskProvider,
+      useTimelineAsk: useTimelineAsk,
+      askContextForDay: askContextForDay,
+      askContextForLoadedDay: askContextForLoadedDay,
+      askContextWithTopic: askContextWithTopic,
+      pinTopicAsk: pinTopicAsk,
+      TopicAskButton: TopicAskButton,
+      topicAskVisible: topicAskVisible,
+      AskPresence: AskPresence,
+      askDayResetKey: askDayResetKey,
     };
   }
 

@@ -51,8 +51,11 @@ Pure helpers extracted from `ask-chat.js` and exported for tests:
 * **Request.** `requestBodyFor` maps `date → date`, `siteId → site_id`,
   `authorFolder → author_folder`, `topicRowId → topic_row_id`, and **omits** absent fields (no
   `''`, no `null` — `api/ask.js` relies on `JSON.stringify` dropping `undefined`). AskChat stops
-  passing `scope` and `topic_id`. `FS.api.ask.ask` itself stays a pass-through: it keeps
-  forwarding `scope`/`topic_id` when a caller supplies them, so
+  passing `scope` and `topic_id`. Whenever at least one narrowing field is present the body also
+  carries `scoped: true`, which is what tells the backend to honour those fields for narrowing at
+  all (user decision 2026-09-16); an unscoped question omits the key entirely. `FS.api.ask.ask`
+  itself stays a pass-through: it keeps forwarding `scope`/`topic_id` when a caller supplies them,
+  and forwards `scoped` only when it is exactly `true`, so
   `tests/ask-timezone-and-basis.test.js` "ask still sends what it always sent" stays green and
   unchanged. `user` and `tz` are still sent.
 * **Chips** above the input, from `chipsFor(context)`: a day chip
@@ -99,7 +102,7 @@ There is **no Timeline Provider today**: `PAGES['/timeline']` registers only `Mi
 used by Today (`today.js` 3118).
 
 * Add `TimelineAskProvider` + `TimelineAskContext` and register it as the page's `Provider`,
-  mirroring `TodayProvider`. It holds only `{askContext, setAskContext, askFocusNonce, requestAskFocus}` —
+  mirroring `TodayProvider`. It holds only the Ask state — `{askContext, setAskContext, askFocusNonce, requestAskFocus, hasAsk, setHasAsk}`, where `hasAsk` is true only while the middle column's one `AskChat` is mounted (published by `AskPresence`) and gates the topic "Ask about this topic" button —
   it does not move any existing Timeline state.
 * `TimelineMiddleColumn` sets the initial context whenever the loaded day/owner changes:
   `{date, siteId: report.site_id, siteName: report.site, authorFolder: route user or
@@ -117,7 +120,7 @@ used by Today (`today.js` 3118).
   `askPrefill`): the hand-off sets `askContext` to `{}` before prefilling, so a question typed in
   the global palette stays global. The chip row then shows nothing, and the user can re-scope by
   navigating.
-* `AggregatedDayView` (site-wide fan-out) still mounts no Ask. `alertsProvider` stays on mount #1.
+* `AggregatedDayView` (site-wide fan-out) still mounts no Ask, so no topic Ask button is shown there. `alertsProvider` stays on mount #1.
 
 ## 4. Search palette
 
