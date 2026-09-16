@@ -29,12 +29,49 @@ test('S1 the middle column reads a Footer from the page entry the way it reads M
   assert.match(slice, /React\.createElement\(\s*page\.Footer\s*,\s*\{/);
 });
 
+/* Walk forward from `openIdx` (which must point at an opening bracket)
+   tracking nesting depth over ( ) { } [ ], skipping over string literals
+   (single- and double-quoted, with backslash escapes) and // and /* *\/
+   comments so bracket characters that merely appear in text don't perturb
+   the count. Returns the offset of the bracket that closes the one at
+   `openIdx`, or -1 if the text ends first. Good enough for this one file;
+   not a general JS parser (no template literals, regex literals, etc. —
+   none of those appear between the contentStyle div's open paren and its
+   close in scripts/app-shell.js). */
+function findMatchingClose(text, openIdx) {
+  let depth = 0;
+  for (let i = openIdx; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "'" || ch === '"') {
+      const quote = ch;
+      i++;
+      while (i < text.length && text[i] !== quote) {
+        if (text[i] === '\\') i++;
+        i++;
+      }
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') i++;
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      i += 2;
+      while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++;
+      i++;
+      continue;
+    }
+    if (ch === '(' || ch === '{' || ch === '[') depth++;
+    else if (ch === ')' || ch === '}' || ch === ']') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
 test('S2 the Footer is a sibling of the scrolling content, never a child of it', () => {
   const slice = sliceMiddleColumn();
-  const contentIdx = slice.indexOf('style: contentStyle');
-  assert.ok(contentIdx >= 0, 'contentStyle scroll container not found');
-  const fallbackIdx = slice.indexOf('Fallback placeholder');
-  assert.ok(fallbackIdx > contentIdx, 'Fallback placeholder not found after contentStyle');
   const footerMarkerIdx = slice.indexOf(
     '/* Footer slot — OUTSIDE the scrolling content (spec 2026-09-16 §3).'
   );
@@ -44,40 +81,28 @@ test('S2 the Footer is a sibling of the scrolling content, never a child of it',
     footerRefIdx > footerMarkerIdx,
     'page.Footer must appear after the marker comment (source order pin)'
   );
+
+  /* The load-bearing check: STRUCTURE, not indentation. Find the specific
+     `React.createElement('div', { style: contentStyle }, ...)` call and
+     walk its argument list forward — counting nesting depth over brackets,
+     skipping string/comment contents — to the offset where THAT call's own
+     closing paren sits. A true sibling Footer slot has to start after that
+     offset, because it isn't part of the contentStyle div's children list
+     at all. If the Footer block were instead pasted in as the div's last
+     child, its marker would land BEFORE that closing paren, however the
+     block happens to be indented — this check doesn't read whitespace. */
+  const callMatch = slice.match(/React\.createElement\('div', \{ style: contentStyle \}/);
+  assert.ok(callMatch, 'contentStyle div createElement call not found');
+  const openParenIdx = callMatch.index + callMatch[0].indexOf('(');
+  assert.strictEqual(slice[openParenIdx], '(', 'expected an opening paren at the located offset');
+  const contentDivCloseIdx = findMatchingClose(slice, openParenIdx);
+  assert.ok(contentDivCloseIdx > openParenIdx, 'contentStyle div call never closes');
   assert.ok(
-    footerRefIdx > fallbackIdx,
-    'Footer block must come after the placeholder in the content div (i.e. after the content div, not inside it)'
-  );
-
-  /* The content div's own closing sequence — `),` right after the
-     Fallback-placeholder IIFE closes the content div's children array and
-     the div itself — must appear between contentStyle and the Footer
-     block, or the Footer is still nested inside the scroll container. */
-  const between = slice.slice(fallbackIdx, footerRefIdx);
-  assert.match(between, /\)\s*,/, 'no content-div closing sequence found before the Footer block');
-
-  /* The load-bearing check: INDENTATION. `React.createElement('div', {
-     style: contentStyle }, ...)` is itself a direct child of MiddleColumn's
-     returned element, indented 4 spaces (same as the header div and the
-     DragDivider block). A structurally correct Footer marker sits at that
-     SAME 4-space depth. If the Footer block is instead nested as the last
-     child of the contentStyle div, its marker comment sits one level
-     deeper (6 spaces, matching the Middle IIFE and the placeholder's own
-     indentation) even though the marker's TEXT and the loose `),`-anywhere
-     check above are unchanged — so indentation is what actually catches
-     the seam violation the textual checks above do not. */
-  const contentDivIndent = slice.match(/\n( *)React\.createElement\('div', \{ style: contentStyle \}/);
-  assert.ok(contentDivIndent, 'content div opening not found');
-  const marker = "/* Footer slot — OUTSIDE the scrolling content (spec 2026-09-16 §3).";
-  const markerLineStart = slice.lastIndexOf('\n', footerMarkerIdx) + 1;
-  const markerIndent = slice.slice(markerLineStart, footerMarkerIdx);
-  assert.strictEqual(
-    markerIndent, contentDivIndent[1],
-    'the Footer marker must sit at the SAME indentation depth as the ' +
-    'contentStyle div itself (a true sibling) — got ' +
-    JSON.stringify(markerIndent) + ' spaces, expected ' +
-    JSON.stringify(contentDivIndent[1]) + '; a deeper indent means the ' +
-    'Footer was nested INSIDE the scroll area'
+    footerMarkerIdx > contentDivCloseIdx,
+    'the Footer slot must start after the contentStyle div\'s own closing ' +
+    'paren (offset ' + contentDivCloseIdx + '), not before it — the marker ' +
+    'sits at offset ' + footerMarkerIdx + ', which means the Footer is ' +
+    'still nested inside the scroll container\'s children list'
   );
 
   /* Pin the Footer element itself: flexShrink: 0, and NOT a child of the
