@@ -199,17 +199,36 @@
       if (!sel || !canRegenerateReport(caller, sel)) return undefined;
       var live = true;
       fetchReportJson(sel).then(function (json) {
-        if (live) setAuthor(authorLabel(((json || {})._report_metadata || {}).generated_by));
+        if (live) setAuthor(authorLabel(((json || {})._report_metadata || {}).generated_by,
+                                        reportFolder(sel.key)));
       }).catch(function () { if (live) setAuthor(null); });
       return function () { live = false; };
     };
   }
 
-  function authorLabel(generatedBy) {
+  function authorLabel(generatedBy, folder) {
     if (typeof generatedBy !== 'string' || !generatedBy.trim()) return '\u2014';
     var v = generatedBy.trim();
     if (v === 'system' || v === 'backfill') return 'Scheduled';
-    return v;
+    /* A PERSON is shown by name, never by their email address. The panel only
+       ever shows the caller's OWN report, and a regenerate may only write into
+       the caller's own folder, so the one person an address here can name is
+       that report's owner -- and the folder is where their name already lives.
+       A value that is already a name is kept as it is. */
+    var name = personName(v.indexOf('@') >= 0 ? folder : v);
+    return name || '\u2014';
+  }
+
+  /* folder -> person: `Ben_Lin` -> `Ben Lin`. The shared rule is
+     FS.speakerNaming.folderToName, which collapses repeated underscores and
+     trims -- a member with no last name has a folder ending in `_`, and
+     "Ben UCPK " is not a name anyone would pick out of a list. The same single
+     line is inlined as the fallback because this module is also read on its
+     own, without the page around it. */
+  function personName(value) {
+    var sn = (typeof window !== 'undefined' && window.FS && window.FS.speakerNaming) || null;
+    if (sn && typeof sn.folderToName === 'function') return sn.folderToName(value);
+    return String(value == null ? '' : value).replace(/_+/g, ' ').trim();
   }
 
   function regenerateErrorMessage(res) {

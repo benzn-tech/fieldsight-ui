@@ -37,7 +37,7 @@ function lift(names) {
   return new Function(constants + parts.join('\n') + '\nreturn {' + names.join(',') + '};')();
 }
 
-const H = lift(['regenerationFinished', 'authorLabel',
+const H = lift(['regenerationFinished', 'authorLabel', 'personName',
   'readPendingRegenerations', 'pendingRegenerationFor', 'rememberPendingRegeneration']);
 
 const JSON_BEFORE = '2026-09-11T03:26:49+00:00';
@@ -91,8 +91,22 @@ test('the schedule is shown as Scheduled', () => {
   assert.strictEqual(H.authorLabel('backfill'), 'Scheduled');
 });
 
-test('a person is shown as themselves', () => {
-  assert.strictEqual(H.authorLabel('benlin.chch+ucpk2@gmail.com'), 'benlin.chch+ucpk2@gmail.com');
+test('THE test: a person is shown by name, never by email address', () => {
+  assert.strictEqual(H.authorLabel('benlin.chch+ucpk2@gmail.com', 'Ben_Lin'), 'Ben Lin');
+});
+
+test('a value that is already a name is kept', () => {
+  assert.strictEqual(H.authorLabel('Ben Lin', 'Ben_Lin'), 'Ben Lin');
+});
+
+test('a folder with no last name is not rendered with a trailing space', () => {
+  assert.strictEqual(H.authorLabel('someone@example.com', 'Ben_UCPK_'), 'Ben UCPK');
+});
+
+test('an address with no folder to name it is a dash, never the address', () => {
+  for (const f of [undefined, null, '', '_']) {
+    assert.strictEqual(H.authorLabel('someone@example.com', f), '\u2014', String(f));
+  }
 });
 
 test('nothing known is a dash, never a guess', () => {
@@ -115,4 +129,6 @@ test("the panel reads the author from the caller's own report", () => {
   assert.match(effect, /canRegenerateReport\(caller, sel\)/, 'own report only');
   assert.match(effect, /authorLabel\(/);
   assert.match(effect, /generated_by/);
+  assert.match(effect, /reportFolder\(sel\.key\)/,
+    'the author label needs the folder to name the person');
 });
