@@ -226,3 +226,129 @@ test('an empty refresh leaves every photo still attemptable', () => {
   const fresh = {};
   assert.strictEqual(fresh['a.jpg'] || stale['a.jpg'], 'https://s3/a');
 });
+
+/* ---- rows: the hand-off table, from the brief when there is one ---------- */
+
+/*
+ * The table used to be built from `action_items` alone. The session brief
+ * carries `tasks[]`, which is the same work said better — with a clock time
+ * and an assignee the extraction chose rather than the ones a topic row
+ * happened to keep.
+ *
+ * Two things these tests exist to hold down:
+ *
+ *   - The brief is the EXCEPTION, not the rule. prod runs SESSION_BRIEF=false
+ *     and has zero brief artifacts, so every prod hand-off today goes through
+ *     the action_items path. A change that only works when a brief is present
+ *     ships as a change that works nowhere.
+ *   - Longer text must never mean fewer rows. The backend half of this plan
+ *     hit exactly that defect: richer prose per task, and quietly fewer tasks.
+ */
+
+function brief(tasks) {
+  /* The task shape the endpoint returns: {text, at, assignee, due}. */
+  return { status: 'ready', tasks: tasks };
+}
+
+test('with no brief the table is built from action_items exactly as today', () => {
+  // Not an edge case: this is what every prod hand-off does right now.
+  const m = buildPreviewModel({
+    topics: [topic({
+      action_items: [
+        { action: 'Redo the wall', responsible: 'John', deadline: 'Wed', status: 'open' },
+        { action: 'Chase the beam cert', status: 'open' },
+      ],
+    })],
+  });
+  assert.strictEqual(m.rows.length, 2);
+  assert.strictEqual(m.rowsSource, 'action_items');
+  assert.deepStrictEqual(
+    m.rows.map((r) => [r.text, r.assignee, r.due]),
+    [['Redo the wall', 'John', 'Wed'], ['Chase the beam cert', '', '']]);
+  // and the groups the photos hang off are untouched
+  assert.strictEqual(m.groups.length, 1);
+  assert.strictEqual(m.totalItems, 2);
+});
+
+test('a day with two sessions produces ONE table carrying both briefs', () => {
+  // "Preview & copy" is rendered per DAY; briefs are written per SESSION.
+  const m = buildPreviewModel({
+    topics: [
+      topic({ action_items: [{ action: 'a', status: 'open' }] }),
+      topic({ topic_title: 'Second', action_items: [{ action: 'b', status: 'open' }] }),
+    ],
+    briefs: [
+      { sessionId: 's1', brief: brief([{ text: 'Pour slab', at: '09:10:00', assignee: 'Sam', due: null }]) },
+      { sessionId: 's2', brief: brief([{ text: 'Order mesh', at: '14:05:00', assignee: null, due: '2026-09-20' }]) },
+    ],
+  });
+  assert.strictEqual(m.rowsSource, 'brief');
+  assert.deepStrictEqual(m.rows.map((r) => r.text), ['Pour slab', 'Order mesh']);
+  // Blank stays blank — no em-dash, no "Unassigned", no invented date.
+  assert.strictEqual(m.rows[0].due, '');
+  assert.strictEqual(m.rows[1].assignee, '');
+});
+
+test('rows are ordered by at, and two sessions sharing a clock time keep a stable order', () => {
+  // `at` is HH:MM:SS with no date and no session component, so two sessions
+  // recorded at the same hour collide. The tie-break is the order they were
+  // written in — session, then task — never an order nobody stated.
+  const m = buildPreviewModel({
+    topics: [topic({ action_items: [] })],
+    briefs: [
+      { sessionId: 's1', brief: brief([
+        { text: 'first-session-late', at: '09:00:00' },
+        { text: 'first-session-early', at: '08:00:00' },
+      ]) },
+      { sessionId: 's2', brief: brief([
+        { text: 'second-session-same-clock', at: '09:00:00' },
+      ]) },
+    ],
+  });
+  assert.deepStrictEqual(m.rows.map((r) => r.text),
+    ['first-session-early', 'first-session-late', 'second-session-same-clock']);
+});
+
+test('the fallback path has no at and falls back to the topic time_range', () => {
+  // An action_item carries no clock time of its own. The topic it was raised
+  // under does, and that is the closest true answer — not a blank column, and
+  // certainly not a time invented to fill it.
+  const m = buildPreviewModel({
+    topics: [topic({ time_range: '09:00 – 09:20',
+                     action_items: [{ action: 'Redo the wall', status: 'open' }] })],
+  });
+  assert.strictEqual(m.rows[0].at, '09:00 – 09:20');
+});
+
+test('the row count never drops below the action_items count for the same day', () => {
+  // Load-bearing. A prompt or rendering change that writes longer text must
+  // not quietly say LESS: the backend half of this plan shipped exactly that,
+  // and a hand-off that drops a commitment is worse than one that reads badly.
+  const m = buildPreviewModel({
+    topics: [topic({
+      action_items: [
+        { action: 'Redo the wall', status: 'open' },
+        { action: 'Chase the beam cert', status: 'open' },
+        { action: 'Book the inspection', status: 'open' },
+      ],
+    })],
+    briefs: [{ sessionId: 's1', brief: brief([{ text: 'Redo the wall', at: '09:00:00' }]) }],
+  });
+  assert.strictEqual(m.rows.length, 3, 'a thinner brief must not shrink the hand-off');
+  assert.strictEqual(m.rowsSource, 'action_items');
+});
+
+test('a done item is still excluded and a topic with nothing open is still dropped', () => {
+  const m = buildPreviewModel({
+    topics: [
+      topic({ action_items: [
+        { action: 'Redo the wall', status: 'open' },
+        { action: 'Already fixed', status: 'done' },
+      ] }),
+      topic({ topic_title: 'All done', action_items: [{ action: 'x', status: 'done' }] }),
+    ],
+  });
+  assert.strictEqual(m.groups.length, 1, 'a topic with nothing open is not a hand-off');
+  assert.strictEqual(m.groups[0].topicTitle, 'Wall tolerance');
+  assert.deepStrictEqual(m.rows.map((r) => r.text), ['Redo the wall']);
+});

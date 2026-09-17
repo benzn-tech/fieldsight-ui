@@ -69,6 +69,50 @@
 
   /* ---- pure model ------------------------------------------------------ */
 
+  /* One outstanding thing, in the four fields the reader acts on.
+
+     Blank stays blank. No em-dash filler, no "Unassigned", no date invented
+     to square off a column: an empty cell says "the meeting did not state
+     this", and every placeholder says something it did not say. 有就有，
+     没有就没有.
+
+     sessionIndex/taskIndex ride along because they are the tie-break below,
+     and because a renderer needs a key that is not the text. */
+  function taskRow(t, sessionIndex, taskIndex) {
+    t = t || {};
+    return {
+      text:     t.text || '',
+      at:       t.at || '',
+      assignee: t.assignee || '',
+      due:      t.due || '',
+      sessionIndex: sessionIndex,
+      taskIndex:    taskIndex,
+    };
+  }
+
+  /* Rows from the session briefs — one flat table for the whole day.
+     "Preview & copy" is rendered per DAY and a brief is written per SESSION,
+     so several briefs land in one table rather than one table each. */
+  function rowsFromBriefs(briefs) {
+    var rows = [];
+    briefs.forEach(function (b, si) {
+      var art = (b && b.brief) || {};
+      (art.tasks || []).forEach(function (t, ti) { rows.push(taskRow(t, si, ti)); });
+    });
+    /* `at` is HH:MM:SS — no date in it, and nothing naming the session — so
+       two sessions recorded in the same hour collide. Session order then task
+       order breaks the tie, which is the order they were written in; a
+       sequence nobody stated must never be stored as if it were data. A row
+       with no time sorts last rather than first: absent is not early. */
+    rows.sort(function (a, b) {
+      if (!a.at !== !b.at) return a.at ? -1 : 1;
+      if (a.at !== b.at) return a.at < b.at ? -1 : 1;
+      if (a.sessionIndex !== b.sessionIndex) return a.sessionIndex - b.sessionIndex;
+      return a.taskIndex - b.taskIndex;
+    });
+    return rows;
+  }
+
   /* One entry per topic that still has something outstanding, carrying its
      own photos. Topics with nothing open are dropped: this is a hand-off of
      work remaining, not a transcript. */
@@ -77,6 +121,7 @@
     var topics = opts.topics || [];
     var isDone = typeof opts.isDone === 'function' ? opts.isDone : function () { return false; };
     var groups = [];
+    var fallbackRows = [];
 
     topics.forEach(function (t) {
       var open = (t.action_items || []).filter(function (a, idx) {
@@ -97,6 +142,20 @@
         }),
         photos: (t.related_photos || []).slice(),
       });
+      /* The same open items as a flat table. An action_item carries no clock
+         time of its own; the topic it was raised under does, and that is the
+         closest true answer to "when" — nearer than a blank, and honest in a
+         way an invented timestamp is not. */
+      open.forEach(function (a) {
+        fallbackRows.push({
+          text:     a.action || a.text || '',
+          at:       t.time_range || '',
+          assignee: a.responsible || '',
+          due:      a.deadline || a.deadline_text || '',
+          sessionIndex: 0,
+          taskIndex:    fallbackRows.length,
+        });
+      });
     });
 
     var totalItems = groups.reduce(function (n, g) { return n + g.items.length; }, 0);
@@ -104,12 +163,37 @@
     var sessionLabel = (opts.session && (opts.session.title || opts.session.label)) || 'All day';
     var site = opts.siteName || '';
 
+    /* The brief is the exception, not the rule. prod runs SESSION_BRIEF=false
+       and holds zero brief artifacts, so the action_items path below is what
+       every hand-off actually takes today; the brief path is the one that has
+       to prove itself, which is why it is the branch and not the default. */
+    var briefs = opts.briefs || [];
+    var rows = fallbackRows;
+    var rowsSource = 'action_items';
+    if (briefs.length) {
+      var fromBriefs = rowsFromBriefs(briefs);
+      /* Better prose must never mean fewer commitments. The backend half of
+         this change shipped exactly that defect — longer task text, and
+         quietly a shorter list — so a brief that says LESS than the topics
+         already say is not used at all. A hand-off that drops something
+         someone committed to is worse than one that reads badly. */
+      if (fromBriefs.length >= fallbackRows.length) {
+        rows = fromBriefs;
+        rowsSource = 'brief';
+      }
+    }
+
     return {
       subject: 'Action items — ' + (site ? site + ' — ' : '') + sessionLabel
         + (opts.date ? ' (' + opts.date + ')' : ''),
       intro: 'Outstanding action items from ' + (site ? site + ' — ' : '')
         + sessionLabel + (opts.date ? ' (' + opts.date + ')' : '') + ':',
       groups: groups,
+      /* Added ALONGSIDE groups, never in place of them: groups are what keeps
+         a photo inside the block of the finding it evidences, and a flat
+         table cannot carry that. */
+      rows: rows,
+      rowsSource: rowsSource,
       totalItems: totalItems,
       totalPhotos: totalPhotos,
       footer: 'Generated from FieldSight'
