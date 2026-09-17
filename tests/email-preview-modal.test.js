@@ -894,6 +894,49 @@ test('the 180-char cap is exact: 180 survives whole, 181 is trimmed to 179 chars
     'the surviving text is the first 179 characters of the untrimmed string');
 });
 
+test('parity: the 180 cap counts codepoints, not UTF-16 units — astral characters at the boundary', () => {
+  // Fix round 2, 2026-09-18: `.length`/`.slice()` count UTF-16 CODE UNITS.
+  // Python's `len()`/`text[:180]` count CODEPOINTS. An astral character (one
+  // outside the Basic Multilingual Plane — an emoji, a CJK Extension B
+  // ideograph) is ONE codepoint but TWO UTF-16 units, so the old
+  // `.length`/`.slice()` cap counted one character too many near the
+  // boundary and could cut a surrogate pair in half, producing an unpaired
+  // surrogate the backend would never emit.
+  //
+  // Expected output computed by running the ACTUAL backend function
+  // (read-only; wt-pipe-sync is untouched):
+  //   cd wt-pipe-sync && PYTHONUTF8=1 PYTHONIOENCODING=utf-8 python -c
+  //     "import sys; sys.path.insert(0,'src'); import lambda_item_writer as w;
+  //      print([hex(ord(c)) for c in w._topic_rows(
+  //        {'topics':[{'topic_title':'T','summary':'\U00020000'*200,
+  //                    'action_items':[]}]})[0]['text']][:6])"
+  // gave: title 'T', summary a run of U+20000 repeated 200 times, no ". " in
+  // it (so the "first sentence" is the whole summary) -> the backend's
+  // `_topic_rows` returns "T — " + (U+20000 * 175) + "…", 180 codepoints
+  // exactly (4-char prefix + 175 astral chars + 1 ellipsis).
+  const astral = '\u{20000}'; // outside the BMP: one codepoint, two UTF-16 units
+  const summary = astral.repeat(200);
+  const text = topicRowText({ topic_title: 'T', summary: summary });
+  const expected = 'T — ' + astral.repeat(175) + '…';
+
+  assert.strictEqual(text, expected, 'byte-for-byte match with the backend\'s own output');
+  assert.strictEqual(Array.from(text).length, TOPIC_ROW_MAX_CHARS,
+    'the cap is measured in codepoints, matching Python\'s len()');
+  // A UTF-16 length of 355 (4 + 175*2 + 1) rather than 180 is exactly the
+  // signature of the old bug being silently reintroduced.
+  assert.strictEqual(text.length, 4 + 175 * 2 + 1);
+  // No astral character survives cut in half: every low (trailing) surrogate
+  // in the string is immediately preceded by its matching high surrogate.
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code >= 0xDC00 && code <= 0xDFFF) {
+      const prev = text.charCodeAt(i - 1);
+      assert.ok(prev >= 0xD800 && prev <= 0xDBFF,
+        'a lone trailing surrogate at index ' + i + ' means a pair was cut in half');
+    }
+  }
+});
+
 /* ---- speaker labels, directly ------------------------------------------- */
 
 test('isSpeakerLabel matches spk_N case-insensitively and nothing else', () => {
@@ -942,4 +985,105 @@ test('the HTML flavour greys a topic row', () => {
   const html = renderEmailHtml(m, {});
   const row = html.slice(html.lastIndexOf('<tr>', html.indexOf('Voiceprint test')));
   assert.ok(/color:#666/.test(row), 'the topic row\'s cells carry the grey color');
+});
+
+/* ---- a topic row's photos travel with it (fix round 2, 2026-09-18) ------- */
+
+/*
+ * `groups` — the only thing the photo section, `totalPhotos` and the
+ * `photoUrls` fetch ever read — used to be pushed only `if (open.length)`.
+ * A topic row is EXACTLY a topic with zero action items, so it could never
+ * contribute a group and its photos vanished with no error anywhere. A
+ * site-observation topic with photos and no task ("Standing water near the
+ * east entrance", no owner, no due date — just evidence) is an ordinary
+ * case, not a corner one.
+ */
+
+function siteObservationTopic(over) {
+  return Object.assign({
+    topic_title: 'Site conditions',
+    summary: 'Standing water near the east entrance.',
+    action_items: [],
+    related_photos: ['photo1.jpg', 'photo2.jpg'],
+  }, over);
+}
+
+test('a topic row keeps its photos — the exact reproduction from the report', () => {
+  const m = buildPreviewModel({ topics: [siteObservationTopic()] });
+
+  assert.strictEqual(m.groups.length, 1, 'the topic row topic must contribute a group');
+  assert.deepStrictEqual(m.groups[0].photos, ['photo1.jpg', 'photo2.jpg']);
+  assert.strictEqual(m.totalPhotos, 2);
+
+  const html = renderEmailHtml(m, { 'photo1.jpg': 'https://s3/1.jpg', 'photo2.jpg': 'https://s3/2.jpg' });
+  assert.strictEqual((html.match(/<img/g) || []).length, 2,
+    'both photos render in the HTML flavour');
+  // "Site conditions" appears TWICE: once inside the table (the topic row's
+  // own AGENDA ITEM text, "Site conditions — Standing water..."), and once
+  // as the photo section's heading below the table — the LAST occurrence.
+  assert.ok(html.lastIndexOf('Site conditions') > html.indexOf('</table>'),
+    'the photo section heading is the topic title, below the table');
+
+  const txt = renderEmailText(m);
+  assert.ok(txt.includes('2 photos'), 'the text flavour says the photos exist');
+  assert.ok(txt.includes('Site conditions'), 'under the topic\'s own title');
+});
+
+test('a topic row with an UNREADABLE photo still reports it, same as any other topic', () => {
+  // Not a new code path — the existing "omitted, never rendered broken" rule
+  // — but worth pinning here specifically because this is the topic shape
+  // that a fixed `open.length` gate could revert to silently skipping again.
+  const m = buildPreviewModel({ topics: [siteObservationTopic({ related_photos: ['gone.jpg'] })] });
+  const html = renderEmailHtml(m, {});
+  assert.ok(!html.includes('<img'));
+  assert.ok(html.includes('Site conditions'), 'the heading still shows — text is never lost');
+});
+
+test('an all-done topic (every item status:done) drops its photos too — a deliberate choice, not a bug', () => {
+  // Decision (fix round 2, 2026-09-18): an all-done topic is neither an
+  // action row (nothing open) nor a §1.5 topic row (its raw action_items is
+  // non-empty, so it fails "produced NO action items at all"). The model's
+  // own stated purpose is "a hand-off of work remaining, not a transcript"
+  // of a fully closed topic — its photos most likely evidenced a task that
+  // was already raised and already communicated when it was open, not
+  // something this hand-off needs to carry again. This is the one place the
+  // model still deliberately drops content; recorded here rather than left
+  // implicit, so a future reviewer sees a decision, not an oversight.
+  const m = buildPreviewModel({
+    topics: [{
+      topic_title: 'Cylinder testing', summary: 'It was tested.',
+      action_items: [{ action: 'Re-inspect', status: 'done' }],
+      related_photos: ['done1.jpg'],
+    }],
+  });
+  assert.strictEqual(m.groups.length, 0, 'an all-done topic contributes no group at all');
+  assert.strictEqual(m.totalPhotos, 0);
+  const html = renderEmailHtml(m, { 'done1.jpg': 'https://s3/done1.jpg' });
+  assert.ok(!html.includes('<img'), 'the finished topic\'s photo does not appear');
+});
+
+test('totalItems now counts action ROWS on the table, not a re-derived group count', () => {
+  // Decision (fix round 2, 2026-09-18): `totalItems` used to be re-derived
+  // from `groups` (sum of each group's raw open-item count), which could
+  // quietly disagree with the table once brief substitution existed — a
+  // session's brief might carry MORE or FEWER tasks than the topic's own
+  // open items it replaced. `groups` is also now carrying topic-row entries
+  // that contribute zero items. `actionRows.length` is the one number that
+  // matches "how many commitments does this hand-off actually carry", which
+  // is what the reader sees in the table.
+  const m = buildPreviewModel({
+    topics: [
+      { topic_title: 'Wall', session_id: 's1',
+        action_items: [
+          { action: 'a', status: 'open' }, { action: 'b', status: 'open' },
+          { action: 'c', status: 'open' },
+        ] },
+    ],
+    briefs: [{ sessionId: 's1', brief: { status: 'ready', tasks: [
+      { text: 'one brief task replaces all three', at: '09:00:00' },
+    ] } }],
+  });
+  assert.strictEqual(m.rows.length - 0, 1, 'sanity: one action row from the brief');
+  assert.strictEqual(m.totalItems, 1,
+    'totalItems reflects the ONE row actually on the table, not the three raw open items it replaced');
 });

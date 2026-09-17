@@ -112,7 +112,7 @@
   <script type="text/babel" src="scripts/composites/tooltip.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/toast.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/modal-overlay.js?v=1"></script>
-  <script type="text/babel" src="scripts/composites/email-preview-modal.js?v=10"></script>
+  <script type="text/babel" src="scripts/composites/email-preview-modal.js?v=11"></script>
   <script type="text/babel" src="scripts/composites/session-report-modal.js?v=5"></script>
   <script type="text/babel" src="scripts/composites/recording-delete-modal.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/safety-create-modal.js?v=3"></script>
@@ -1380,15 +1380,27 @@
             </Row>
           </Section>
 
-          {/* feat/handoff-sync (2026-09-18 plan, fix round same day) — one
-              flat table on both surfaces: every action row, then every topic
-              row, nothing interleaved (§1.2). Substitution is PER SESSION,
-              not per day (§1.3): a session's own usable brief (loaded, >= 1
-              task) replaces THAT session's own action items only — a sibling
-              session with no usable brief keeps its own items untouched, and
-              a topic with no session_id at all can never be substituted.
-              `rowsSource` on the model is 'brief' / 'action_items' / 'mixed'
-              accordingly; the fourth fixture below is a 'mixed' table.
+          {/* feat/handoff-sync (2026-09-18 plan, two same-day fix rounds) —
+              one flat table on both surfaces: every action row, then every
+              topic row, nothing interleaved (§1.2). Substitution is PER
+              SESSION, not per day (§1.3): a session's own usable brief
+              (loaded, >= 1 task) replaces THAT session's own action items
+              only — a sibling session with no usable brief keeps its own
+              items untouched, and a topic with no session_id at all can
+              never be substituted. `rowsSource` on the model is 'brief' /
+              'action_items' / 'mixed' accordingly; the fourth fixture below
+              is a 'mixed' table.
+
+              Fix round 2: a topic row's PHOTOS travel with it now — they
+              used to vanish silently, because `groups` (the only thing the
+              photo section reads) was pushed only `if (open.length)`, and a
+              topic row is exactly a topic with zero open items. The fifth
+              fixture below is the reproduction: a site-observation topic,
+              photos, no task. An all-done topic (every item `status:'done'`)
+              is the one case that still drops its photos on purpose — it is
+              neither an action row nor a §1.5 topic row, and the model's own
+              stated purpose is a hand-off of work REMAINING, not a
+              transcript of something already closed out.
 
               An unstated owner or due date on an action row is the em dash
               "—"; a topic row (one whose extraction produced no action items
@@ -1490,17 +1502,40 @@
                   ],
                 }}
               />
+              <ModalTrigger
+                label="Hand-off — a topic row carrying a photo"
+                Modal={EmailPreviewModal}
+                props={{
+                  open: true,
+                  date: '2026-03-01',
+                  siteName: 'SB1108 Ellesmere',
+                  // Fix round 2, 2026-09-18: a topic row (zero action items)
+                  // used to lose its photos entirely — `groups` was only
+                  // pushed `if (open.length)`. A site-observation topic like
+                  // this one, with photos and no task, is the ordinary case
+                  // that reproduced the bug.
+                  topics: [
+                    { topic_id: 1, topic_title: 'Site conditions', time_range: '08:40 – 08:52',
+                      summary: 'Standing water near the east entrance, roughly 3m across.',
+                      action_items: [],
+                      related_photos: ['site1.jpg', 'site2.jpg'] },
+                  ],
+                }}
+              />
             </Row>
             <Row label="note">
               <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                Photos need a real <code>userFolder</code> + media API, so none are fetched here;
-                the photo row is exercised on /timeline. The third fixture's ASSIGNED cell for
-                "Redo the west wall to line" reads "—", not "spk_0" — a raw speaker label is not
-                a name (§1.4) — and the "Voiceprint test" row below it reads "N/A" / "N/A", greyed.
-                The fourth fixture's table reads "Redo the west wall to line before the next pour"
-                (s1, substituted by its brief) followed by "Order mesh for the slab" (s2, kept —
-                its brief never loaded) — a sibling session's success never drops another session's
-                own commitment.
+                Photos need a real <code>userFolder</code> + media API, so none are fetched here —
+                the fifth fixture's photo group renders with its title and a "loading photo…"
+                placeholder for each of the two photos, which is exactly what a topic row's photo
+                section looked like BEFORE the fix (except before the fix it did not render at
+                all). The photo row itself is exercised for real on /timeline. The third fixture's
+                ASSIGNED cell for "Redo the west wall to line" reads "—", not "spk_0" — a raw
+                speaker label is not a name (§1.4) — and the "Voiceprint test" row below it reads
+                "N/A" / "N/A", greyed. The fourth fixture's table reads "Redo the west wall to line
+                before the next pour" (s1, substituted by its brief) followed by "Order mesh for
+                the slab" (s2, kept — its brief never loaded) — a sibling session's success never
+                drops another session's own commitment.
               </span>
             </Row>
           </Section>

@@ -111,8 +111,19 @@
       first += '.';
     }
     var text = [title, first].filter(Boolean).join(' — ');
-    if (text.length > TOPIC_ROW_MAX_CHARS) {
-      text = text.slice(0, TOPIC_ROW_MAX_CHARS - 1).replace(/\s+$/, '') + '…';
+    /* The cap counts CODEPOINTS, matching Python's `len()` — not UTF-16
+       code units. `.length`/`.slice()` on a JS string count the latter, and
+       an astral character (an emoji, a CJK Extension B ideograph — anything
+       outside the Basic Multilingual Plane) is TWO UTF-16 units but one
+       codepoint. Near the boundary that made JS count one character too
+       many and `.slice()` could cut a surrogate pair in half, producing an
+       unpaired surrogate the backend's `text[:180]` would never produce.
+       `Array.from` iterates a string by codepoint (it is what for...of and
+       the spread operator use under the hood), so counting and slicing
+       through it stays byte-for-byte aligned with the Python side. */
+    var codepoints = Array.from(text);
+    if (codepoints.length > TOPIC_ROW_MAX_CHARS) {
+      text = codepoints.slice(0, TOPIC_ROW_MAX_CHARS - 1).join('').replace(/\s+$/, '') + '…';
     }
     return text;
   }
@@ -177,15 +188,47 @@
     var briefRowsBySession = briefsBySession(opts.briefs || []);
     var emittedSessions = {};
     var actionRows = [];
+    var topicRows = [];
     var fromBriefCount = 0;
     var fromExtractionCount = 0;
 
+    /* A topic's photos travel with it into the photo section below the
+       table WHENEVER the topic itself is represented on the table — as an
+       action row (its own items, open, not superseded) or as a topic row
+       (§1.5) — regardless of which text ends up in the AGENDA ITEM cell.
+       (Fix round 2, 2026-09-18: `groups` used to be pushed only `if
+       (open.length)`, so a topic row — exactly a topic with ZERO action
+       items — could never contribute a group and its photos vanished with
+       no error anywhere.)
+
+       Two things this decision does NOT change, on purpose:
+         - A topic whose OWN open items were superseded by its session's
+           brief still has `open.length > 0` here (substitution only changes
+           what is EMITTED as action rows below, not what `open` computed
+           from the raw extraction is) — so its group, and its photos, are
+           unaffected. Confirmed by review; not regressed.
+         - A topic whose action items are ALL `status:'done'` produces
+           NEITHER an action row (nothing open) NOR a topic row (its raw
+           action_items is non-empty, so it fails the §1.5 "no action items
+           AT ALL" test) — it is, by the model's own stated purpose, "a
+           hand-off of work remaining, not a transcript" of a fully closed
+           topic. Its photos are excluded here too, deliberately: they
+           evidence work that is already finished and (if a task existed)
+           already communicated when that task was raised, not something
+           this hand-off needs to carry again. This is the one place the
+           model still silently drops something — recorded here rather than
+           left implicit, and pinned by a test in the same name as this
+           decision. */
     topics.forEach(function (t) {
       var open = (t.action_items || []).filter(function (a, idx) {
         if (a && a.status) return a.status !== 'done';
         return !isDone(a, t.topic_id, idx);
       });
-      if (open.length) {
+      var hasOwnItems = (t.action_items || []).length > 0;
+      var topicText = hasOwnItems ? '' : topicRowText(t);
+      var isTopicRow = !hasOwnItems && !!topicText;
+
+      if (open.length || isTopicRow) {
         groups.push({
           topicTitle: t.topic_title || t.title || 'Untitled topic',
           timeRange:  t.time_range || '',
@@ -200,6 +243,8 @@
           photos: (t.related_photos || []).slice(),
         });
       }
+
+      if (isTopicRow) topicRows.push({ text: topicText, kind: 'topic' });
 
       var sid = t.session_id;
       var briefRows = sid ? briefRowsBySession[sid] : null;
@@ -235,7 +280,17 @@
       });
     });
 
-    var totalItems = groups.reduce(function (n, g) { return n + g.items.length; }, 0);
+    /* `totalItems` now means the number of action rows actually on the
+       table — whichever source they came from — not a count re-derived from
+       `groups`. Before this fix round the two could quietly disagree (a
+       brief-substituted topic's raw open-item count is not the same number
+       as the brief's own task count), and `groups` is now also carrying
+       topic-row entries that contribute ZERO items. `actionRows.length` is
+       the one number that matches "how many commitments does this hand-off
+       carry", which is what the Copy button and the empty-state message
+       (both keyed off `model.rows.length` — actionRows + topicRows — in the
+       React shell below) are really asking about. */
+    var totalItems = actionRows.length;
     var totalPhotos = groups.reduce(function (n, g) { return n + g.photos.length; }, 0);
     var sessionLabel = (opts.session && (opts.session.title || opts.session.label)) || 'All day';
     var site = opts.siteName || '';
@@ -246,23 +301,6 @@
     var rowsSource = (fromBriefCount && fromExtractionCount) ? 'mixed'
       : fromBriefCount ? 'brief'
       : 'action_items';
-
-    /* Topic rows (§1.5) sink to the bottom of the SAME table, after every
-       action row. A topic belongs here only when its extraction produced NO
-       action items AT ALL — raw presence, not "nothing still open" — because
-       a topic whose only item was ticked off is already accounted for by
-       having been in the action-row set once; listing it again here would
-       double it. This is unaffected by brief substitution: a topic that had
-       action items superseded by its session's brief is not "topics that
-       produced no action items" — it produced some, they are just told a
-       different way. */
-    var topicRows = [];
-    topics.forEach(function (t) {
-      if ((t.action_items || []).length) return;
-      var text = topicRowText(t);
-      if (!text) return;
-      topicRows.push({ text: text, kind: 'topic' });
-    });
 
     return {
       subject: 'Action items — ' + (site ? site + ' — ' : '') + sessionLabel
