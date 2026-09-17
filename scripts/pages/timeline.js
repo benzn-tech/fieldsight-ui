@@ -233,6 +233,57 @@
     return list.filter(function (t) { return !!t && t.session_id === sessionId; });
   }
 
+  /* The hand-off table's second source (F4). A brief is written per SESSION
+     and there is no batch route, so this is N reads for N sessions: issued
+     together, and each one's failure is its own.
+
+     A brief that is denied, not found, still pending or outright rejected
+     contributes NOTHING — not a placeholder, not an empty shell. A placeholder
+     would be a claim the meeting said nothing, and rowsFromBriefs would count
+     it as a session that yielded no tasks.
+
+     The wrapper is the contract buildPreviewModel reads: {sessionId, brief},
+     with the artifact underneath. getSessionBrief resolves the artifact ITSELF
+     (status and tasks at the top level), so handing its result straight on
+     would give the model a list whose every `b.brief` is undefined — zero
+     rows, a silent permanent fallback, and a feature that looks wired. */
+  function loadSessionBriefs(sessions, opts) {
+    opts = opts || {};
+    var list = (sessions || []).filter(function (s) { return s && s.session_id; });
+    var org = (((window.FS || {}).api || {}).org) || {};
+    if (!list.length || typeof org.getSessionBrief !== 'function') return Promise.resolve([]);
+    return Promise.all(list.map(function (s) {
+      var p;
+      try {
+        p = org.getSessionBrief({ sessionId: s.session_id, date: opts.date, user: opts.user });
+      } catch (e) {
+        return Promise.resolve(null);
+      }
+      return Promise.resolve(p).then(function (b) {
+        /* The envelope flags first: _accessDenied/_notFound carry a NUMERIC
+           `status` under the same key the brief uses for a string, so the
+           string test alone would read 403 as "not ready" by luck. */
+        if (!b || b._accessDenied || b._notFound) return null;
+        if (b.status !== 'ready') return null;
+        return { sessionId: s.session_id, brief: b };
+      }).catch(function () { return null; });
+    })).then(function (out) {
+      return out.filter(Boolean);
+    });
+  }
+
+  /* Narrow the day's briefs the same way filterTopicsBySession narrows the
+     day's topics. Without this, picking one meeting in the session picker
+     would hand the modal THAT meeting's topics and EVERY meeting's brief
+     tasks — and since the brief set would then be the larger of the two, the
+     thinner-brief floor would wave it through and the table would carry work
+     from meetings the user had just filtered away. */
+  function scopeBriefsToSession(briefs, sessionId) {
+    var list = briefs || [];
+    if (sessionId == null) return list;
+    return list.filter(function (b) { return !!b && b.sessionId === sessionId; });
+  }
+
   /* Group sessions that share a `block` (a meeting split across recording
      restarts — same gap-merged meeting, several press-record events).
      Preserves first-appearance order of both groups and sessions within a
@@ -2036,6 +2087,36 @@
       return function () { cancelled = true; };
     }, [date, user, state.status, state.report]);
 
+    /* The briefs behind the hand-off table (F4), keyed on the sessions the
+       effect above already loaded — a second list request for a day whose
+       list is in hand would be a second answer to a question already
+       answered.
+
+       A PARTIAL set is not a problem to work around. buildPreviewModel
+       refuses a brief set that yields fewer rows than the topics already
+       yield, so a day whose briefs half-loaded falls back to action_items —
+       the table this hand-off has always had, never an empty one. */
+    var refBriefs    = React.useState([]);
+    var dayBriefs    = refBriefs[0];
+    var setDayBriefs = refBriefs[1];
+
+    React.useEffect(function () {
+      var loaded = sessionsState.sessions || [];
+      var rpt    = state.report;
+      /* Same owner-folder resolution as the sessions effect above: the
+         self-view has user===null and the brief belongs to whoever recorded. */
+      var folder = user || (rpt && rpt.user_name && window.FS.api.folderName(rpt.user_name)) || null;
+      if (sessionsState.status !== 'ok' || !loaded.length || !folder || !date) {
+        setDayBriefs([]);
+        return undefined;
+      }
+      var cancelled = false;
+      loadSessionBriefs(loaded, { date: date, user: folder }).then(function (list) {
+        if (!cancelled) setDayBriefs(list);
+      });
+      return function () { cancelled = true; };
+    }, [date, user, sessionsState.status, sessionsState.sessions]);
+
     /* A new date/user has entirely different session_ids — drop any active
        filter rather than silently show zero topics against a stale id. */
     React.useEffect(function () { setSelectedSessionId(null); }, [date, user]);
@@ -2687,6 +2768,9 @@
       reportDate: report.report_date || date,
       deepLink:   (typeof window !== 'undefined' && window.location) ? window.location.href : '',
       isDone:     _isActionDone,
+      /* Scoped the same way `topics` above is: one meeting selected means one
+         meeting's brief. */
+      briefs:     scopeBriefsToSession(dayBriefs, selectedSessionId),
     });
     /* Delivery-C Tier-2 generate control — sits beside the mailto draft, active
        only when a specific meeting is selected (the modal is per-session). */
@@ -3107,6 +3191,9 @@
         userFolder: props.userFolder,
         isDone:     props.isDone,
         deepLink:   props.deepLink,
+        /* Forwarding into this component is not enough — THIS list is what
+           reaches the modal, and buildPreviewModel reads opts.briefs off it. */
+        briefs:     props.briefs,
       }),
     );
   }
@@ -4619,6 +4706,11 @@
       generateReportUnavailableReason: generateReportUnavailableReason,
       generateReportScope: generateReportScope,
       filterTopicsBySession: filterTopicsBySession,
+      /* the hand-off table's briefs (F4) */
+      loadSessionBriefs: loadSessionBriefs,
+      scopeBriefsToSession: scopeBriefsToSession,
+      DraftEmailButton: DraftEmailButton,
+      PreviewEmailButton: PreviewEmailButton,
       groupSessionsByBlock: groupSessionsByBlock,
       formatParticipants: formatParticipants,
       formatSessionSummary: formatSessionSummary,
