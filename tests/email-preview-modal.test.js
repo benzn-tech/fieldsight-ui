@@ -1108,109 +1108,82 @@ test('totalItems now counts action ROWS on the table, not a re-derived group cou
          mentioned, silently vanished when the brief won.
 */
 
-/* ---- §7.1: parsing a topic's own time_range ------------------------------ */
+/* ---- §7.1 (superseded): topic-row suppression is now a TEXT test --------
+   Time-based coverage (`topicCovered`/`parseTimeRange`/`parseClockSeconds`)
+   is gone — measured on a real session it suppressed a topic row that
+   shared nothing but a clock window with the brief task that "covered" it
+   (a Papakura row killed by a KCD task, same 2-minute window, unrelated
+   content). Suppression is decided by `isRepresented` against the topic's
+   own row text, reusing the §7.4 rule below rather than a second one. */
 
-test('parseTimeRange accepts an en dash, an em dash, a hyphen, and tight spacing', () => {
-  const { parseTimeRange } = require('../scripts/composites/email-preview-modal.js');
-  assert.deepStrictEqual(parseTimeRange('09:00 – 09:20'), [9 * 3600, 9 * 3600 + 20 * 60]);
-  assert.deepStrictEqual(parseTimeRange('09:00–09:20'), [9 * 3600, 9 * 3600 + 20 * 60]);
-  assert.deepStrictEqual(parseTimeRange('09:00 - 09:20'), [9 * 3600, 9 * 3600 + 20 * 60]);
-  assert.deepStrictEqual(parseTimeRange('09:00-09:20'), [9 * 3600, 9 * 3600 + 20 * 60]);
-  assert.deepStrictEqual(parseTimeRange('13:40 — 13:41'), [13 * 3600 + 40 * 60, 13 * 3600 + 41 * 60]);
-});
-
-test('parseTimeRange returns null for anything that is not exactly two clock times', () => {
-  const { parseTimeRange } = require('../scripts/composites/email-preview-modal.js');
-  assert.strictEqual(parseTimeRange(''), null);
-  assert.strictEqual(parseTimeRange(null), null);
-  assert.strictEqual(parseTimeRange(undefined), null);
-  assert.strictEqual(parseTimeRange('09:00'), null, 'a single time is not a range');
-  assert.strictEqual(parseTimeRange('all day'), null);
-  assert.strictEqual(parseTimeRange('09:00 - 09:20 - 09:40'), null, 'three parts is not a range');
-  assert.strictEqual(parseTimeRange('25:00 - 26:00'), null, 'an out-of-range clock time');
-});
-
-/* ---- §7.1: coverage, both ends inclusive --------------------------------- */
-
-test('topicCovered: a task exactly at the range START covers', () => {
-  const { topicCovered } = require('../scripts/composites/email-preview-modal.js');
-  const covered = topicCovered({ time_range: '09:00 – 09:20' }, [{ at: '09:00:00' }]);
-  assert.strictEqual(covered, true);
-});
-
-test('topicCovered: a task exactly at the range END covers', () => {
-  const { topicCovered } = require('../scripts/composites/email-preview-modal.js');
-  const covered = topicCovered({ time_range: '09:00 – 09:20' }, [{ at: '09:20:00' }]);
-  assert.strictEqual(covered, true);
-});
-
-test('topicCovered: one second outside either end does not cover', () => {
-  const { topicCovered } = require('../scripts/composites/email-preview-modal.js');
-  assert.strictEqual(
-    topicCovered({ time_range: '09:00 – 09:20' }, [{ at: '08:59:59' }]), false);
-  assert.strictEqual(
-    topicCovered({ time_range: '09:00 – 09:20' }, [{ at: '09:20:01' }]), false);
-});
-
-test('topicCovered: a brief task with no `at` covers nothing', () => {
-  const { topicCovered } = require('../scripts/composites/email-preview-modal.js');
-  assert.strictEqual(
-    topicCovered({ time_range: '09:00 – 09:20' }, [{ at: '' }, { at: null }]), false);
-});
-
-test('topicCovered: an unparsable range is never covered', () => {
-  const { topicCovered } = require('../scripts/composites/email-preview-modal.js');
-  assert.strictEqual(
-    topicCovered({ time_range: 'all day' }, [{ at: '09:00:00' }]), false);
-  assert.strictEqual(
-    topicCovered({ time_range: '' }, [{ at: '09:00:00' }]), false);
-});
-
-/* ---- §7.2 / §5.1: a covered topic emits no topic row, but keeps photos --- */
-
-test('§9 worked example: 13:40:43 covers "Ormiston College 360 Inspections" 13:40 – 13:41', () => {
+test('real case: the Ormiston/DeAndre topic row IS suppressed — its text is represented in the matching brief task', () => {
   const m = buildPreviewModel({
     topics: [topic({
       session_id: 's1', topic_title: 'Ormiston College 360 Inspections',
-      time_range: '13:40 – 13:41', summary: 'Speaker hopes to visit the MPI site with DeAndre.',
+      summary: 'Speaker hopes to visit the MPI site with DeAndre.',
       action_items: [],
     })],
     briefs: [{ sessionId: 's1', brief: brief([
-      { text: 'Visit MPI site with DeAndre to see comprehensive open-space usage pattern.', at: '13:40:43' },
+      { text: 'Visit MPI site with DeAndre to review open-space usage pattern after Ormiston College 360 inspections.', at: '13:42:06' },
     ]) }],
   });
   assert.deepStrictEqual(m.rows.map((r) => r.text),
-    ['Visit MPI site with DeAndre to see comprehensive open-space usage pattern.'],
-    'the topic is covered: no second row saying the same thing in different words');
+    ['Visit MPI site with DeAndre to review open-space usage pattern after Ormiston College 360 inspections.'],
+    'the topic row is suppressed: no second row saying the same thing in different words');
 });
 
-test('a covered topic still carries its photos below the table', () => {
+test('real case: the Papakura topic row is KEPT — nothing in the real brief tasks mentions it (this is the whole reason for the change)', () => {
+  const m = buildPreviewModel({
+    topics: [topic({
+      session_id: 's1', topic_title: 'Papakura Progress and Modulars',
+      summary: 'Papakura is mid-program with good positioning and progressing well.',
+      action_items: [],
+    })],
+    briefs: [{ sessionId: 's1', brief: brief([
+      { text: 'Meet with KCD at the Icehouse office regarding new contract details.', at: '13:40:43' },
+      { text: 'Visit MPI site with DeAndre to review open-space usage pattern after Ormiston College 360 inspections.', at: '13:42:06' },
+      { text: 'Follow up with contractor on scaffolding permit renewal.', at: '13:44:33' },
+    ]) }],
+  });
+  assert.deepStrictEqual(m.rows.map((r) => r.text),
+    ['Meet with KCD at the Icehouse office regarding new contract details.',
+      'Visit MPI site with DeAndre to review open-space usage pattern after Ormiston College 360 inspections.',
+      'Follow up with contractor on scaffolding permit renewal.',
+      'Papakura Progress and Modulars — Papakura is mid-program with good positioning and progressing well.'],
+    'the KCD task (same time window, unrelated text) must not suppress a Papakura row it never mentions');
+});
+
+test('a suppressed topic still carries its photos below the table', () => {
   const m = buildPreviewModel({
     topics: [topic({
       session_id: 's1', topic_title: 'Ormiston College 360 Inspections',
-      time_range: '13:40 – 13:41', summary: 'Speaker hopes to visit the MPI site.',
+      summary: 'Speaker hopes to visit the MPI site with DeAndre.',
       action_items: [], related_photos: ['mpi.jpg'],
     })],
-    briefs: [{ sessionId: 's1', brief: brief([{ text: 'Visit MPI site with DeAndre.', at: '13:40:43' }]) }],
+    briefs: [{ sessionId: 's1', brief: brief([
+      { text: 'Visit MPI site with DeAndre to review open-space usage pattern after Ormiston College 360 inspections.', at: '13:42:06' },
+    ]) }],
   });
-  assert.strictEqual(m.rows.length, 1, 'no topic row for the covered topic');
+  assert.strictEqual(m.rows.length, 1, 'no topic row for the suppressed topic');
   assert.strictEqual(m.totalPhotos, 1, 'the photo travels even though no topic row was emitted');
   const html = renderEmailHtml(m, { 'mpi.jpg': 'https://s3/mpi.jpg' });
   assert.ok(html.includes('<img'));
   assert.ok(html.includes('Ormiston College 360 Inspections'), 'the photo section heading survives');
 });
 
-test('an uncovered topic (no session, or brief elsewhere) still emits its topic row as before', () => {
+test('a topic with no session_id is never suppressed — there is no brief to test its text against', () => {
   const m = buildPreviewModel({
     topics: [
-      topic({ session_id: 's1', topic_title: 'Covered by s1', time_range: '13:40 – 13:41',
-        summary: 'x', action_items: [] }),
+      topic({ session_id: 's1', topic_title: 'Ormiston College 360 Inspections',
+        summary: 'Speaker hopes to visit the MPI site with DeAndre.', action_items: [] }),
       topic({ session_id: null, topic_title: 'No session at all', summary: 'y', action_items: [] }),
     ],
-    briefs: [{ sessionId: 's1', brief: brief([{ text: 'whatever', at: '13:40:00' }]) }],
+    briefs: [{ sessionId: 's1', brief: brief([
+      { text: 'Visit MPI site with DeAndre to review open-space usage pattern after Ormiston College 360 inspections.', at: '13:42:06' },
+    ]) }],
   });
   assert.ok(m.rows.some((r) => r.text.startsWith('No session at all')),
-    'a topic with no session_id can never be covered — there is no brief to check it against');
+    'a topic with no session_id can never be suppressed — there is no brief to check its text against');
 });
 
 /* ---- §7.3-7.4: back-fill ------------------------------------------------- */
@@ -1268,9 +1241,13 @@ test('§9 worked example: an item with NO due date is never back-filled, however
 test('back-fill draws from the WHOLE session, including a topic reached later in the walk', () => {
   // The brief block is written at the FIRST topic of the session; the
   // eligible extraction item lives on the SECOND topic of the same session.
+  // The first topic carries no title/summary of its own — this test is
+  // about back-fill order, not topic-row suppression, so it is built to
+  // produce no topic row at all (an empty topicRowText is dropped, not
+  // suppressed) rather than pull suppression into an unrelated assertion.
   const m = buildPreviewModel({
     topics: [
-      topic({ session_id: 's1', topic_title: 'First topic', action_items: [] }),
+      topic({ session_id: 's1', topic_title: '', action_items: [] }),
       topic({ session_id: 's1', topic_title: 'Second topic',
         action_items: [{ action: 'Sign the completely unrelated producer statement', deadline: '2026-12-01', status: 'open' }] }),
     ],
@@ -1308,9 +1285,12 @@ test('back-fill never fires for a session with no usable brief — nothing to ap
 });
 
 test('back-fill never crosses sessions: session A cannot back-fill session B\'s items', () => {
+  // Session A's topic carries no title/summary of its own — this test is
+  // about session boundaries, not topic-row suppression (see the note on
+  // the WHOLE-session back-fill test above for why).
   const m = buildPreviewModel({
     topics: [
-      topic({ session_id: 's1', topic_title: 'A', action_items: [] }),
+      topic({ session_id: 's1', topic_title: '', action_items: [] }),
       topic({ session_id: 's2', topic_title: 'B',
         action_items: [{ action: 'B\'s own unrelated dated item', deadline: '2026-10-01', status: 'open' }] }),
     ],

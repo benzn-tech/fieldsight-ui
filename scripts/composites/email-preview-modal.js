@@ -139,53 +139,24 @@
     return /^\s*(spk|speaker)[\s_-]*\d+\s*$/i.test(String(s == null ? '' : s));
   }
 
-  /* §7.1 — coverage by time. A topic's own `time_range` string looks like
-     "09:00 – 09:20" (an en dash), but has also been seen with a plain
-     hyphen and with no surrounding spaces. Parsed defensively: anything that
-     does not split into exactly two HH:MM or HH:MM:SS clock times is
-     unparsable, and an unparsable range is never covered (§7.1) — this
-     function returns null rather than guessing. */
-  function parseClockSeconds(s) {
-    var m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(String(s == null ? '' : s).trim());
-    if (!m) return null;
-    var h = Number(m[1]), mi = Number(m[2]), sec = m[3] ? Number(m[3]) : 0;
-    if (h > 23 || mi > 59 || sec > 59) return null;
-    return h * 3600 + mi * 60 + sec;
-  }
+  /* Topic-row suppression was time-based (§7.1 of the original plan): a
+     topic was "covered" when a brief task's `at` fell inside the topic's own
+     `time_range`. Measured against a real session it ate content — the
+     brief's 8 tasks carried only THREE distinct `at` values, and the
+     extraction's topics were 2-minute windows overlapping those anchors, so
+     a task about meeting KCD at the Icehouse office suppressed a Papakura
+     topic row that shared nothing but a clock window with it. Time cannot
+     separate topics that overlap in time, and in real conversation they do.
 
-  /* Splits on an en dash, an em dash, or a plain hyphen, with or without
-     surrounding whitespace — the three shapes seen in practice. Returns
-     [startSeconds, endSeconds], or null when the string isn't exactly two
-     parsable clock times. A range side given only as HH:MM is read as
-     HH:MM:00 — the plain reading, with no invented ":59" at the end. */
-  function parseTimeRange(range) {
-    var s = String(range == null ? '' : range).trim();
-    if (!s) return null;
-    var parts = s.split(/\s*[–—-]\s*/);
-    if (parts.length !== 2) return null;
-    var start = parseClockSeconds(parts[0]);
-    var end = parseClockSeconds(parts[1]);
-    if (start == null || end == null) return null;
-    return [start, end];
-  }
-
-  /* §7.1: "A topic is covered when at least one brief task's `at` falls
-     inside that topic's own time range, inclusive of both ends." `briefRows`
-     is the SAME per-session array buildPreviewModel already computed for
-     substitution — coverage is decided against a topic's own session, never
-     a sibling's. A brief task with no `at` covers nothing. */
-  function topicCovered(topic, briefRows) {
-    var range = parseTimeRange(topic && topic.time_range);
-    if (!range || !briefRows || !briefRows.length) return false;
-    for (var i = 0; i < briefRows.length; i += 1) {
-      var at = briefRows[i].at;
-      if (!at) continue;
-      var atSec = parseClockSeconds(at);
-      if (atSec == null) continue;
-      if (atSec >= range[0] && atSec <= range[1]) return true;
-    }
-    return false;
-  }
+     Replaced with a TEXT test: a topic row is suppressed iff its own row
+     text is "represented" (§7.4 below, `isRepresented` /
+     `REPRESENTED_JACCARD_THRESHOLD`) in some brief task of that topic's own
+     session. Same function, same threshold, same stop list as the back-fill
+     rule below it — one place decides "does this text already say that",
+     used in both directions. Below the threshold = not represented = the
+     row is KEPT, so both directions carry the same bias: when unsure, do
+     not lose content (§10) — suppression only fires on a confident match,
+     exactly like back-fill only skips a confident match. */
 
   /* §7.4 — "represented" is a deliberately conservative text test.
      Lower-case, keep [a-z0-9]+ tokens of 3+ characters, drop the stop list,
@@ -355,20 +326,26 @@
       var sid = t.session_id;
       var briefRows = sid ? briefRowsBySession[sid] : null;
 
-      /* §7.1–7.2: a topic that a brief task's `at` already falls inside is
-         "covered" and emits no topic row (§5.1 — the same commitment stopped
-         appearing twice, once as an action row and once as prose about the
-         topic it was raised under). Coverage is only asked of topics that
-         would otherwise BE a topic row — a topic with its own action items
-         already has an action row and was never a topic-row candidate. */
-      var covered = !hasOwnItems && topicCovered(t, briefRows);
-      var topicText = (hasOwnItems || covered) ? '' : topicRowText(t);
-      var isTopicRow = !hasOwnItems && !covered && !!topicText;
+      /* A topic row whose own text is already represented in one of its
+         session's brief tasks is suppressed — the same commitment stopped
+         appearing twice, once as an action row (from the brief) and once as
+         prose about the topic it was raised under (§5.1). Suppression is
+         only asked of topics that would otherwise BE a topic row — a topic
+         with its own action items already has an action row and was never a
+         topic-row candidate, and a topic with no usable brief (`briefRows`
+         null/empty) has nothing to test against, so `isRepresented` sees an
+         empty `briefTexts` array and returns false via the same "no evidence
+         = not represented" path §7.4 already defines. */
+      var topicTextRaw = hasOwnItems ? '' : topicRowText(t);
+      var briefTexts = briefRows ? briefRows.map(function (r) { return r.text; }) : [];
+      var suppressed = !hasOwnItems && !!topicTextRaw && isRepresented(topicTextRaw, briefTexts);
+      var topicText = suppressed ? '' : topicTextRaw;
+      var isTopicRow = !hasOwnItems && !suppressed && !!topicText;
 
-      /* A covered topic still carries its photos below the table (task
+      /* A suppressed topic still carries its photos below the table (task
          instruction §3/§7): it is simply not ALSO stated as prose, because
          the brief task already carries the same commitment as a real row. */
-      if (open.length || isTopicRow || covered) {
+      if (open.length || isTopicRow || suppressed) {
         groups.push({
           topicTitle: t.topic_title || t.title || 'Untitled topic',
           timeRange:  t.time_range || '',
@@ -910,8 +887,6 @@
       isSpeakerLabel: isSpeakerLabel,
       cellsFor: cellsFor,
       TOPIC_ROW_MAX_CHARS: TOPIC_ROW_MAX_CHARS,
-      parseTimeRange: parseTimeRange,
-      topicCovered: topicCovered,
       isRepresented: isRepresented,
       REPRESENTED_JACCARD_THRESHOLD: REPRESENTED_JACCARD_THRESHOLD,
     };
