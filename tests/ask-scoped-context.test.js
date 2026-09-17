@@ -478,12 +478,36 @@ test('D-c "Ask across everything" appears only when it means something, and re-a
   assert.deepStrictEqual(spy, [{}]);
   h.render({ user: 'Ben', context: {}, onContextChange });
   assert.strictEqual(h.asks.length, 2, 'the question was not asked again');
-  /* Task 11: the resend fires from the same effect that clears `msgs`, and
-     (matching real React) the closure `send()` runs in still holds the
-     PRE-clear log -- the prior turn under the old scope is still the
-     conversation's own history at the moment the widened question goes out. */
-  assert.deepStrictEqual(h.asks[1],
-    { question: 'q', user: 'Ben', history: [{ question: 'q', answer: 'a' }] });
+  /* Task 11 / spec decision 5: "Ask across everything" IS a scope change --
+     the whole point of the button is to drop the site/date/owner narrowing
+     that produced an empty answer. Carrying the just-answered site-scoped
+     turn into this request as `history` would leak that turn's referents
+     ("here", "the same site") into a request whose scope fields have
+     already been dropped, which is exactly what decision 5 forbids.
+     The resend fires its request from inside the SAME effect that clears
+     `msgs` for the scope change, and — because React state updates apply on
+     the next render, not synchronously — the closure that request is built
+     in still holds the PRE-clear `msgs`. Relying on `msgs` here would leak;
+     the widen resend must pass its own explicit empty history instead (see
+     `send`'s `opts.noHistory` and every `send(pending, ...)` call site). */
+  assert.deepStrictEqual(h.asks[1], { question: 'q', user: 'Ben' });
+  assert.ok(!('history' in h.asks[1]),
+    'the widen carried the pre-clear site-scoped turn as history -- decision 5 leak');
+});
+
+test('D-c2 the widen resend never carries history, even across several prior turns', async () => {
+  const onContextChange = () => {};
+  const h = mountAsk();
+  h.render({ user: 'Ben', context: SCOPED, onContextChange });
+  await h.ask('first question');
+  await h.settle(0, { answer: 'first answer', citations: [] });
+  await h.ask('second question');
+  await h.settle(1, { answer: 'a', citations: [], applied_scope: { date: '2026-09-03' } });
+  h.byClass('fs-ask-chat__widen')[0].props.onClick();
+  h.render({ user: 'Ben', context: {}, onContextChange });
+  assert.strictEqual(h.asks.length, 3);
+  assert.ok(!('history' in h.asks[2]),
+    'the widen carried a multi-turn conversation across the scope change');
 });
 
 test('D-d a scope key change clears the history; a user change does not', async () => {

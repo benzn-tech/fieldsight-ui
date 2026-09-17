@@ -786,7 +786,7 @@
       if (enrichedSiteOnly) {
         if (pending && !hasScope(context)) {
           if (busy) deferredResendRef.current = pending;
-          else send(pending);
+          else send(pending, { noHistory: true });
         }
         return;
       }
@@ -795,7 +795,7 @@
       setMsgs([]);
       if (pending && !hasScope(context)) {
         if (busy) deferredResendRef.current = pending;
-        else send(pending);
+        else send(pending, { noHistory: true });
       }
     }, [context.date, context.siteId, context.authorFolder]);
 
@@ -834,7 +834,9 @@
       if (busy || !deferredResendRef.current) return;
       var pending = deferredResendRef.current;
       deferredResendRef.current = null;
-      send(pending);
+      /* This deferred send only ever fires a widen -- see the comment on
+         `send`'s signature. */
+      send(pending, { noHistory: true });
     }, [busy]);
 
     /* Attach a corroboration result to the answer it belongs to.
@@ -857,7 +859,24 @@
       });
     }
 
-    function send(question) {
+    /* `opts.noHistory`: the "Ask across everything" resend path (both the
+       immediate send below and the deferred one fired once a busy request
+       settles) is a SCOPE CHANGE -- it is what widening the scope to
+       "everything" IS -- and decision 5 clears history on every scope
+       change. The ordinary `msgs`-clearing effect (:767-800) already does
+       that for a date/site/owner change a person drives from the host, but
+       this resend fires ITS OWN request from inside that same effect,
+       before the `setMsgs([])` it just queued has taken effect on the
+       `msgs` this closure still holds (React state updates apply on the
+       NEXT render, not synchronously) -- so the ordinary `historyFromMessages
+       (msgs)` below would still see the pre-clear, old-scope turn and send
+       it as history on the new, unscoped request. That is exactly the
+       leak decision 5 forbids: the prior site-scoped turn's referents
+       ("here", "the same site") would ride along into a request whose
+       site/date fields have already been dropped. Passing `noHistory: true`
+       from every resend call site (not relying on state that has not
+       updated yet) is what actually prevents it. */
+    function send(question, opts) {
       if (!question || busy) return;
       var userMsg = { role: 'user', text: question };
       setMsgs(function (m) { return m.concat([userMsg]); });
@@ -904,8 +923,10 @@
          above -- history is what came before this question, never including
          it. `msgs` here is the render's own closed-over value, same as
          `context` a line below: a later change to either does not reach a
-         request already under way. */
-      var history = historyFromMessages(msgs);
+         request already under way. `opts.noHistory` overrides this to `[]`
+         (which `requestBodyFor` then omits from the wire) for the widen
+         resend -- see the comment on `send`'s signature above. */
+      var history = (opts && opts.noHistory) ? [] : historyFromMessages(msgs);
       var body = requestBodyFor(context, question, history);
       body.user = user;   /* undefined is dropped on the wire */
       var gen = genRef.current;
