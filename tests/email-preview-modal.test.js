@@ -939,13 +939,18 @@ test('parity: the 180 cap counts codepoints, not UTF-16 units — astral charact
 
 /* ---- speaker labels, directly ------------------------------------------- */
 
-test('isSpeakerLabel matches spk_N case-insensitively and nothing else', () => {
-  assert.ok(isSpeakerLabel('spk_0'));
-  assert.ok(isSpeakerLabel('SPK_12'));
-  assert.ok(isSpeakerLabel('  spk_3  '));
-  assert.ok(!isSpeakerLabel('Sam'));
-  assert.ok(!isSpeakerLabel('speaker_0'));
-  assert.ok(!isSpeakerLabel(''));
+test('isSpeakerLabel matches the backend pattern exactly: spk/speaker + number, any separator', () => {
+  // Mirrors fieldsight-pipeline session_brief._SPEAKER_LABEL
+  // (r"^\s*(spk|speaker)[\s_-]*\d+\s*$", re.I). The email blanks every one of
+  // these; if this side did not, the same row would read differently in the
+  // email and in Preview & copy.
+  for (const label of ['spk_0', 'SPK_12', '  spk_3  ', 'spk-4', 'spk5', 'speaker_0',
+                       'Speaker 2', 'SPEAKER-7']) {
+    assert.ok(isSpeakerLabel(label), label + ' is a speaker label');
+  }
+  for (const name of ['Sam', '', 'Speaker', 'spk_', 'Spike 3', 'John spk_0']) {
+    assert.ok(!isSpeakerLabel(name), JSON.stringify(name) + ' is not a speaker label');
+  }
 });
 
 /* ---- the table is flat: one order, action rows then topic rows ---------- */

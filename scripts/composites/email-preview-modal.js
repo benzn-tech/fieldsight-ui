@@ -128,11 +128,15 @@
     return text;
   }
 
-  /* A raw speaker label ("spk_0", "spk_12", case-insensitive) is not a name
-     (§1.4) — it is what the diarizer wrote when nobody stated who the owner
-     was, and showing it as an assignee would tell the reader it was. */
+  /* A raw speaker label ("spk_0", "spk-12", "Speaker 2", case-insensitive) is
+     not a name (§1.4) — it is what the diarizer wrote when nobody stated who
+     the owner was, and showing it as an assignee would tell the reader it was.
+     The SAME pattern as the confirmation email's filter,
+     fieldsight-pipeline session_brief._SPEAKER_LABEL — the two surfaces render
+     one table, so they must agree on what is not a name. An earlier version
+     matched only "spk_N", and a row the email blanked showed here verbatim. */
   function isSpeakerLabel(s) {
-    return /^spk_\d+$/i.test(String(s == null ? '' : s).trim());
+    return /^\s*(spk|speaker)[\s_-]*\d+\s*$/i.test(String(s == null ? '' : s));
   }
 
   /* A session's brief tasks, keyed by sessionId — usable ones only.
