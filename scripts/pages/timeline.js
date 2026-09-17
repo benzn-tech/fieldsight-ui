@@ -233,6 +233,31 @@
     return list.filter(function (t) { return !!t && t.session_id === sessionId; });
   }
 
+  /* Whether the day's briefs are worth fetching yet (F4).
+
+     The answer used to be "always". The effect fired on every day view and
+     issued one GET /sessions/{id}/brief per session before anyone had shown
+     the slightest interest in the hand-off — and nothing on the day view
+     displays a brief, only the modal does. On prod every one of those reads
+     is also a guaranteed miss: SESSION_BRIEF is false there and there are
+     zero brief artifacts, so an N-session day spent N round-trips to learn
+     nothing, on every open.
+
+     `wantedFor` is the date the hand-off was opened on, matched against the
+     date being viewed, so interest does not carry across days.
+
+     A plain function rather than a guard inside the effect because a guard
+     inside an effect is reachable only by rendering the whole page against a
+     settled report, a session list and a resolved owner. This is the whole
+     decision, and it can be driven directly. */
+  function shouldLoadBriefs(o) {
+    o = o || {};
+    if (!o.date || !o.folder) return false;
+    if (o.status !== 'ok') return false;
+    if (!(o.sessions || []).length) return false;
+    return o.wantedFor === o.date;
+  }
+
   /* The hand-off table's second source (F4). A brief is written per SESSION
      and there is no batch route, so this is N reads for N sessions: issued
      together, and each one's failure is its own.
@@ -2087,10 +2112,12 @@
       return function () { cancelled = true; };
     }, [date, user, state.status, state.report]);
 
-    /* The briefs behind the hand-off table (F4), keyed on the sessions the
+    /* The briefs behind the hand-off table (F4), read off the sessions the
        effect above already loaded — a second list request for a day whose
        list is in hand would be a second answer to a question already
        answered.
+
+       DEFERRED until the hand-off is opened; see shouldLoadBriefs for why.
 
        A PARTIAL set is not a problem to work around. buildPreviewModel
        refuses a brief set that yields fewer rows than the topics already
@@ -2099,23 +2126,46 @@
     var refBriefs    = React.useState([]);
     var dayBriefs    = refBriefs[0];
     var setDayBriefs = refBriefs[1];
+    /* The date the hand-off was opened on, or null for "nobody has asked".
+       A date rather than a boolean so the interest expires with the day it
+       was expressed about: moving to another day leaves this pointing at the
+       old one, the guard below stops matching, and the new day starts closed
+       again — without a second effect racing this one to clear a flag. */
+    var refWanted    = React.useState(null);
+    var briefsFor    = refWanted[0];
+    var setBriefsFor = refWanted[1];
+
+    /* Same owner-folder resolution as the sessions effect above: the self-view
+       has user===null and the brief belongs to whoever recorded. Resolved
+       during render rather than inside the effect so the effect can DEPEND on
+       it. It is derived from `state.report`, which the effect reads and the
+       dependency list did not name; depending on the resolved STRING closes
+       that gap without making the effect re-run on every new report object
+       that resolves to the same folder. */
+    var briefFolder = user
+      || ((state.report && state.report.user_name)
+            ? window.FS.api.folderName(state.report.user_name)
+            : null)
+      || null;
 
     React.useEffect(function () {
       var loaded = sessionsState.sessions || [];
-      var rpt    = state.report;
-      /* Same owner-folder resolution as the sessions effect above: the
-         self-view has user===null and the brief belongs to whoever recorded. */
-      var folder = user || (rpt && rpt.user_name && window.FS.api.folderName(rpt.user_name)) || null;
-      if (sessionsState.status !== 'ok' || !loaded.length || !folder || !date) {
+      if (!shouldLoadBriefs({
+        status:    sessionsState.status,
+        sessions:  loaded,
+        folder:    briefFolder,
+        date:      date,
+        wantedFor: briefsFor,
+      })) {
         setDayBriefs([]);
         return undefined;
       }
       var cancelled = false;
-      loadSessionBriefs(loaded, { date: date, user: folder }).then(function (list) {
+      loadSessionBriefs(loaded, { date: date, user: briefFolder }).then(function (list) {
         if (!cancelled) setDayBriefs(list);
       });
       return function () { cancelled = true; };
-    }, [date, user, sessionsState.status, sessionsState.sessions]);
+    }, [date, briefFolder, sessionsState.status, sessionsState.sessions, briefsFor]);
 
     /* A new date/user has entirely different session_ids — drop any active
        filter rather than silently show zero topics against a stale id. */
@@ -2771,6 +2821,10 @@
       /* Scoped the same way `topics` above is: one meeting selected means one
          meeting's brief. */
       briefs:     scopeBriefsToSession(dayBriefs, selectedSessionId),
+      /* Opening the hand-off is the interest that pays for the fetch. Until
+         this fires, `dayBriefs` is [] and the table is the action_items one
+         it has always been. */
+      onNeedBriefs: function () { setBriefsFor(date); },
     });
     /* Delivery-C Tier-2 generate control — sits beside the mailto draft, active
        only when a specific meeting is selected (the modal is per-session). */
@@ -3178,7 +3232,17 @@
         type:      'button',
         className: 'fs-btn fs-btn--tertiary fs-btn--sm',
         title:     'See the hand-off with its photos, then copy it into any email',
-        onClick:   function () { setOpen(true); },
+        onClick:   function () {
+          /* Ask for the briefs at the moment the hand-off is opened, rather
+             than on every day view. The modal opens immediately either way —
+             it does not wait — so the table starts on action_items and
+             rebuilds when the briefs land. That rebuild is exactly what
+             props.briefs in buildPreviewModel's memo dependencies is for;
+             without it the modal would sit on the fallback table with
+             nothing to say it had not updated. */
+          if (props.onNeedBriefs) props.onNeedBriefs();
+          setOpen(true);
+        },
       }, 'Preview & copy'),
       React.createElement(Modal, {
         open:       open,
@@ -4709,6 +4773,7 @@
       /* the hand-off table's briefs (F4) */
       loadSessionBriefs: loadSessionBriefs,
       scopeBriefsToSession: scopeBriefsToSession,
+      shouldLoadBriefs: shouldLoadBriefs,
       DraftEmailButton: DraftEmailButton,
       PreviewEmailButton: PreviewEmailButton,
       groupSessionsByBlock: groupSessionsByBlock,
