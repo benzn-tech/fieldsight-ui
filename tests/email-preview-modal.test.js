@@ -561,3 +561,107 @@ test('a literal pipe in the text cannot break the text table apart', () => {
   assert.strictEqual(cells.length, 3, 'still three columns');
   assert.strictEqual(cells[1], 'Sam', 'the owner is still in the ASSIGNED column');
 });
+
+test('a newline inside task text cannot terminate the row mid-table', () => {
+  // Brief task text comes from a model, so a wrapped sentence is reachable
+  // rather than theoretical. A raw newline ends the pipe row where it falls:
+  // a markdown-aware client loses every row after it, and a plain reader gets
+  // the tail of the sentence orphaned under no column at all. Collapsed to a
+  // space, which is what the sentence meant anyway.
+  const m = buildPreviewModel({
+    topics: [topic({ action_items: [
+      { action: 'Check the level 2 handover\nand the level 3 one',
+        responsible: 'Sam', status: 'open' }] })],
+  });
+  const txt = renderEmailText(m);
+
+  const cells = textRows(txt).find((c) => c[0].startsWith('Check the level 2 handover'));
+  assert.strictEqual(cells.length, 3, 'the row still has three columns');
+  assert.strictEqual(cells[1], 'Sam', 'the owner is still in the ASSIGNED column');
+  assert.ok(cells[0].includes('handover and the level 3 one'),
+    'the rest of the sentence stays in the AGENDA ITEM cell');
+
+  // The structural claim, stated directly: nothing between the header and the
+  // blank line before the footer is anything but a pipe row. A split row
+  // leaves a line that does not start with `|`, which is the tell.
+  const body = txt.split('\n').slice(txt.split('\n').indexOf('| AGENDA ITEM | ASSIGNED | DUE DATE |'));
+  body.filter((l) => l.trim() && l !== m.footer).forEach((l) => {
+    assert.ok(l.trim().startsWith('|'), 'every table line is a whole row: ' + JSON.stringify(l));
+  });
+});
+
+/* ---- a topic label row is a heading, and only `**` says so --------------- */
+
+test('the text flavour marks a topic label row with ** so it is not read as a commitment', () => {
+  // A pipe table has no colspan. In the text flavour a topic label row is
+  // therefore STRUCTURALLY IDENTICAL to an item row with a blank owner and a
+  // blank date — "Wall tolerance (09:00 – 09:20) |  |  " is exactly what an
+  // unassigned, undated commitment looks like. The `**` is the only thing
+  // that distinguishes a heading from a job nobody has picked up, so it is
+  // load-bearing rather than decoration, and until this test the whole row
+  // was pinned by nothing: dropping it left the suite green.
+  const m = buildPreviewModel({ topics: [topic()] });
+  const rows = textRows(renderEmailText(m));
+
+  const label = rows.find((c) => c[0].includes('Wall tolerance'));
+  assert.deepStrictEqual(label, ['**Wall tolerance (09:00 – 09:20)**', '', ''],
+    'the topic label row is present, bolded, and carries no owner or date');
+  assert.ok(label[0].startsWith('**') && label[0].endsWith('**'),
+    'without the markers this row cannot be told from an unassigned item row');
+
+  // And it heads the rows it labels rather than trailing them.
+  const firstCol = rows.map((c) => c[0]);
+  assert.ok(firstCol.indexOf(label[0]) < firstCol.findIndex((t) => t.startsWith('Redo the wall')),
+    'the heading comes before the items it heads');
+});
+
+/* ---- the equality boundary: a brief is never slotted under topics -------- */
+
+test('a brief with exactly as many tasks as open items is still ONE flat block', () => {
+  // This is the ORDINARY case, not an edge one: the gate that admits a brief
+  // at all is `fromBriefs.length >= fallbackRows.length`, so equality is the
+  // boundary it sits on, and equality is also the one length at which rows
+  // could be walked out one-per-open-item.
+  //
+  // Doing that would be silently wrong. Brief rows carry no topic — nothing
+  // maps task i to group i — so laying them out per topic slots them by
+  // POSITION, and the evidence follows the position rather than the claim.
+  // Here that puts "Pour slab to level 2" under "Wall tolerance" with the
+  // wall photograph attached to it: a photo of a wall offered as evidence of
+  // a slab. The length check alone cannot catch this, which is why the
+  // rowsSource check exists beside it.
+  const m = buildPreviewModel({
+    topics: [
+      topic({ related_photos: ['wall.jpg'],
+              action_items: [{ action: 'Redo the wall', status: 'open' }] }),
+      topic({ topic_title: 'Slab pour', time_range: '10:00 – 10:20',
+              action_items: [{ action: 'Pour the slab', status: 'open' }] }),
+    ],
+    briefs: [{ sessionId: 's1', brief: brief([
+      { text: 'Pour slab to level 2', at: '09:10:00' },
+      { text: 'Order mesh', at: '14:05:00' },
+    ]) }],
+  });
+
+  assert.strictEqual(m.rowsSource, 'brief', 'an equal-length brief is still used');
+  assert.strictEqual(m.rows.length, m.totalItems,
+    'and its length equals the open-item count — the condition being guarded');
+
+  // The exact document, in order: both brief rows as one flat block, and the
+  // topic blocks that follow carrying nothing but their photos.
+  assert.deepStrictEqual(textRows(renderEmailText(m)).map((c) => c[0]), [
+    'AGENDA ITEM',
+    'Pour slab to level 2 (at 09:10:00)',
+    'Order mesh (at 14:05:00)',
+    '**Wall tolerance (09:00 – 09:20)**',
+    '[1 photo attached above]',
+  ]);
+
+  // Said as the consequence rather than the shape: no brief row sits beneath
+  // a topic heading, so no photo can be read as evidencing one.
+  const html = renderEmailHtml(m, { 'wall.jpg': 'https://s3/wall.jpg' });
+  assert.ok(html.indexOf('Pour slab to level 2') < html.indexOf('Wall tolerance'),
+    'the brief rows precede every topic heading in the HTML flavour too');
+  assert.ok(html.indexOf('Order mesh') < html.indexOf('Wall tolerance'),
+    'including the last of them — the block is not interleaved');
+});

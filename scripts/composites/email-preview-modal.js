@@ -345,8 +345,18 @@
     var lines = [model.intro, ''];
 
     /* A literal pipe inside a cell would end its column early and shift
-       every later cell one to the left. */
-    function cell(s) { return String(s == null ? '' : s).replace(/\|/g, '\\|'); }
+       every later cell one to the left.
+
+       A NEWLINE is worse: it terminates the row mid-table. A markdown-aware
+       client loses every row after it, and a plain reader sees the rest of
+       the line orphaned under no column at all. Brief task text comes from a
+       model, so a wrapped sentence is reachable rather than theoretical —
+       collapsed to a space, which is what the sentence meant anyway. */
+    function cell(s) {
+      return String(s == null ? '' : s)
+        .replace(/\r?\n/g, ' ')
+        .replace(/\|/g, '\\|');
+    }
     function pipe(cells) { return '| ' + cells.map(cell).join(' | ') + ' |'; }
 
     lines.push(pipe(COLUMNS));

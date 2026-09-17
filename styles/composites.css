@@ -11928,21 +11928,15 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-email-preview__subject,
 .fs-email-preview__intro { margin: 0 0 12px; }
 
-.fs-email-preview__group {
-  margin: 0 0 18px;
-  padding: 0 0 14px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.fs-email-preview__group:last-of-type { border-bottom: 0; }
-
-.fs-email-preview__topic { font-weight: var(--font-weight-semibold); }
 .fs-email-preview__time  { font-weight: 400; color: var(--text-tertiary); }
 
 /* The hand-off is a three-column table: AGENDA ITEM / ASSIGNED / DUE DATE.
    The preview renders the same three columns the clipboard payload does —
    a preview in a different shape from the payload is a preview of something
-   else. (The old `__items` bullet list went with actionLine; its rules are
-   gone rather than left behind with no consumer.) */
+   else. (The old `__items` bullet list went with actionLine, and `__group` /
+   `__topic` went with the group-per-block markup the table replaced — a topic
+   label is now a `__topic-row` inside the table. All three are gone rather
+   than left behind with no consumer.) */
 .fs-email-preview__table {
   width: 100%;
   border-collapse: collapse;
