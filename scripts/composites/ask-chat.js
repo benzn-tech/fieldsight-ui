@@ -480,7 +480,19 @@
      the body -- it tells the backend "honour date/site/author/topic for
      narrowing", and an unscoped question must not opt into that by accident
      (user decision 2026-09-16). */
-  function requestBodyFor(context, question) {
+  /* `history`: the most recent turns from the log this component already
+     keeps, as [{question, answer}] -- exactly those two key names, the
+     server drops anything else. Omitted entirely when there is nothing to
+     send: absent is not the same as an empty list to the backend, and an
+     always-present `history: []` would be a claim that this is turn one
+     when it might not be.
+
+     No second, smaller cap here. The backend caps at 6 turns / 2000 chars
+     per field (ask conversation memory spec §4); a client-side cap on top
+     of that would just be a second number to keep in sync with the first,
+     and the caller here builds `history` from the visible log, which is
+     already the right size for a reader to have typed. */
+  function requestBodyFor(context, question, history) {
     var c = context || {};
     var body = { question: question };
     if (present(c.date))         body.date          = c.date;
@@ -490,7 +502,28 @@
     if (present(c.date) || present(c.siteId) || present(c.authorFolder) || present(c.topicRowId)) {
       body.scoped = true;
     }
+    if (history && history.length) body.history = history;
     return body;
+  }
+
+  /* Turns the log into [{question, answer}] pairs for `requestBodyFor`.
+     Only a question that got a REAL answer counts as a turn: a failed
+     request renders the one reassuring line (see `send()`'s catch below),
+     and feeding that back to the model as if it had answered would teach
+     it that the agent said "FieldSight is busy" on a prior turn -- noise,
+     not memory. `m.error` is exactly the flag that failure path sets. */
+  function historyFromMessages(msgs) {
+    var out = [];
+    var pendingQuestion = null;
+    (msgs || []).forEach(function (m) {
+      if (m.role === 'user') {
+        pendingQuestion = m.text;
+      } else if (m.role === 'assistant' && !m.error && pendingQuestion != null) {
+        out.push({ question: pendingQuestion, answer: m.text });
+        pendingQuestion = null;
+      }
+    });
+    return out;
   }
 
   var SCOPE_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -753,7 +786,7 @@
       if (enrichedSiteOnly) {
         if (pending && !hasScope(context)) {
           if (busy) deferredResendRef.current = pending;
-          else send(pending);
+          else send(pending, { noHistory: true });
         }
         return;
       }
@@ -762,7 +795,7 @@
       setMsgs([]);
       if (pending && !hasScope(context)) {
         if (busy) deferredResendRef.current = pending;
-        else send(pending);
+        else send(pending, { noHistory: true });
       }
     }, [context.date, context.siteId, context.authorFolder]);
 
@@ -801,7 +834,9 @@
       if (busy || !deferredResendRef.current) return;
       var pending = deferredResendRef.current;
       deferredResendRef.current = null;
-      send(pending);
+      /* This deferred send only ever fires a widen -- see the comment on
+         `send`'s signature. */
+      send(pending, { noHistory: true });
     }, [busy]);
 
     /* Attach a corroboration result to the answer it belongs to.
@@ -824,7 +859,24 @@
       });
     }
 
-    function send(question) {
+    /* `opts.noHistory`: the "Ask across everything" resend path (both the
+       immediate send below and the deferred one fired once a busy request
+       settles) is a SCOPE CHANGE -- it is what widening the scope to
+       "everything" IS -- and decision 5 clears history on every scope
+       change. The ordinary `msgs`-clearing effect (:767-800) already does
+       that for a date/site/owner change a person drives from the host, but
+       this resend fires ITS OWN request from inside that same effect,
+       before the `setMsgs([])` it just queued has taken effect on the
+       `msgs` this closure still holds (React state updates apply on the
+       NEXT render, not synchronously) -- so the ordinary `historyFromMessages
+       (msgs)` below would still see the pre-clear, old-scope turn and send
+       it as history on the new, unscoped request. That is exactly the
+       leak decision 5 forbids: the prior site-scoped turn's referents
+       ("here", "the same site") would ride along into a request whose
+       site/date fields have already been dropped. Passing `noHistory: true`
+       from every resend call site (not relying on state that has not
+       updated yet) is what actually prevents it. */
+    function send(question, opts) {
       if (!question || busy) return;
       var userMsg = { role: 'user', text: question };
       setMsgs(function (m) { return m.concat([userMsg]); });
@@ -867,7 +919,15 @@
 
       /* Captured at send time: the context may change while this is in flight. */
       var scopedRequest = hasScope(context);
-      var body = requestBodyFor(context, question);
+      /* Captured from `msgs` BEFORE this turn's own user message is appended
+         above -- history is what came before this question, never including
+         it. `msgs` here is the render's own closed-over value, same as
+         `context` a line below: a later change to either does not reach a
+         request already under way. `opts.noHistory` overrides this to `[]`
+         (which `requestBodyFor` then omits from the wire) for the widen
+         resend -- see the comment on `send`'s signature above. */
+      var history = (opts && opts.noHistory) ? [] : historyFromMessages(msgs);
+      var body = requestBodyFor(context, question, history);
       body.user = user;   /* undefined is dropped on the wire */
       var gen = genRef.current;
       function isStale() { return gen !== genRef.current; }
@@ -911,6 +971,14 @@
           scopeResponse: { applied_scope: res.applied_scope },
           scoped:        scopedRequest,
           question:      question,
+          /* What the backend actually searched for, once it resolves
+             history-dependent references ("it", "the same site") into a
+             standalone question. Rendered only when present and different
+             from what was typed -- absent on today's backend (history is
+             not wired up yet on that side) and equal-to-typed on the common
+             case where there was nothing to resolve, both of which say
+             nothing worth a line. */
+          asked:         res.asked,
         }]); });
 
         /* The second pass. Fired after the answer is already on screen and
@@ -927,14 +995,31 @@
           .catch(function () { if (!isStale()) patchCorrob(mid, { _failed: true }); });
       }).catch(function (err) {
         if (isStale()) return;
-        /* A timeout is not an unreachable agent, and saying so sent the reader
-           at the backend while it was answering correctly. Name the two cases
-           apart: one is "it is slow", the other is "it is not there". */
+        /* One reassuring line for every failure class -- a timeout, any HTTP
+           status, or a bare network error (spec §4.8). The two-message split
+           this replaced named the cause on screen ("took too long" vs
+           "could not reach"), and a reader cannot act on that distinction
+           any more than on this one: either way the question was not lost
+           and asking again is the only available move. Naming the cause
+           only invites the next person to re-add a second line "to be
+           helpful", so the copy below says nothing about why.
+
+           `err.timeout` / `err.status` are kept and read here -- not to pick
+           the words shown, only to label what reached the console, so a
+           report of "Ask is failing" can be told apart from a report of
+           "Ask is slow" without exposing that difference to the reader. */
+        if (err && err.timeout) {
+          console.warn('[AskChat] request timed out', err);
+        } else if (err && err.status) {
+          console.warn('[AskChat] request failed with HTTP ' + err.status, err);
+        } else {
+          console.warn('[AskChat] request failed (network)', err);
+        }
         setMsgs(function (m) { return m.concat([{
           role:  'assistant',
-          text:  (err && err.timeout)
-                   ? 'The agent took too long to answer. It may still be working — try asking again.'
-                   : 'Could not reach the agent. ' + (err && err.message || ''),
+          text:  'FieldSight is busy at the moment. Your question has not been '
+               + 'lost — please try again shortly. If it keeps happening, '
+               + 'contact the FieldSight team.',
           error: true,
         }]); });
       }).then(function () {
@@ -1045,7 +1130,23 @@
                   }, line);
                 })
               : null,
+            /* What the backend actually searched for, once "it" / "the same
+               site" / etc. were resolved against the history this turn sent.
+               Only when it says something the reader did not already know:
+               present, and different from what they typed -- an equal value
+               would just repeat their own question back at them. */
+            m.role === 'assistant' && m.asked && m.asked !== m.question
+              ? React.createElement('div', { className: 'fs-ask-chat__asked' },
+                  'Searched for: ' + m.asked)
+              : null,
             m.role === 'assistant' ? renderWebOrigin(m) : null,
+            /* `question_admission` already returns the sentence explaining a
+               refusal (a name, a commercially sensitive topic, ...); nothing
+               rendered it, so the reader saw the web section simply absent
+               and read a guard doing its job as an outage. */
+            m.role === 'assistant' && m.web && m.web.refused
+              ? React.createElement('div', { className: 'fs-ask-chat__web-refused' }, m.web.refused)
+              : null,
             /* The plain-text fallback below is also what renders the user's
                own question; a divider already rendered its one line above
                and must not get a second copy of it here (m.role !== 'divider'

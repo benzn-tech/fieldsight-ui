@@ -3660,6 +3660,24 @@
   color: var(--text-tertiary);
   margin-bottom: 4px;
 }
+/* Task 11 (docs/superpowers/sdd/2026-09-17-ask-conversation-memory): what the
+   backend actually searched for once history resolved a "it"/"the same
+   site" reference. Same treatment as the scope line it sits beside -- a
+   quiet fact above the answer, not a correction (that is `fs-ask-chat__
+   basis--widened`'s job). */
+.fs-ask-chat__asked {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+  font-style: italic;
+}
+/* `question_admission`'s refusal sentence -- rendered so a guard doing its
+   job does not read as the web section having silently gone missing. */
+.fs-ask-chat__web-refused {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+}
 .fs-ask-chat__widen {
   font: inherit;
   font-size: 12px;

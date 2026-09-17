@@ -188,16 +188,21 @@ test('the default is still to retry -- this fix must not disarm it everywhere', 
 
 /* ---- the copy the user actually saw -------------------------------------- */
 
-test('a slow agent is not reported as an unreachable one', () => {
-  /* Wiring, not behaviour, and that is all this claims: ask-chat.js is a React
-     IIFE with no export, and the repo's existing tests for it (ask-panel-ux)
-     read the source the same way. What it pins is that the branch exists and
-     keys off the flag `_fetch` now sets -- the words themselves are checked by
-     reading them, which is what copy deserves. */
+/* Superseded 2026-09-18 (Task 11, docs/superpowers/sdd/2026-09-17-ask-
+   conversation-memory): the two-message split this test used to pin --
+   "took too long to answer" vs "could not reach the agent" -- was collapsed
+   into one reassuring line for every failure class (spec §4.8). `err.timeout`
+   is still read in the catch block, but now only to label what reaches
+   console.warn, not to choose what is shown. The full behaviour (both
+   failure classes rendering identical text, `err.status` also still read) is
+   pinned in tests/ask-history-and-failure.test.js (F1-F5). */
+test('a slow agent and an unreachable one render the same reassuring line', () => {
   const fs = require('fs');
   const src = fs.readFileSync(
     require.resolve('../scripts/composites/ask-chat.js'), 'utf8');
   assert.ok(/err && err\.timeout/.test(src),
-    'the error branch must distinguish a timeout from an unreachable agent');
-  assert.ok(/took too long to answer/.test(src), 'timeout copy missing');
+    'err.timeout must still be read, for the console.warn label');
+  assert.ok(!/took too long to answer/.test(src), 'old timeout-only copy still present');
+  assert.ok(!/Could not reach the agent/.test(src), 'old unreachable-agent-only copy still present');
+  assert.ok(/FieldSight is busy at the moment/.test(src), 'the reassuring copy is missing');
 });
