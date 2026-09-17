@@ -112,7 +112,7 @@
   <script type="text/babel" src="scripts/composites/tooltip.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/toast.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/modal-overlay.js?v=1"></script>
-  <script type="text/babel" src="scripts/composites/email-preview-modal.js?v=8"></script>
+  <script type="text/babel" src="scripts/composites/email-preview-modal.js?v=9"></script>
   <script type="text/babel" src="scripts/composites/session-report-modal.js?v=5"></script>
   <script type="text/babel" src="scripts/composites/recording-delete-modal.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/safety-create-modal.js?v=3"></script>
@@ -1380,18 +1380,21 @@
             </Row>
           </Section>
 
-          {/* feat/handoff-table — EmailPreviewModal had no showcase render at
-              all, so the one thing worth looking at (does the table actually
-              read like a hand-off?) could only be seen by driving /timeline.
-              Both row sources are triggered here because they lay the table
-              out differently: action_items rows sit under their own topic so
-              a photo stays beside the finding it evidences, while brief rows
-              carry no topic and are one flat block.
+          {/* feat/handoff-sync (2026-09-18 plan) — one flat table on both
+              surfaces: every action row, then every topic row, nothing
+              interleaved (§1.2). Both row SOURCES are triggered here —
+              action_items and brief — but they no longer lay the table out
+              differently; a brief with at least one task simply replaces the
+              action rows wholesale (the row-count floor is gone, §1.3).
 
-              Deliberately blank in both fixtures: one item has no owner, one
-              has no due date. Those cells must render EMPTY — no dash, no
-              "Unassigned", no invented date. 有就有，没有就没有. */}
-          <Section title="feat/handoff-table · EmailPreviewModal (hand-off table)">
+              An unstated owner or due date on an action row is the em dash
+              "—"; a topic row (one whose extraction produced no action items
+              at all) is "N/A" in both cells and greyed in the HTML flavour —
+              N/A is not the em dash (§0/§1.4/§1.5). The third fixture below
+              exists to show a topic row next to an action row in the same
+              table, and a speaker label rendering as "—" rather than as a
+              name. */}
+          <Section title="feat/handoff-sync · EmailPreviewModal (hand-off table)">
             <Row label="open">
               <ModalTrigger
                 label="Hand-off — from action items"
@@ -1437,11 +1440,33 @@
                   ],
                 }}
               />
+              <ModalTrigger
+                label="Hand-off — topic row sunk below action rows"
+                Modal={EmailPreviewModal}
+                props={{
+                  open: true,
+                  date: '2026-03-01',
+                  siteName: 'SB1108 Ellesmere',
+                  topics: [
+                    { topic_id: 1, topic_title: 'Wall tolerance', time_range: '09:00 – 09:20',
+                      action_items: [
+                        { action: 'Redo the west wall to line', responsible: 'spk_0', deadline: 'Wed', status: 'open' },
+                      ],
+                      related_photos: [] },
+                    { topic_id: 2, topic_title: 'Voiceprint test', time_range: '11:00 – 11:15',
+                      summary: 'Recorded outdoors in site noise. The purpose was to check recall against the pipeline.',
+                      action_items: [],
+                      related_photos: [] },
+                  ],
+                }}
+              />
             </Row>
             <Row label="note">
               <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
                 Photos need a real <code>userFolder</code> + media API, so none are fetched here;
-                the photo row is exercised on /timeline.
+                the photo row is exercised on /timeline. The third fixture's ASSIGNED cell for
+                "Redo the west wall to line" reads "—", not "spk_0" — a raw speaker label is not
+                a name (§1.4) — and the "Voiceprint test" row below it reads "N/A" / "N/A", greyed.
               </span>
             </Row>
           </Section>

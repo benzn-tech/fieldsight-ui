@@ -90,6 +90,40 @@
     };
   }
 
+  /* How much of a topic's own summary rides in its row (§1.5). Mirrors
+     `lambda_item_writer.TOPIC_ROW_MAX_CHARS` exactly — this is the shared
+     constant the parity test pins against. */
+  var TOPIC_ROW_MAX_CHARS = 180;
+
+  /* The text for a topic that produced no action items, built byte-for-byte
+     the way `lambda_item_writer._topic_rows` builds it, so the email and
+     "Preview & copy" cannot drift into showing two different sentences for
+     the same topic. Returns '' when there is nothing to say (no title, no
+     summary) — the caller drops the row rather than emitting a blank one. */
+  function topicRowText(t) {
+    t = t || {};
+    var title = String(t.topic_title || t.title || '').trim();
+    var summary = String(t.summary || '').split(/\s+/).filter(Boolean).join(' ');
+    /* The first sentence, not the whole summary: the rest repeats it at
+       length, which is what pushed the old prose below the fold. */
+    var first = summary.split('. ')[0].trim();
+    if (first && first !== summary && first.charAt(first.length - 1) !== '.') {
+      first += '.';
+    }
+    var text = [title, first].filter(Boolean).join(' — ');
+    if (text.length > TOPIC_ROW_MAX_CHARS) {
+      text = text.slice(0, TOPIC_ROW_MAX_CHARS - 1).replace(/\s+$/, '') + '…';
+    }
+    return text;
+  }
+
+  /* A raw speaker label ("spk_0", "spk_12", case-insensitive) is not a name
+     (§1.4) — it is what the diarizer wrote when nobody stated who the owner
+     was, and showing it as an assignee would tell the reader it was. */
+  function isSpeakerLabel(s) {
+    return /^spk_\d+$/i.test(String(s == null ? '' : s).trim());
+  }
+
   /* Rows from the session briefs — one flat table for the whole day.
      "Preview & copy" is rendered per DAY and a brief is written per SESSION,
      so several briefs land in one table rather than one table each. */
@@ -166,22 +200,37 @@
     /* The brief is the exception, not the rule. prod runs SESSION_BRIEF=false
        and holds zero brief artifacts, so the action_items path below is what
        every hand-off actually takes today; the brief path is the one that has
-       to prove itself, which is why it is the branch and not the default. */
+       to prove itself, which is why it is the branch and not the default.
+
+       No row-count floor: a brief with at least one task IS the source, full
+       stop. (§1.3) A brief with zero tasks is treated as no brief at all —
+       `rowsFromBriefs` on an empty `briefs` array returns `[]`, which reads
+       the same as "no brief produced anything", so no extra check is needed
+       here for that case. */
     var briefs = opts.briefs || [];
-    var rows = fallbackRows;
-    var rowsSource = 'action_items';
-    if (briefs.length) {
-      var fromBriefs = rowsFromBriefs(briefs);
-      /* Better prose must never mean fewer commitments. The backend half of
-         this change shipped exactly that defect — longer task text, and
-         quietly a shorter list — so a brief that says LESS than the topics
-         already say is not used at all. A hand-off that drops something
-         someone committed to is worse than one that reads badly. */
-      if (fromBriefs.length >= fallbackRows.length) {
-        rows = fromBriefs;
-        rowsSource = 'brief';
-      }
+    var fromBriefs = briefs.length ? rowsFromBriefs(briefs) : [];
+    var rows, rowsSource;
+    if (fromBriefs.length) {
+      rows = fromBriefs;
+      rowsSource = 'brief';
+    } else {
+      rows = fallbackRows;
+      rowsSource = 'action_items';
     }
+
+    /* Topic rows (§1.5) sink to the bottom of the SAME table, after every
+       action row. A topic belongs here only when its extraction produced NO
+       action items AT ALL — raw presence, not "nothing still open" — because
+       a topic whose only item was ticked off is already accounted for by
+       having been in the action-row set once; listing it again here would
+       double it. */
+    var topicRows = [];
+    topics.forEach(function (t) {
+      if ((t.action_items || []).length) return;
+      var text = topicRowText(t);
+      if (!text) return;
+      topicRows.push({ text: text, kind: 'topic' });
+    });
 
     return {
       subject: 'Action items — ' + (site ? site + ' — ' : '') + sessionLabel
@@ -189,10 +238,11 @@
       intro: 'Outstanding action items from ' + (site ? site + ' — ' : '')
         + sessionLabel + (opts.date ? ' (' + opts.date + ')' : '') + ':',
       groups: groups,
-      /* Added ALONGSIDE groups, never in place of them: groups are what keeps
-         a photo inside the block of the finding it evidences, and a flat
-         table cannot carry that. */
-      rows: rows,
+      /* One flat table: every action row, then every topic row. Nothing
+         interleaved, no topic label rows breaking it up (§1.2). `groups` is
+         kept alongside it only for photos, which now render below the table
+         rather than inside it. */
+      rows: rows.concat(topicRows),
       rowsSource: rowsSource,
       totalItems: totalItems,
       totalPhotos: totalPhotos,
@@ -221,70 +271,40 @@
   /* Three columns, in the words they were asked for in. */
   var COLUMNS = ['AGENDA ITEM', 'ASSIGNED', 'DUE DATE'];
 
-  /* `at` carries two formats under one name and nothing upstream marks
-     which: a brief task holds a clock time ("09:10:00"), a fallback row
-     holds the topic's whole time_range ("09:00 – 09:20"). Rendered the same
-     way they read as one kind of fact and they are two — the moment
-     something was said, versus the span it was discussed in.
+  /* Blank stays blank for an action row: an empty cell would say the meeting
+     did not state this, and it DID — it just didn't name an owner or a date.
+     §1.4 makes that an em dash instead, so the reader is not left guessing
+     whether a truly empty cell means "nothing was said" or "this render
+     forgot to fill it in". A topic row is N/A in both cells — there is no
+     task here at all, which N/A says and a dash does not (§1.5/§0).
 
-     They must never be COMPARED either. "09:00 – 09:20" < "09:10:00" is a
-     true string comparison and a meaningless time one, so a sort that saw
-     both would misorder silently. rowsFromBriefs sorts brief rows only,
-     where every `at` is a clock time; fallback rows are never sorted. */
-  function isClockTime(at) {
-    return /^\d{1,2}:\d{2}(:\d{2})?$/.test(String(at == null ? '' : at));
-  }
+     A raw speaker label in ASSIGNED (spk_0, spk_12, case-insensitive) is not
+     a name and renders as the same em dash an unstated owner would (§1.4).
 
-  /* The moment takes the preposition; a range is self-evidently a range. */
-  function agendaCell(row) {
-    var text = row.text || '';
-    var at = row.at || '';
-    if (!at) return text;
-    return text + (isClockTime(at) ? ' (at ' + at + ')' : ' (' + at + ')');
-  }
+     No time suffix anywhere (§1.6): the cell is the row's text, verbatim. */
+  var DASH = '—';
 
-  /* Blank stays blank: an empty cell says the meeting did not state this,
-     and a dash, "Unassigned" or "TBC" each say something it did not.
-     有就有，没有就没有. */
   function cellsFor(row) {
     row = row || {};
-    return [agendaCell(row), row.assignee || '', row.due || ''];
+    if (row.kind === 'topic') return [row.text || '', 'N/A', 'N/A'];
+    var assignee = row.assignee || '';
+    if (isSpeakerLabel(assignee)) assignee = '';
+    return [row.text || '', assignee || DASH, row.due || DASH];
   }
 
-  /* Rows can be laid out UNDER their topics only when they came from the
-     topics, where the i-th row is the i-th open item in group order. Brief
-     rows carry no topic at all, so they are one flat block and the topic
-     blocks that follow carry nothing but their photos. The length check is
-     the invariant, not an assumption about it. */
-  function laysOutPerTopic(model) {
-    var items = model.groups.reduce(function (n, g) { return n + g.items.length; }, 0);
-    return model.rowsSource !== 'brief' && (model.rows || []).length === items;
-  }
-
-  /* The table's blocks in render order — walked by the HTML flavour, the
-     text flavour and the on-screen preview, so the three cannot drift into
-     showing different documents. */
+  /* The table's rows in render order — walked by the HTML flavour, the text
+     flavour and the on-screen preview, so the three cannot drift into
+     showing different documents. One flat table: every action row, then
+     every topic row (§1.2) — `model.rows` is already in that order. */
   function previewBlocks(model) {
-    var blocks = [];
-    var rows = model.rows || [];
-    if (laysOutPerTopic(model)) {
-      var i = 0;
-      model.groups.forEach(function (g) {
-        blocks.push({ kind: 'topic', group: g });
-        g.items.forEach(function () { blocks.push({ kind: 'row', row: rows[i++] }); });
-        /* Photos sit INSIDE the topic block, which is the whole point: the
-           evidence stays with the claim it evidences. */
-        if (g.photos.length) blocks.push({ kind: 'photos', group: g });
-      });
-    } else {
-      rows.forEach(function (r) { blocks.push({ kind: 'row', row: r }); });
-      model.groups.forEach(function (g) {
-        if (!g.photos.length) return;
-        blocks.push({ kind: 'topic', group: g });
-        blocks.push({ kind: 'photos', group: g });
-      });
-    }
-    return blocks;
+    return (model.rows || []).map(function (row) { return { kind: 'row', row: row }; });
+  }
+
+  /* The topic groups that still carry a photo, in topic order — walked by
+     both renderers and the on-screen preview to put the photo section below
+     the table, grouped under the topic title that evidences it (§3). */
+  function photoGroups(model) {
+    return (model.groups || []).filter(function (g) { return g.photos && g.photos.length; });
   }
 
   /* photoSrc maps a filename to an embeddable src. A filename with no entry
@@ -294,7 +314,8 @@
     var TH = 'padding:6px 10px;text-align:left;font-size:11px;letter-spacing:.05em;'
       + 'color:#486581;border-bottom:2px solid #9fb3c8;white-space:nowrap';
     var TD = 'padding:6px 10px;vertical-align:top;border-bottom:1px solid #d9e2ec';
-    var LABEL = 'padding:12px 10px 4px;font-weight:600;border-bottom:1px solid #d9e2ec';
+    var TD_TOPIC = TD + ';color:#666';
+    var LABEL = 'padding:12px 10px 4px;font-weight:600';
     var out = [];
 
     out.push('<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#102A43">');
@@ -306,32 +327,27 @@
     }).join('') + '</tr></thead><tbody>');
 
     previewBlocks(model).forEach(function (b) {
-      if (b.kind === 'topic') {
-        out.push('<tr><td colspan="3" style="' + LABEL + '">' + esc(b.group.topicTitle)
-          + (b.group.timeRange ? ' <span style="font-weight:400;color:#627d98">('
-              + esc(b.group.timeRange) + ')</span>' : '') + '</td></tr>');
-        return;
-      }
-      if (b.kind === 'row') {
-        out.push('<tr>' + cellsFor(b.row).map(function (c) {
-          /* An unstated column is an empty <td>. Not a dash, not a
-             non-breaking space: an empty cell is the only thing that says
-             nothing. */
-          return '<td style="' + TD + '">' + esc(c) + '</td>';
-        }).join('') + '</tr>');
-        return;
-      }
-      var srcs = b.group.photos.map(function (f) { return photoSrc[f]; }).filter(Boolean);
-      if (!srcs.length) return;
-      out.push('<tr><td colspan="3" style="' + TD + '">'
-        + srcs.map(function (src) {
-            return '<img src="' + src + '" style="max-width:420px;height:auto;'
-              + 'margin:0 8px 8px 0;border:1px solid #d9e2ec;border-radius:4px" />';
-          }).join('')
-        + '</td></tr>');
+      var isTopic = b.row.kind === 'topic';
+      out.push('<tr>' + cellsFor(b.row).map(function (c) {
+        return '<td style="' + (isTopic ? TD_TOPIC : TD) + '">' + esc(c) + '</td>';
+      }).join('') + '</tr>');
     });
 
     out.push('</tbody></table>');
+
+    /* Photos below the table, grouped under their topic's title — no longer
+       interleaved with the rows, since the table is flat now (§3). */
+    photoGroups(model).forEach(function (g) {
+      var srcs = g.photos.map(function (f) { return photoSrc[f]; }).filter(Boolean);
+      out.push('<p style="' + LABEL + '">' + esc(g.topicTitle) + '</p>');
+      if (srcs.length) {
+        out.push('<p>' + srcs.map(function (src) {
+          return '<img src="' + src + '" style="max-width:420px;height:auto;'
+            + 'margin:0 8px 8px 0;border:1px solid #d9e2ec;border-radius:4px" />';
+        }).join('') + '</p>');
+      }
+    });
+
     out.push('<p style="color:#627d98;font-size:12px">' + esc(model.footer) + '</p>');
     out.push('</div>');
     return out.join('');
@@ -362,18 +378,20 @@
     lines.push(pipe(COLUMNS));
     lines.push('| --- | --- | --- |');
 
-    previewBlocks(model).forEach(function (b) {
-      if (b.kind === 'topic') {
-        lines.push(pipe(['**' + b.group.topicTitle
-          + (b.group.timeRange ? ' (' + b.group.timeRange + ')' : '') + '**', '', '']));
-        return;
-      }
-      if (b.kind === 'row') { lines.push(pipe(cellsFor(b.row))); return; }
-      /* The text flavour cannot carry an image, so it says the photos exist
-         rather than losing them silently. */
-      lines.push(pipe(['[' + b.group.photos.length + ' photo'
-        + (b.group.photos.length === 1 ? '' : 's') + ' attached above]', '', '']));
-    });
+    previewBlocks(model).forEach(function (b) { lines.push(pipe(cellsFor(b.row))); });
+
+    /* The text flavour cannot carry an image, so it says the photos exist —
+       below the table, grouped under their topic's title — rather than
+       losing them silently. */
+    var groupsWithPhotos = photoGroups(model);
+    if (groupsWithPhotos.length) {
+      lines.push('');
+      groupsWithPhotos.forEach(function (g) {
+        lines.push('**' + g.topicTitle + '**');
+        lines.push('[' + g.photos.length + ' photo'
+          + (g.photos.length === 1 ? '' : 's') + ' attached below]');
+      });
+    }
 
     lines.push('');
     lines.push(model.footer);
@@ -557,66 +575,72 @@
               return h('th', { key: ci, scope: 'col' }, c);
             }))),
           h('tbody', null, previewBlocks(model).map(function (b, bi) {
-            if (b.kind === 'topic') {
-              return h('tr', { key: bi, className: 'fs-email-preview__topic-row' },
-                h('td', { colSpan: 3 },
-                  b.group.topicTitle, b.group.timeRange
-                    ? h('span', { className: 'fs-email-preview__time' },
-                        ' (' + b.group.timeRange + ')')
-                    : null));
-            }
-            if (b.kind === 'row') {
-              return h('tr', { key: bi }, cellsFor(b.row).map(function (c, ci) {
-                return h('td', { key: ci }, c);
-              }));
-            }
-            return h('tr', { key: bi },
-              h('td', { colSpan: 3 },
-                h('div', { className: 'fs-email-preview__photos' },
-                  b.group.photos.map(function (f, pi) {
-                    return photoSrc[f]
-                      ? h('img', {
-                          key: pi, src: photoSrc[f], alt: f,
-                          className: 'fs-email-preview__photo',
-                          /* No crossOrigin here, and that is now a measured
-                             decision rather than an oversight.
-
-                             The preview fetches without CORS and the copy
-                             fetches the same URL with it, which looks like
-                             the classic cache-taint trap -- the second
-                             request served from the first's CORS-less entry,
-                             tainting the canvas and silently dropping every
-                             photo. It was shipped as a suspect for exactly
-                             the reported symptom (photos visible, absent
-                             once pasted).
-
-                             Then it was measured, against a local image
-                             served with the same headers the bucket sends:
-
-                               no-crossOrigin first        -> TAINTED
-                               crossOrigin after it        -> CLEAN
-
-                             Chrome keys the cache by CORS mode, so the
-                             preview's fetch cannot poison the copy's. The
-                             hypothesis is refuted and the attribute is gone
-                             again; leaving it would be a permanent fix for
-                             a problem that does not exist, with a retry
-                             path to maintain. */
-                          /* A photo that will not load must leave no trace. A
-                             broken-image icon in a PREVIEW reads as "the app is
-                             broken", when the truth is narrower: this one file
-                             is unreachable (expired presign, deleted object,
-                             or mock mode with no real media behind it). The
-                             copy path already skips what it cannot read, so
-                             hiding it here keeps the two views honest with each
-                             other. */
-                          onError: function (e) { e.target.style.display = 'none'; },
-                        })
-                      : h('span', { key: pi, className: 'fs-email-preview__photo-pending' },
-                          'loading photo…');
-                  }))));
+            var isTopic = b.row.kind === 'topic';
+            return h('tr', {
+              key: bi,
+              className: isTopic ? 'fs-email-preview__topic-row' : undefined,
+            }, cellsFor(b.row).map(function (c, ci) {
+              return h('td', { key: ci }, c);
+            }));
           }))),
-        model.totalItems === 0
+        /* Photos below the table, grouped under their topic's title — no
+           longer interleaved with the rows, since the table is flat now. */
+        photoGroups(model).length
+          ? h('div', { className: 'fs-email-preview__photo-section' },
+              photoGroups(model).map(function (g, gi) {
+                return h('div', { key: gi, className: 'fs-email-preview__photo-group' },
+                  h('p', { className: 'fs-email-preview__photo-group-title' }, g.topicTitle),
+                  h('div', { className: 'fs-email-preview__photos' },
+                    g.photos.map(function (f, pi) {
+                      return photoSrc[f]
+                        ? h('img', {
+                            key: pi, src: photoSrc[f], alt: f,
+                            className: 'fs-email-preview__photo',
+                            /* No crossOrigin here, and that is now a measured
+                               decision rather than an oversight.
+
+                               The preview fetches without CORS and the copy
+                               fetches the same URL with it, which looks like
+                               the classic cache-taint trap -- the second
+                               request served from the first's CORS-less entry,
+                               tainting the canvas and silently dropping every
+                               photo. It was shipped as a suspect for exactly
+                               the reported symptom (photos visible, absent
+                               once pasted).
+
+                               Then it was measured, against a local image
+                               served with the same headers the bucket sends:
+
+                                 no-crossOrigin first        -> TAINTED
+                                 crossOrigin after it        -> CLEAN
+
+                               Chrome keys the cache by CORS mode, so the
+                               preview's fetch cannot poison the copy's. The
+                               hypothesis is refuted and the attribute is gone
+                               again; leaving it would be a permanent fix for
+                               a problem that does not exist, with a retry
+                               path to maintain. */
+                            /* A photo that will not load must leave no trace. A
+                               broken-image icon in a PREVIEW reads as "the app is
+                               broken", when the truth is narrower: this one file
+                               is unreachable (expired presign, deleted object,
+                               or mock mode with no real media behind it). The
+                               copy path already skips what it cannot read, so
+                               hiding it here keeps the two views honest with each
+                               other. */
+                            onError: function (e) { e.target.style.display = 'none'; },
+                          })
+                        : h('span', { key: pi, className: 'fs-email-preview__photo-pending' },
+                            'loading photo…');
+                    })));
+              }))
+          : null,
+        /* "Nothing outstanding" compares against the TABLE — a topic-only
+           session (no action items, but something to say about the day) is
+           not empty, and must not read as if there is no hand-off to send
+           (mirrors the backend's confirmation email, which renders the
+           table for exactly this case). */
+        model.rows.length === 0
           ? h('p', { className: 'fs-email-preview__empty' },
               'Nothing outstanding — there is no hand-off to send.')
           : null,
@@ -643,7 +667,7 @@
         h('button', {
           type: 'button', className: 'fs-btn fs-btn--primary',
           onClick: onCopy,
-          disabled: copyState === 'copying' || model.totalItems === 0,
+          disabled: copyState === 'copying' || model.rows.length === 0,
         }, copyLabel),
       ),
     );
@@ -659,6 +683,10 @@
       renderEmailText: renderEmailText,
       skipSummary: skipSummary,
       actionLine: actionLine,
+      topicRowText: topicRowText,
+      isSpeakerLabel: isSpeakerLabel,
+      cellsFor: cellsFor,
+      TOPIC_ROW_MAX_CHARS: TOPIC_ROW_MAX_CHARS,
     };
   }
 }());

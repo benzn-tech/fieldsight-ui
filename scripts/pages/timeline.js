@@ -2119,10 +2119,12 @@
 
        DEFERRED until the hand-off is opened; see shouldLoadBriefs for why.
 
-       A PARTIAL set is not a problem to work around. buildPreviewModel
-       refuses a brief set that yields fewer rows than the topics already
-       yield, so a day whose briefs half-loaded falls back to action_items —
-       the table this hand-off has always had, never an empty one. */
+       A PARTIAL set is handed to buildPreviewModel exactly as fetched, not
+       padded or worked around here. As of the 2026-09-18 handoff-sync plan
+       (§0/§1.3), "if a brief exists, use it" is unconditional — a brief
+       with at least one task IS the action-row source, even when another
+       session's fetch failed and its own commitments are not in it. Only a
+       day where NOTHING usable loaded falls back to action_items. */
     var refBriefs    = React.useState([]);
     var dayBriefs    = refBriefs[0];
     var setDayBriefs = refBriefs[1];

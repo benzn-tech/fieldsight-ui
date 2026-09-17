@@ -21,8 +21,15 @@
  *   - The fetched shape is the shape the model reads. getSessionBrief resolves
  *     the ARTIFACT; buildPreviewModel reads `b.brief`. Hand one straight to
  *     the other and every row vanishes with no error anywhere.
- *   - A failed or half-loaded fetch falls back to action_items. The table the
- *     hand-off has always had is the floor; an empty table is never the answer.
+ *   - A totally failed fetch (no brief loaded at all) falls back to
+ *     action_items. A HALF-loaded fetch does not: the 2026-09-18
+ *     handoff-sync plan (§0/§1.3) removed the row-count floor that used to
+ *     force a fallback whenever a brief said less than the topics did — "if
+ *     a brief exists, use it" is now unconditional. The two tests below
+ *     that used to pin the floor's protection now pin its deliberate
+ *     absence instead, so the new, more surprising behaviour (a session
+ *     with no brief of its own silently drops out of the table the moment
+ *     ANY session's brief exists) is visible rather than assumed away.
  */
 
 const test = require('node:test');
@@ -227,11 +234,18 @@ test('a rejected brief fetch drops that session and nothing else', async () => {
   assert.ok(out.every(Boolean), 'a failure must leave no hole in the list');
 });
 
-test('a half-loaded brief set renders the action_items table, never an empty one', async () => {
-  /* The floor in buildPreviewModel is doing the work here, and that is the
-     point: a partial set is EXACTLY what it exists to catch, so the honest
-     thing is to hand it over and let it refuse — not to dress a partial set up
-     as a complete one. */
+test('a half-loaded brief set is still used whole — the floor that used to catch this is gone', async () => {
+  /* 2026-09-18 handoff-sync plan §0/§1.3: "if a brief exists, use it. The
+     row-count floor goes." Before that decision, buildPreviewModel refused a
+     brief that said less than the topics' own action items, specifically to
+     catch exactly this case — one session's brief loaded, the other's
+     fetch failed, and the two-meeting day would otherwise read as
+     one-meeting. That refusal is deliberately removed: a brief with at
+     least one task now IS the source, full stop, even when it is missing a
+     whole session's worth of commitments. This test used to pin the old
+     refusal; it now pins the new, more surprising consequence, so the
+     removal is a decision someone can see rather than a floor that quietly
+     stopped existing. */
   const { loadSessionBriefs } = loadTimeline({
     getSessionBrief: async (o) => {
       if (o.sessionId === 's2') throw new Error('network');
@@ -245,11 +259,11 @@ test('a half-loaded brief set renders the action_items table, never an empty one
       action_items: [{ action: 'Order mesh', status: 'open' }] })],
     briefs: briefs,
   });
-  assert.strictEqual(model.rowsSource, 'action_items',
-    'one brief cannot stand in for two meetings');
-  assert.strictEqual(model.rows.length, 2,
-    'both commitments stay on the table — a hand-off that drops one is worse '
-    + 'than one that reads badly, and an empty one is worse than both');
+  assert.strictEqual(model.rowsSource, 'brief',
+    'a brief with at least one task is the source, even a half-loaded set');
+  assert.deepStrictEqual(model.rows.map((r) => r.text), ['Redo the west wall'],
+    "s2's own action item is not merged in — there is no per-session mixing, "
+    + 'only "brief entirely, or action_items entirely"');
 });
 
 test('a pending or denied brief is no brief, and neither is an error', async () => {
@@ -355,11 +369,20 @@ test('a topic with no session_id still reaches the table', async () => {
     { date: '2026-03-01', user: 'Ben_Lin' });
   const model = buildPreviewModel({ topics: [topic(), loose], briefs: briefs });
   const texts = model.rows.map((r) => r.text);
-  assert.ok(texts.indexOf('Chase the producer statement') !== -1,
-    'the session-less topic lost its row the moment a brief was passed — the '
-    + 'brief covers the sessions, and nothing covers this one');
-  assert.strictEqual(model.rowsSource, 'action_items',
-    'and the reason it survives is the floor, which is the whole point of it');
+  /* Plan §0/§1.3 removed the row-count floor that used to keep this row on
+     the table: "if a brief exists, use it", full stop. A brief covers the
+     sessions it was written for, and nothing covers a session-less topic —
+     so its action item is dropped from the action-row view the moment ANY
+     usable brief exists, the same consequence pinned above for a
+     half-loaded brief set. It also does not become a TOPIC row (§1.5),
+     because it produced an action item; a topic row is only for one that
+     produced none at all. This is the row that most needs a brief to
+     succeed on every session, not just some of them — recorded here as a
+     known, deliberate gap rather than a silent one. */
+  assert.strictEqual(texts.indexOf('Chase the producer statement'), -1,
+    'the session-less topic\'s row is gone now that a brief with at least '
+    + 'one task exists — there is no floor left to keep it');
+  assert.strictEqual(model.rowsSource, 'brief');
 });
 
 test('picking one meeting narrows the briefs the same way it narrows the topics', () => {
