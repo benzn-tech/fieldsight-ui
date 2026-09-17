@@ -112,7 +112,7 @@
   <script type="text/babel" src="scripts/composites/tooltip.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/toast.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/modal-overlay.js?v=1"></script>
-  <script type="text/babel" src="scripts/composites/email-preview-modal.js?v=12"></script>
+  <script type="text/babel" src="scripts/composites/email-preview-modal.js?v=13"></script>
   <script type="text/babel" src="scripts/composites/session-report-modal.js?v=5"></script>
   <script type="text/babel" src="scripts/composites/recording-delete-modal.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/safety-create-modal.js?v=3"></script>
@@ -1523,24 +1523,37 @@
                 }}
               />
               <ModalTrigger
-                label="Hand-off — Part 2: covered topic (no dup) + back-filled item"
+                label="Hand-off — Part 2: suppressed-by-text topic + kept topic + back-filled item"
                 Modal={EmailPreviewModal}
                 props={{
                   open: true,
                   date: '2026-09-11',
                   siteName: 'Ormiston College',
                   // §7/§9, from the real 2026-09-11 session this plan is
-                  // reasoning about. Topic 1 is COVERED (the brief task's
-                  // `at` 13:40:43 falls inside the topic's own 13:40 – 13:41
-                  // range) — it produced no action item, but it never sinks
-                  // to the bottom as a topic row either, because the brief
-                  // already said the same thing as a real row. Its photo
-                  // still travels below the table (§7.2/§3): coverage only
-                  // suppresses the DUPLICATE PROSE, not the evidence.
-                  // Topic 2's extraction item has a due date the brief never
-                  // mentioned (its best overlap with either brief task is
-                  // low) — that item is back-filled after the brief's own
-                  // rows, which is how the 2026-09-11 email lost it before.
+                  // reasoning about — and from the fix round that replaced
+                  // time-based "coverage" with a text test after that rule
+                  // measurably ate content (a Papakura topic suppressed by
+                  // a same-time-window KCD task that never mentioned it).
+                  //
+                  // Topic 1 is SUPPRESSED: its row text ("Ormiston College
+                  // 360 Inspections — Speaker hopes to visit the MPI site
+                  // with DeAndre.") is represented (Jaccard > 0.30) in one
+                  // of session s1's own brief tasks, which is a paraphrase
+                  // of the same commitment — so it never sinks to the
+                  // bottom as a topic row. Its photo still travels below
+                  // the table (§7.2/§3): suppression only removes the
+                  // DUPLICATE PROSE, not the evidence.
+                  //
+                  // Topic 2's extraction item has a due date neither brief
+                  // task is about (low overlap either way) — back-filled
+                  // after the brief's own rows, which is how the
+                  // 2026-09-11 email lost it before.
+                  //
+                  // Topic 3 is KEPT as a topic row: nothing in s1's brief
+                  // mentions Papakura at all, so — unlike the old
+                  // time-based rule, which would have suppressed it purely
+                  // for sharing a clock window with an unrelated task —
+                  // the text test correctly leaves it on the table.
                   topics: [
                     { topic_id: 1, session_id: 's1',
                       topic_title: 'Ormiston College 360 Inspections', time_range: '13:40 – 13:41',
@@ -1552,11 +1565,16 @@
                         { action: 'PS4 for the Port Com SR study to be signed', deadline: '2027-01-31', status: 'open' },
                       ],
                       related_photos: [] },
+                    { topic_id: 3, session_id: 's1',
+                      topic_title: 'Papakura Progress and Modulars', time_range: '13:42 – 13:44',
+                      summary: 'Papakura is mid-program with good positioning and progressing well.',
+                      action_items: [],
+                      related_photos: [] },
                   ],
                   briefs: [
                     { sessionId: 's1', brief: { status: 'ready', tasks: [
                       { text: 'Start QA pour checks and create report on Port Com concrete once 28-day cure ends', at: '10:05:00', assignee: 'Sam' },
-                      { text: 'Visit MPI site with DeAndre to see comprehensive open-space usage pattern', at: '13:40:43' },
+                      { text: 'Visit MPI site with DeAndre to review open-space usage pattern after Ormiston College 360 inspections.', at: '13:40:43' },
                     ] } },
                   ],
                 }}
@@ -1574,12 +1592,14 @@
                 "N/A" / "N/A", greyed. The fourth fixture's table reads "Redo the west wall to line
                 before the next pour" (s1, substituted by its brief) followed by "Order mesh for
                 the slab" (s2, kept — its brief never loaded) — a sibling session's success never
-                drops another session's own commitment. The sixth fixture is Part 2 (§7): its table
-                reads "Start QA pour checks…" then "Visit MPI site with DeAndre…" (both brief rows)
-                then "PS4 for the Port Com SR study to be signed" (back-filled — its due date
-                survived even though the brief never mentioned it). "Ormiston College 360
-                Inspections" never appears as a topic row — the brief task at 13:40:43 falls inside
-                its own 13:40 – 13:41 range, so it is covered — but its photo still renders in the
+                drops another session's own commitment. The sixth fixture is Part 2 (§7), now on the
+                TEXT rule: its table reads "Start QA pour checks…" then "Visit MPI site with
+                DeAndre…" (both brief rows) then "PS4 for the Port Com SR study to be signed"
+                (back-filled — its due date survived even though the brief never mentioned it) then
+                "Papakura Progress and Modulars — Papakura is mid-program…" (a topic row — nothing
+                in the brief is about Papakura, so it is kept). "Ormiston College 360 Inspections"
+                never appears as a topic row — its own text is a close paraphrase of one of s1's
+                brief tasks, so it is suppressed as a duplicate — but its photo still renders in the
                 photo section below the table, under its own title.
               </span>
             </Row>
