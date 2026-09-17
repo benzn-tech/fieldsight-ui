@@ -252,6 +252,13 @@ function brief(tasks) {
 
 test('with no brief the table is built from action_items exactly as today', () => {
   // Not an edge case: this is what every prod hand-off does right now.
+  //
+  // "Exactly as today" is compared against the WHOLE model, not a few fields
+  // of it. The first version of this test asserted that the right rows
+  // existed and would have stayed green through a change to `groups`, the
+  // subject or the intro — which is the very thing its name promises to
+  // catch. A test that pins less than it claims is worse than no test,
+  // because the next person reads the name and stops looking.
   const m = buildPreviewModel({
     topics: [topic({
       action_items: [
@@ -260,14 +267,34 @@ test('with no brief the table is built from action_items exactly as today', () =
       ],
     })],
   });
-  assert.strictEqual(m.rows.length, 2);
   assert.strictEqual(m.rowsSource, 'action_items');
   assert.deepStrictEqual(
-    m.rows.map((r) => [r.text, r.assignee, r.due]),
-    [['Redo the wall', 'John', 'Wed'], ['Chase the beam cert', '', '']]);
-  // and the groups the photos hang off are untouched
-  assert.strictEqual(m.groups.length, 1);
-  assert.strictEqual(m.totalItems, 2);
+    m.rows.map((r) => [r.text, r.at, r.assignee, r.due]),
+    [['Redo the wall', '09:00 – 09:20', 'John', 'Wed'],
+     ['Chase the beam cert', '09:00 – 09:20', '', '']]);
+
+  /* rows/rowsSource are F2's addition and are pinned above; everything else
+     must be byte-for-byte what the pre-F2 model was. */
+  const rest = Object.assign({}, m);
+  delete rest.rows;
+  delete rest.rowsSource;
+  assert.deepStrictEqual(rest, {
+    subject: 'Action items — All day',
+    intro: 'Outstanding action items from All day:',
+    groups: [{
+      topicTitle: 'Wall tolerance',
+      timeRange: '09:00 – 09:20',
+      category: '',
+      items: [
+        { action: 'Redo the wall', responsible: 'John', deadline: 'Wed' },
+        { action: 'Chase the beam cert', responsible: '', deadline: '' },
+      ],
+      photos: [],
+    }],
+    totalItems: 2,
+    totalPhotos: 0,
+    footer: 'Generated from FieldSight',
+  });
 });
 
 test('a day with two sessions produces ONE table carrying both briefs', () => {
@@ -351,4 +378,186 @@ test('a done item is still excluded and a topic with nothing open is still dropp
   assert.strictEqual(m.groups.length, 1, 'a topic with nothing open is not a hand-off');
   assert.strictEqual(m.groups[0].topicTitle, 'Wall tolerance');
   assert.deepStrictEqual(m.rows.map((r) => r.text), ['Redo the wall']);
+});
+
+/* ---- the hand-off is a three-column table ------------------------------- */
+
+/*
+ * The shape the product owner asked for, in their words: a header row
+ * `| AGENDA ITEM | ASSIGNED | DUE DATE |`, and blanks left blank —
+ * 有就有，没有就没有. No dash, no "Unassigned", no date invented to square a
+ * column off.
+ *
+ * The purpose that decides every ambiguous case below: the reader pastes
+ * this table into an email, and someone who was in the room has to be able
+ * to reconstruct each line from it without the recording.
+ */
+
+/* The cells of every pipe row in the text flavour, separator row dropped.
+   Splits on UNESCAPED pipes only: a cell may legitimately contain `\|`, and
+   the first version of this helper split on every pipe — which reported the
+   escaping as broken when it was the parser that was. */
+function textRows(txt) {
+  return txt.split('\n')
+    .filter((l) => l.trim().startsWith('|'))
+    .map((l) => l.trim().replace(/^\|/, '').replace(/\|$/, '')
+      .split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, '|')))
+    .filter((cells) => !cells.every((c) => /^-+$/.test(c)));
+}
+
+function findRow(txt, startsWith) {
+  return textRows(txt).find((cells) => cells[0].startsWith(startsWith));
+}
+
+test('both flavours carry the header row AGENDA ITEM / ASSIGNED / DUE DATE', () => {
+  const m = buildPreviewModel({ topics: [topic()] });
+  const html = renderEmailHtml(m, {});
+  assert.ok(html.includes('<table'), 'the hand-off is a table, not a list');
+  const thead = html.slice(html.indexOf('<thead'), html.indexOf('</thead>'));
+  ['AGENDA ITEM', 'ASSIGNED', 'DUE DATE'].forEach((c) => {
+    assert.ok(thead.includes('>' + c + '<'), c + ' is a column heading in the HTML flavour');
+  });
+  assert.deepStrictEqual(textRows(renderEmailText(m))[0],
+    ['AGENDA ITEM', 'ASSIGNED', 'DUE DATE']);
+});
+
+test('the plain-text flavour is a readable table too, not a bulleted list', () => {
+  // Every mail client picks the richest flavour it supports and some pick
+  // this one. A reader who gets a bulleted list instead of the table has been
+  // sent a different document from the one the sender previewed.
+  const m = buildPreviewModel({ topics: [topic()] });
+  const txt = renderEmailText(m);
+  assert.ok(!/^\s*[-*]\s/m.test(txt), 'no bulleted list survives in the text flavour');
+  const rows = textRows(txt);
+  assert.ok(rows.length >= 2, 'a header row and at least one item row');
+  rows.forEach((cells) => assert.strictEqual(cells.length, 3, 'every row has three columns'));
+});
+
+test('an unstated assignee or due date is an EMPTY cell, never a dash', () => {
+  // Blank stays blank. A dash, "Unassigned" or "TBC" each say something the
+  // meeting did not say, and the reader cannot tell an invented placeholder
+  // from a recorded one.
+  const m = buildPreviewModel({
+    topics: [topic({ action_items: [{ action: 'Chase the beam cert', status: 'open' }] })],
+  });
+  assert.deepStrictEqual(findRow(renderEmailText(m), 'Chase the beam cert').slice(1),
+    ['', ''], 'both unstated columns are empty');
+
+  const html = renderEmailHtml(m, {});
+  assert.ok(/<td[^>]*><\/td>/.test(html), 'an unstated column is an empty cell in HTML too');
+  assert.ok(!/<td[^>]*>\s*[—–-]\s*<\/td>/.test(html), 'no dash is used as filler');
+  assert.ok(!/Unassigned|No owner|TBC|TBD/i.test(html), 'nothing is invented to fill a column');
+});
+
+test('a row never folds the sentence together with its owner and date', () => {
+  // "Redo the wall — John (by Wed)" is exactly the register the table exists
+  // to replace: the owner and the date get their own columns, or they are not
+  // columns at all.
+  const m = buildPreviewModel({ topics: [topic()] });
+  const folded = actionLine({ action: 'Redo the wall', responsible: 'John', deadline: 'Wed' });
+  assert.strictEqual(folded, 'Redo the wall — John (by Wed)', 'still what actionLine does');
+  assert.ok(!renderEmailText(m).includes(folded), 'the fold is gone from the text flavour');
+  assert.ok(!renderEmailHtml(m, {}).includes(folded), 'and from the HTML flavour');
+  assert.deepStrictEqual(findRow(renderEmailText(m), 'Redo the wall'),
+    ['Redo the wall (09:00 – 09:20)', 'John', 'Wed']);
+});
+
+test('nothing truncates in the table, however long the day', () => {
+  // The mailto path drops items past its URL budget. This one must not — and
+  // the table must not quietly drop a row the model still carries.
+  const items = Array.from({ length: 80 }, (_, i) => ({
+    action: 'Item number ' + i + ' with a deliberately long description '.repeat(3),
+    status: 'open',
+  }));
+  const m = buildPreviewModel({ topics: [topic({ action_items: items })] });
+  const txt = renderEmailText(m);
+  assert.strictEqual(textRows(txt).filter((c) => c[0].startsWith('Item number')).length, 80);
+  assert.strictEqual((renderEmailHtml(m, {}).match(/Item number/g) || []).length, 80);
+  assert.ok(txt.includes(items[79].action), 'the longest line survives whole');
+});
+
+test('photos still sit INSIDE their topic block now that the rows are a table', () => {
+  // The whole reason this modal exists: "the wall is out of tolerance, John
+  // by Wednesday" and the photograph showing it are one block. A table that
+  // sweeps every photo into a gallery at the bottom has thrown that away.
+  const m = buildPreviewModel({
+    topics: [
+      topic({ related_photos: ['wall.jpg'] }),
+      topic({ topic_title: 'Second topic', action_items: [{ action: 'Other', status: 'open' }] }),
+    ],
+  });
+  const html = renderEmailHtml(m, { 'wall.jpg': 'data:image/jpeg;base64,AAA' });
+  const action = html.indexOf('Redo the wall');
+  const img = html.indexOf('data:image/jpeg');
+  const second = html.indexOf('Second topic');
+  assert.ok(action < img, 'the photo comes after its own topic\'s rows');
+  assert.ok(img < second, 'and before the next topic starts');
+  assert.ok(img < html.indexOf('</table>'), 'inside the table, not appended after it');
+});
+
+/* ---- `at` is two formats wearing one name ------------------------------- */
+
+test('a clock time and a topic time range are not rendered as the same fact', () => {
+  // A brief task's `at` is a clock time ("09:10:00"); a fallback row's `at`
+  // is the whole topic time_range ("09:00 – 09:20"). Rendered identically
+  // they read as one kind of fact and they are two: the moment something was
+  // said, versus the span it was discussed in.
+  const fromBrief = buildPreviewModel({
+    topics: [topic({ action_items: [] })],
+    briefs: [{ sessionId: 's1', brief: brief([{ text: 'Pour slab', at: '09:10:00' }]) }],
+  });
+  const fromTopics = buildPreviewModel({ topics: [topic()] });
+  assert.strictEqual(findRow(renderEmailText(fromBrief), 'Pour slab')[0],
+    'Pour slab (at 09:10:00)');
+  assert.strictEqual(findRow(renderEmailText(fromTopics), 'Redo the wall')[0],
+    'Redo the wall (09:00 – 09:20)');
+});
+
+test('a time_range is never sorted against a clock time', () => {
+  // "09:00 – 09:20" < "09:10:00" is a true string comparison and a
+  // meaningless time one, so a sort that saw both would misorder silently.
+  // Only brief rows — where every `at` is a clock time — are sorted at all;
+  // fallback rows keep the order the topics gave them.
+  const m = buildPreviewModel({
+    topics: [
+      topic({ topic_title: 'Said late', time_range: '15:00 – 15:20',
+              action_items: [{ action: 'said late', status: 'open' }] }),
+      topic({ topic_title: 'Said early', time_range: '08:00 – 08:20',
+              action_items: [{ action: 'said early', status: 'open' }] }),
+    ],
+  });
+  assert.deepStrictEqual(m.rows.map((r) => r.text), ['said late', 'said early'],
+    'topic order is kept — an order nobody stated is never imposed');
+  const order = textRows(renderEmailText(m)).map((c) => c[0]);
+  assert.ok(order.findIndex((t) => t.startsWith('said late'))
+          < order.findIndex((t) => t.startsWith('said early')));
+});
+
+test('a brief task with no time sorts LAST — absent is not early', () => {
+  // Blanks-last is implemented in buildPreviewModel and, until this test, was
+  // held down by nothing: deleting the clause or inverting it left the suite
+  // green. An undated commitment sorted to the top of a hand-off reads as the
+  // first thing that happened that morning.
+  const m = buildPreviewModel({
+    topics: [topic({ action_items: [] })],
+    briefs: [{ sessionId: 's1', brief: brief([
+      { text: 'no time at all' },
+      { text: 'ten past nine', at: '09:10:00' },
+      { text: 'eight sharp', at: '08:00:00' },
+    ]) }],
+  });
+  assert.deepStrictEqual(m.rows.map((r) => r.text),
+    ['eight sharp', 'ten past nine', 'no time at all']);
+});
+
+test('a literal pipe in the text cannot break the text table apart', () => {
+  // A task written "check level 2 | level 3 handover" would otherwise end its
+  // column early and shift every later cell one to the left.
+  const m = buildPreviewModel({
+    topics: [topic({ action_items: [
+      { action: 'Check level 2 | level 3 handover', responsible: 'Sam', status: 'open' }] })],
+  });
+  const cells = textRows(renderEmailText(m)).find((c) => c[0].startsWith('Check level 2'));
+  assert.strictEqual(cells.length, 3, 'still three columns');
+  assert.strictEqual(cells[1], 'Sam', 'the owner is still in the ASSIGNED column');
 });
