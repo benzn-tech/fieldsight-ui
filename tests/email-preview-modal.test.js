@@ -307,10 +307,12 @@ test('with no brief the table is built from action_items exactly as today', () =
 
 test('a day with two sessions produces ONE table carrying both briefs', () => {
   // "Preview & copy" is rendered per DAY; briefs are written per SESSION.
+  // Substitution is per session (fix round, 2026-09-18): each topic's
+  // `session_id` is what routes its row to its own session's brief.
   const m = buildPreviewModel({
     topics: [
-      topic({ action_items: [{ action: 'a', status: 'open' }] }),
-      topic({ topic_title: 'Second', action_items: [{ action: 'b', status: 'open' }] }),
+      topic({ session_id: 's1', action_items: [{ action: 'a', status: 'open' }] }),
+      topic({ session_id: 's2', topic_title: 'Second', action_items: [{ action: 'b', status: 'open' }] }),
     ],
     briefs: [
       { sessionId: 's1', brief: brief([{ text: 'Pour slab', at: '09:10:00', assignee: 'Sam', due: null }]) },
@@ -324,12 +326,20 @@ test('a day with two sessions produces ONE table carrying both briefs', () => {
   assert.strictEqual(m.rows[1].assignee, '');
 });
 
-test('rows are ordered by at, and two sessions sharing a clock time keep a stable order', () => {
-  // `at` is HH:MM:SS with no date and no session component, so two sessions
-  // recorded at the same hour collide. The tie-break is the order they were
-  // written in — session, then task — never an order nobody stated.
+test('a session\'s brief rows are ordered by at with a stable tie-break; sessions are never merged by time', () => {
+  // §1.3 fix round: substitution is per session, and a session's block is
+  // emitted whole, at the FIRST topic (in walk order) that belongs to it.
+  // Sessions are never interleaved or re-sorted against each other by `at` —
+  // only a session's OWN tasks are sorted against each other. Walk order
+  // decides block order, so the session reached SECOND in the topics array
+  // (s2) still comes second in the table even though its only task's clock
+  // time (09:00:00) is earlier than one of s1's.
   const m = buildPreviewModel({
-    topics: [topic({ action_items: [] })],
+    topics: [
+      topic({ session_id: 's1', action_items: [] }),
+      topic({ session_id: 's2', topic_title: 'Second session topic',
+              action_items: [{ action: 'superseded by the brief', status: 'open' }] }),
+    ],
     briefs: [
       { sessionId: 's1', brief: brief([
         { text: 'first-session-late', at: '09:00:00' },
@@ -340,7 +350,7 @@ test('rows are ordered by at, and two sessions sharing a clock time keep a stabl
       ]) },
     ],
   });
-  // The topic (no action items) sinks to the bottom, after every brief row —
+  // The topic (no action items) sinks to the bottom, after every action row —
   // §1.2/§1.3. It carries no `at` at all, which is exactly the point: a
   // topic row is never part of the at-ordered set.
   assert.deepStrictEqual(m.rows.map((r) => r.text),
@@ -366,6 +376,7 @@ test('the row-count floor is gone: a brief with fewer tasks than the topics stil
   // action_items rows instead — that floor is deliberately removed.
   const m = buildPreviewModel({
     topics: [topic({
+      session_id: 's1',
       action_items: [
         { action: 'Redo the wall', status: 'open' },
         { action: 'Chase the beam cert', status: 'open' },
@@ -382,11 +393,114 @@ test('a brief with zero tasks is treated as no brief at all', () => {
   // §1.3: "A brief with zero tasks is treated as no brief." An empty table
   // where the extraction had items would read as broken.
   const m = buildPreviewModel({
-    topics: [topic({ action_items: [{ action: 'Chase the beam cert', status: 'open' }] })],
+    topics: [topic({ session_id: 's1',
+      action_items: [{ action: 'Chase the beam cert', status: 'open' }] })],
     briefs: [{ sessionId: 's1', brief: brief([]) }],
   });
   assert.strictEqual(m.rowsSource, 'action_items');
   assert.deepStrictEqual(m.rows.map((r) => r.text), ['Chase the beam cert']);
+});
+
+/* ---- substitution is PER SESSION, never per day (fix round, 2026-09-18) - */
+
+/*
+ * The first cut of this plan read §1.3 ("if a brief exists, use it") as a
+ * day-wide switch: any one usable brief flipped the WHOLE table to the brief
+ * path, which silently dropped every other session's — and every
+ * session-less topic's — own commitment the moment that one brief loaded.
+ * That was a defect the coordinator caught in review, not accepted product
+ * behaviour: the rule is per session. A session's own usable brief (loaded,
+ * >= 1 task) replaces only THAT session's own action items; every item whose
+ * session has no usable brief — because its fetch failed, is still pending,
+ * has zero tasks, or the topic carries no session_id at all — stays exactly
+ * where it was. `rowsSource` is `'mixed'` whenever that produces a table
+ * with rows from both sources, which is the ordinary shape of a half-loaded
+ * day, not an edge case.
+ */
+
+test('two sessions, one briefed and one not: the briefed one substitutes, the other keeps its own item', () => {
+  const m = buildPreviewModel({
+    topics: [
+      topic({ session_id: 's1', action_items: [{ action: 'Redo the wall', status: 'open' }] }),
+      topic({ session_id: 's2', topic_title: 'Slab pour',
+        action_items: [{ action: 'Pour the slab', status: 'open' }] }),
+    ],
+    // s2's brief simply never loaded (a failed or still-pending fetch never
+    // reaches `opts.briefs` at all — see timeline.js's loadSessionBriefs).
+    briefs: [{ sessionId: 's1', brief: brief([
+      { text: 'Redo the west wall to line', at: '09:00:00', assignee: 'John', due: 'Wed' },
+    ]) }],
+  });
+  assert.strictEqual(m.rowsSource, 'mixed',
+    'one row substituted (s1), one stayed as extraction (s2) — this is not '
+    + 'fully "brief" and not fully "action_items"');
+  assert.deepStrictEqual(m.rows.map((r) => r.text),
+    ['Redo the west wall to line', 'Pour the slab'],
+    "s2's own extraction item must still be on the table — a sibling "
+    + "session's usable brief must never make it disappear");
+});
+
+test('a topic with no session_id keeps its own item even when a sibling session is briefed', () => {
+  const m = buildPreviewModel({
+    topics: [
+      topic({ session_id: 's1', action_items: [{ action: 'Redo the wall', status: 'open' }] }),
+      topic({ session_id: null, topic_title: 'Site walk',
+        action_items: [{ action: 'Chase the producer statement', status: 'open' }] }),
+    ],
+    briefs: [{ sessionId: 's1', brief: brief([
+      { text: 'Redo the west wall to line', at: '09:00:00', assignee: 'John', due: 'Wed' },
+    ]) }],
+  });
+  assert.strictEqual(m.rowsSource, 'mixed');
+  assert.deepStrictEqual(m.rows.map((r) => r.text),
+    ['Redo the west wall to line', 'Chase the producer statement'],
+    'a topic with no session_id can never be routed to anyone\'s brief, so '
+    + 'it always keeps its own extraction item');
+});
+
+test('a briefed session with zero tasks keeps its OWN items even beside a genuinely-briefed sibling', () => {
+  const m = buildPreviewModel({
+    topics: [
+      topic({ session_id: 's1', action_items: [{ action: 'Redo the wall', status: 'open' }] }),
+      topic({ session_id: 's2', topic_title: 'Slab pour',
+        action_items: [{ action: 'Pour the slab', status: 'open' }] }),
+    ],
+    briefs: [
+      { sessionId: 's1', brief: brief([
+        { text: 'Redo the west wall to line', at: '09:00:00', assignee: 'John', due: 'Wed' },
+      ]) },
+      { sessionId: 's2', brief: brief([]) },  // zero tasks = no usable brief, §1.3
+    ],
+  });
+  assert.strictEqual(m.rowsSource, 'mixed');
+  assert.deepStrictEqual(m.rows.map((r) => r.text),
+    ['Redo the west wall to line', 'Pour the slab']);
+});
+
+test('rowsSource is exactly "brief" when every row substituted, and "action_items" when none did', () => {
+  const allBrief = buildPreviewModel({
+    topics: [topic({ session_id: 's1' })],
+    briefs: [{ sessionId: 's1', brief: brief([{ text: 'Redo the west wall to line' }]) }],
+  });
+  assert.strictEqual(allBrief.rowsSource, 'brief');
+
+  const allExtraction = buildPreviewModel({ topics: [topic({ session_id: 's1' })] });
+  assert.strictEqual(allExtraction.rowsSource, 'action_items');
+});
+
+test('a briefed session with no matching topic contributes nothing (§1.3 rule 4)', () => {
+  // scopeBriefsToSession already narrows the briefs list on the caller side;
+  // this pins the model's OWN half of that guarantee — a session's brief
+  // sitting unused in `opts.briefs` must never surface rows on its own.
+  const m = buildPreviewModel({
+    topics: [topic({ session_id: 's1', action_items: [{ action: 'Redo the wall', status: 'open' }] })],
+    briefs: [
+      { sessionId: 's1', brief: brief([{ text: 'Redo the west wall to line' }]) },
+      { sessionId: 's9', brief: brief([{ text: 'Nobody\'s topic points here' }]) },
+    ],
+  });
+  assert.deepStrictEqual(m.rows.map((r) => r.text), ['Redo the west wall to line']);
+  assert.strictEqual(m.rowsSource, 'brief');
 });
 
 test('a done item is still excluded and a topic with nothing open is still dropped', () => {
@@ -501,7 +615,7 @@ test('a raw speaker label is not a name and renders as the em dash', () => {
   // §1.4: "spk_0", "spk_12" (case-insensitive) is what the diarizer wrote
   // when nobody stated an owner, not a name someone gave.
   const m = buildPreviewModel({
-    topics: [topic({ action_items: [] })],
+    topics: [topic({ session_id: 's1', action_items: [] })],
     briefs: [{ sessionId: 's1', brief: brief([
       { text: 'Chase the beam cert', at: '09:00:00', assignee: 'spk_0' },
       { text: 'Order mesh', at: '09:05:00', assignee: 'SPK_12' },
@@ -531,7 +645,7 @@ test('no time suffix appears in any cell', () => {
   // §1.6: no "(at 09:05:00)", no "(09:00 – 09:20)" — a brief task's clock
   // time and a fallback row's topic time_range are both dropped entirely.
   const fromBrief = buildPreviewModel({
-    topics: [topic({ action_items: [] })],
+    topics: [topic({ session_id: 's1', action_items: [] })],
     briefs: [{ sessionId: 's1', brief: brief([{ text: 'Pour slab', at: '09:10:00' }]) }],
   });
   const fromTopics = buildPreviewModel({ topics: [topic()] });
@@ -606,7 +720,7 @@ test('a brief task with no time sorts LAST — absent is not early', () => {
   // green. An undated commitment sorted to the top of a hand-off reads as the
   // first thing that happened that morning.
   const m = buildPreviewModel({
-    topics: [topic({ action_items: [] })],
+    topics: [topic({ session_id: 's1', action_items: [] })],
     briefs: [{ sessionId: 's1', brief: brief([
       { text: 'no time at all' },
       { text: 'ten past nine', at: '09:10:00' },
@@ -680,19 +794,20 @@ test('a topic row sits at the bottom of the SAME flat table, not a heading above
 
 /* ---- a brief is never slotted under topics by position ------------------- */
 
-test('brief rows and topic rows never interleave, regardless of counts matching', () => {
-  // Brief rows carry no topic — nothing maps task i to group i — so nothing
-  // in this model may ever lay them out one-per-open-item. Doing so would put
-  // "Pour slab to level 2" underneath "Wall tolerance" with the wall
-  // photograph attached to it: a photo of a wall offered as evidence of a
-  // slab. The old code guarded this with a length-equality special case;
-  // the new flat model has no such case to get wrong, and this test is what
-  // is left to prove that.
+test('a session\'s brief is emitted once, at its first topic; later topics of the same session add nothing', () => {
+  // Two topics sharing ONE session: nothing in this model may ever lay brief
+  // rows out one-per-topic by position — that would put "Pour slab to level
+  // 2" underneath "Wall tolerance" with the wall photograph attached to it,
+  // a photo of a wall offered as evidence of a slab. Substitution is per
+  // SESSION (fix round, 2026-09-18): the session's whole brief block is
+  // written once, at the first topic that belongs to it; the second topic of
+  // the SAME session contributes neither a second copy of the brief nor its
+  // own (now-superseded) extraction item.
   const m = buildPreviewModel({
     topics: [
-      topic({ related_photos: ['wall.jpg'],
+      topic({ session_id: 's1', related_photos: ['wall.jpg'],
               action_items: [{ action: 'Redo the wall', status: 'open' }] }),
-      topic({ topic_title: 'Slab pour', time_range: '10:00 – 10:20',
+      topic({ session_id: 's1', topic_title: 'Slab pour', time_range: '10:00 – 10:20',
               action_items: [{ action: 'Pour the slab', status: 'open' }] }),
     ],
     briefs: [{ sessionId: 's1', brief: brief([
@@ -701,9 +816,10 @@ test('brief rows and topic rows never interleave, regardless of counts matching'
     ]) }],
   });
 
-  assert.strictEqual(m.rowsSource, 'brief', 'an equal-length brief is still used');
+  assert.strictEqual(m.rowsSource, 'brief');
   assert.deepStrictEqual(m.rows.map((r) => r.text), ['Pour slab to level 2', 'Order mesh'],
-    'both topics produced action items, so there is no topic row at all here');
+    'the whole session is substituted once — "Pour the slab" (the second '
+    + "topic's own extraction item) never appears at all");
 
   // Said as the consequence rather than the shape: no brief row sits beneath
   // a topic heading, so no photo can be read as evidencing one.

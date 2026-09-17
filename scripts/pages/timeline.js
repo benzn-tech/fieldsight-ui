@@ -264,8 +264,8 @@
 
      A brief that is denied, not found, still pending or outright rejected
      contributes NOTHING — not a placeholder, not an empty shell. A placeholder
-     would be a claim the meeting said nothing, and rowsFromBriefs would count
-     it as a session that yielded no tasks.
+     would be a claim the meeting said nothing, and briefsBySession would
+     count it as a session that yielded no tasks.
 
      The wrapper is the contract buildPreviewModel reads: {sessionId, brief},
      with the artifact underneath. getSessionBrief resolves the artifact ITSELF
@@ -2121,10 +2121,14 @@
 
        A PARTIAL set is handed to buildPreviewModel exactly as fetched, not
        padded or worked around here. As of the 2026-09-18 handoff-sync plan
-       (§0/§1.3), "if a brief exists, use it" is unconditional — a brief
-       with at least one task IS the action-row source, even when another
-       session's fetch failed and its own commitments are not in it. Only a
-       day where NOTHING usable loaded falls back to action_items. */
+       (§0/§1.3, fix round the same day), "if a brief exists, use it" is
+       PER SESSION: a session's own usable brief (loaded, >= 1 task) replaces
+       THAT session's own action items, and never anyone else's. A session
+       whose own fetch failed, is still pending, or whose brief has zero
+       tasks keeps its extraction items exactly as before — a sibling
+       session's success can never make them disappear. `rowsSource` on the
+       model reflects the real mix: 'brief' only when every row substituted,
+       'action_items' only when none did, 'mixed' otherwise. */
     var refBriefs    = React.useState([]);
     var dayBriefs    = refBriefs[0];
     var setDayBriefs = refBriefs[1];

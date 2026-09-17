@@ -124,27 +124,38 @@
     return /^spk_\d+$/i.test(String(s == null ? '' : s).trim());
   }
 
-  /* Rows from the session briefs — one flat table for the whole day.
-     "Preview & copy" is rendered per DAY and a brief is written per SESSION,
-     so several briefs land in one table rather than one table each. */
-  function rowsFromBriefs(briefs) {
-    var rows = [];
-    briefs.forEach(function (b, si) {
+  /* A session's brief tasks, keyed by sessionId — usable ones only.
+     "Usable" (§1.3, fix round 2026-09-18): the session loaded a brief
+     (present in `opts.briefs`) AND it has at least one task. A brief with
+     zero tasks is treated as no brief at all for that session.
+
+     Substitution is now PER SESSION, not per day: this map only says what a
+     given session's brief WOULD contribute if that session comes up during
+     the topic walk in buildPreviewModel. It never decides, on its own,
+     whether any particular action item is replaced — a session with no
+     topic in `opts.topics` (e.g. scoped away) is simply never looked up,
+     which is how §1.3 rule 4 falls out for free rather than needing its own
+     check. */
+  function briefsBySession(briefs) {
+    var map = {};
+    (briefs || []).forEach(function (b) {
+      if (!b || !b.sessionId) return;
       var art = (b && b.brief) || {};
-      (art.tasks || []).forEach(function (t, ti) { rows.push(taskRow(t, si, ti)); });
+      var tasks = art.tasks || [];
+      if (!tasks.length) return;
+      var rows = tasks.map(function (t, ti) { return taskRow(t, 0, ti); });
+      /* `at` is HH:MM:SS with no date in it. Sorted within the session only
+         — there is no longer a day-wide merge to break ties across sessions
+         for, since a session's block is emitted whole, in one place. A row
+         with no time sorts last rather than first: absent is not early. */
+      rows.sort(function (a, c) {
+        if (!a.at !== !c.at) return a.at ? -1 : 1;
+        if (a.at !== c.at) return a.at < c.at ? -1 : 1;
+        return a.taskIndex - c.taskIndex;
+      });
+      map[b.sessionId] = rows;
     });
-    /* `at` is HH:MM:SS — no date in it, and nothing naming the session — so
-       two sessions recorded in the same hour collide. Session order then task
-       order breaks the tie, which is the order they were written in; a
-       sequence nobody stated must never be stored as if it were data. A row
-       with no time sorts last rather than first: absent is not early. */
-    rows.sort(function (a, b) {
-      if (!a.at !== !b.at) return a.at ? -1 : 1;
-      if (a.at !== b.at) return a.at < b.at ? -1 : 1;
-      if (a.sessionIndex !== b.sessionIndex) return a.sessionIndex - b.sessionIndex;
-      return a.taskIndex - b.taskIndex;
-    });
-    return rows;
+    return map;
   }
 
   /* One entry per topic that still has something outstanding, carrying its
@@ -155,40 +166,72 @@
     var topics = opts.topics || [];
     var isDone = typeof opts.isDone === 'function' ? opts.isDone : function () { return false; };
     var groups = [];
-    var fallbackRows = [];
+
+    /* Substitution is PER SESSION (fix round, 2026-09-18): "if a brief
+       exists, use it" means a session's brief replaces THAT session's own
+       action items, never another session's. `emittedSessions` makes sure
+       a briefed session's block is written exactly once, at the FIRST topic
+       (in walk order) that belongs to it — every later topic of the same
+       session contributes nothing further, brief or extraction, because its
+       commitments already rode in on that first block. */
+    var briefRowsBySession = briefsBySession(opts.briefs || []);
+    var emittedSessions = {};
+    var actionRows = [];
+    var fromBriefCount = 0;
+    var fromExtractionCount = 0;
 
     topics.forEach(function (t) {
       var open = (t.action_items || []).filter(function (a, idx) {
         if (a && a.status) return a.status !== 'done';
         return !isDone(a, t.topic_id, idx);
       });
-      if (!open.length) return;
-      groups.push({
-        topicTitle: t.topic_title || t.title || 'Untitled topic',
-        timeRange:  t.time_range || '',
-        category:   t.category || '',
-        items: open.map(function (a) {
-          return {
-            action:      a.action || a.text || '',
-            responsible: a.responsible || '',
-            deadline:    a.deadline || a.deadline_text || '',
-          };
-        }),
-        photos: (t.related_photos || []).slice(),
-      });
-      /* The same open items as a flat table. An action_item carries no clock
-         time of its own; the topic it was raised under does, and that is the
-         closest true answer to "when" — nearer than a blank, and honest in a
-         way an invented timestamp is not. */
+      if (open.length) {
+        groups.push({
+          topicTitle: t.topic_title || t.title || 'Untitled topic',
+          timeRange:  t.time_range || '',
+          category:   t.category || '',
+          items: open.map(function (a) {
+            return {
+              action:      a.action || a.text || '',
+              responsible: a.responsible || '',
+              deadline:    a.deadline || a.deadline_text || '',
+            };
+          }),
+          photos: (t.related_photos || []).slice(),
+        });
+      }
+
+      var sid = t.session_id;
+      var briefRows = sid ? briefRowsBySession[sid] : null;
+
+      if (briefRows) {
+        if (!emittedSessions[sid]) {
+          emittedSessions[sid] = true;
+          briefRows.forEach(function (r) {
+            actionRows.push({ text: r.text, at: r.at, assignee: r.assignee, due: r.due });
+            fromBriefCount += 1;
+          });
+        }
+        /* This topic's own extraction items never surface once its session
+           has been substituted — that is the replacement, not a merge. */
+        return;
+      }
+
+      /* No usable brief for this session (fetch failed, still pending, or
+         zero tasks), or the topic carries no session_id at all: the
+         extraction's own open items stay on the table exactly as before.
+         An action_item carries no clock time of its own; the topic it was
+         raised under does, and that is the closest true answer to "when" —
+         nearer than a blank, and honest in a way an invented timestamp is
+         not. */
       open.forEach(function (a) {
-        fallbackRows.push({
+        actionRows.push({
           text:     a.action || a.text || '',
           at:       t.time_range || '',
           assignee: a.responsible || '',
           due:      a.deadline || a.deadline_text || '',
-          sessionIndex: 0,
-          taskIndex:    fallbackRows.length,
         });
+        fromExtractionCount += 1;
       });
     });
 
@@ -197,33 +240,22 @@
     var sessionLabel = (opts.session && (opts.session.title || opts.session.label)) || 'All day';
     var site = opts.siteName || '';
 
-    /* The brief is the exception, not the rule. prod runs SESSION_BRIEF=false
-       and holds zero brief artifacts, so the action_items path below is what
-       every hand-off actually takes today; the brief path is the one that has
-       to prove itself, which is why it is the branch and not the default.
-
-       No row-count floor: a brief with at least one task IS the source, full
-       stop. (§1.3) A brief with zero tasks is treated as no brief at all —
-       `rowsFromBriefs` on an empty `briefs` array returns `[]`, which reads
-       the same as "no brief produced anything", so no extra check is needed
-       here for that case. */
-    var briefs = opts.briefs || [];
-    var fromBriefs = briefs.length ? rowsFromBriefs(briefs) : [];
-    var rows, rowsSource;
-    if (fromBriefs.length) {
-      rows = fromBriefs;
-      rowsSource = 'brief';
-    } else {
-      rows = fallbackRows;
-      rowsSource = 'action_items';
-    }
+    /* `rowsSource` describes the ACTUAL mix of what ended up on the table,
+       not a day-wide policy choice — 'mixed' is a real, expected value the
+       moment one session substituted and another did not. */
+    var rowsSource = (fromBriefCount && fromExtractionCount) ? 'mixed'
+      : fromBriefCount ? 'brief'
+      : 'action_items';
 
     /* Topic rows (§1.5) sink to the bottom of the SAME table, after every
        action row. A topic belongs here only when its extraction produced NO
        action items AT ALL — raw presence, not "nothing still open" — because
        a topic whose only item was ticked off is already accounted for by
        having been in the action-row set once; listing it again here would
-       double it. */
+       double it. This is unaffected by brief substitution: a topic that had
+       action items superseded by its session's brief is not "topics that
+       produced no action items" — it produced some, they are just told a
+       different way. */
     var topicRows = [];
     topics.forEach(function (t) {
       if ((t.action_items || []).length) return;
@@ -242,7 +274,7 @@
          interleaved, no topic label rows breaking it up (§1.2). `groups` is
          kept alongside it only for photos, which now render below the table
          rather than inside it. */
-      rows: rows.concat(topicRows),
+      rows: actionRows.concat(topicRows),
       rowsSource: rowsSource,
       totalItems: totalItems,
       totalPhotos: totalPhotos,
