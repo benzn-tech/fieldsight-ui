@@ -478,7 +478,12 @@ test('D-c "Ask across everything" appears only when it means something, and re-a
   assert.deepStrictEqual(spy, [{}]);
   h.render({ user: 'Ben', context: {}, onContextChange });
   assert.strictEqual(h.asks.length, 2, 'the question was not asked again');
-  assert.deepStrictEqual(h.asks[1], { question: 'q', user: 'Ben' });
+  /* Task 11: the resend fires from the same effect that clears `msgs`, and
+     (matching real React) the closure `send()` runs in still holds the
+     PRE-clear log -- the prior turn under the old scope is still the
+     conversation's own history at the moment the widened question goes out. */
+  assert.deepStrictEqual(h.asks[1],
+    { question: 'q', user: 'Ben', history: [{ question: 'q', answer: 'a' }] });
 });
 
 test('D-d a scope key change clears the history; a user change does not', async () => {
