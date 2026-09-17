@@ -160,14 +160,28 @@ test('the mock serves a brief for a fixture session rather than an empty one', a
     'the fixture day carries action items — a brief with no tasks is the '
     + 'empty-stub claim that the feature is finished and the data absent');
   /* The task contract, whole. `build_brief_prompt` in session_brief.py asks
-     the model for exactly {text, at, assignee, due} and nothing else — `why`
-     and `basis` were dropped on purpose, the per-item context line folded
-     into the task's own sentence. Pinned as a SET so both directions are
-     red: a fifth key is a field the mock invented and no caller will ever
-     receive, a missing one is a field a caller reads as undefined. */
+     the model for exactly {text, at, assignee, due, section} and nothing else
+     — `why` and `basis` were dropped on purpose, the per-item context line
+     folded into the task's own sentence. Pinned as a SET so both directions
+     are red: a sixth key is a field the mock invented and no caller will ever
+     receive, a missing one is a field a caller reads as undefined.
+
+     `section` joined the contract on 2026-09-18 and is load-bearing here, not
+     decorative: the hand-off table sinks every brief section that NO task
+     claims, so a mock whose tasks claim nothing shows every topic twice. */
   assert.deepStrictEqual(Object.keys(brief.tasks[0]).sort(),
-    ['assignee', 'at', 'due', 'text'],
-    'a brief task is exactly {text, at, assignee, due}');
+    ['assignee', 'at', 'due', 'section', 'text'],
+    'a brief task is exactly {text, at, assignee, due, section}');
+  /* Behavioural, not just shape: the hand-off table sinks every section that
+     NO task claims. A task whose `section` names nothing therefore suppresses
+     nothing, and the local preview shows that topic twice -- once as a task,
+     once as a sunk row. Pinning the SHAPE alone would stay green through
+     exactly that defect. */
+  brief.tasks.forEach(function (t, i) {
+    assert.ok(brief.sections.some(function (s) { return s.title === t.section; }),
+      'tasks[' + i + '].section (' + JSON.stringify(t.section) + ') names no '
+      + 'section of this brief, so its section would sink as a duplicate row');
+  });
   assert.ok(brief.stats && typeof brief.stats === 'object',
     'every brief finalize writes carries a stats dict; null is only the '
     + 'pre-field default, and a caller reading brief.stats.X off a null '
@@ -205,11 +219,11 @@ test('the mock invents no field the live endpoint does not return', async () => 
   const SHAPES = {
     brief: ['headline', 'sections', 'entities', 'tasks', 'stats',
             'summary', 'open_todos', 'open_points', 'status'],
-    task: ['text', 'at', 'assignee', 'due'],
+    task: ['text', 'at', 'assignee', 'due', 'section'],
     section: ['title', 'bullets'],
     bullet: ['text', 'at', 'quote'],
     entity: ['name', 'aliases', 'kind', 'note'],
-    todo: ['text', 'responsible', 'due', 'at'],
+    todo: ['text', 'responsible', 'due', 'at', 'section'],
   };
   const shapeOf = (obj, kind, where) => assert.deepStrictEqual(
     Object.keys(obj).sort(), SHAPES[kind].slice().sort(),
