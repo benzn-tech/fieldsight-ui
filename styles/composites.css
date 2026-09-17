@@ -11934,9 +11934,15 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
    The preview renders the same three columns the clipboard payload does —
    a preview in a different shape from the payload is a preview of something
    else. (The old `__items` bullet list went with actionLine, and `__group` /
-   `__topic` went with the group-per-block markup the table replaced — a topic
-   label is now a `__topic-row` inside the table. All three are gone rather
-   than left behind with no consumer.) */
+   `__topic` went with the group-per-block markup the table replaced.)
+
+   2026-09-18 handoff-sync: the table is now ONE FLAT list — every action
+   row, then every topic row, nothing interleaved. `__topic-row` used to be
+   a bold heading that spanned the table; it is now an ordinary 3-cell row
+   whose ASSIGNED/DUE DATE cells read "N/A" (greyed, not a heading) — N/A is
+   not the em dash an unowned action shows (§0/§1.5 of the plan). Photos are
+   grouped under `__photo-section` / `__photo-group` BELOW the table now,
+   not inside it. */
 .fs-email-preview__table {
   width: 100%;
   border-collapse: collapse;
@@ -11957,12 +11963,16 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   border-bottom: 1px solid var(--border-subtle);
   overflow-wrap: anywhere;
 }
-/* A topic label spans the table so its photos stay inside its own block. */
-.fs-email-preview__topic-row td {
-  padding-top: 12px;
+/* A topic row (no action items at all) is greyed, matching the HTML email
+   flavour's inline `color:#666` (§1.5) — an ordinary row, not a heading. */
+.fs-email-preview__topic-row td { color: var(--text-tertiary); }
+
+.fs-email-preview__photo-section { margin-top: 12px; }
+.fs-email-preview__photo-group { margin-bottom: 12px; }
+.fs-email-preview__photo-group-title {
+  margin: 0 0 6px;
   font-weight: var(--font-weight-semibold);
 }
-
 .fs-email-preview__photos { display: flex; flex-wrap: wrap; gap: 8px; }
 .fs-email-preview__photo {
   max-width: 200px; height: auto;

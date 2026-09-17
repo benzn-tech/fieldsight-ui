@@ -21,8 +21,22 @@
  *   - The fetched shape is the shape the model reads. getSessionBrief resolves
  *     the ARTIFACT; buildPreviewModel reads `b.brief`. Hand one straight to
  *     the other and every row vanishes with no error anywhere.
- *   - A failed or half-loaded fetch falls back to action_items. The table the
- *     hand-off has always had is the floor; an empty table is never the answer.
+ *   - A session with no usable brief (fetch failed, still pending, or zero
+ *     tasks) never loses its own extraction items to another session's
+ *     success. The 2026-09-18 handoff-sync plan (§0/§1.3) removed the
+ *     row-count floor that used to force a whole-day fallback whenever a
+ *     brief said less than the topics did — "if a brief exists, use it" —
+ *     and the FIRST implementation of that misread it as a DAY-WIDE rule:
+ *     one session's usable brief made the entire table brief-sourced,
+ *     silently dropping a sibling session's or a session-less topic's own
+ *     commitment. That was a defect, caught in review and fixed the same
+ *     day (not accepted behaviour, and not left "recorded as a known gap"
+ *     — an earlier revision of these comments said exactly that, which was
+ *     itself the mistake). Substitution is per SESSION: a session's brief
+ *     only ever replaces the action items of TOPICS THAT BELONG TO IT.
+ *     `rowsSource` can now be `'mixed'` — some rows from a brief, some
+ *     still extraction — and that is the ordinary, expected shape of a
+ *     half-loaded day, not an edge case.
  */
 
 const test = require('node:test');
@@ -227,11 +241,15 @@ test('a rejected brief fetch drops that session and nothing else', async () => {
   assert.ok(out.every(Boolean), 'a failure must leave no hole in the list');
 });
 
-test('a half-loaded brief set renders the action_items table, never an empty one', async () => {
-  /* The floor in buildPreviewModel is doing the work here, and that is the
-     point: a partial set is EXACTLY what it exists to catch, so the honest
-     thing is to hand it over and let it refuse — not to dress a partial set up
-     as a complete one. */
+test('a half-loaded brief set substitutes ONLY the session that loaded — the other stays', async () => {
+  /* Fix round, 2026-09-18: the coordinator caught that the first cut of this
+     read "if a brief exists, use it" as a DAY-WIDE decision — any usable
+     brief made the whole table brief-sourced, so s2's fetch failing here
+     silently dropped its own commitment from the table. That was a defect,
+     not accepted behaviour: "use it" means per SESSION. s1 loaded a brief
+     and substitutes; s2's fetch failed, so s2's own extraction item stays
+     exactly where it was. Nothing is ever silently dropped by a sibling
+     session's success. */
   const { loadSessionBriefs } = loadTimeline({
     getSessionBrief: async (o) => {
       if (o.sessionId === 's2') throw new Error('network');
@@ -245,11 +263,12 @@ test('a half-loaded brief set renders the action_items table, never an empty one
       action_items: [{ action: 'Order mesh', status: 'open' }] })],
     briefs: briefs,
   });
-  assert.strictEqual(model.rowsSource, 'action_items',
-    'one brief cannot stand in for two meetings');
-  assert.strictEqual(model.rows.length, 2,
-    'both commitments stay on the table — a hand-off that drops one is worse '
-    + 'than one that reads badly, and an empty one is worse than both');
+  assert.strictEqual(model.rowsSource, 'mixed',
+    'one row came from a brief (s1), one stayed as an extraction item (s2) — '
+    + 'neither "brief" nor "action_items" alone describes this table');
+  assert.deepStrictEqual(model.rows.map((r) => r.text), ['Redo the west wall', 'Order mesh'],
+    "s2's own action item is still on the table — a sibling session's "
+    + 'successful brief must never make it disappear');
 });
 
 test('a pending or denied brief is no brief, and neither is an error', async () => {
@@ -311,13 +330,44 @@ test('the brief effect reuses the loaded session list rather than re-fetching it
 
 test('what the fetcher returns is the shape the model reads', async () => {
   /* The seam that would otherwise fail silently: getSessionBrief resolves the
-     ARTIFACT (status and tasks at the top level) and rowsFromBriefs reads
-     `b.brief`. Hand one straight to the other and every row disappears, the
-     floor waves the fallback through, and nothing anywhere reports a problem.
-     Driven through the real model rather than asserted against a key name,
-     and fed the FETCHER's own output rather than a hand-built wrapper — a
-     restated shape is exactly the thing that was already agreeing with itself
-     while the two ends disagreed. */
+     ARTIFACT (status and tasks at the top level) and `briefsBySession` (the
+     per-session substitution map, fix round 2026-09-18 — formerly
+     `rowsFromBriefs`) reads `b.brief`. Hand one straight to the other and
+     every row disappears, and nothing anywhere reports a problem. Driven
+     through the real model rather than asserted against a key name, and fed
+     the FETCHER's own output rather than a hand-built wrapper — a restated
+     shape is exactly the thing that was already agreeing with itself while
+     the two ends disagreed.
+
+     `topics` must carry a topic that actually belongs to s1: substitution is
+     topic-anchored now (§1.3 rule 4), so an empty topics array would prove
+     nothing — that shape is covered separately by "a briefed session with no
+     topics contributes nothing" below. */
+  const { loadSessionBriefs } = loadTimeline({
+    getSessionBrief: async () => readyBrief([
+      { text: 'Redo the west wall to line before the next pour', at: '09:12:00',
+        assignee: 'John', due: 'Wed' },
+    ]),
+  });
+  const briefs = await loadSessionBriefs([{ session_id: 's1' }],
+    { date: '2026-03-01', user: 'Ben_Lin' });
+  const model = buildPreviewModel({
+    topics: [topic({ session_id: 's1' })],
+    briefs: briefs,
+  });
+  assert.strictEqual(model.rowsSource, 'brief');
+  assert.strictEqual(model.rows.length, 1);
+  assert.strictEqual(model.rows[0].text,
+    'Redo the west wall to line before the next pour');
+  assert.strictEqual(model.rows[0].assignee, 'John');
+});
+
+test('a briefed session with no topics in scope contributes nothing', async () => {
+  // §1.3 rule 4: a session whose topics were all scoped away (e.g. by
+  // filterTopicsBySession) must not have its brief appear from nowhere.
+  // `scopeBriefsToSession` already narrows the briefs list for this; this
+  // test pins the OTHER half — the model itself must not resurrect a
+  // session's rows just because its brief is present in `opts.briefs`.
   const { loadSessionBriefs } = loadTimeline({
     getSessionBrief: async () => readyBrief([
       { text: 'Redo the west wall to line before the next pour', at: '09:12:00',
@@ -327,11 +377,9 @@ test('what the fetcher returns is the shape the model reads', async () => {
   const briefs = await loadSessionBriefs([{ session_id: 's1' }],
     { date: '2026-03-01', user: 'Ben_Lin' });
   const model = buildPreviewModel({ topics: [], briefs: briefs });
-  assert.strictEqual(model.rowsSource, 'brief');
-  assert.strictEqual(model.rows.length, 1);
-  assert.strictEqual(model.rows[0].text,
-    'Redo the west wall to line before the next pour');
-  assert.strictEqual(model.rows[0].assignee, 'John');
+  assert.strictEqual(model.rows.length, 0);
+  assert.strictEqual(model.rowsSource, 'action_items',
+    'zero rows from either source reads as the ordinary empty/fallback case');
 });
 
 /* ---------- 5. scope ------------------------------------------------------ */
@@ -339,7 +387,14 @@ test('what the fetcher returns is the shape the model reads', async () => {
 test('a topic with no session_id still reaches the table', async () => {
   /* Some topics carry no session_id at all — the report is the scope they
      have. "All day" is the scope the draft controls run in by default, and
-     filtering there is what would quietly drop them. */
+     filtering there is what would quietly drop them.
+
+     Fix round, 2026-09-18: the first cut of this test pinned a DEFECT (a
+     session-less topic's row silently disappearing the moment any OTHER
+     session had a usable brief) as if it were accepted behaviour. It is
+     not — substitution is per session, and a topic with no session_id can
+     never be routed to anyone's brief, so its extraction item must always
+     stay, regardless of what briefs exist for OTHER sessions. */
   const { filterTopicsBySession, loadSessionBriefs } = loadTimeline({
     getSessionBrief: async () => readyBrief([
       { text: 'Redo the west wall to line before the next pour', at: '09:12:00',
@@ -355,11 +410,12 @@ test('a topic with no session_id still reaches the table', async () => {
     { date: '2026-03-01', user: 'Ben_Lin' });
   const model = buildPreviewModel({ topics: [topic(), loose], briefs: briefs });
   const texts = model.rows.map((r) => r.text);
-  assert.ok(texts.indexOf('Chase the producer statement') !== -1,
-    'the session-less topic lost its row the moment a brief was passed — the '
-    + 'brief covers the sessions, and nothing covers this one');
-  assert.strictEqual(model.rowsSource, 'action_items',
-    'and the reason it survives is the floor, which is the whole point of it');
+  assert.notStrictEqual(texts.indexOf('Chase the producer statement'), -1,
+    "the session-less topic's own item stays — s1's usable brief only ever "
+    + 'substitutes s1\'s own topic');
+  assert.strictEqual(model.rowsSource, 'mixed',
+    "one row came from s1's brief, one stayed as an extraction item — "
+    + 'neither single label describes this table');
 });
 
 test('picking one meeting narrows the briefs the same way it narrows the topics', () => {
@@ -382,7 +438,18 @@ test('picking one meeting narrows the briefs the same way it narrows the topics'
    rename and stays green on a rewrite. The two tests below are the ones that
    watch the table. */
 
-test('an unscoped brief set puts the other meeting\'s task on the table', () => {
+test('an unscoped brief set cannot leak another meeting\'s task — substitution is topic-anchored', () => {
+  /* Before the fix round (2026-09-18), this test pinned a real defect: with
+     day-wide substitution, handing the model the WHOLE day's briefs while
+     the topics were already narrowed to one meeting still let the other
+     meeting's task onto the table. Per-session substitution removes that
+     failure mode structurally rather than by floor or scope-matching: a
+     session only ever contributes rows when one of ITS OWN topics is
+     walked, so s2's brief being present in `briefs` is irrelevant once
+     `topics` holds no s2 topic at all. Unscoped and scoped briefs now
+     produce the SAME table for the same (already topic-scoped) input —
+     proven here so a future rewrite that walks `briefs` instead of `topics`
+     reds immediately. */
   const { scopeBriefsToSession, filterTopicsBySession } = loadTimeline();
   const day = [
     { sessionId: 's1', brief: readyBrief([{ text: 'Redo the west wall to line',
@@ -396,24 +463,17 @@ test('an unscoped brief set puts the other meeting\'s task on the table', () => 
   assert.strictEqual(scopedTopics.length, 1,
     'the fixture must really be one meeting, or the rest of this proves nothing');
 
-  /* The defect, driven: one meeting's topics, the whole day's briefs. The
-     brief set is then the LARGER of the two, so the thinner-brief floor waves
-     it through and the table carries work from a meeting the user has just
-     filtered away — with no error and nothing on screen saying so. */
   const unscoped = buildPreviewModel({ topics: scopedTopics, briefs: day });
   assert.strictEqual(unscoped.rowsSource, 'brief');
-  assert.deepStrictEqual(unscoped.rows.map((r) => r.text),
-    ['Redo the west wall to line', 'Order mesh for the slab'],
-    'unscoped, the hand-off for ONE meeting lists both meetings');
+  assert.deepStrictEqual(unscoped.rows.map((r) => r.text), ['Redo the west wall to line'],
+    "s2's task never surfaces — s2 has no topic in scopedTopics, so its "
+    + "brief is never looked up, whether or not it is present in `briefs`");
 
   const scoped = buildPreviewModel({
     topics: scopedTopics, briefs: scopeBriefsToSession(day, 's1'),
   });
-  assert.strictEqual(scoped.rowsSource, 'brief',
-    'scoping must not knock the table off the brief path — one task against '
-    + 'one open item is EQUALITY, which the floor admits');
-  assert.deepStrictEqual(scoped.rows.map((r) => r.text), ['Redo the west wall to line'],
-    "the selected meeting's hand-off must carry only the selected meeting");
+  assert.deepStrictEqual(scoped.rows.map((r) => r.text), unscoped.rows.map((r) => r.text),
+    'scoping the briefs list changes nothing here — the topics list already decided');
 });
 
 test("the mount's own expression, evaluated, keeps the other meeting off", () => {

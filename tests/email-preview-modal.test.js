@@ -15,7 +15,8 @@ const assert = require('node:assert');
 global.window = global.window || {};
 global.document = global.document || {};
 
-const { buildPreviewModel, renderEmailHtml, renderEmailText, actionLine, skipSummary } =
+const { buildPreviewModel, renderEmailHtml, renderEmailText, actionLine, skipSummary,
+  topicRowText, isSpeakerLabel, TOPIC_ROW_MAX_CHARS } =
   require('../scripts/composites/email-preview-modal.js');
 
 function topic(over) {
@@ -90,9 +91,10 @@ test('missing owner or deadline simply drop out', () => {
 
 /* ---- photos stay with the claim they evidence --------------------------- */
 
-test('a photo renders inside its own topic block, after that block\'s actions', () => {
+test('a photo renders below the table, under the title of the topic it evidences', () => {
   // The whole reason for this modal: "the wall is out of tolerance, John by
-  // Wednesday" and the photograph showing it have to be one group.
+  // Wednesday" and the photograph showing it have to stay traceable to each
+  // other, even though the table itself is flat now (§3).
   const m = buildPreviewModel({
     topics: [
       topic({ related_photos: ['wall.jpg'] }),
@@ -100,11 +102,13 @@ test('a photo renders inside its own topic block, after that block\'s actions', 
     ],
   });
   const html = renderEmailHtml(m, { 'wall.jpg': 'data:image/jpeg;base64,AAA' });
+  const table = html.indexOf('</table>');
   const action = html.indexOf('Redo the wall');
   const img = html.indexOf('data:image/jpeg');
-  const second = html.indexOf('Second topic');
-  assert.ok(action < img, 'photo comes after its topic\'s actions');
-  assert.ok(img < second, 'photo stays before the next topic starts');
+  const title = html.indexOf('Wall tolerance');
+  assert.ok(action < table, 'the action text is inside the table');
+  assert.ok(table < title, 'the photo\'s topic title comes after the table');
+  assert.ok(title < img, 'and the photo itself follows its own title');
 });
 
 test('a photo with no embeddable source is omitted, never rendered broken', () => {
@@ -128,6 +132,10 @@ test('topic and action text is escaped into the HTML flavour', () => {
     topics: [topic({
       topic_title: 'Wall <script>alert(1)</script>',
       action_items: [{ action: 'Fix "it" & go', status: 'open' }],
+      // A photo so the malicious title still gets rendered somewhere (as the
+      // photo group's heading below the table) — a topic with neither an
+      // open item nor a photo never appears in either flavour at all.
+      related_photos: ['a.jpg'],
     })],
   });
   const html = renderEmailHtml(m, {});
@@ -299,10 +307,12 @@ test('with no brief the table is built from action_items exactly as today', () =
 
 test('a day with two sessions produces ONE table carrying both briefs', () => {
   // "Preview & copy" is rendered per DAY; briefs are written per SESSION.
+  // Substitution is per session (fix round, 2026-09-18): each topic's
+  // `session_id` is what routes its row to its own session's brief.
   const m = buildPreviewModel({
     topics: [
-      topic({ action_items: [{ action: 'a', status: 'open' }] }),
-      topic({ topic_title: 'Second', action_items: [{ action: 'b', status: 'open' }] }),
+      topic({ session_id: 's1', action_items: [{ action: 'a', status: 'open' }] }),
+      topic({ session_id: 's2', topic_title: 'Second', action_items: [{ action: 'b', status: 'open' }] }),
     ],
     briefs: [
       { sessionId: 's1', brief: brief([{ text: 'Pour slab', at: '09:10:00', assignee: 'Sam', due: null }]) },
@@ -316,12 +326,20 @@ test('a day with two sessions produces ONE table carrying both briefs', () => {
   assert.strictEqual(m.rows[1].assignee, '');
 });
 
-test('rows are ordered by at, and two sessions sharing a clock time keep a stable order', () => {
-  // `at` is HH:MM:SS with no date and no session component, so two sessions
-  // recorded at the same hour collide. The tie-break is the order they were
-  // written in — session, then task — never an order nobody stated.
+test('a session\'s brief rows are ordered by at with a stable tie-break; sessions are never merged by time', () => {
+  // §1.3 fix round: substitution is per session, and a session's block is
+  // emitted whole, at the FIRST topic (in walk order) that belongs to it.
+  // Sessions are never interleaved or re-sorted against each other by `at` —
+  // only a session's OWN tasks are sorted against each other. Walk order
+  // decides block order, so the session reached SECOND in the topics array
+  // (s2) still comes second in the table even though its only task's clock
+  // time (09:00:00) is earlier than one of s1's.
   const m = buildPreviewModel({
-    topics: [topic({ action_items: [] })],
+    topics: [
+      topic({ session_id: 's1', action_items: [] }),
+      topic({ session_id: 's2', topic_title: 'Second session topic',
+              action_items: [{ action: 'superseded by the brief', status: 'open' }] }),
+    ],
     briefs: [
       { sessionId: 's1', brief: brief([
         { text: 'first-session-late', at: '09:00:00' },
@@ -332,8 +350,12 @@ test('rows are ordered by at, and two sessions sharing a clock time keep a stabl
       ]) },
     ],
   });
+  // The topic (no action items) sinks to the bottom, after every action row —
+  // §1.2/§1.3. It carries no `at` at all, which is exactly the point: a
+  // topic row is never part of the at-ordered set.
   assert.deepStrictEqual(m.rows.map((r) => r.text),
-    ['first-session-early', 'first-session-late', 'second-session-same-clock']);
+    ['first-session-early', 'first-session-late', 'second-session-same-clock',
+     'Wall tolerance']);
 });
 
 test('the fallback path has no at and falls back to the topic time_range', () => {
@@ -347,12 +369,14 @@ test('the fallback path has no at and falls back to the topic time_range', () =>
   assert.strictEqual(m.rows[0].at, '09:00 – 09:20');
 });
 
-test('the row count never drops below the action_items count for the same day', () => {
-  // Load-bearing. A prompt or rendering change that writes longer text must
-  // not quietly say LESS: the backend half of this plan shipped exactly that,
-  // and a hand-off that drops a commitment is worse than one that reads badly.
+test('the row-count floor is gone: a brief with fewer tasks than the topics still wins', () => {
+  // §1.3/§0: "if a brief exists, use it." A brief with at least one task IS
+  // the source, even when it says less than the extraction's action items
+  // would have. Before this change the pair below would have kept the three
+  // action_items rows instead — that floor is deliberately removed.
   const m = buildPreviewModel({
     topics: [topic({
+      session_id: 's1',
       action_items: [
         { action: 'Redo the wall', status: 'open' },
         { action: 'Chase the beam cert', status: 'open' },
@@ -361,8 +385,122 @@ test('the row count never drops below the action_items count for the same day', 
     })],
     briefs: [{ sessionId: 's1', brief: brief([{ text: 'Redo the wall', at: '09:00:00' }]) }],
   });
-  assert.strictEqual(m.rows.length, 3, 'a thinner brief must not shrink the hand-off');
+  assert.strictEqual(m.rowsSource, 'brief');
+  assert.deepStrictEqual(m.rows.map((r) => r.text), ['Redo the wall']);
+});
+
+test('a brief with zero tasks is treated as no brief at all', () => {
+  // §1.3: "A brief with zero tasks is treated as no brief." An empty table
+  // where the extraction had items would read as broken.
+  const m = buildPreviewModel({
+    topics: [topic({ session_id: 's1',
+      action_items: [{ action: 'Chase the beam cert', status: 'open' }] })],
+    briefs: [{ sessionId: 's1', brief: brief([]) }],
+  });
   assert.strictEqual(m.rowsSource, 'action_items');
+  assert.deepStrictEqual(m.rows.map((r) => r.text), ['Chase the beam cert']);
+});
+
+/* ---- substitution is PER SESSION, never per day (fix round, 2026-09-18) - */
+
+/*
+ * The first cut of this plan read §1.3 ("if a brief exists, use it") as a
+ * day-wide switch: any one usable brief flipped the WHOLE table to the brief
+ * path, which silently dropped every other session's — and every
+ * session-less topic's — own commitment the moment that one brief loaded.
+ * That was a defect the coordinator caught in review, not accepted product
+ * behaviour: the rule is per session. A session's own usable brief (loaded,
+ * >= 1 task) replaces only THAT session's own action items; every item whose
+ * session has no usable brief — because its fetch failed, is still pending,
+ * has zero tasks, or the topic carries no session_id at all — stays exactly
+ * where it was. `rowsSource` is `'mixed'` whenever that produces a table
+ * with rows from both sources, which is the ordinary shape of a half-loaded
+ * day, not an edge case.
+ */
+
+test('two sessions, one briefed and one not: the briefed one substitutes, the other keeps its own item', () => {
+  const m = buildPreviewModel({
+    topics: [
+      topic({ session_id: 's1', action_items: [{ action: 'Redo the wall', status: 'open' }] }),
+      topic({ session_id: 's2', topic_title: 'Slab pour',
+        action_items: [{ action: 'Pour the slab', status: 'open' }] }),
+    ],
+    // s2's brief simply never loaded (a failed or still-pending fetch never
+    // reaches `opts.briefs` at all — see timeline.js's loadSessionBriefs).
+    briefs: [{ sessionId: 's1', brief: brief([
+      { text: 'Redo the west wall to line', at: '09:00:00', assignee: 'John', due: 'Wed' },
+    ]) }],
+  });
+  assert.strictEqual(m.rowsSource, 'mixed',
+    'one row substituted (s1), one stayed as extraction (s2) — this is not '
+    + 'fully "brief" and not fully "action_items"');
+  assert.deepStrictEqual(m.rows.map((r) => r.text),
+    ['Redo the west wall to line', 'Pour the slab'],
+    "s2's own extraction item must still be on the table — a sibling "
+    + "session's usable brief must never make it disappear");
+});
+
+test('a topic with no session_id keeps its own item even when a sibling session is briefed', () => {
+  const m = buildPreviewModel({
+    topics: [
+      topic({ session_id: 's1', action_items: [{ action: 'Redo the wall', status: 'open' }] }),
+      topic({ session_id: null, topic_title: 'Site walk',
+        action_items: [{ action: 'Chase the producer statement', status: 'open' }] }),
+    ],
+    briefs: [{ sessionId: 's1', brief: brief([
+      { text: 'Redo the west wall to line', at: '09:00:00', assignee: 'John', due: 'Wed' },
+    ]) }],
+  });
+  assert.strictEqual(m.rowsSource, 'mixed');
+  assert.deepStrictEqual(m.rows.map((r) => r.text),
+    ['Redo the west wall to line', 'Chase the producer statement'],
+    'a topic with no session_id can never be routed to anyone\'s brief, so '
+    + 'it always keeps its own extraction item');
+});
+
+test('a briefed session with zero tasks keeps its OWN items even beside a genuinely-briefed sibling', () => {
+  const m = buildPreviewModel({
+    topics: [
+      topic({ session_id: 's1', action_items: [{ action: 'Redo the wall', status: 'open' }] }),
+      topic({ session_id: 's2', topic_title: 'Slab pour',
+        action_items: [{ action: 'Pour the slab', status: 'open' }] }),
+    ],
+    briefs: [
+      { sessionId: 's1', brief: brief([
+        { text: 'Redo the west wall to line', at: '09:00:00', assignee: 'John', due: 'Wed' },
+      ]) },
+      { sessionId: 's2', brief: brief([]) },  // zero tasks = no usable brief, §1.3
+    ],
+  });
+  assert.strictEqual(m.rowsSource, 'mixed');
+  assert.deepStrictEqual(m.rows.map((r) => r.text),
+    ['Redo the west wall to line', 'Pour the slab']);
+});
+
+test('rowsSource is exactly "brief" when every row substituted, and "action_items" when none did', () => {
+  const allBrief = buildPreviewModel({
+    topics: [topic({ session_id: 's1' })],
+    briefs: [{ sessionId: 's1', brief: brief([{ text: 'Redo the west wall to line' }]) }],
+  });
+  assert.strictEqual(allBrief.rowsSource, 'brief');
+
+  const allExtraction = buildPreviewModel({ topics: [topic({ session_id: 's1' })] });
+  assert.strictEqual(allExtraction.rowsSource, 'action_items');
+});
+
+test('a briefed session with no matching topic contributes nothing (§1.3 rule 4)', () => {
+  // scopeBriefsToSession already narrows the briefs list on the caller side;
+  // this pins the model's OWN half of that guarantee — a session's brief
+  // sitting unused in `opts.briefs` must never surface rows on its own.
+  const m = buildPreviewModel({
+    topics: [topic({ session_id: 's1', action_items: [{ action: 'Redo the wall', status: 'open' }] })],
+    briefs: [
+      { sessionId: 's1', brief: brief([{ text: 'Redo the west wall to line' }]) },
+      { sessionId: 's9', brief: brief([{ text: 'Nobody\'s topic points here' }]) },
+    ],
+  });
+  assert.deepStrictEqual(m.rows.map((r) => r.text), ['Redo the west wall to line']);
+  assert.strictEqual(m.rowsSource, 'brief');
 });
 
 test('a done item is still excluded and a topic with nothing open is still dropped', () => {
@@ -433,20 +571,61 @@ test('the plain-text flavour is a readable table too, not a bulleted list', () =
   rows.forEach((cells) => assert.strictEqual(cells.length, 3, 'every row has three columns'));
 });
 
-test('an unstated assignee or due date is an EMPTY cell, never a dash', () => {
-  // Blank stays blank. A dash, "Unassigned" or "TBC" each say something the
-  // meeting did not say, and the reader cannot tell an invented placeholder
-  // from a recorded one.
+test('an unstated assignee or due date is an em dash, never invented text', () => {
+  // §1.4/§0: an action row missing an owner or a date shows "—" (this is the
+  // one place the plan overturns the pre-existing "blank stays blank" rule —
+  // the em dash is what the email already did, and the two surfaces now
+  // agree). "Unassigned", "TBC" etc. still must never appear — those invent
+  // something the meeting did not say; the em dash does not.
   const m = buildPreviewModel({
     topics: [topic({ action_items: [{ action: 'Chase the beam cert', status: 'open' }] })],
   });
   assert.deepStrictEqual(findRow(renderEmailText(m), 'Chase the beam cert').slice(1),
-    ['', ''], 'both unstated columns are empty');
+    ['—', '—'], 'both unstated columns are an em dash');
 
   const html = renderEmailHtml(m, {});
-  assert.ok(/<td[^>]*><\/td>/.test(html), 'an unstated column is an empty cell in HTML too');
-  assert.ok(!/<td[^>]*>\s*[—–-]\s*<\/td>/.test(html), 'no dash is used as filler');
+  assert.ok(!/<td[^>]*><\/td>/.test(html), 'no column is left truly empty');
+  assert.ok(/<td[^>]*>—<\/td>/.test(html), 'the em dash fills an unstated cell in HTML too');
   assert.ok(!/Unassigned|No owner|TBC|TBD/i.test(html), 'nothing is invented to fill a column');
+});
+
+test('a topic row is N/A in both cells, never the action row\'s em dash', () => {
+  // N/A IS NOT THE EM DASH (§0/§1.5). "—" means nobody has picked the task
+  // up yet; "N/A" means there is no task here to pick up. Collapsing them
+  // would invite someone to adopt a row that was never a task.
+  const m = buildPreviewModel({
+    topics: [
+      topic({ action_items: [{ action: 'Chase the beam cert', status: 'open' }] }),
+      topic({ topic_title: 'Voiceprint test', summary: 'Recorded outdoors.', action_items: [] }),
+    ],
+  });
+  const unowned = findRow(renderEmailText(m), 'Chase the beam cert');
+  assert.deepStrictEqual(unowned.slice(1), ['—', '—']);
+  const topicRow = findRow(renderEmailText(m), 'Voiceprint test');
+  assert.deepStrictEqual(topicRow, ['Voiceprint test — Recorded outdoors.', 'N/A', 'N/A']);
+
+  const html = renderEmailHtml(m, {});
+  assert.ok(html.indexOf('N/A') > -1, 'N/A appears in the HTML flavour');
+  const topicHtmlRow = html.slice(html.indexOf('Voiceprint test'));
+  assert.ok((topicHtmlRow.match(/N\/A/g) || []).length >= 2,
+    'both the owner and the due cell of a topic row');
+});
+
+test('a raw speaker label is not a name and renders as the em dash', () => {
+  // §1.4: "spk_0", "spk_12" (case-insensitive) is what the diarizer wrote
+  // when nobody stated an owner, not a name someone gave.
+  const m = buildPreviewModel({
+    topics: [topic({ session_id: 's1', action_items: [] })],
+    briefs: [{ sessionId: 's1', brief: brief([
+      { text: 'Chase the beam cert', at: '09:00:00', assignee: 'spk_0' },
+      { text: 'Order mesh', at: '09:05:00', assignee: 'SPK_12' },
+      { text: 'Pour slab', at: '09:10:00', assignee: 'Sam' },
+    ]) }],
+  });
+  assert.strictEqual(findRow(renderEmailText(m), 'Chase the beam cert')[1], '—');
+  assert.strictEqual(findRow(renderEmailText(m), 'Order mesh')[1], '—');
+  assert.strictEqual(findRow(renderEmailText(m), 'Pour slab')[1], 'Sam',
+    'a real name still comes through');
 });
 
 test('a row never folds the sentence together with its owner and date', () => {
@@ -459,7 +638,21 @@ test('a row never folds the sentence together with its owner and date', () => {
   assert.ok(!renderEmailText(m).includes(folded), 'the fold is gone from the text flavour');
   assert.ok(!renderEmailHtml(m, {}).includes(folded), 'and from the HTML flavour');
   assert.deepStrictEqual(findRow(renderEmailText(m), 'Redo the wall'),
-    ['Redo the wall (09:00 – 09:20)', 'John', 'Wed']);
+    ['Redo the wall', 'John', 'Wed']);
+});
+
+test('no time suffix appears in any cell', () => {
+  // §1.6: no "(at 09:05:00)", no "(09:00 – 09:20)" — a brief task's clock
+  // time and a fallback row's topic time_range are both dropped entirely.
+  const fromBrief = buildPreviewModel({
+    topics: [topic({ session_id: 's1', action_items: [] })],
+    briefs: [{ sessionId: 's1', brief: brief([{ text: 'Pour slab', at: '09:10:00' }]) }],
+  });
+  const fromTopics = buildPreviewModel({ topics: [topic()] });
+  assert.strictEqual(findRow(renderEmailText(fromBrief), 'Pour slab')[0], 'Pour slab');
+  assert.strictEqual(findRow(renderEmailText(fromTopics), 'Redo the wall')[0], 'Redo the wall');
+  assert.ok(!renderEmailText(fromBrief).includes('09:10:00'));
+  assert.ok(!renderEmailText(fromTopics).includes('09:00'));
 });
 
 test('nothing truncates in the table, however long the day', () => {
@@ -476,10 +669,12 @@ test('nothing truncates in the table, however long the day', () => {
   assert.ok(txt.includes(items[79].action), 'the longest line survives whole');
 });
 
-test('photos still sit INSIDE their topic block now that the rows are a table', () => {
+test('photos render below the table now, grouped under their topic\'s title', () => {
   // The whole reason this modal exists: "the wall is out of tolerance, John
-  // by Wednesday" and the photograph showing it are one block. A table that
-  // sweeps every photo into a gallery at the bottom has thrown that away.
+  // by Wednesday" and the photograph showing it must stay traceable to each
+  // other. The table itself is flat now (§1.2/§3), so that grouping lives
+  // below it instead of inside it — but a photo must still carry the right
+  // topic's title, not any topic's.
   const m = buildPreviewModel({
     topics: [
       topic({ related_photos: ['wall.jpg'] }),
@@ -487,31 +682,17 @@ test('photos still sit INSIDE their topic block now that the rows are a table', 
     ],
   });
   const html = renderEmailHtml(m, { 'wall.jpg': 'data:image/jpeg;base64,AAA' });
-  const action = html.indexOf('Redo the wall');
-  const img = html.indexOf('data:image/jpeg');
-  const second = html.indexOf('Second topic');
-  assert.ok(action < img, 'the photo comes after its own topic\'s rows');
-  assert.ok(img < second, 'and before the next topic starts');
-  assert.ok(img < html.indexOf('</table>'), 'inside the table, not appended after it');
+  const table = html.indexOf('</table>');
+  assert.ok(html.indexOf('Redo the wall') < table, 'the row is inside the table');
+  assert.ok(table < html.indexOf('Wall tolerance'), 'the photo section starts after the table');
+  assert.ok(html.indexOf('Wall tolerance') < html.indexOf('data:image/jpeg'),
+    'the photo\'s own topic title precedes it');
+  // "Second topic" has no photos, so it never gets a photo-section heading
+  // of its own — nothing to evidence there.
+  assert.ok(!html.slice(table).includes('Second topic'));
 });
 
-/* ---- `at` is two formats wearing one name ------------------------------- */
-
-test('a clock time and a topic time range are not rendered as the same fact', () => {
-  // A brief task's `at` is a clock time ("09:10:00"); a fallback row's `at`
-  // is the whole topic time_range ("09:00 – 09:20"). Rendered identically
-  // they read as one kind of fact and they are two: the moment something was
-  // said, versus the span it was discussed in.
-  const fromBrief = buildPreviewModel({
-    topics: [topic({ action_items: [] })],
-    briefs: [{ sessionId: 's1', brief: brief([{ text: 'Pour slab', at: '09:10:00' }]) }],
-  });
-  const fromTopics = buildPreviewModel({ topics: [topic()] });
-  assert.strictEqual(findRow(renderEmailText(fromBrief), 'Pour slab')[0],
-    'Pour slab (at 09:10:00)');
-  assert.strictEqual(findRow(renderEmailText(fromTopics), 'Redo the wall')[0],
-    'Redo the wall (09:00 – 09:20)');
-});
+/* ---- `at` is two formats wearing one name, and neither reaches a cell --- */
 
 test('a time_range is never sorted against a clock time', () => {
   // "09:00 – 09:20" < "09:10:00" is a true string comparison and a
@@ -539,15 +720,16 @@ test('a brief task with no time sorts LAST — absent is not early', () => {
   // green. An undated commitment sorted to the top of a hand-off reads as the
   // first thing that happened that morning.
   const m = buildPreviewModel({
-    topics: [topic({ action_items: [] })],
+    topics: [topic({ session_id: 's1', action_items: [] })],
     briefs: [{ sessionId: 's1', brief: brief([
       { text: 'no time at all' },
       { text: 'ten past nine', at: '09:10:00' },
       { text: 'eight sharp', at: '08:00:00' },
     ]) }],
   });
+  // The topic (no action items) sinks after every brief row, as always.
   assert.deepStrictEqual(m.rows.map((r) => r.text),
-    ['eight sharp', 'ten past nine', 'no time at all']);
+    ['eight sharp', 'ten past nine', 'no time at all', 'Wall tolerance']);
 });
 
 test('a literal pipe in the text cannot break the text table apart', () => {
@@ -590,51 +772,42 @@ test('a newline inside task text cannot terminate the row mid-table', () => {
   });
 });
 
-/* ---- a topic label row is a heading, and only `**` says so --------------- */
+/* ---- a topic row is a real row now, not a heading ------------------------ */
 
-test('the text flavour marks a topic label row with ** so it is not read as a commitment', () => {
-  // A pipe table has no colspan. In the text flavour a topic label row is
-  // therefore STRUCTURALLY IDENTICAL to an item row with a blank owner and a
-  // blank date — "Wall tolerance (09:00 – 09:20) |  |  " is exactly what an
-  // unassigned, undated commitment looks like. The `**` is the only thing
-  // that distinguishes a heading from a job nobody has picked up, so it is
-  // load-bearing rather than decoration, and until this test the whole row
-  // was pinned by nothing: dropping it left the suite green.
-  const m = buildPreviewModel({ topics: [topic()] });
-  const rows = textRows(renderEmailText(m));
-
-  const label = rows.find((c) => c[0].includes('Wall tolerance'));
-  assert.deepStrictEqual(label, ['**Wall tolerance (09:00 – 09:20)**', '', ''],
-    'the topic label row is present, bolded, and carries no owner or date');
-  assert.ok(label[0].startsWith('**') && label[0].endsWith('**'),
-    'without the markers this row cannot be told from an unassigned item row');
-
-  // And it heads the rows it labels rather than trailing them.
-  const firstCol = rows.map((c) => c[0]);
-  assert.ok(firstCol.indexOf(label[0]) < firstCol.findIndex((t) => t.startsWith('Redo the wall')),
-    'the heading comes before the items it heads');
-});
-
-/* ---- the equality boundary: a brief is never slotted under topics -------- */
-
-test('a brief with exactly as many tasks as open items is still ONE flat block', () => {
-  // This is the ORDINARY case, not an edge one: the gate that admits a brief
-  // at all is `fromBriefs.length >= fallbackRows.length`, so equality is the
-  // boundary it sits on, and equality is also the one length at which rows
-  // could be walked out one-per-open-item.
-  //
-  // Doing that would be silently wrong. Brief rows carry no topic — nothing
-  // maps task i to group i — so laying them out per topic slots them by
-  // POSITION, and the evidence follows the position rather than the claim.
-  // Here that puts "Pour slab to level 2" under "Wall tolerance" with the
-  // wall photograph attached to it: a photo of a wall offered as evidence of
-  // a slab. The length check alone cannot catch this, which is why the
-  // rowsSource check exists beside it.
+test('a topic row sits at the bottom of the SAME flat table, not a heading above it', () => {
+  // The per-topic layout and its `**`-marked label rows are gone entirely
+  // (§1.2/§3): there is exactly one table, action rows first, topic rows
+  // sunk after them, and a topic row is indistinguishable in STRUCTURE from
+  // an action row — only its N/A cells (checked elsewhere) say it is not one.
   const m = buildPreviewModel({
     topics: [
-      topic({ related_photos: ['wall.jpg'],
+      topic(),
+      topic({ topic_title: 'Voiceprint test', summary: 'Recorded outdoors.', action_items: [] }),
+    ],
+  });
+  const rows = textRows(renderEmailText(m));
+  const firstCol = rows.map((c) => c[0]);
+  assert.ok(!firstCol.some((t) => t.startsWith('**')), 'no `**` heading marker survives');
+  assert.ok(firstCol.indexOf('Redo the wall') < firstCol.indexOf('Voiceprint test — Recorded outdoors.'),
+    'the action row precedes the topic row it sinks below');
+});
+
+/* ---- a brief is never slotted under topics by position ------------------- */
+
+test('a session\'s brief is emitted once, at its first topic; later topics of the same session add nothing', () => {
+  // Two topics sharing ONE session: nothing in this model may ever lay brief
+  // rows out one-per-topic by position — that would put "Pour slab to level
+  // 2" underneath "Wall tolerance" with the wall photograph attached to it,
+  // a photo of a wall offered as evidence of a slab. Substitution is per
+  // SESSION (fix round, 2026-09-18): the session's whole brief block is
+  // written once, at the first topic that belongs to it; the second topic of
+  // the SAME session contributes neither a second copy of the brief nor its
+  // own (now-superseded) extraction item.
+  const m = buildPreviewModel({
+    topics: [
+      topic({ session_id: 's1', related_photos: ['wall.jpg'],
               action_items: [{ action: 'Redo the wall', status: 'open' }] }),
-      topic({ topic_title: 'Slab pour', time_range: '10:00 – 10:20',
+      topic({ session_id: 's1', topic_title: 'Slab pour', time_range: '10:00 – 10:20',
               action_items: [{ action: 'Pour the slab', status: 'open' }] }),
     ],
     briefs: [{ sessionId: 's1', brief: brief([
@@ -643,25 +816,279 @@ test('a brief with exactly as many tasks as open items is still ONE flat block',
     ]) }],
   });
 
-  assert.strictEqual(m.rowsSource, 'brief', 'an equal-length brief is still used');
-  assert.strictEqual(m.rows.length, m.totalItems,
-    'and its length equals the open-item count — the condition being guarded');
-
-  // The exact document, in order: both brief rows as one flat block, and the
-  // topic blocks that follow carrying nothing but their photos.
-  assert.deepStrictEqual(textRows(renderEmailText(m)).map((c) => c[0]), [
-    'AGENDA ITEM',
-    'Pour slab to level 2 (at 09:10:00)',
-    'Order mesh (at 14:05:00)',
-    '**Wall tolerance (09:00 – 09:20)**',
-    '[1 photo attached above]',
-  ]);
+  assert.strictEqual(m.rowsSource, 'brief');
+  assert.deepStrictEqual(m.rows.map((r) => r.text), ['Pour slab to level 2', 'Order mesh'],
+    'the whole session is substituted once — "Pour the slab" (the second '
+    + "topic's own extraction item) never appears at all");
 
   // Said as the consequence rather than the shape: no brief row sits beneath
   // a topic heading, so no photo can be read as evidencing one.
   const html = renderEmailHtml(m, { 'wall.jpg': 'https://s3/wall.jpg' });
-  assert.ok(html.indexOf('Pour slab to level 2') < html.indexOf('Wall tolerance'),
-    'the brief rows precede every topic heading in the HTML flavour too');
-  assert.ok(html.indexOf('Order mesh') < html.indexOf('Wall tolerance'),
-    'including the last of them — the block is not interleaved');
+  const table = html.indexOf('</table>');
+  assert.ok(html.indexOf('Pour slab to level 2') < table
+    && html.indexOf('Order mesh') < table, 'both brief rows are inside the table');
+  assert.ok(html.indexOf('Wall tolerance') > table,
+    'the wall photo\'s title only ever appears in the photo section, after the table');
+});
+
+/* ---- topic-row text: parity with lambda_item_writer._topic_rows --------- */
+
+/*
+ * §1.5/§3: the topic-row text is built "exactly as lambda_item_writer._topic_rows
+ * builds it today". The four cases below are the SAME input/output pairs the
+ * backend pins in tests/unit/test_the_email_is_one_table_of_items.py, ported
+ * as literally as JS syntax allows, so the two implementations cannot drift
+ * apart silently — a change to either side that is not also made to the
+ * other shows up here as a mismatch, not as two documents quietly disagreeing.
+ *
+ * Backend cases mirrored (found in
+ * wt-pipe-sync/tests/unit/test_the_email_is_one_table_of_items.py):
+ *   - test_a_topic_that_produced_a_task_is_not_listed_twice
+ *     (title "Voiceprint test", summary "Recorded outdoors.")
+ *   - test_a_topic_row_carries_the_first_sentence_only
+ *   - test_a_long_topic_row_is_trimmed_not_dropped
+ *   - test_a_topic_with_no_words_at_all_is_not_a_row
+ */
+
+test('parity: a one-sentence summary that already ends with "." is not doubled', () => {
+  // Backend: test_a_topic_that_produced_a_task_is_not_listed_twice.
+  const text = topicRowText({ topic_title: 'Voiceprint test', summary: 'Recorded outdoors.' });
+  assert.strictEqual(text, 'Voiceprint test — Recorded outdoors.');
+});
+
+test('parity: only the first sentence rides in the row', () => {
+  // Backend: test_a_topic_row_carries_the_first_sentence_only.
+  const text = topicRowText({
+    topic_title: 'Voiceprint test',
+    summary: 'Recorded outdoors in site noise. The purpose was to check recall against the pipeline.',
+  });
+  assert.strictEqual(text, 'Voiceprint test — Recorded outdoors in site noise.');
+});
+
+test('parity: a long row is trimmed to 180 chars with an ellipsis, not dropped', () => {
+  // Backend: test_a_long_topic_row_is_trimmed_not_dropped.
+  const text = topicRowText({ topic_title: 'T', summary: 'x'.repeat(400) });
+  assert.ok(text.length <= TOPIC_ROW_MAX_CHARS && text.endsWith('…'));
+});
+
+test('parity: a topic with no words at all produces no row', () => {
+  // Backend: test_a_topic_with_no_words_at_all_is_not_a_row.
+  assert.strictEqual(topicRowText({ topic_title: '  ', summary: '' }), '');
+});
+
+test('the 180-char cap is exact: 180 survives whole, 181 is trimmed to 179 chars + ellipsis', () => {
+  // Off-by-one is the failure mode a "close enough" cap ships silently. Built
+  // so the title + " — " prefix is fixed and only the summary's first
+  // "sentence" (no ". " in it, so the whole string) varies by one character.
+  const prefix = 'T — ';               // 4 chars
+  const body179 = 'x'.repeat(180 - prefix.length);       // text.length === 180 exactly
+  const exact = topicRowText({ topic_title: 'T', summary: body179 });
+  assert.strictEqual(exact.length, TOPIC_ROW_MAX_CHARS, 'exactly 180 is left whole');
+  assert.ok(!exact.endsWith('…'), 'and is not truncated');
+
+  const body180 = 'x'.repeat(181 - prefix.length);       // one character over
+  const over = topicRowText({ topic_title: 'T', summary: body180 });
+  assert.strictEqual(over.length, TOPIC_ROW_MAX_CHARS, 'trimmed back down to the cap');
+  assert.ok(over.endsWith('…'), 'and marked as trimmed');
+  assert.strictEqual(over.slice(0, -1), exact.slice(0, TOPIC_ROW_MAX_CHARS - 1),
+    'the surviving text is the first 179 characters of the untrimmed string');
+});
+
+test('parity: the 180 cap counts codepoints, not UTF-16 units — astral characters at the boundary', () => {
+  // Fix round 2, 2026-09-18: `.length`/`.slice()` count UTF-16 CODE UNITS.
+  // Python's `len()`/`text[:180]` count CODEPOINTS. An astral character (one
+  // outside the Basic Multilingual Plane — an emoji, a CJK Extension B
+  // ideograph) is ONE codepoint but TWO UTF-16 units, so the old
+  // `.length`/`.slice()` cap counted one character too many near the
+  // boundary and could cut a surrogate pair in half, producing an unpaired
+  // surrogate the backend would never emit.
+  //
+  // Expected output computed by running the ACTUAL backend function
+  // (read-only; wt-pipe-sync is untouched):
+  //   cd wt-pipe-sync && PYTHONUTF8=1 PYTHONIOENCODING=utf-8 python -c
+  //     "import sys; sys.path.insert(0,'src'); import lambda_item_writer as w;
+  //      print([hex(ord(c)) for c in w._topic_rows(
+  //        {'topics':[{'topic_title':'T','summary':'\U00020000'*200,
+  //                    'action_items':[]}]})[0]['text']][:6])"
+  // gave: title 'T', summary a run of U+20000 repeated 200 times, no ". " in
+  // it (so the "first sentence" is the whole summary) -> the backend's
+  // `_topic_rows` returns "T — " + (U+20000 * 175) + "…", 180 codepoints
+  // exactly (4-char prefix + 175 astral chars + 1 ellipsis).
+  const astral = '\u{20000}'; // outside the BMP: one codepoint, two UTF-16 units
+  const summary = astral.repeat(200);
+  const text = topicRowText({ topic_title: 'T', summary: summary });
+  const expected = 'T — ' + astral.repeat(175) + '…';
+
+  assert.strictEqual(text, expected, 'byte-for-byte match with the backend\'s own output');
+  assert.strictEqual(Array.from(text).length, TOPIC_ROW_MAX_CHARS,
+    'the cap is measured in codepoints, matching Python\'s len()');
+  // A UTF-16 length of 355 (4 + 175*2 + 1) rather than 180 is exactly the
+  // signature of the old bug being silently reintroduced.
+  assert.strictEqual(text.length, 4 + 175 * 2 + 1);
+  // No astral character survives cut in half: every low (trailing) surrogate
+  // in the string is immediately preceded by its matching high surrogate.
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if (code >= 0xDC00 && code <= 0xDFFF) {
+      const prev = text.charCodeAt(i - 1);
+      assert.ok(prev >= 0xD800 && prev <= 0xDBFF,
+        'a lone trailing surrogate at index ' + i + ' means a pair was cut in half');
+    }
+  }
+});
+
+/* ---- speaker labels, directly ------------------------------------------- */
+
+test('isSpeakerLabel matches the backend pattern exactly: spk/speaker + number, any separator', () => {
+  // Mirrors fieldsight-pipeline session_brief._SPEAKER_LABEL
+  // (r"^\s*(spk|speaker)[\s_-]*\d+\s*$", re.I). The email blanks every one of
+  // these; if this side did not, the same row would read differently in the
+  // email and in Preview & copy.
+  for (const label of ['spk_0', 'SPK_12', '  spk_3  ', 'spk-4', 'spk5', 'speaker_0',
+                       'Speaker 2', 'SPEAKER-7']) {
+    assert.ok(isSpeakerLabel(label), label + ' is a speaker label');
+  }
+  for (const name of ['Sam', '', 'Speaker', 'spk_', 'Spike 3', 'John spk_0']) {
+    assert.ok(!isSpeakerLabel(name), JSON.stringify(name) + ' is not a speaker label');
+  }
+});
+
+/* ---- the table is flat: one order, action rows then topic rows ---------- */
+
+test('action rows and topic rows are never interleaved, across multiple topics', () => {
+  // §1.2: "Order: every action row, then every topic row." Three topics,
+  // mixed — two with action items, two without — proves the sink is by
+  // KIND, not by position in the topics array.
+  const m = buildPreviewModel({
+    topics: [
+      topic({ topic_title: 'Has task A', action_items: [{ action: 'task A', status: 'open' }] }),
+      topic({ topic_title: 'No task 1', summary: 'First bare topic.', action_items: [] }),
+      topic({ topic_title: 'Has task B', action_items: [{ action: 'task B', status: 'open' }] }),
+      topic({ topic_title: 'No task 2', summary: 'Second bare topic.', action_items: [] }),
+    ],
+  });
+  assert.deepStrictEqual(m.rows.map((r) => r.text), [
+    'task A', 'task B',
+    'No task 1 — First bare topic.', 'No task 2 — Second bare topic.',
+  ]);
+});
+
+test('a topic that produced an action item is never ALSO listed as a topic row', () => {
+  const m = buildPreviewModel({
+    topics: [topic({ topic_title: 'Cylinder testing', summary: 'It was tested.',
+                      action_items: [{ action: 'Re-inspect', responsible: 'Neil', status: 'open' }] })],
+  });
+  assert.deepStrictEqual(m.rows.map((r) => r.text), ['Re-inspect']);
+  assert.ok(!renderEmailText(m).includes('Cylinder testing'));
+});
+
+test('the HTML flavour greys a topic row', () => {
+  // §1.5: "HTML renders the row greyed (color:#666)."
+  const m = buildPreviewModel({
+    topics: [topic({ topic_title: 'Voiceprint test', summary: 'Recorded outdoors.', action_items: [] })],
+  });
+  const html = renderEmailHtml(m, {});
+  const row = html.slice(html.lastIndexOf('<tr>', html.indexOf('Voiceprint test')));
+  assert.ok(/color:#666/.test(row), 'the topic row\'s cells carry the grey color');
+});
+
+/* ---- a topic row's photos travel with it (fix round 2, 2026-09-18) ------- */
+
+/*
+ * `groups` — the only thing the photo section, `totalPhotos` and the
+ * `photoUrls` fetch ever read — used to be pushed only `if (open.length)`.
+ * A topic row is EXACTLY a topic with zero action items, so it could never
+ * contribute a group and its photos vanished with no error anywhere. A
+ * site-observation topic with photos and no task ("Standing water near the
+ * east entrance", no owner, no due date — just evidence) is an ordinary
+ * case, not a corner one.
+ */
+
+function siteObservationTopic(over) {
+  return Object.assign({
+    topic_title: 'Site conditions',
+    summary: 'Standing water near the east entrance.',
+    action_items: [],
+    related_photos: ['photo1.jpg', 'photo2.jpg'],
+  }, over);
+}
+
+test('a topic row keeps its photos — the exact reproduction from the report', () => {
+  const m = buildPreviewModel({ topics: [siteObservationTopic()] });
+
+  assert.strictEqual(m.groups.length, 1, 'the topic row topic must contribute a group');
+  assert.deepStrictEqual(m.groups[0].photos, ['photo1.jpg', 'photo2.jpg']);
+  assert.strictEqual(m.totalPhotos, 2);
+
+  const html = renderEmailHtml(m, { 'photo1.jpg': 'https://s3/1.jpg', 'photo2.jpg': 'https://s3/2.jpg' });
+  assert.strictEqual((html.match(/<img/g) || []).length, 2,
+    'both photos render in the HTML flavour');
+  // "Site conditions" appears TWICE: once inside the table (the topic row's
+  // own AGENDA ITEM text, "Site conditions — Standing water..."), and once
+  // as the photo section's heading below the table — the LAST occurrence.
+  assert.ok(html.lastIndexOf('Site conditions') > html.indexOf('</table>'),
+    'the photo section heading is the topic title, below the table');
+
+  const txt = renderEmailText(m);
+  assert.ok(txt.includes('2 photos'), 'the text flavour says the photos exist');
+  assert.ok(txt.includes('Site conditions'), 'under the topic\'s own title');
+});
+
+test('a topic row with an UNREADABLE photo still reports it, same as any other topic', () => {
+  // Not a new code path — the existing "omitted, never rendered broken" rule
+  // — but worth pinning here specifically because this is the topic shape
+  // that a fixed `open.length` gate could revert to silently skipping again.
+  const m = buildPreviewModel({ topics: [siteObservationTopic({ related_photos: ['gone.jpg'] })] });
+  const html = renderEmailHtml(m, {});
+  assert.ok(!html.includes('<img'));
+  assert.ok(html.includes('Site conditions'), 'the heading still shows — text is never lost');
+});
+
+test('an all-done topic (every item status:done) drops its photos too — a deliberate choice, not a bug', () => {
+  // Decision (fix round 2, 2026-09-18): an all-done topic is neither an
+  // action row (nothing open) nor a §1.5 topic row (its raw action_items is
+  // non-empty, so it fails "produced NO action items at all"). The model's
+  // own stated purpose is "a hand-off of work remaining, not a transcript"
+  // of a fully closed topic — its photos most likely evidenced a task that
+  // was already raised and already communicated when it was open, not
+  // something this hand-off needs to carry again. This is the one place the
+  // model still deliberately drops content; recorded here rather than left
+  // implicit, so a future reviewer sees a decision, not an oversight.
+  const m = buildPreviewModel({
+    topics: [{
+      topic_title: 'Cylinder testing', summary: 'It was tested.',
+      action_items: [{ action: 'Re-inspect', status: 'done' }],
+      related_photos: ['done1.jpg'],
+    }],
+  });
+  assert.strictEqual(m.groups.length, 0, 'an all-done topic contributes no group at all');
+  assert.strictEqual(m.totalPhotos, 0);
+  const html = renderEmailHtml(m, { 'done1.jpg': 'https://s3/done1.jpg' });
+  assert.ok(!html.includes('<img'), 'the finished topic\'s photo does not appear');
+});
+
+test('totalItems now counts action ROWS on the table, not a re-derived group count', () => {
+  // Decision (fix round 2, 2026-09-18): `totalItems` used to be re-derived
+  // from `groups` (sum of each group's raw open-item count), which could
+  // quietly disagree with the table once brief substitution existed — a
+  // session's brief might carry MORE or FEWER tasks than the topic's own
+  // open items it replaced. `groups` is also now carrying topic-row entries
+  // that contribute zero items. `actionRows.length` is the one number that
+  // matches "how many commitments does this hand-off actually carry", which
+  // is what the reader sees in the table.
+  const m = buildPreviewModel({
+    topics: [
+      { topic_title: 'Wall', session_id: 's1',
+        action_items: [
+          { action: 'a', status: 'open' }, { action: 'b', status: 'open' },
+          { action: 'c', status: 'open' },
+        ] },
+    ],
+    briefs: [{ sessionId: 's1', brief: { status: 'ready', tasks: [
+      { text: 'one brief task replaces all three', at: '09:00:00' },
+    ] } }],
+  });
+  assert.strictEqual(m.rows.length - 0, 1, 'sanity: one action row from the brief');
+  assert.strictEqual(m.totalItems, 1,
+    'totalItems reflects the ONE row actually on the table, not the three raw open items it replaced');
 });
