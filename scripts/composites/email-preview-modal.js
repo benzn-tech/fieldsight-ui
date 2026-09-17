@@ -69,6 +69,50 @@
 
   /* ---- pure model ------------------------------------------------------ */
 
+  /* One outstanding thing, in the four fields the reader acts on.
+
+     Blank stays blank. No em-dash filler, no "Unassigned", no date invented
+     to square off a column: an empty cell says "the meeting did not state
+     this", and every placeholder says something it did not say. 有就有，
+     没有就没有.
+
+     sessionIndex/taskIndex ride along because they are the tie-break below,
+     and because a renderer needs a key that is not the text. */
+  function taskRow(t, sessionIndex, taskIndex) {
+    t = t || {};
+    return {
+      text:     t.text || '',
+      at:       t.at || '',
+      assignee: t.assignee || '',
+      due:      t.due || '',
+      sessionIndex: sessionIndex,
+      taskIndex:    taskIndex,
+    };
+  }
+
+  /* Rows from the session briefs — one flat table for the whole day.
+     "Preview & copy" is rendered per DAY and a brief is written per SESSION,
+     so several briefs land in one table rather than one table each. */
+  function rowsFromBriefs(briefs) {
+    var rows = [];
+    briefs.forEach(function (b, si) {
+      var art = (b && b.brief) || {};
+      (art.tasks || []).forEach(function (t, ti) { rows.push(taskRow(t, si, ti)); });
+    });
+    /* `at` is HH:MM:SS — no date in it, and nothing naming the session — so
+       two sessions recorded in the same hour collide. Session order then task
+       order breaks the tie, which is the order they were written in; a
+       sequence nobody stated must never be stored as if it were data. A row
+       with no time sorts last rather than first: absent is not early. */
+    rows.sort(function (a, b) {
+      if (!a.at !== !b.at) return a.at ? -1 : 1;
+      if (a.at !== b.at) return a.at < b.at ? -1 : 1;
+      if (a.sessionIndex !== b.sessionIndex) return a.sessionIndex - b.sessionIndex;
+      return a.taskIndex - b.taskIndex;
+    });
+    return rows;
+  }
+
   /* One entry per topic that still has something outstanding, carrying its
      own photos. Topics with nothing open are dropped: this is a hand-off of
      work remaining, not a transcript. */
@@ -77,6 +121,7 @@
     var topics = opts.topics || [];
     var isDone = typeof opts.isDone === 'function' ? opts.isDone : function () { return false; };
     var groups = [];
+    var fallbackRows = [];
 
     topics.forEach(function (t) {
       var open = (t.action_items || []).filter(function (a, idx) {
@@ -97,6 +142,20 @@
         }),
         photos: (t.related_photos || []).slice(),
       });
+      /* The same open items as a flat table. An action_item carries no clock
+         time of its own; the topic it was raised under does, and that is the
+         closest true answer to "when" — nearer than a blank, and honest in a
+         way an invented timestamp is not. */
+      open.forEach(function (a) {
+        fallbackRows.push({
+          text:     a.action || a.text || '',
+          at:       t.time_range || '',
+          assignee: a.responsible || '',
+          due:      a.deadline || a.deadline_text || '',
+          sessionIndex: 0,
+          taskIndex:    fallbackRows.length,
+        });
+      });
     });
 
     var totalItems = groups.reduce(function (n, g) { return n + g.items.length; }, 0);
@@ -104,12 +163,37 @@
     var sessionLabel = (opts.session && (opts.session.title || opts.session.label)) || 'All day';
     var site = opts.siteName || '';
 
+    /* The brief is the exception, not the rule. prod runs SESSION_BRIEF=false
+       and holds zero brief artifacts, so the action_items path below is what
+       every hand-off actually takes today; the brief path is the one that has
+       to prove itself, which is why it is the branch and not the default. */
+    var briefs = opts.briefs || [];
+    var rows = fallbackRows;
+    var rowsSource = 'action_items';
+    if (briefs.length) {
+      var fromBriefs = rowsFromBriefs(briefs);
+      /* Better prose must never mean fewer commitments. The backend half of
+         this change shipped exactly that defect — longer task text, and
+         quietly a shorter list — so a brief that says LESS than the topics
+         already say is not used at all. A hand-off that drops something
+         someone committed to is worse than one that reads badly. */
+      if (fromBriefs.length >= fallbackRows.length) {
+        rows = fromBriefs;
+        rowsSource = 'brief';
+      }
+    }
+
     return {
       subject: 'Action items — ' + (site ? site + ' — ' : '') + sessionLabel
         + (opts.date ? ' (' + opts.date + ')' : ''),
       intro: 'Outstanding action items from ' + (site ? site + ' — ' : '')
         + sessionLabel + (opts.date ? ' (' + opts.date + ')' : '') + ':',
       groups: groups,
+      /* Added ALONGSIDE groups, never in place of them: groups are what keeps
+         a photo inside the block of the finding it evidences, and a flat
+         table cannot carry that. */
+      rows: rows,
+      rowsSource: rowsSource,
       totalItems: totalItems,
       totalPhotos: totalPhotos,
       footer: 'Generated from FieldSight'
@@ -118,7 +202,13 @@
   }
 
   /* One line per action. Owner and deadline are the two things the reader
-     acts on, so they are never folded into prose. */
+     acts on, so they are never folded into prose.
+
+     NOT used by the hand-off table, and that is the point of the table:
+     "Redo the wall — John (by Wed)" is exactly the register the product
+     owner rejected. Owner and date get their own columns or they are not
+     columns. Kept and still exported because it remains the one-line form
+     for a caller that has a line and no table to put it in. */
   function actionLine(item) {
     var bits = [item.action];
     if (item.responsible) bits.push('— ' + item.responsible);
@@ -126,53 +216,166 @@
     return bits.join(' ');
   }
 
-  /* photoSrc maps a filename to an embeddable src (a data URI once the
-     downscale has run). A filename with no entry is omitted — never rendered
-     as a broken image. */
+  /* ---- the hand-off table ---------------------------------------------- */
+
+  /* Three columns, in the words they were asked for in. */
+  var COLUMNS = ['AGENDA ITEM', 'ASSIGNED', 'DUE DATE'];
+
+  /* `at` carries two formats under one name and nothing upstream marks
+     which: a brief task holds a clock time ("09:10:00"), a fallback row
+     holds the topic's whole time_range ("09:00 – 09:20"). Rendered the same
+     way they read as one kind of fact and they are two — the moment
+     something was said, versus the span it was discussed in.
+
+     They must never be COMPARED either. "09:00 – 09:20" < "09:10:00" is a
+     true string comparison and a meaningless time one, so a sort that saw
+     both would misorder silently. rowsFromBriefs sorts brief rows only,
+     where every `at` is a clock time; fallback rows are never sorted. */
+  function isClockTime(at) {
+    return /^\d{1,2}:\d{2}(:\d{2})?$/.test(String(at == null ? '' : at));
+  }
+
+  /* The moment takes the preposition; a range is self-evidently a range. */
+  function agendaCell(row) {
+    var text = row.text || '';
+    var at = row.at || '';
+    if (!at) return text;
+    return text + (isClockTime(at) ? ' (at ' + at + ')' : ' (' + at + ')');
+  }
+
+  /* Blank stays blank: an empty cell says the meeting did not state this,
+     and a dash, "Unassigned" or "TBC" each say something it did not.
+     有就有，没有就没有. */
+  function cellsFor(row) {
+    row = row || {};
+    return [agendaCell(row), row.assignee || '', row.due || ''];
+  }
+
+  /* Rows can be laid out UNDER their topics only when they came from the
+     topics, where the i-th row is the i-th open item in group order. Brief
+     rows carry no topic at all, so they are one flat block and the topic
+     blocks that follow carry nothing but their photos. The length check is
+     the invariant, not an assumption about it. */
+  function laysOutPerTopic(model) {
+    var items = model.groups.reduce(function (n, g) { return n + g.items.length; }, 0);
+    return model.rowsSource !== 'brief' && (model.rows || []).length === items;
+  }
+
+  /* The table's blocks in render order — walked by the HTML flavour, the
+     text flavour and the on-screen preview, so the three cannot drift into
+     showing different documents. */
+  function previewBlocks(model) {
+    var blocks = [];
+    var rows = model.rows || [];
+    if (laysOutPerTopic(model)) {
+      var i = 0;
+      model.groups.forEach(function (g) {
+        blocks.push({ kind: 'topic', group: g });
+        g.items.forEach(function () { blocks.push({ kind: 'row', row: rows[i++] }); });
+        /* Photos sit INSIDE the topic block, which is the whole point: the
+           evidence stays with the claim it evidences. */
+        if (g.photos.length) blocks.push({ kind: 'photos', group: g });
+      });
+    } else {
+      rows.forEach(function (r) { blocks.push({ kind: 'row', row: r }); });
+      model.groups.forEach(function (g) {
+        if (!g.photos.length) return;
+        blocks.push({ kind: 'topic', group: g });
+        blocks.push({ kind: 'photos', group: g });
+      });
+    }
+    return blocks;
+  }
+
+  /* photoSrc maps a filename to an embeddable src. A filename with no entry
+     is omitted — never rendered as a broken image. */
   function renderEmailHtml(model, photoSrc) {
     photoSrc = photoSrc || {};
+    var TH = 'padding:6px 10px;text-align:left;font-size:11px;letter-spacing:.05em;'
+      + 'color:#486581;border-bottom:2px solid #9fb3c8;white-space:nowrap';
+    var TD = 'padding:6px 10px;vertical-align:top;border-bottom:1px solid #d9e2ec';
+    var LABEL = 'padding:12px 10px 4px;font-weight:600;border-bottom:1px solid #d9e2ec';
     var out = [];
+
     out.push('<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#102A43">');
     out.push('<p>' + esc(model.intro) + '</p>');
-    model.groups.forEach(function (g) {
-      out.push('<div style="margin:0 0 18px">');
-      out.push('<p style="margin:0 0 4px;font-weight:600">' + esc(g.topicTitle)
-        + (g.timeRange ? ' <span style="font-weight:400;color:#627d98">('
-            + esc(g.timeRange) + ')</span>' : '') + '</p>');
-      out.push('<ul style="margin:0 0 8px;padding-left:20px">');
-      g.items.forEach(function (it) {
-        out.push('<li style="margin:0 0 3px">' + esc(actionLine(it)) + '</li>');
-      });
-      out.push('</ul>');
-      /* Photos sit INSIDE the topic block, which is the whole point: the
-         evidence stays with the claim it evidences. */
-      var srcs = g.photos.map(function (f) { return photoSrc[f]; }).filter(Boolean);
-      if (srcs.length) {
-        out.push('<div>');
-        srcs.forEach(function (src) {
-          out.push('<img src="' + src + '" style="max-width:420px;height:auto;'
-            + 'margin:0 8px 8px 0;border:1px solid #d9e2ec;border-radius:4px" />');
-        });
-        out.push('</div>');
+    out.push('<table cellspacing="0" cellpadding="0" '
+      + 'style="border-collapse:collapse;width:100%">');
+    out.push('<thead><tr>' + COLUMNS.map(function (c) {
+      return '<th style="' + TH + '">' + esc(c) + '</th>';
+    }).join('') + '</tr></thead><tbody>');
+
+    previewBlocks(model).forEach(function (b) {
+      if (b.kind === 'topic') {
+        out.push('<tr><td colspan="3" style="' + LABEL + '">' + esc(b.group.topicTitle)
+          + (b.group.timeRange ? ' <span style="font-weight:400;color:#627d98">('
+              + esc(b.group.timeRange) + ')</span>' : '') + '</td></tr>');
+        return;
       }
-      out.push('</div>');
+      if (b.kind === 'row') {
+        out.push('<tr>' + cellsFor(b.row).map(function (c) {
+          /* An unstated column is an empty <td>. Not a dash, not a
+             non-breaking space: an empty cell is the only thing that says
+             nothing. */
+          return '<td style="' + TD + '">' + esc(c) + '</td>';
+        }).join('') + '</tr>');
+        return;
+      }
+      var srcs = b.group.photos.map(function (f) { return photoSrc[f]; }).filter(Boolean);
+      if (!srcs.length) return;
+      out.push('<tr><td colspan="3" style="' + TD + '">'
+        + srcs.map(function (src) {
+            return '<img src="' + src + '" style="max-width:420px;height:auto;'
+              + 'margin:0 8px 8px 0;border:1px solid #d9e2ec;border-radius:4px" />';
+          }).join('')
+        + '</td></tr>');
     });
+
+    out.push('</tbody></table>');
     out.push('<p style="color:#627d98;font-size:12px">' + esc(model.footer) + '</p>');
     out.push('</div>');
     return out.join('');
   }
 
+  /* The plain-text flavour is a TABLE too, not a bulleted list. Every mail
+     client picks the richest flavour it supports and some pick this one; a
+     reader who gets a list has been sent a different document from the one
+     the sender previewed. */
   function renderEmailText(model) {
     var lines = [model.intro, ''];
-    model.groups.forEach(function (g) {
-      lines.push(g.topicTitle + (g.timeRange ? ' (' + g.timeRange + ')' : ''));
-      g.items.forEach(function (it) { lines.push('  - ' + actionLine(it)); });
-      if (g.photos.length) {
-        lines.push('  [' + g.photos.length + ' photo'
-          + (g.photos.length === 1 ? '' : 's') + ' attached above]');
+
+    /* A literal pipe inside a cell would end its column early and shift
+       every later cell one to the left.
+
+       A NEWLINE is worse: it terminates the row mid-table. A markdown-aware
+       client loses every row after it, and a plain reader sees the rest of
+       the line orphaned under no column at all. Brief task text comes from a
+       model, so a wrapped sentence is reachable rather than theoretical —
+       collapsed to a space, which is what the sentence meant anyway. */
+    function cell(s) {
+      return String(s == null ? '' : s)
+        .replace(/\r?\n/g, ' ')
+        .replace(/\|/g, '\\|');
+    }
+    function pipe(cells) { return '| ' + cells.map(cell).join(' | ') + ' |'; }
+
+    lines.push(pipe(COLUMNS));
+    lines.push('| --- | --- | --- |');
+
+    previewBlocks(model).forEach(function (b) {
+      if (b.kind === 'topic') {
+        lines.push(pipe(['**' + b.group.topicTitle
+          + (b.group.timeRange ? ' (' + b.group.timeRange + ')' : '') + '**', '', '']));
+        return;
       }
-      lines.push('');
+      if (b.kind === 'row') { lines.push(pipe(cellsFor(b.row))); return; }
+      /* The text flavour cannot carry an image, so it says the photos exist
+         rather than losing them silently. */
+      lines.push(pipe(['[' + b.group.photos.length + ' photo'
+        + (b.group.photos.length === 1 ? '' : 's') + ' attached above]', '', '']));
     });
+
+    lines.push('');
     lines.push(model.footer);
     return lines.join('\n');
   }
@@ -200,7 +403,12 @@
 
     var model = React.useMemo(function () {
       return buildPreviewModel(props);
-    }, [props.topics, props.session, props.date, props.siteName, props.deepLink]);
+      /* props.briefs belongs in this list: it is an input to
+         buildPreviewModel, and without it a brief arriving after the modal
+         first rendered would leave the table built from action_items with
+         nothing to say it had not updated. */
+    }, [props.topics, props.session, props.date, props.siteName, props.deepLink,
+        props.briefs]);
 
     var srcRef   = React.useState({});
     var photoSrc = srcRef[0];
@@ -338,19 +546,34 @@
         h('p', { className: 'fs-email-preview__subject' },
           h('strong', null, 'Subject: '), model.subject),
         h('p', { className: 'fs-email-preview__intro' }, model.intro),
-        model.groups.map(function (g, gi) {
-          return h('div', { key: gi, className: 'fs-email-preview__group' },
-            h('div', { className: 'fs-email-preview__topic' },
-              g.topicTitle, g.timeRange
-                ? h('span', { className: 'fs-email-preview__time' }, ' (' + g.timeRange + ')')
-                : null),
-            h('ul', { className: 'fs-email-preview__items' },
-              g.items.map(function (it, ii) {
-                return h('li', { key: ii }, actionLine(it));
-              })),
-            g.photos.length
-              ? h('div', { className: 'fs-email-preview__photos' },
-                  g.photos.map(function (f, pi) {
+        /* The preview renders the SAME three columns, in the same order,
+           that the clipboard payload does — it walks previewBlocks like
+           both renderers do. This modal exists to show what is about to be
+           sent; a preview in a different shape from the payload is a
+           preview of something else. */
+        h('table', { className: 'fs-email-preview__table' },
+          h('thead', null,
+            h('tr', null, COLUMNS.map(function (c, ci) {
+              return h('th', { key: ci, scope: 'col' }, c);
+            }))),
+          h('tbody', null, previewBlocks(model).map(function (b, bi) {
+            if (b.kind === 'topic') {
+              return h('tr', { key: bi, className: 'fs-email-preview__topic-row' },
+                h('td', { colSpan: 3 },
+                  b.group.topicTitle, b.group.timeRange
+                    ? h('span', { className: 'fs-email-preview__time' },
+                        ' (' + b.group.timeRange + ')')
+                    : null));
+            }
+            if (b.kind === 'row') {
+              return h('tr', { key: bi }, cellsFor(b.row).map(function (c, ci) {
+                return h('td', { key: ci }, c);
+              }));
+            }
+            return h('tr', { key: bi },
+              h('td', { colSpan: 3 },
+                h('div', { className: 'fs-email-preview__photos' },
+                  b.group.photos.map(function (f, pi) {
                     return photoSrc[f]
                       ? h('img', {
                           key: pi, src: photoSrc[f], alt: f,
@@ -391,9 +614,8 @@
                         })
                       : h('span', { key: pi, className: 'fs-email-preview__photo-pending' },
                           'loading photo…');
-                  }))
-              : null);
-        }),
+                  }))));
+          }))),
         model.totalItems === 0
           ? h('p', { className: 'fs-email-preview__empty' },
               'Nothing outstanding — there is no hand-off to send.')

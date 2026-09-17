@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="styles/tokens.css?v=1" />
   <link rel="stylesheet" href="styles/app-shell.css?v=4" />
   <link rel="stylesheet" href="styles/components.css?v=7" />
-  <link rel="stylesheet" href="styles/composites.css?v=22" />
+  <link rel="stylesheet" href="styles/composites.css?v=23" />
 
   <style>
     html, body { overflow: auto; height: auto; }
@@ -112,7 +112,7 @@
   <script type="text/babel" src="scripts/composites/tooltip.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/toast.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/modal-overlay.js?v=1"></script>
-  <script type="text/babel" src="scripts/composites/email-preview-modal.js?v=7"></script>
+  <script type="text/babel" src="scripts/composites/email-preview-modal.js?v=8"></script>
   <script type="text/babel" src="scripts/composites/session-report-modal.js?v=5"></script>
   <script type="text/babel" src="scripts/composites/recording-delete-modal.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/safety-create-modal.js?v=3"></script>
@@ -155,6 +155,8 @@
             ErrorBanner, OverAllocationBanner, Tooltip,
             SafetyCreateModal, QualityCreateModal, SearchPalette,
             OnboardingOverlay, DemoTour,
+            /* feat/handoff-table — the hand-off as a three-column table */
+            EmailPreviewModal,
             /* Sprint 9 — new L5 composites */
             BarStack, SparkLine, TrendPill,
             HealthScore, RollupTable,
@@ -1374,6 +1376,72 @@
             <Row label="note">
               <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
                 DemoTour is page-level — activate via <code>?demo=1</code> on app-shell-preview.html.
+              </span>
+            </Row>
+          </Section>
+
+          {/* feat/handoff-table — EmailPreviewModal had no showcase render at
+              all, so the one thing worth looking at (does the table actually
+              read like a hand-off?) could only be seen by driving /timeline.
+              Both row sources are triggered here because they lay the table
+              out differently: action_items rows sit under their own topic so
+              a photo stays beside the finding it evidences, while brief rows
+              carry no topic and are one flat block.
+
+              Deliberately blank in both fixtures: one item has no owner, one
+              has no due date. Those cells must render EMPTY — no dash, no
+              "Unassigned", no invented date. 有就有，没有就没有. */}
+          <Section title="feat/handoff-table · EmailPreviewModal (hand-off table)">
+            <Row label="open">
+              <ModalTrigger
+                label="Hand-off — from action items"
+                Modal={EmailPreviewModal}
+                props={{
+                  open: true,
+                  date: '2026-03-01',
+                  siteName: 'SB1108 Ellesmere',
+                  session: { title: 'Morning walk' },
+                  topics: [
+                    { topic_id: 1, topic_title: 'Wall tolerance', time_range: '09:00 – 09:20',
+                      action_items: [
+                        { action: 'Redo the west wall to line', responsible: 'John', deadline: 'Wed', status: 'open' },
+                        { action: 'Chase the beam producer statement', status: 'open' },
+                      ],
+                      related_photos: [] },
+                    { topic_id: 2, topic_title: 'Slab pour', time_range: '10:05 – 10:30',
+                      action_items: [
+                        { action: 'Book the pre-pour inspection', responsible: 'Priya Sharma', status: 'open' },
+                      ],
+                      related_photos: [] },
+                  ],
+                }}
+              />
+              <ModalTrigger
+                label="Hand-off — from a session brief"
+                Modal={EmailPreviewModal}
+                props={{
+                  open: true,
+                  date: '2026-03-01',
+                  siteName: 'SB1108 Ellesmere',
+                  topics: [
+                    { topic_id: 1, topic_title: 'Wall tolerance', time_range: '09:00 – 09:20',
+                      action_items: [{ action: 'Redo the west wall to line', status: 'open' }],
+                      related_photos: [] },
+                  ],
+                  briefs: [
+                    { sessionId: 's1', brief: { status: 'ready', tasks: [
+                      { text: 'Redo the west wall to line before the next pour', at: '09:12:00', assignee: 'John', due: 'Wed' },
+                      { text: 'Chase the beam producer statement', at: '09:18:00', assignee: null, due: null },
+                      { text: 'Confirm the crane booking window', assignee: 'Priya Sharma', due: '2026-03-04' },
+                    ] } },
+                  ],
+                }}
+              />
+            </Row>
+            <Row label="note">
+              <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
+                Photos need a real <code>userFolder</code> + media API, so none are fetched here;
+                the photo row is exercised on /timeline.
               </span>
             </Row>
           </Section>
