@@ -112,7 +112,7 @@
   <script type="text/babel" src="scripts/composites/tooltip.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/toast.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/modal-overlay.js?v=1"></script>
-  <script type="text/babel" src="scripts/composites/email-preview-modal.js?v=11"></script>
+  <script type="text/babel" src="scripts/composites/email-preview-modal.js?v=12"></script>
   <script type="text/babel" src="scripts/composites/session-report-modal.js?v=5"></script>
   <script type="text/babel" src="scripts/composites/recording-delete-modal.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/safety-create-modal.js?v=3"></script>
@@ -1522,6 +1522,45 @@
                   ],
                 }}
               />
+              <ModalTrigger
+                label="Hand-off — Part 2: covered topic (no dup) + back-filled item"
+                Modal={EmailPreviewModal}
+                props={{
+                  open: true,
+                  date: '2026-09-11',
+                  siteName: 'Ormiston College',
+                  // §7/§9, from the real 2026-09-11 session this plan is
+                  // reasoning about. Topic 1 is COVERED (the brief task's
+                  // `at` 13:40:43 falls inside the topic's own 13:40 – 13:41
+                  // range) — it produced no action item, but it never sinks
+                  // to the bottom as a topic row either, because the brief
+                  // already said the same thing as a real row. Its photo
+                  // still travels below the table (§7.2/§3): coverage only
+                  // suppresses the DUPLICATE PROSE, not the evidence.
+                  // Topic 2's extraction item has a due date the brief never
+                  // mentioned (its best overlap with either brief task is
+                  // low) — that item is back-filled after the brief's own
+                  // rows, which is how the 2026-09-11 email lost it before.
+                  topics: [
+                    { topic_id: 1, session_id: 's1',
+                      topic_title: 'Ormiston College 360 Inspections', time_range: '13:40 – 13:41',
+                      summary: 'Speaker hopes to visit the MPI site with DeAndre.',
+                      action_items: [],
+                      related_photos: ['mpi-site.jpg'] },
+                    { topic_id: 2, session_id: 's1', topic_title: 'Port Com QA', time_range: '10:00 – 10:20',
+                      action_items: [
+                        { action: 'PS4 for the Port Com SR study to be signed', deadline: '2027-01-31', status: 'open' },
+                      ],
+                      related_photos: [] },
+                  ],
+                  briefs: [
+                    { sessionId: 's1', brief: { status: 'ready', tasks: [
+                      { text: 'Start QA pour checks and create report on Port Com concrete once 28-day cure ends', at: '10:05:00', assignee: 'Sam' },
+                      { text: 'Visit MPI site with DeAndre to see comprehensive open-space usage pattern', at: '13:40:43' },
+                    ] } },
+                  ],
+                }}
+              />
             </Row>
             <Row label="note">
               <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
@@ -1535,7 +1574,13 @@
                 "N/A" / "N/A", greyed. The fourth fixture's table reads "Redo the west wall to line
                 before the next pour" (s1, substituted by its brief) followed by "Order mesh for
                 the slab" (s2, kept — its brief never loaded) — a sibling session's success never
-                drops another session's own commitment.
+                drops another session's own commitment. The sixth fixture is Part 2 (§7): its table
+                reads "Start QA pour checks…" then "Visit MPI site with DeAndre…" (both brief rows)
+                then "PS4 for the Port Com SR study to be signed" (back-filled — its due date
+                survived even though the brief never mentioned it). "Ormiston College 360
+                Inspections" never appears as a topic row — the brief task at 13:40:43 falls inside
+                its own 13:40 – 13:41 range, so it is covered — but its photo still renders in the
+                photo section below the table, under its own title.
               </span>
             </Row>
           </Section>

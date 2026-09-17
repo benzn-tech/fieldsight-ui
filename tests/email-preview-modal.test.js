@@ -336,7 +336,10 @@ test('a session\'s brief rows are ordered by at with a stable tie-break; session
   // time (09:00:00) is earlier than one of s1's.
   const m = buildPreviewModel({
     topics: [
-      topic({ session_id: 's1', action_items: [] }),
+      // time_range moved off the brief's clock times (§7.1 coverage is a
+      // deliberate, separate behavior pinned elsewhere — this test is about
+      // sort order, so the topic must stay UNCOVERED to keep testing that).
+      topic({ session_id: 's1', action_items: [], time_range: '11:00 – 11:20' }),
       topic({ session_id: 's2', topic_title: 'Second session topic',
               action_items: [{ action: 'superseded by the brief', status: 'open' }] }),
     ],
@@ -720,7 +723,7 @@ test('a brief task with no time sorts LAST — absent is not early', () => {
   // green. An undated commitment sorted to the top of a hand-off reads as the
   // first thing that happened that morning.
   const m = buildPreviewModel({
-    topics: [topic({ session_id: 's1', action_items: [] })],
+    topics: [topic({ session_id: 's1', action_items: [], time_range: '11:00 – 11:20' })],
     briefs: [{ sessionId: 's1', brief: brief([
       { text: 'no time at all' },
       { text: 'ten past nine', at: '09:10:00' },
@@ -1091,4 +1094,300 @@ test('totalItems now counts action ROWS on the table, not a re-derived group cou
   assert.strictEqual(m.rows.length - 0, 1, 'sanity: one action row from the brief');
   assert.strictEqual(m.totalItems, 1,
     'totalItems reflects the ONE row actually on the table, not the three raw open items it replaced');
+});
+
+/* ==========================================================================
+   Part 2 — the brief and the extraction stop talking past each other (§5-10)
+   ==========================================================================
+   Two defects fixed here, both consequences of substituting brief tasks for
+   extraction action items while topic rows were still decided from the
+   extraction alone (§5):
+     5.1 the same commitment appeared twice — once as an action row, once as
+         a topic row about the same topic;
+     5.2 a dated commitment the extraction caught, that the brief never
+         mentioned, silently vanished when the brief won.
+*/
+
+/* ---- §7.1: parsing a topic's own time_range ------------------------------ */
+
+test('parseTimeRange accepts an en dash, an em dash, a hyphen, and tight spacing', () => {
+  const { parseTimeRange } = require('../scripts/composites/email-preview-modal.js');
+  assert.deepStrictEqual(parseTimeRange('09:00 – 09:20'), [9 * 3600, 9 * 3600 + 20 * 60]);
+  assert.deepStrictEqual(parseTimeRange('09:00–09:20'), [9 * 3600, 9 * 3600 + 20 * 60]);
+  assert.deepStrictEqual(parseTimeRange('09:00 - 09:20'), [9 * 3600, 9 * 3600 + 20 * 60]);
+  assert.deepStrictEqual(parseTimeRange('09:00-09:20'), [9 * 3600, 9 * 3600 + 20 * 60]);
+  assert.deepStrictEqual(parseTimeRange('13:40 — 13:41'), [13 * 3600 + 40 * 60, 13 * 3600 + 41 * 60]);
+});
+
+test('parseTimeRange returns null for anything that is not exactly two clock times', () => {
+  const { parseTimeRange } = require('../scripts/composites/email-preview-modal.js');
+  assert.strictEqual(parseTimeRange(''), null);
+  assert.strictEqual(parseTimeRange(null), null);
+  assert.strictEqual(parseTimeRange(undefined), null);
+  assert.strictEqual(parseTimeRange('09:00'), null, 'a single time is not a range');
+  assert.strictEqual(parseTimeRange('all day'), null);
+  assert.strictEqual(parseTimeRange('09:00 - 09:20 - 09:40'), null, 'three parts is not a range');
+  assert.strictEqual(parseTimeRange('25:00 - 26:00'), null, 'an out-of-range clock time');
+});
+
+/* ---- §7.1: coverage, both ends inclusive --------------------------------- */
+
+test('topicCovered: a task exactly at the range START covers', () => {
+  const { topicCovered } = require('../scripts/composites/email-preview-modal.js');
+  const covered = topicCovered({ time_range: '09:00 – 09:20' }, [{ at: '09:00:00' }]);
+  assert.strictEqual(covered, true);
+});
+
+test('topicCovered: a task exactly at the range END covers', () => {
+  const { topicCovered } = require('../scripts/composites/email-preview-modal.js');
+  const covered = topicCovered({ time_range: '09:00 – 09:20' }, [{ at: '09:20:00' }]);
+  assert.strictEqual(covered, true);
+});
+
+test('topicCovered: one second outside either end does not cover', () => {
+  const { topicCovered } = require('../scripts/composites/email-preview-modal.js');
+  assert.strictEqual(
+    topicCovered({ time_range: '09:00 – 09:20' }, [{ at: '08:59:59' }]), false);
+  assert.strictEqual(
+    topicCovered({ time_range: '09:00 – 09:20' }, [{ at: '09:20:01' }]), false);
+});
+
+test('topicCovered: a brief task with no `at` covers nothing', () => {
+  const { topicCovered } = require('../scripts/composites/email-preview-modal.js');
+  assert.strictEqual(
+    topicCovered({ time_range: '09:00 – 09:20' }, [{ at: '' }, { at: null }]), false);
+});
+
+test('topicCovered: an unparsable range is never covered', () => {
+  const { topicCovered } = require('../scripts/composites/email-preview-modal.js');
+  assert.strictEqual(
+    topicCovered({ time_range: 'all day' }, [{ at: '09:00:00' }]), false);
+  assert.strictEqual(
+    topicCovered({ time_range: '' }, [{ at: '09:00:00' }]), false);
+});
+
+/* ---- §7.2 / §5.1: a covered topic emits no topic row, but keeps photos --- */
+
+test('§9 worked example: 13:40:43 covers "Ormiston College 360 Inspections" 13:40 – 13:41', () => {
+  const m = buildPreviewModel({
+    topics: [topic({
+      session_id: 's1', topic_title: 'Ormiston College 360 Inspections',
+      time_range: '13:40 – 13:41', summary: 'Speaker hopes to visit the MPI site with DeAndre.',
+      action_items: [],
+    })],
+    briefs: [{ sessionId: 's1', brief: brief([
+      { text: 'Visit MPI site with DeAndre to see comprehensive open-space usage pattern.', at: '13:40:43' },
+    ]) }],
+  });
+  assert.deepStrictEqual(m.rows.map((r) => r.text),
+    ['Visit MPI site with DeAndre to see comprehensive open-space usage pattern.'],
+    'the topic is covered: no second row saying the same thing in different words');
+});
+
+test('a covered topic still carries its photos below the table', () => {
+  const m = buildPreviewModel({
+    topics: [topic({
+      session_id: 's1', topic_title: 'Ormiston College 360 Inspections',
+      time_range: '13:40 – 13:41', summary: 'Speaker hopes to visit the MPI site.',
+      action_items: [], related_photos: ['mpi.jpg'],
+    })],
+    briefs: [{ sessionId: 's1', brief: brief([{ text: 'Visit MPI site with DeAndre.', at: '13:40:43' }]) }],
+  });
+  assert.strictEqual(m.rows.length, 1, 'no topic row for the covered topic');
+  assert.strictEqual(m.totalPhotos, 1, 'the photo travels even though no topic row was emitted');
+  const html = renderEmailHtml(m, { 'mpi.jpg': 'https://s3/mpi.jpg' });
+  assert.ok(html.includes('<img'));
+  assert.ok(html.includes('Ormiston College 360 Inspections'), 'the photo section heading survives');
+});
+
+test('an uncovered topic (no session, or brief elsewhere) still emits its topic row as before', () => {
+  const m = buildPreviewModel({
+    topics: [
+      topic({ session_id: 's1', topic_title: 'Covered by s1', time_range: '13:40 – 13:41',
+        summary: 'x', action_items: [] }),
+      topic({ session_id: null, topic_title: 'No session at all', summary: 'y', action_items: [] }),
+    ],
+    briefs: [{ sessionId: 's1', brief: brief([{ text: 'whatever', at: '13:40:00' }]) }],
+  });
+  assert.ok(m.rows.some((r) => r.text.startsWith('No session at all')),
+    'a topic with no session_id can never be covered — there is no brief to check it against');
+});
+
+/* ---- §7.3-7.4: back-fill ------------------------------------------------- */
+
+test('§9 worked example: a low-overlap dated item is back-filled after the brief rows', () => {
+  const m = buildPreviewModel({
+    topics: [topic({
+      session_id: 's1', topic_title: 'Port Com',
+      action_items: [{
+        action: 'PS4 for the Port Com SR study to be signed', deadline: '2027-01-31', status: 'open',
+      }],
+    })],
+    briefs: [{ sessionId: 's1', brief: brief([
+      { text: 'Start QA pour checks and create report on Port Com concrete', at: '09:00:00' },
+    ]) }],
+  });
+  assert.strictEqual(m.rowsSource, 'mixed', 'one brief row, one back-filled extraction row');
+  assert.deepStrictEqual(m.rows.map((r) => r.text), [
+    'Start QA pour checks and create report on Port Com concrete',
+    'PS4 for the Port Com SR study to be signed',
+  ], 'the back-filled row is appended AFTER the brief rows of its session');
+  assert.strictEqual(m.rows[1].due, '2027-01-31');
+});
+
+test('§9 worked example: a high-overlap item ("represented") is NOT back-filled', () => {
+  const m = buildPreviewModel({
+    topics: [topic({
+      session_id: 's1', topic_title: 'Port Com',
+      action_items: [{
+        action: 'Concrete QA pour checks and report to be started three weeks later after cure',
+        deadline: '2026-10-09', status: 'open',
+      }],
+    })],
+    briefs: [{ sessionId: 's1', brief: brief([
+      { text: 'Start QA pour checks and create report on Port Com concrete once 28-day cure ends in about three weeks', at: '09:00:00' },
+    ]) }],
+  });
+  assert.strictEqual(m.rowsSource, 'brief', 'nothing back-filled: the item is already represented');
+  assert.deepStrictEqual(m.rows.map((r) => r.text),
+    ['Start QA pour checks and create report on Port Com concrete once 28-day cure ends in about three weeks']);
+});
+
+test('§9 worked example: an item with NO due date is never back-filled, however unmatched', () => {
+  const m = buildPreviewModel({
+    topics: [topic({
+      session_id: 's1', topic_title: 'Random',
+      action_items: [{ action: 'Completely unrelated undated remark', status: 'open' }],
+    })],
+    briefs: [{ sessionId: 's1', brief: brief([{ text: 'Pour the slab', at: '09:00:00' }]) }],
+  });
+  assert.strictEqual(m.rowsSource, 'brief');
+  assert.deepStrictEqual(m.rows.map((r) => r.text), ['Pour the slab']);
+});
+
+test('back-fill draws from the WHOLE session, including a topic reached later in the walk', () => {
+  // The brief block is written at the FIRST topic of the session; the
+  // eligible extraction item lives on the SECOND topic of the same session.
+  const m = buildPreviewModel({
+    topics: [
+      topic({ session_id: 's1', topic_title: 'First topic', action_items: [] }),
+      topic({ session_id: 's1', topic_title: 'Second topic',
+        action_items: [{ action: 'Sign the completely unrelated producer statement', deadline: '2026-12-01', status: 'open' }] }),
+    ],
+    briefs: [{ sessionId: 's1', brief: brief([{ text: 'Pour the slab', at: '09:00:00' }]) }],
+  });
+  assert.deepStrictEqual(m.rows.map((r) => r.text),
+    ['Pour the slab', 'Sign the completely unrelated producer statement']);
+});
+
+test('a done extraction item is never back-filled', () => {
+  const m = buildPreviewModel({
+    topics: [topic({
+      session_id: 's1', topic_title: 'Port Com',
+      action_items: [{ action: 'Completely unrelated finished item', deadline: '2026-10-01', status: 'done' }],
+    })],
+    briefs: [{ sessionId: 's1', brief: brief([{ text: 'Pour the slab', at: '09:00:00' }]) }],
+  });
+  assert.strictEqual(m.rowsSource, 'brief');
+  assert.deepStrictEqual(m.rows.map((r) => r.text), ['Pour the slab']);
+});
+
+test('back-fill never fires for a session with no usable brief — nothing to append after', () => {
+  const m = buildPreviewModel({
+    topics: [topic({
+      session_id: 's1', topic_title: 'Port Com',
+      action_items: [{ action: 'Unrelated dated item', deadline: '2026-10-01', status: 'open' }],
+    })],
+    // s1's own brief has zero tasks, so §1.3 treats it as no brief at all —
+    // the whole session stays on the extraction path, and §7.3 only fires
+    // "when action rows come from a session's brief".
+    briefs: [{ sessionId: 's1', brief: brief([]) }],
+  });
+  assert.strictEqual(m.rowsSource, 'action_items');
+  assert.deepStrictEqual(m.rows.map((r) => r.text), ['Unrelated dated item']);
+});
+
+test('back-fill never crosses sessions: session A cannot back-fill session B\'s items', () => {
+  const m = buildPreviewModel({
+    topics: [
+      topic({ session_id: 's1', topic_title: 'A', action_items: [] }),
+      topic({ session_id: 's2', topic_title: 'B',
+        action_items: [{ action: 'B\'s own unrelated dated item', deadline: '2026-10-01', status: 'open' }] }),
+    ],
+    briefs: [{ sessionId: 's1', brief: brief([{ text: 'A\'s own brief task', at: '09:00:00' }]) }],
+    // s2 has no usable brief, so its own item stays on the extraction path —
+    // it must not ALSO ride in as a back-fill under session s1.
+  });
+  assert.strictEqual(m.rowsSource, 'mixed');
+  assert.deepStrictEqual(m.rows.map((r) => r.text),
+    ["A's own brief task", "B's own unrelated dated item"]);
+  // In particular: it appears exactly once, not doubled by back-fill logic.
+  assert.strictEqual(m.rows.filter((r) => r.text.includes('unrelated dated item')).length, 1);
+});
+
+/* ---- §7.4: the Jaccard threshold, the stop list, and the tie direction -- */
+
+test('isRepresented: overlap strictly above the threshold is represented', () => {
+  const { isRepresented } = require('../scripts/composites/email-preview-modal.js');
+  // tokens {aaa,bbb,ccc,ddd} vs {aaa,bbb,ccc,eee}: intersection 3, union 5 -> 0.6
+  assert.strictEqual(isRepresented('aaa bbb ccc ddd', ['aaa bbb ccc eee']), true);
+});
+
+test('isRepresented: overlap strictly below the threshold is not represented', () => {
+  const { isRepresented } = require('../scripts/composites/email-preview-modal.js');
+  assert.strictEqual(isRepresented('aaa bbb', ['aaa xxx yyy zzz']), false);
+});
+
+test('isRepresented: overlap EXACTLY at the threshold is a tie, and a tie is NOT represented', () => {
+  // Decision made explicit (§7.4 read literally): "Represented iff overlap
+  // >= 0.30. A tie ... counts as NOT represented." Read together, the tie in
+  // question is the best-overlap value landing exactly ON the threshold, so
+  // this implementation treats the comparison as strictly-greater-than 0.30
+  // rather than >=. Picked over the alternative reading (a plain >= 0.30,
+  // making the second sentence describe only ties among several candidate
+  // brief tasks) because it is the one that keeps BOTH sentences true at
+  // once, and it keeps faith with §10's stated bias: uncertain cases lean
+  // towards carrying a commitment twice, never towards dropping it.
+  //
+  // 10 tokens vs 10 tokens sharing exactly 3 in common: 3 / (10+10-3) = 3/17
+  // is not exactly 0.30, so this constructs the boundary directly instead:
+  // {a,b,c} vs {a,b,d} -> intersection 2, union 4 -> 0.5, not what's wanted.
+  // Simplest exact 0.30: intersection 3, union 10 -> {a,b,c,d,e,f,g} (7
+  // unique) vs {a,b,c,h,i,j} (6 unique), shared {a,b,c} -> union 10,
+  // inter 3 -> 3/10 = 0.30 exactly.
+  const { isRepresented, REPRESENTED_JACCARD_THRESHOLD } =
+    require('../scripts/composites/email-preview-modal.js');
+  assert.strictEqual(REPRESENTED_JACCARD_THRESHOLD, 0.30);
+  const textA = 'aaa bbb ccc ddd eee fff ggg';   // 7 tokens: a b c d e f g
+  const textB = 'aaa bbb ccc hhh iii jjj';       // 6 tokens: a b c h i j
+  assert.strictEqual(isRepresented(textA, [textB]), false, 'exactly 0.30 does not represent');
+});
+
+test('isRepresented: an empty token set (too-short words, all stop words) is never represented', () => {
+  const { isRepresented } = require('../scripts/composites/email-preview-modal.js');
+  assert.strictEqual(isRepresented('to a an', ['pour the slab today']), false, 'all stop words / <3 chars');
+  assert.strictEqual(isRepresented('', ['pour the slab today']), false);
+  assert.strictEqual(isRepresented('pour the slab today', ['']), false);
+});
+
+test('isRepresented drops the stop list and short tokens before comparing', () => {
+  const { isRepresented } = require('../scripts/composites/email-preview-modal.js');
+  // Without stop-word/length filtering "to the a" would inflate overlap on
+  // completely unrelated sentences that happen to share function words.
+  assert.strictEqual(
+    isRepresented('Go to the site and check it', ['Go to the office and pay it']), false);
+});
+
+/* ---- rows/rowsSource stay honest with backfilled rows -------------------- */
+
+test('a back-filled row counts toward totalItems and fromExtractionCount (rowsSource=mixed)', () => {
+  const m = buildPreviewModel({
+    topics: [topic({
+      session_id: 's1', topic_title: 'Port Com',
+      action_items: [{ action: 'Totally unrelated dated commitment', deadline: '2026-10-01', status: 'open' }],
+    })],
+    briefs: [{ sessionId: 's1', brief: brief([{ text: 'Pour the slab', at: '09:00:00' }]) }],
+  });
+  assert.strictEqual(m.totalItems, 2);
+  assert.strictEqual(m.rowsSource, 'mixed');
 });

@@ -139,6 +139,103 @@
     return /^\s*(spk|speaker)[\s_-]*\d+\s*$/i.test(String(s == null ? '' : s));
   }
 
+  /* §7.1 — coverage by time. A topic's own `time_range` string looks like
+     "09:00 – 09:20" (an en dash), but has also been seen with a plain
+     hyphen and with no surrounding spaces. Parsed defensively: anything that
+     does not split into exactly two HH:MM or HH:MM:SS clock times is
+     unparsable, and an unparsable range is never covered (§7.1) — this
+     function returns null rather than guessing. */
+  function parseClockSeconds(s) {
+    var m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(String(s == null ? '' : s).trim());
+    if (!m) return null;
+    var h = Number(m[1]), mi = Number(m[2]), sec = m[3] ? Number(m[3]) : 0;
+    if (h > 23 || mi > 59 || sec > 59) return null;
+    return h * 3600 + mi * 60 + sec;
+  }
+
+  /* Splits on an en dash, an em dash, or a plain hyphen, with or without
+     surrounding whitespace — the three shapes seen in practice. Returns
+     [startSeconds, endSeconds], or null when the string isn't exactly two
+     parsable clock times. A range side given only as HH:MM is read as
+     HH:MM:00 — the plain reading, with no invented ":59" at the end. */
+  function parseTimeRange(range) {
+    var s = String(range == null ? '' : range).trim();
+    if (!s) return null;
+    var parts = s.split(/\s*[–—-]\s*/);
+    if (parts.length !== 2) return null;
+    var start = parseClockSeconds(parts[0]);
+    var end = parseClockSeconds(parts[1]);
+    if (start == null || end == null) return null;
+    return [start, end];
+  }
+
+  /* §7.1: "A topic is covered when at least one brief task's `at` falls
+     inside that topic's own time range, inclusive of both ends." `briefRows`
+     is the SAME per-session array buildPreviewModel already computed for
+     substitution — coverage is decided against a topic's own session, never
+     a sibling's. A brief task with no `at` covers nothing. */
+  function topicCovered(topic, briefRows) {
+    var range = parseTimeRange(topic && topic.time_range);
+    if (!range || !briefRows || !briefRows.length) return false;
+    for (var i = 0; i < briefRows.length; i += 1) {
+      var at = briefRows[i].at;
+      if (!at) continue;
+      var atSec = parseClockSeconds(at);
+      if (atSec == null) continue;
+      if (atSec >= range[0] && atSec <= range[1]) return true;
+    }
+    return false;
+  }
+
+  /* §7.4 — "represented" is a deliberately conservative text test.
+     Lower-case, keep [a-z0-9]+ tokens of 3+ characters, drop the stop list,
+     Jaccard overlap. One constant, named identically to the backend's, and
+     both sides pin the §9 worked examples against it. */
+  var REPRESENTED_STOP_WORDS = ('the a an and or to of for on in at is are '
+    + 'be by with from that this it as').split(' ');
+  var REPRESENTED_JACCARD_THRESHOLD = 0.30;
+
+  var _stopSet = {};
+  REPRESENTED_STOP_WORDS.forEach(function (w) { _stopSet[w] = true; });
+
+  function _tokenSet(s) {
+    var words = String(s == null ? '' : s).toLowerCase().match(/[a-z0-9]+/g) || [];
+    var set = {};
+    words.forEach(function (w) {
+      if (w.length >= 3 && !_stopSet[w]) set[w] = true;
+    });
+    return set;
+  }
+
+  function _jaccard(setA, setB) {
+    var keysA = Object.keys(setA), keysB = Object.keys(setB);
+    if (!keysA.length || !keysB.length) return 0;
+    var union = {}, inter = 0;
+    keysA.forEach(function (k) { union[k] = true; if (setB[k]) inter += 1; });
+    keysB.forEach(function (k) { union[k] = true; });
+    var unionSize = Object.keys(union).length;
+    return unionSize ? inter / unionSize : 0;
+  }
+
+  /* True iff `text` is represented in ANY of `briefTexts` — the BEST
+     overlap across the brief's tasks, not the average or the first. §7.4:
+     "Represented iff overlap >= 0.30. A tie ... counts as NOT represented" —
+     read together, a best-overlap that lands EXACTLY on the threshold is the
+     tie in question and counts as not represented, so the comparison below
+     is strictly-greater-than. An empty token set on either side already
+     scores 0 from `_jaccard`, which is always < the threshold, so it falls
+     out of the same comparison rather than needing its own branch — and the
+     bias stays towards carrying a commitment twice rather than losing it (§10). */
+  function isRepresented(text, briefTexts) {
+    var tokens = _tokenSet(text);
+    var best = 0;
+    (briefTexts || []).forEach(function (bt) {
+      var j = _jaccard(tokens, _tokenSet(bt));
+      if (j > best) best = j;
+    });
+    return best > REPRESENTED_JACCARD_THRESHOLD;
+  }
+
   /* A session's brief tasks, keyed by sessionId — usable ones only.
      "Usable" (§1.3, fix round 2026-09-18): the session loaded a brief
      (present in `opts.briefs`) AND it has at least one task. A brief with
@@ -196,6 +293,31 @@
     var fromBriefCount = 0;
     var fromExtractionCount = 0;
 
+    /* §7.3 pre-pass: every session's own OPEN extraction action items, in
+       the extraction's own order (topic-walk order, then item order) —
+       gathered BEFORE the main walk below because a session's brief block is
+       written at its FIRST topic, but the items eligible for back-fill may
+       live on a LATER topic of that same session. Excludes done items, the
+       same as every other action row on this table. */
+    var extractionItemsBySession = {};
+    topics.forEach(function (t) {
+      var sid = t.session_id;
+      if (!sid) return;
+      var open = (t.action_items || []).filter(function (a, idx) {
+        if (a && a.status) return a.status !== 'done';
+        return !isDone(a, t.topic_id, idx);
+      });
+      if (!open.length) return;
+      if (!extractionItemsBySession[sid]) extractionItemsBySession[sid] = [];
+      open.forEach(function (a) {
+        extractionItemsBySession[sid].push({
+          text:     a.action || a.text || '',
+          assignee: a.responsible || '',
+          due:      a.deadline || a.deadline_text || '',
+        });
+      });
+    });
+
     /* A topic's photos travel with it into the photo section below the
        table WHENEVER the topic itself is represented on the table — as an
        action row (its own items, open, not superseded) or as a topic row
@@ -229,10 +351,24 @@
         return !isDone(a, t.topic_id, idx);
       });
       var hasOwnItems = (t.action_items || []).length > 0;
-      var topicText = hasOwnItems ? '' : topicRowText(t);
-      var isTopicRow = !hasOwnItems && !!topicText;
 
-      if (open.length || isTopicRow) {
+      var sid = t.session_id;
+      var briefRows = sid ? briefRowsBySession[sid] : null;
+
+      /* §7.1–7.2: a topic that a brief task's `at` already falls inside is
+         "covered" and emits no topic row (§5.1 — the same commitment stopped
+         appearing twice, once as an action row and once as prose about the
+         topic it was raised under). Coverage is only asked of topics that
+         would otherwise BE a topic row — a topic with its own action items
+         already has an action row and was never a topic-row candidate. */
+      var covered = !hasOwnItems && topicCovered(t, briefRows);
+      var topicText = (hasOwnItems || covered) ? '' : topicRowText(t);
+      var isTopicRow = !hasOwnItems && !covered && !!topicText;
+
+      /* A covered topic still carries its photos below the table (task
+         instruction §3/§7): it is simply not ALSO stated as prose, because
+         the brief task already carries the same commitment as a real row. */
+      if (open.length || isTopicRow || covered) {
         groups.push({
           topicTitle: t.topic_title || t.title || 'Untitled topic',
           timeRange:  t.time_range || '',
@@ -250,9 +386,6 @@
 
       if (isTopicRow) topicRows.push({ text: topicText, kind: 'topic' });
 
-      var sid = t.session_id;
-      var briefRows = sid ? briefRowsBySession[sid] : null;
-
       if (briefRows) {
         if (!emittedSessions[sid]) {
           emittedSessions[sid] = true;
@@ -260,9 +393,25 @@
             actionRows.push({ text: r.text, at: r.at, assignee: r.assignee, due: r.due });
             fromBriefCount += 1;
           });
+
+          /* §7.3 back-fill: every extraction action item of THIS session
+             that carries a non-empty due date and is not represented in the
+             brief (§7.4) is appended after the brief's own rows, in the
+             extraction's own order. Matched against every one of the
+             session's brief task texts — best overlap wins, not the first
+             or the average. */
+          var briefTexts = briefRows.map(function (r) { return r.text; });
+          (extractionItemsBySession[sid] || []).forEach(function (item) {
+            if (!item.due) return;
+            if (isRepresented(item.text, briefTexts)) return;
+            actionRows.push({ text: item.text, at: '', assignee: item.assignee, due: item.due });
+            fromExtractionCount += 1;
+          });
         }
         /* This topic's own extraction items never surface once its session
-           has been substituted — that is the replacement, not a merge. */
+           has been substituted — that is the replacement, not a merge. The
+           back-filled items above are the one deliberate exception, and they
+           are drawn from `extractionItemsBySession`, not from `open` here. */
         return;
       }
 
@@ -761,6 +910,10 @@
       isSpeakerLabel: isSpeakerLabel,
       cellsFor: cellsFor,
       TOPIC_ROW_MAX_CHARS: TOPIC_ROW_MAX_CHARS,
+      parseTimeRange: parseTimeRange,
+      topicCovered: topicCovered,
+      isRepresented: isRepresented,
+      REPRESENTED_JACCARD_THRESHOLD: REPRESENTED_JACCARD_THRESHOLD,
     };
   }
 }());
