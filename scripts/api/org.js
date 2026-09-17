@@ -510,15 +510,26 @@
      lambda_session_finalize has been writing a brief per session since the
      brief shipped, and until now no client had ever read one: the whole
      narrative — sections with timestamps and verbatim quotes, the entities
-     with the spellings the transcriber produced, the tasks with the reason
-     each exists — went to S3 and stopped there.
+     with the spellings the transcriber produced, the tasks themselves — went
+     to S3 and stopped there.
 
      THREE STATES, NONE OF THEM AN ERROR. The endpoint answers `pending` for a
      brief that has not been written yet (and for one that never will be —
      they are the same thing to a caller), `removed` for a session whose
      recordings were deleted, and `ready` with the artifact spread whole
      underneath. A caller must read `status`: anything other than 'ready' is
-     "no brief", not a failure, and nothing here throws to say so.
+     "no brief", not a failure.
+
+     `status` IS TWO TYPES ON ONE KEY. The brief's own is a STRING
+     ('ready' | 'pending' | 'removed'); the _accessDenied/_notFound envelopes
+     below carry a NUMERIC one (401/403/404) under the same name. So
+     `switch (brief.status)` is unsafe — 404 never equals '404', and a
+     `default:` branch silently swallows every denial. Test the envelope
+     flags first, then the string.
+
+     And "nothing throws" is true only of these three states: a 5xx still
+     rejects, because _fetch.js retries three times and then throws the last
+     error. A caller that must not break on a bad gateway needs a catch.
 
      _accessDenied/_notFound pass straight through unswallowed, the posture
      getSessions and getSiteMembers already take — the caller decides how to
@@ -572,10 +583,14 @@
     var tasks = [];
     topics.forEach(function (t) {
       (t.action_items || []).forEach(function (a) {
+        /* Exactly the four keys build_brief_prompt asks the model for
+           (session_brief.py). `why` and `basis` are not among them: the
+           per-item context line was dropped on purpose, and the task's OWN
+           sentence carries that context now. Reinstating either here would
+           invent a field no live brief returns. */
         tasks.push({
-          text: a.action, why: 'Raised under ' + (t.topic_title || 'this meeting') + '.',
-          at: at(t), assignee: a.responsible || null, due: a.deadline || null,
-          basis: 'committed',
+          text: a.action, at: at(t),
+          assignee: a.responsible || null, due: a.deadline || null,
         });
       });
     });
@@ -584,14 +599,29 @@
     return {
       headline: headline, summary: headline,
       sections: sections, entities: entities, tasks: tasks,
-      open_todos: tasks.filter(function (t) { return !!t.assignee; }),
+      /* NOT the task objects. `to_session_summary` in session_brief.py
+         rebuilds each one as {text, responsible, due, at} — `responsible`,
+         not `assignee`, because it passes the name through `_real_name`
+         first. And it filters on TEXT, not on who it was given to: an
+         unassigned to-do is still outstanding work, and dropping it here
+         made the mock's list shorter than the live one for the same brief. */
+      open_todos: tasks.filter(function (t) { return !!(t.text || '').trim(); })
+        .map(function (t) {
+          return { text: t.text, responsible: t.assignee, due: t.due, at: t.at };
+        }),
       /* Empty because the fixture states nothing hedged, not because open
          points are unimplemented — they are lifted from a speaker flagging
          their own uncertainty, and no fixture line does. */
       open_points: [],
-      /* null, not zeros: the fixture measures nothing, and `0` here would
-         render as a counted-and-found-nothing result. */
-      stats: null,
+      /* A dict, because every brief finalize writes carries one: session_brief
+         assigns `stats` unconditionally and then adds the open-point counts.
+         `null` is only what _BRIEF_DEFAULTS serves for a brief written before
+         the field existed, so a caller reading brief.stats.X off the mock
+         would throw here and work live — backwards. These zeros are honest
+         counts of work this mock did none of, not a measurement. */
+      stats: { reanchored: 0, unmatched: 0, aliases_rejected: 0,
+               open_points_admitted: 0, open_points_rejected: {},
+               open_points_resolved: 0 },
       status: 'ready',
     };
   }

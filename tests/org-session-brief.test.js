@@ -4,8 +4,8 @@
  * GET /api/org/sessions/{id}/brief has existed on the backend since the brief
  * shipped, and no client had ever called it. lambda_session_finalize writes
  * one per session — sections with timestamps and verbatim quotes, entities
- * with the spellings the transcriber actually produced, tasks with the reason
- * each exists — and every one of them went to S3 and stopped there.
+ * with the spellings the transcriber actually produced, and the tasks — and
+ * every one of them went to S3 and stopped there.
  *
  * The endpoint answers with `status` in ready | pending | removed, and none of
  * the three is an error: a brief not yet written, one that will never be
@@ -159,7 +159,19 @@ test('the mock serves a brief for a fixture session rather than an empty one', a
   assert.ok(brief.tasks.length,
     'the fixture day carries action items — a brief with no tasks is the '
     + 'empty-stub claim that the feature is finished and the data absent');
-  assert.ok(brief.tasks[0].why, 'the reason a task exists is the field the to-do list was missing');
+  /* The task contract, whole. `build_brief_prompt` in session_brief.py asks
+     the model for exactly {text, at, assignee, due} and nothing else — `why`
+     and `basis` were dropped on purpose, the per-item context line folded
+     into the task's own sentence. Pinned as a SET so both directions are
+     red: a fifth key is a field the mock invented and no caller will ever
+     receive, a missing one is a field a caller reads as undefined. */
+  assert.deepStrictEqual(Object.keys(brief.tasks[0]).sort(),
+    ['assignee', 'at', 'due', 'text'],
+    'a brief task is exactly {text, at, assignee, due}');
+  assert.ok(brief.stats && typeof brief.stats === 'object',
+    'every brief finalize writes carries a stats dict; null is only the '
+    + 'pre-field default, and a caller reading brief.stats.X off a null '
+    + 'mock would throw here and work live');
   assert.ok(brief.headline, 'and it says what the meeting was about');
 });
 
@@ -179,12 +191,44 @@ test('the mock invents no field the live endpoint does not return', async () => 
   const brief = await org.getSessionBrief({
     sessionId: session.session_id, date: DAY.date, user: DAY.user,
   });
-  /* _BRIEF_DEFAULTS in lambda_org_api.py, plus `status`. A caller that grew
-     to read brief.date off the mock would break the moment it went live. */
-  const allowed = ['headline', 'sections', 'entities', 'tasks', 'stats',
-                   'summary', 'open_todos', 'open_points', 'status'];
-  const extra = Object.keys(brief).filter((k) => allowed.indexOf(k) < 0);
-  assert.deepStrictEqual(extra, [], 'mock-only fields: ' + extra.join(', '));
+  /* EVERY level, not just the top one. This test used to read
+     Object.keys(brief) alone, and a review measured what that let through:
+     adding a field to every task, dropping a field from every task, and
+     renaming `assignee` to `responsible` were ALL green, because none of
+     them changes a top-level key — and the nested objects are exactly where
+     a caller reads. Each shape below is the live one: the top level is
+     _BRIEF_DEFAULTS in lambda_org_api.py plus `status`, and the rest is what
+     build_brief_prompt asks the model for in session_brief.py, except
+     `todo`, which to_session_summary rebuilds ({responsible}, not
+     {assignee}). Compared as SETS, so an invented field and a missing one
+     are both red. */
+  const SHAPES = {
+    brief: ['headline', 'sections', 'entities', 'tasks', 'stats',
+            'summary', 'open_todos', 'open_points', 'status'],
+    task: ['text', 'at', 'assignee', 'due'],
+    section: ['title', 'bullets'],
+    bullet: ['text', 'at', 'quote'],
+    entity: ['name', 'aliases', 'kind', 'note'],
+    todo: ['text', 'responsible', 'due', 'at'],
+  };
+  const shapeOf = (obj, kind, where) => assert.deepStrictEqual(
+    Object.keys(obj).sort(), SHAPES[kind].slice().sort(),
+    where + ' is not the live ' + kind + ' shape {' + SHAPES[kind].join(', ') + '}');
+
+  shapeOf(brief, 'brief', 'the brief');
+  /* Without this the four walks below are vacuous on an empty array, which
+     is the same green a correct mock gives. */
+  assert.ok(brief.tasks.length && brief.sections.length
+    && brief.entities.length && brief.open_todos.length,
+    'nothing to walk — this test would pass on a brief with no nested objects');
+  brief.tasks.forEach((t, i) => shapeOf(t, 'task', `tasks[${i}]`));
+  brief.open_todos.forEach((t, i) => shapeOf(t, 'todo', `open_todos[${i}]`));
+  brief.entities.forEach((e, i) => shapeOf(e, 'entity', `entities[${i}]`));
+  brief.sections.forEach((s, i) => {
+    shapeOf(s, 'section', `sections[${i}]`);
+    assert.ok(s.bullets.length, `sections[${i}] has no bullets to check`);
+    s.bullets.forEach((b, j) => shapeOf(b, 'bullet', `sections[${i}].bullets[${j}]`));
+  });
 });
 
 test('the mock does not fabricate a verbatim quote it has no transcript for', async () => {
