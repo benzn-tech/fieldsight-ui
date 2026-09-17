@@ -583,14 +583,22 @@
     var tasks = [];
     topics.forEach(function (t) {
       (t.action_items || []).forEach(function (a) {
-        /* Exactly the four keys build_brief_prompt asks the model for
+        /* Exactly the five keys build_brief_prompt asks the model for
            (session_brief.py). `why` and `basis` are not among them: the
            per-item context line was dropped on purpose, and the task's OWN
            sentence carries that context now. Reinstating either here would
-           invent a field no live brief returns. */
+           invent a field no live brief returns.
+
+           `section` is the title of the section this task came from, verbatim
+           — the same string `sections` above was built with. Omitting it is
+           not neutral: the hand-off table sinks every section NO task claims,
+           so a mock whose tasks claim nothing would show every topic twice,
+           once as a task and once as a sunk row, and the local preview would
+           be lying in the exact place this field exists to fix. */
         tasks.push({
           text: a.action, at: at(t),
           assignee: a.responsible || null, due: a.deadline || null,
+          section: t.topic_title || 'Untitled',
         });
       });
     });
@@ -607,7 +615,8 @@
          made the mock's list shorter than the live one for the same brief. */
       open_todos: tasks.filter(function (t) { return !!(t.text || '').trim(); })
         .map(function (t) {
-          return { text: t.text, responsible: t.assignee, due: t.due, at: t.at };
+          return { text: t.text, responsible: t.assignee, due: t.due, at: t.at,
+                   section: t.section };
         }),
       /* Empty because the fixture states nothing hedged, not because open
          points are unimplemented — they are lifted from a speaker flagging

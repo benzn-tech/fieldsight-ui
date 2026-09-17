@@ -336,9 +336,10 @@ test('a session\'s brief rows are ordered by at with a stable tie-break; session
   // time (09:00:00) is earlier than one of s1's.
   const m = buildPreviewModel({
     topics: [
-      // time_range moved off the brief's clock times (§7.1 coverage is a
-      // deliberate, separate behavior pinned elsewhere — this test is about
-      // sort order, so the topic must stay UNCOVERED to keep testing that).
+      // §2 (2026-09-18): s1 has a usable brief, so this topic — no action
+      // items of its own, and no `sections` on the brief either — produces
+      // NO row of its own at all; it exists here only to bring s1's block
+      // into the walk at this position, which is what the test is about.
       topic({ session_id: 's1', action_items: [], time_range: '11:00 – 11:20' }),
       topic({ session_id: 's2', topic_title: 'Second session topic',
               action_items: [{ action: 'superseded by the brief', status: 'open' }] }),
@@ -353,12 +354,8 @@ test('a session\'s brief rows are ordered by at with a stable tie-break; session
       ]) },
     ],
   });
-  // The topic (no action items) sinks to the bottom, after every action row —
-  // §1.2/§1.3. It carries no `at` at all, which is exactly the point: a
-  // topic row is never part of the at-ordered set.
   assert.deepStrictEqual(m.rows.map((r) => r.text),
-    ['first-session-early', 'first-session-late', 'second-session-same-clock',
-     'Wall tolerance']);
+    ['first-session-early', 'first-session-late', 'second-session-same-clock']);
 });
 
 test('the fallback path has no at and falls back to the topic time_range', () => {
@@ -723,6 +720,9 @@ test('a brief task with no time sorts LAST — absent is not early', () => {
   // green. An undated commitment sorted to the top of a hand-off reads as the
   // first thing that happened that morning.
   const m = buildPreviewModel({
+    // §2 (2026-09-18): s1's topic has no action items and the brief carries
+    // no `sections`, so it contributes no row of its own — it only brings
+    // s1's block into the walk.
     topics: [topic({ session_id: 's1', action_items: [], time_range: '11:00 – 11:20' })],
     briefs: [{ sessionId: 's1', brief: brief([
       { text: 'no time at all' },
@@ -730,9 +730,8 @@ test('a brief task with no time sorts LAST — absent is not early', () => {
       { text: 'eight sharp', at: '08:00:00' },
     ]) }],
   });
-  // The topic (no action items) sinks after every brief row, as always.
   assert.deepStrictEqual(m.rows.map((r) => r.text),
-    ['eight sharp', 'ten past nine', 'no time at all', 'Wall tolerance']);
+    ['eight sharp', 'ten past nine', 'no time at all']);
 });
 
 test('a literal pipe in the text cannot break the text table apart', () => {
@@ -1108,15 +1107,24 @@ test('totalItems now counts action ROWS on the table, not a re-derived group cou
          mentioned, silently vanished when the brief won.
 */
 
-/* ---- §7.1 (superseded): topic-row suppression is now a TEXT test --------
+/* ---- §7.1 (superseded twice): coverage was time, then text, now the brief
+   says it itself ----------------------------------------------------------
    Time-based coverage (`topicCovered`/`parseTimeRange`/`parseClockSeconds`)
-   is gone — measured on a real session it suppressed a topic row that
-   shared nothing but a clock window with the brief task that "covered" it
-   (a Papakura row killed by a KCD task, same 2-minute window, unrelated
-   content). Suppression is decided by `isRepresented` against the topic's
-   own row text, reusing the §7.4 rule below rather than a second one. */
+   was replaced by a TEXT test (`isRepresented` against the topic's own row
+   text) because it suppressed a Papakura row killed by a same-time-window
+   KCD task that never mentioned it.
 
-test('real case: the Ormiston/DeAndre topic row IS suppressed — its text is represented in the matching brief task', () => {
+   The 2026-09-18 "brief says where a task came from" spec removes the text
+   test in turn, for a session with a usable brief: that session's
+   extraction topics now contribute NOTHING to the table, represented or
+   not — the brief's own `sections` say what produced no task (§2), and the
+   extraction's topic text is never consulted again for that session. The
+   two tests immediately below still pass unchanged, because for THESE
+   fixtures (no `sections` on the brief) the old "suppressed" outcome and
+   the new "never asked" outcome produce the identical set of rows — but the
+   REASON changed, so the assertion names below are corrected to say so. */
+
+test('real case: the Ormiston/DeAndre topic never produces a topic row once its session has a usable brief', () => {
   const m = buildPreviewModel({
     topics: [topic({
       session_id: 's1', topic_title: 'Ormiston College 360 Inspections',
@@ -1129,31 +1137,47 @@ test('real case: the Ormiston/DeAndre topic row IS suppressed — its text is re
   });
   assert.deepStrictEqual(m.rows.map((r) => r.text),
     ['Visit MPI site with DeAndre to review open-space usage pattern after Ormiston College 360 inspections.'],
-    'the topic row is suppressed: no second row saying the same thing in different words');
+    'no second row saying the same thing in different words — the topic contributes nothing on its own');
 });
 
-test('real case: the Papakura topic row is KEPT — nothing in the real brief tasks mentions it (this is the whole reason for the change)', () => {
+test('real case: the Papakura topic is KEPT — but now because it is the brief\'s OWN section with no task, not because its extraction text went unmatched (this is the whole reason for §2)', () => {
   const m = buildPreviewModel({
     topics: [topic({
       session_id: 's1', topic_title: 'Papakura Progress and Modulars',
       summary: 'Papakura is mid-program with good positioning and progressing well.',
       action_items: [],
     })],
-    briefs: [{ sessionId: 's1', brief: brief([
-      { text: 'Meet with KCD at the Icehouse office regarding new contract details.', at: '13:40:43' },
-      { text: 'Visit MPI site with DeAndre to review open-space usage pattern after Ormiston College 360 inspections.', at: '13:42:06' },
-      { text: 'Follow up with contractor on scaffolding permit renewal.', at: '13:44:33' },
-    ]) }],
+    briefs: [{ sessionId: 's1', brief: {
+      status: 'ready',
+      tasks: [
+        { text: 'Meet with KCD at the Icehouse office regarding new contract details.', at: '13:40:43', section: 'KCD contract' },
+        { text: 'Visit MPI site with DeAndre to review open-space usage pattern after Ormiston College 360 inspections.', at: '13:42:06', section: 'Ormiston College 360 Inspections' },
+        { text: 'Follow up with contractor on scaffolding permit renewal.', at: '13:44:33', section: 'Scaffolding permit' },
+      ],
+      /* The model that wrote both halves in the same pass: three sections
+         matched by a task (no sunk row), and one — Papakura — that produced
+         none. §2 is explicit this is now the ONLY route Papakura can
+         survive by; the extraction's own topic text (identical to the
+         summary above) is never consulted for a briefed session any more. */
+      sections: [
+        { title: 'KCD contract', bullets: [{ text: 'Met with KCD at the Icehouse office.' }] },
+        { title: 'Ormiston College 360 Inspections', bullets: [{ text: 'Discussed visiting the MPI site with DeAndre.' }] },
+        { title: 'Scaffolding permit', bullets: [{ text: 'Permit renewal to be chased.' }] },
+        { title: 'Papakura Progress and Modulars', bullets: [
+          { text: 'Papakura is mid-program with good positioning and progressing well.' }] },
+      ],
+    } }],
   });
   assert.deepStrictEqual(m.rows.map((r) => r.text),
     ['Meet with KCD at the Icehouse office regarding new contract details.',
       'Visit MPI site with DeAndre to review open-space usage pattern after Ormiston College 360 inspections.',
       'Follow up with contractor on scaffolding permit renewal.',
       'Papakura Progress and Modulars — Papakura is mid-program with good positioning and progressing well.'],
-    'the KCD task (same time window, unrelated text) must not suppress a Papakura row it never mentions');
+    'the three task-producing sections are not ALSO listed as sunk rows, and the one section with no '
+    + 'matching task — Papakura — is kept, sunk at the bottom');
 });
 
-test('a suppressed topic still carries its photos below the table', () => {
+test('a topic whose session has a usable brief keeps its photos even though it produces no row (old "suppressed" case)', () => {
   const m = buildPreviewModel({
     topics: [topic({
       session_id: 's1', topic_title: 'Ormiston College 360 Inspections',
@@ -1164,14 +1188,14 @@ test('a suppressed topic still carries its photos below the table', () => {
       { text: 'Visit MPI site with DeAndre to review open-space usage pattern after Ormiston College 360 inspections.', at: '13:42:06' },
     ]) }],
   });
-  assert.strictEqual(m.rows.length, 1, 'no topic row for the suppressed topic');
-  assert.strictEqual(m.totalPhotos, 1, 'the photo travels even though no topic row was emitted');
+  assert.strictEqual(m.rows.length, 1, 'no topic row for a topic in a briefed session');
+  assert.strictEqual(m.totalPhotos, 1, 'the photo travels even though no row was emitted for its topic');
   const html = renderEmailHtml(m, { 'mpi.jpg': 'https://s3/mpi.jpg' });
   assert.ok(html.includes('<img'));
   assert.ok(html.includes('Ormiston College 360 Inspections'), 'the photo section heading survives');
 });
 
-test('a topic with no session_id is never suppressed — there is no brief to test its text against', () => {
+test('a topic with no session_id still becomes its own topic row — there is no brief to substitute it', () => {
   const m = buildPreviewModel({
     topics: [
       topic({ session_id: 's1', topic_title: 'Ormiston College 360 Inspections',
@@ -1183,7 +1207,7 @@ test('a topic with no session_id is never suppressed — there is no brief to te
     ]) }],
   });
   assert.ok(m.rows.some((r) => r.text.startsWith('No session at all')),
-    'a topic with no session_id can never be suppressed — there is no brief to check its text against');
+    'a topic with no session_id can never be routed to any session\'s brief, so it keeps its own extraction text');
 });
 
 /* ---- §7.3-7.4: back-fill ------------------------------------------------- */
@@ -1370,4 +1394,235 @@ test('a back-filled row counts toward totalItems and fromExtractionCount (rowsSo
   });
   assert.strictEqual(m.totalItems, 2);
   assert.strictEqual(m.rowsSource, 'mixed');
+});
+
+/* ==========================================================================
+   Part 3 — the brief says which of its own sections a task came from (§1-2
+   of the 2026-09-18 "the brief says where a task came from" spec)
+   ==========================================================================
+   Reconciling the brief's tasks with the extraction's topics at RENDER time
+   was a guess: on a real session the two true duplicates scored 0.105 and
+   0.130 against the 0.30 threshold while the row that had to be kept scored
+   0.000 -- no threshold separates them. So the brief now says which of its
+   OWN sections each task came from, and a session with a usable brief takes
+   its WHOLE table from the brief: action rows are its tasks, sunk rows are
+   its sections that produced no task, and the extraction contributes
+   nothing else at all (Part 2's back-fill is the one deliberate exception,
+   unchanged).
+*/
+
+/* ---- sectionRowText: the sunk-row text, parity with topicRowText's rule - */
+
+test('sectionRowText: title — first bullet, same shape as a topic row', () => {
+  const { sectionRowText } = require('../scripts/composites/email-preview-modal.js');
+  const text = sectionRowText({
+    title: 'Papakura Progress and Modulars',
+    bullets: [{ text: 'Papakura is mid-program with good positioning and progressing well.' }],
+  });
+  assert.strictEqual(text, 'Papakura Progress and Modulars — Papakura is mid-program with good positioning and progressing well.');
+});
+
+test('sectionRowText takes the WHOLE first bullet, not its first sentence (unlike topicRowText)', () => {
+  // A bullet is already one sentence-shaped thing the model wrote; splitting
+  // it again the way topicRowText splits a summary would cut it mid-thought.
+  const { sectionRowText } = require('../scripts/composites/email-preview-modal.js');
+  const text = sectionRowText({
+    title: 'T', bullets: [{ text: 'First part. Second part that must survive too.' }],
+  });
+  assert.strictEqual(text, 'T — First part. Second part that must survive too.');
+});
+
+test('sectionRowText only reads the FIRST bullet — later bullets never leak in', () => {
+  const { sectionRowText } = require('../scripts/composites/email-preview-modal.js');
+  const text = sectionRowText({
+    title: 'T', bullets: [{ text: 'first bullet' }, { text: 'second bullet must not appear' }],
+  });
+  assert.strictEqual(text, 'T — first bullet');
+});
+
+test('sectionRowText: no title and no bullets produces no row, same contract as topicRowText', () => {
+  const { sectionRowText } = require('../scripts/composites/email-preview-modal.js');
+  assert.strictEqual(sectionRowText({ title: '  ', bullets: [] }), '');
+  assert.strictEqual(sectionRowText(undefined), '');
+});
+
+test('sectionRowText: a title with no bullets at all still renders alone', () => {
+  const { sectionRowText } = require('../scripts/composites/email-preview-modal.js');
+  assert.strictEqual(sectionRowText({ title: 'Lone section', bullets: [] }), 'Lone section');
+});
+
+test('sectionRowText truncates at 180 codepoints with an ellipsis — the EXACT same cap as topicRowText', () => {
+  const { sectionRowText, topicRowText, TOPIC_ROW_MAX_CHARS } =
+    require('../scripts/composites/email-preview-modal.js');
+  const long = sectionRowText({ title: 'T', bullets: [{ text: 'x'.repeat(400) }] });
+  const longTopic = topicRowText({ topic_title: 'T', summary: 'x'.repeat(400) });
+  assert.ok(long.length <= TOPIC_ROW_MAX_CHARS && long.endsWith('…'));
+  // Same title, same repeated filler, same cap -> byte-for-byte the same
+  // output, which is the "SAME rule, not a lookalike" requirement made
+  // concrete rather than asserted by name only.
+  assert.strictEqual(long, longTopic);
+});
+
+/* ---- §2: a session with a usable brief takes its whole table from it ---- */
+
+function briefWithSections(tasks, sections) {
+  return { status: 'ready', tasks: tasks, sections: sections };
+}
+
+test('a section whose title exactly matches a task\'s `section` produces NO sunk row', () => {
+  const m = buildPreviewModel({
+    topics: [topic({ session_id: 's1', topic_title: 'Wall tolerance', action_items: [] })],
+    briefs: [{ sessionId: 's1', brief: briefWithSections(
+      [{ text: 'Redo the wall', at: '09:00:00', section: 'Wall tolerance' }],
+      [{ title: 'Wall tolerance', bullets: [{ text: 'Wall out by 12mm on the west face.' }] }],
+    ) }],
+  });
+  assert.deepStrictEqual(m.rows.map((r) => r.text), ['Redo the wall'],
+    'the section produced a task, so it is not ALSO listed as a sunk row');
+});
+
+test('a section with NO matching task produces a sunk row, title — first bullet', () => {
+  const m = buildPreviewModel({
+    topics: [topic({ session_id: 's1', topic_title: 'Site logistics', action_items: [] })],
+    briefs: [{ sessionId: 's1', brief: briefWithSections(
+      [{ text: 'Redo the wall', at: '09:00:00', section: 'Wall tolerance' }],
+      [
+        { title: 'Wall tolerance', bullets: [{ text: 'Wall out by 12mm on the west face.' }] },
+        { title: 'Site logistics', bullets: [{ text: 'Crane booking window needs confirming before pour.' }] },
+      ],
+    ) }],
+  });
+  assert.deepStrictEqual(m.rows.map((r) => r.text),
+    ['Redo the wall', 'Site logistics — Crane booking window needs confirming before pour.']);
+  // Sunk rows are §1.5-shaped: N/A in both cells, greyed in HTML — the same
+  // rendering a topic row always got, not a new visual language.
+  const sunk = findRow(renderEmailText(m), 'Site logistics');
+  assert.deepStrictEqual(sunk.slice(1), ['N/A', 'N/A']);
+  const html = renderEmailHtml(m, {});
+  const row = html.slice(html.lastIndexOf('<tr>', html.indexOf('Site logistics')));
+  assert.ok(/color:#666/.test(row), 'a sunk section row is greyed the same as a topic row');
+});
+
+test('a task with `section: null` suppresses nothing — the section it might have meant still sinks', () => {
+  const m = buildPreviewModel({
+    topics: [topic({ session_id: 's1', topic_title: 'Site logistics', action_items: [] })],
+    briefs: [{ sessionId: 's1', brief: briefWithSections(
+      [{ text: 'A genuine orphan task', at: '09:00:00', section: null }],
+      [{ title: 'Site logistics', bullets: [{ text: 'Crane booking window needs confirming.' }] }],
+    ) }],
+  });
+  assert.deepStrictEqual(m.rows.map((r) => r.text),
+    ['A genuine orphan task', 'Site logistics — Crane booking window needs confirming.']);
+});
+
+test('a task whose `section` matches NOTHING (a hallucinated title, or one the validator already nulled) suppresses nothing either', () => {
+  const m = buildPreviewModel({
+    topics: [topic({ session_id: 's1', topic_title: 'Site logistics', action_items: [] })],
+    briefs: [{ sessionId: 's1', brief: briefWithSections(
+      [{ text: 'A task pointing nowhere real', at: '09:00:00', section: 'A title that exists in no section' }],
+      [{ title: 'Site logistics', bullets: [{ text: 'Crane booking window needs confirming.' }] }],
+    ) }],
+  });
+  assert.deepStrictEqual(m.rows.map((r) => r.text),
+    ['A task pointing nowhere real', 'Site logistics — Crane booking window needs confirming.']);
+});
+
+test('a session\'s extraction topics contribute NO topic rows at all once it has a usable brief — even a topic with no `sections` on the brief', () => {
+  // §1: "that session's extraction topics contribute no topic rows at all."
+  // Not "usually none" or "none once represented" — the extraction's own
+  // topic text is never read for a briefed session, full stop, regardless
+  // of whether the brief happens to carry `sections`.
+  const m = buildPreviewModel({
+    topics: [topic({
+      session_id: 's1', topic_title: 'Totally unrelated extraction topic',
+      summary: 'Nothing in the brief says anything like this at all.',
+      action_items: [],
+    })],
+    briefs: [{ sessionId: 's1', brief: brief([{ text: 'Some brief task', at: '09:00:00' }]) }],
+  });
+  assert.deepStrictEqual(m.rows.map((r) => r.text), ['Some brief task']);
+});
+
+test('every section with no matching task sinks, in the sections\' own order, after the action rows and the back-fill', () => {
+  const m = buildPreviewModel({
+    topics: [topic({
+      session_id: 's1', topic_title: 'Port Com',
+      action_items: [{ action: 'Unrelated dated extraction item', deadline: '2026-10-01', status: 'open' }],
+    })],
+    briefs: [{ sessionId: 's1', brief: briefWithSections(
+      [{ text: 'Pour the slab', at: '09:00:00', section: 'Slab pour' }],
+      [
+        { title: 'Slab pour', bullets: [{ text: 'Slab poured to level 2.' }] },
+        { title: 'First sunk section', bullets: [{ text: 'First sunk bullet.' }] },
+        { title: 'Second sunk section', bullets: [{ text: 'Second sunk bullet.' }] },
+      ],
+    ) }],
+  });
+  assert.deepStrictEqual(m.rows.map((r) => r.text), [
+    'Pour the slab',                                        // action row (brief task)
+    'Unrelated dated extraction item',                       // §7.3 back-fill
+    'First sunk section — First sunk bullet.',                // §2 sunk rows, in order
+    'Second sunk section — Second sunk bullet.',
+  ]);
+});
+
+test('a mixed day: the briefed session\'s sunk rows appear, and the OTHER session (no usable brief) keeps its own extraction rows exactly as before', () => {
+  const m = buildPreviewModel({
+    topics: [
+      topic({ session_id: 's1', topic_title: 'Wall tolerance', action_items: [] }),
+      topic({ session_id: 's2', topic_title: 'Slab pour',
+        action_items: [{ action: 'Pour the slab', status: 'open' }] }),
+      topic({ session_id: null, topic_title: 'No session at all', summary: 'A bare observation.',
+        action_items: [] }),
+    ],
+    briefs: [{ sessionId: 's1', brief: briefWithSections(
+      [{ text: 'Redo the wall', at: '09:00:00', section: 'Wall tolerance' }],
+      [
+        { title: 'Wall tolerance', bullets: [{ text: 'Wall out by 12mm on the west face.' }] },
+        { title: 'Site logistics', bullets: [{ text: 'Crane booking window needs confirming.' }] },
+      ],
+    ) }],
+  });
+  assert.strictEqual(m.rowsSource, 'mixed');
+  assert.deepStrictEqual(m.rows.map((r) => r.text), [
+    'Redo the wall',                                          // s1 action row (brief)
+    'Pour the slab',                                          // s2 action row (extraction, untouched)
+    'Site logistics — Crane booking window needs confirming.', // s1 sunk row
+    'No session at all — A bare observation.',                 // ordinary topic row, no session
+  ]);
+});
+
+test('a session with zero-task brief (unusable, §1.3) contributes no sunk rows either — it never entered the brief path at all', () => {
+  const m = buildPreviewModel({
+    topics: [topic({ session_id: 's1', topic_title: 'Wall tolerance',
+      action_items: [{ action: 'Chase the beam cert', status: 'open' }] })],
+    briefs: [{ sessionId: 's1', brief: briefWithSections(
+      [],
+      [{ title: 'Wall tolerance', bullets: [{ text: 'Wall out by 12mm.' }] }],
+    ) }],
+  });
+  assert.strictEqual(m.rowsSource, 'action_items');
+  assert.deepStrictEqual(m.rows.map((r) => r.text), ['Chase the beam cert']);
+});
+
+test('a section that has already been consumed by a task never ALSO produces a sunk row, even with several tasks and several sections mixed', () => {
+  const m = buildPreviewModel({
+    topics: [topic({ session_id: 's1', topic_title: 'Wall tolerance', action_items: [] })],
+    briefs: [{ sessionId: 's1', brief: briefWithSections(
+      [
+        { text: 'Redo the wall', at: '09:00:00', section: 'Wall tolerance' },
+        { text: 'Order mesh', at: '09:05:00', section: 'Slab pour' },
+        { text: 'An orphan with no section', at: '09:10:00', section: null },
+      ],
+      [
+        { title: 'Wall tolerance', bullets: [{ text: 'x' }] },
+        { title: 'Slab pour', bullets: [{ text: 'y' }] },
+        { title: 'Site meeting', bullets: [{ text: 'Weekly coordination meeting held on site.' }] },
+      ],
+    ) }],
+  });
+  assert.deepStrictEqual(m.rows.map((r) => r.text), [
+    'Redo the wall', 'Order mesh', 'An orphan with no section',
+    'Site meeting — Weekly coordination meeting held on site.',
+  ], 'exactly ONE sunk row — the two covered sections are not doubled up');
 });
