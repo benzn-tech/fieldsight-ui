@@ -85,6 +85,16 @@
       at:       t.at || '',
       assignee: t.assignee || '',
       due:      t.due || '',
+      /* The exact title of the section this task came from, or `null` —
+         carried through untouched, never defaulted to '' (§1 of the
+         2026-09-18 spec: "a section field that does not match any section
+         title exactly is set to null" — that validation is the backend's
+         job; this side only reads the result and must not invent a
+         mismatch of its own by coercing null to a string). Not rendered as
+         a table cell anywhere — it exists only to decide which of the
+         brief's OWN sections produced no task (§2, `sunkSectionsFor`
+         below). */
+      section:  t.section == null ? null : t.section,
       sessionIndex: sessionIndex,
       taskIndex:    taskIndex,
     };
@@ -95,11 +105,38 @@
      constant the parity test pins against. */
   var TOPIC_ROW_MAX_CHARS = 180;
 
+  /* The one truncation rule every sunk row (topic OR brief-section) is built
+     with: cap at 180 CODEPOINTS, matching Python's `len()` — not UTF-16 code
+     units. `.length`/`.slice()` on a JS string count the latter, and an
+     astral character (an emoji, a CJK Extension B ideograph — anything
+     outside the Basic Multilingual Plane) is TWO UTF-16 units but one
+     codepoint. Near the boundary that made JS count one character too many
+     and `.slice()` could cut a surrogate pair in half, producing an unpaired
+     surrogate the backend's `text[:180]` would never produce. `Array.from`
+     iterates a string by codepoint (it is what for...of and the spread
+     operator use under the hood), so counting and slicing through it stays
+     byte-for-byte aligned with the Python side. Factored out of
+     `topicRowText` (fix round, 2026-09-18) so `sectionRowText` — the brief's
+     own sunk rows — is truncated by the exact same rule, not a second one
+     that could drift from it. */
+  function _truncateRowText(text) {
+    var codepoints = Array.from(text);
+    if (codepoints.length > TOPIC_ROW_MAX_CHARS) {
+      text = codepoints.slice(0, TOPIC_ROW_MAX_CHARS - 1).join('').replace(/\s+$/, '') + '…';
+    }
+    return text;
+  }
+
   /* The text for a topic that produced no action items, built byte-for-byte
      the way `lambda_item_writer._topic_rows` builds it, so the email and
      "Preview & copy" cannot drift into showing two different sentences for
      the same topic. Returns '' when there is nothing to say (no title, no
-     summary) — the caller drops the row rather than emitting a blank one. */
+     summary) — the caller drops the row rather than emitting a blank one.
+
+     Used only for a topic whose session has NO usable brief (§2, fix round
+     2026-09-18): once a session's brief exists, that session's extraction
+     topics contribute nothing to the table — sunk rows for a briefed
+     session come from `sectionRowText` below instead, not from this. */
   function topicRowText(t) {
     t = t || {};
     var title = String(t.topic_title || t.title || '').trim();
@@ -111,21 +148,25 @@
       first += '.';
     }
     var text = [title, first].filter(Boolean).join(' — ');
-    /* The cap counts CODEPOINTS, matching Python's `len()` — not UTF-16
-       code units. `.length`/`.slice()` on a JS string count the latter, and
-       an astral character (an emoji, a CJK Extension B ideograph — anything
-       outside the Basic Multilingual Plane) is TWO UTF-16 units but one
-       codepoint. Near the boundary that made JS count one character too
-       many and `.slice()` could cut a surrogate pair in half, producing an
-       unpaired surrogate the backend's `text[:180]` would never produce.
-       `Array.from` iterates a string by codepoint (it is what for...of and
-       the spread operator use under the hood), so counting and slicing
-       through it stays byte-for-byte aligned with the Python side. */
-    var codepoints = Array.from(text);
-    if (codepoints.length > TOPIC_ROW_MAX_CHARS) {
-      text = codepoints.slice(0, TOPIC_ROW_MAX_CHARS - 1).join('').replace(/\s+$/, '') + '…';
-    }
-    return text;
+    return _truncateRowText(text);
+  }
+
+  /* The text for a brief SECTION that produced no task (§2 of the
+     2026-09-18 "brief says where a task came from" spec): `title — first
+     bullet`, truncated by the exact same rule as `topicRowText` — the spec
+     is explicit that it is "the SAME rule `topicRowText` already
+     implements", not a lookalike. Unlike `topicRowText` this takes the
+     WHOLE first bullet, not its first sentence: a section's bullet is
+     already one sentence-shaped thing the model wrote, not prose to further
+     trim. Returns '' when there is nothing to say (no title, no bullets),
+     same contract as `topicRowText` — the caller drops the row. */
+  function sectionRowText(sec) {
+    sec = sec || {};
+    var title = String(sec.title || '').trim();
+    var bullets = sec.bullets || [];
+    var first = String((bullets[0] && bullets[0].text) || '').trim();
+    var text = [title, first].filter(Boolean).join(' — ');
+    return _truncateRowText(text);
   }
 
   /* A raw speaker label ("spk_0", "spk-12", "Speaker 2", case-insensitive) is
@@ -219,8 +260,49 @@
      topic in `opts.topics` (e.g. scoped away) is simply never looked up,
      which is how §1.3 rule 4 falls out for free rather than needing its own
      check. */
+  /* §2 (2026-09-18): the brief's OWN sections that produced no task, for one
+     usable session — the sunk-row source once a brief exists, replacing the
+     extraction-topic text test entirely for that session. "Produced a task"
+     is an EXACT title match only (§1: "a section field that does not match
+     any section title exactly is set to null" server-side; here that means
+     a task whose `section` is null, or a string that happens to match
+     nothing in THIS session's own `sections`, suppresses nothing — every
+     section with no exact-matching task is sunk, never fewer). */
+  function sunkSectionsFor(sections, tasks) {
+    var covered = {};
+    (tasks || []).forEach(function (t) {
+      var s = t && t.section;
+      if (s != null && s !== '') covered[s] = true;
+    });
+    return (sections || []).filter(function (sec) {
+      var title = (sec && sec.title) || '';
+      return !!title && !covered[title];
+    });
+  }
+
+  /* A session's brief tasks AND its sunk sections, keyed by sessionId —
+     usable sessions only. "Usable" (§1.3, fix round 2026-09-18): the
+     session loaded a brief (present in `opts.briefs`) AND it has at least
+     one task. A brief with zero tasks is treated as no brief at all for
+     that session — and, since there is then no task to test a section
+     against, it contributes no sunk rows either (the whole session falls
+     back to the extraction path, §1.3).
+
+     Substitution is now PER SESSION, not per day: this map only says what a
+     given session's brief WOULD contribute if that session comes up during
+     the topic walk in buildPreviewModel. It never decides, on its own,
+     whether any particular action item is replaced — a session with no
+     topic in `opts.topics` (e.g. scoped away) is simply never looked up,
+     which is how §1.3 rule 4 falls out for free rather than needing its own
+     check.
+
+     Returns `{ tasks: {sid: [row]}, sunkSections: {sid: [section]} }` —
+     two maps rather than one, because a caller only ever wants one or the
+     other and the two shapes (task rows vs raw section objects) are not the
+     same thing pretending to be. */
   function briefsBySession(briefs) {
-    var map = {};
+    var tasksMap = {};
+    var sunkMap = {};
     (briefs || []).forEach(function (b) {
       if (!b || !b.sessionId) return;
       var art = (b && b.brief) || {};
@@ -236,9 +318,10 @@
         if (a.at !== c.at) return a.at < c.at ? -1 : 1;
         return a.taskIndex - c.taskIndex;
       });
-      map[b.sessionId] = rows;
+      tasksMap[b.sessionId] = rows;
+      sunkMap[b.sessionId] = sunkSectionsFor(art.sections, tasks);
     });
-    return map;
+    return { tasks: tasksMap, sunkSections: sunkMap };
   }
 
   /* One entry per topic that still has something outstanding, carrying its
@@ -257,7 +340,9 @@
        (in walk order) that belongs to it — every later topic of the same
        session contributes nothing further, brief or extraction, because its
        commitments already rode in on that first block. */
-    var briefRowsBySession = briefsBySession(opts.briefs || []);
+    var briefsInfo = briefsBySession(opts.briefs || []);
+    var briefRowsBySession = briefsInfo.tasks;
+    var sunkSectionsBySession = briefsInfo.sunkSections;
     var emittedSessions = {};
     var actionRows = [];
     var topicRows = [];
@@ -316,52 +401,56 @@
            model still silently drops something — recorded here rather than
            left implicit, and pinned by a test in the same name as this
            decision. */
+    function pushGroup(t, open, photos) {
+      groups.push({
+        topicTitle: t.topic_title || t.title || 'Untitled topic',
+        timeRange:  t.time_range || '',
+        category:   t.category || '',
+        items: open.map(function (a) {
+          return {
+            action:      a.action || a.text || '',
+            responsible: a.responsible || '',
+            deadline:    a.deadline || a.deadline_text || '',
+          };
+        }),
+        photos: photos,
+      });
+    }
+
     topics.forEach(function (t) {
       var open = (t.action_items || []).filter(function (a, idx) {
         if (a && a.status) return a.status !== 'done';
         return !isDone(a, t.topic_id, idx);
       });
       var hasOwnItems = (t.action_items || []).length > 0;
+      var photos = (t.related_photos || []).slice();
 
       var sid = t.session_id;
       var briefRows = sid ? briefRowsBySession[sid] : null;
 
-      /* A topic row whose own text is already represented in one of its
-         session's brief tasks is suppressed — the same commitment stopped
-         appearing twice, once as an action row (from the brief) and once as
-         prose about the topic it was raised under (§5.1). Suppression is
-         only asked of topics that would otherwise BE a topic row — a topic
-         with its own action items already has an action row and was never a
-         topic-row candidate, and a topic with no usable brief (`briefRows`
-         null/empty) has nothing to test against, so `isRepresented` sees an
-         empty `briefTexts` array and returns false via the same "no evidence
-         = not represented" path §7.4 already defines. */
-      var topicTextRaw = hasOwnItems ? '' : topicRowText(t);
-      var briefTexts = briefRows ? briefRows.map(function (r) { return r.text; }) : [];
-      var suppressed = !hasOwnItems && !!topicTextRaw && isRepresented(topicTextRaw, briefTexts);
-      var topicText = suppressed ? '' : topicTextRaw;
-      var isTopicRow = !hasOwnItems && !suppressed && !!topicText;
-
-      /* A suppressed topic still carries its photos below the table (task
-         instruction §3/§7): it is simply not ALSO stated as prose, because
-         the brief task already carries the same commitment as a real row. */
-      if (open.length || isTopicRow || suppressed) {
-        groups.push({
-          topicTitle: t.topic_title || t.title || 'Untitled topic',
-          timeRange:  t.time_range || '',
-          category:   t.category || '',
-          items: open.map(function (a) {
-            return {
-              action:      a.action || a.text || '',
-              responsible: a.responsible || '',
-              deadline:    a.deadline || a.deadline_text || '',
-            };
-          }),
-          photos: (t.related_photos || []).slice(),
-        });
+      if (briefRows) {
+        /* §2 (2026-09-18): a session with a usable brief takes ITS WHOLE
+           table from the brief — this topic contributes no row of its own,
+           neither an action row (superseded, unchanged from before) nor a
+           topic row. The text test that used to decide topic-row
+           suppression here (`isRepresented` against the topic's own
+           summary) is gone entirely for this branch, not just quieted: the
+           brief's own `sections` now say what produced no task (emitted
+           once per session, below), and the extraction's topic text is
+           never consulted again. A topic still keeps its photos whenever it
+           has any — the one thing that travels per topic regardless of
+           whether the topic produced a row at all (task instruction §3). */
+        if (open.length || photos.length) pushGroup(t, open, photos);
+      } else {
+        /* No usable brief for this session (or no session_id at all):
+           exactly the old behaviour — a topic with no action items of its
+           own becomes a topic row from its own text, never suppressed
+           (there is no brief here to test it against). */
+        var topicText = hasOwnItems ? '' : topicRowText(t);
+        var isTopicRow = !hasOwnItems && !!topicText;
+        if (open.length || isTopicRow) pushGroup(t, open, photos);
+        if (isTopicRow) topicRows.push({ text: topicText, kind: 'topic' });
       }
-
-      if (isTopicRow) topicRows.push({ text: topicText, kind: 'topic' });
 
       if (briefRows) {
         if (!emittedSessions[sid]) {
@@ -383,6 +472,19 @@
             if (isRepresented(item.text, briefTexts)) return;
             actionRows.push({ text: item.text, at: '', assignee: item.assignee, due: item.due });
             fromExtractionCount += 1;
+          });
+
+          /* §2 sunk rows: this session's brief sections that produced no
+             task, `title — first bullet`, truncated by the same rule as a
+             topic row. Sink after the brief's own action rows and the
+             back-fill above, same position a topic row always took (§1.2:
+             every action row, then every topic row) — reused `kind: 'topic'`
+             deliberately: N/A cells, greyed in HTML, is exactly what "there
+             is no task here" already means on this table, and a sunk brief
+             section is precisely that. */
+          (sunkSectionsBySession[sid] || []).forEach(function (sec) {
+            var text = sectionRowText(sec);
+            if (text) topicRows.push({ text: text, kind: 'topic' });
           });
         }
         /* This topic's own extraction items never surface once its session
@@ -884,6 +986,7 @@
       skipSummary: skipSummary,
       actionLine: actionLine,
       topicRowText: topicRowText,
+      sectionRowText: sectionRowText,
       isSpeakerLabel: isSpeakerLabel,
       cellsFor: cellsFor,
       TOPIC_ROW_MAX_CHARS: TOPIC_ROW_MAX_CHARS,
