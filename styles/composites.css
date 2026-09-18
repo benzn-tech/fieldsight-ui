@@ -111,6 +111,9 @@
   overflow-wrap: anywhere;
 }
 
+/* "This to-do has been changed" — quieter than status (spec 2026-09-15 §8.2). */
+.fs-task-card__version { vertical-align: 1px; }
+
 .fs-task-card__meta {
   display: flex;
   align-items: center;
@@ -826,6 +829,18 @@
   width: 100%;
 }
 
+/* Compact strip: Timeline day header only (spec 2026-09-15 §10). Value and
+   label share one baseline. Scoped here so the base .fs-stat-card rules (and
+   Insights / strategic dashboards) are unchanged. Tone colours still apply. */
+.fs-kpi-strip.fs-kpi-strip--compact { gap: 6px; }
+.fs-kpi-strip--compact .fs-stat-card {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 10px;
+}
+.fs-kpi-strip--compact .fs-stat-card__value { font-size: 15px; }
+
 
 /* =========================================================================
    CategoryBadge — opinionated tone wrapper over Badge
@@ -935,11 +950,46 @@
 
 .fs-action-item-row__priority { flex-shrink: 0; }
 
+.fs-action-item-row__history-toggle {
+  background: none; border: 0; padding: 0; font: inherit;
+  color: var(--text-secondary); text-decoration: underline; cursor: pointer;
+}
+.fs-action-item-row__history-toggle:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.fs-action-item-row-wrap > .fs-todo-history { margin: 0 10px 8px 36px; }
+
 .fs-action-item-row--checked .fs-action-item-row__text {
   color: var(--text-tertiary);
   text-decoration: line-through;
 }
 
+/* =========================================================================
+   TodoHistory — provenance + version list (spec 2026-09-15 §2)
+   ========================================================================= */
+.fs-todo-history {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fs-todo-history--loading { color: var(--text-tertiary); }
+.fs-todo-history__link {
+  background: none; border: 0; padding: 0; font: inherit;
+  color: var(--text-link, var(--text-primary));
+  text-decoration: underline; cursor: pointer;
+}
+.fs-todo-history__link:focus-visible { outline: 2px solid var(--border-focus, currentColor); outline-offset: 2px; }
+.fs-todo-history__versions {
+  list-style: none; margin: 0; padding: 0 0 0 10px;
+  border-left: 2px solid var(--border-subtle);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.fs-todo-history__heading { display: flex; gap: 8px; align-items: baseline; }
+.fs-todo-history__tag { font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.fs-todo-history__when { color: var(--text-tertiary); }
+.fs-todo-history__body { color: var(--text-primary); word-break: break-word; }
+.fs-todo-history__body--field { color: var(--text-secondary); font-style: italic; }
+.fs-todo-history__who { color: var(--text-tertiary); }
 
 /* =========================================================================
    SafetyFlagRow — risk badge + observation + recommended action
@@ -3558,6 +3608,168 @@
   display: flex;
   gap: 6px;
   align-items: stretch;
+}
+
+/* One Ask, scoped (docs/specs/2026-09-15-one-ask-scoped.md) */
+.fs-ask-chat__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.fs-ask-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  gap: 2px;
+  padding: 2px 4px 2px 10px;
+  font-size: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  background: var(--surface-panel-muted);
+  color: var(--text-secondary);
+}
+.fs-ask-chip__seg {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fs-ask-chip__seg--unenforced {
+  text-decoration: line-through;
+  color: var(--text-tertiary);
+}
+.fs-ask-chip__sep { color: var(--text-tertiary); }
+.fs-ask-chip__remove {
+  font: inherit;
+  min-width: 32px;
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+}
+.fs-ask-chip__remove:hover { color: var(--text-primary); }
+.fs-ask-chip__remove:focus-visible { outline: 2px solid var(--border-focus, var(--border-strong)); outline-offset: -2px; }
+@media (pointer: coarse) {
+  .fs-ask-chip__remove { min-width: 44px; min-height: 44px; }
+}
+.fs-ask-chat__scope-line {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+}
+/* Task 11 (docs/superpowers/sdd/2026-09-17-ask-conversation-memory): what the
+   backend actually searched for once history resolved a "it"/"the same
+   site" reference. Same treatment as the scope line it sits beside -- a
+   quiet fact above the answer, not a correction (that is `fs-ask-chat__
+   basis--widened`'s job). */
+.fs-ask-chat__asked {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+  font-style: italic;
+}
+/* `question_admission`'s refusal sentence -- rendered so a guard doing its
+   job does not read as the web section having silently gone missing. */
+.fs-ask-chat__web-refused {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+}
+.fs-ask-chat__widen {
+  font: inherit;
+  font-size: 12px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.fs-ask-chat__widen:focus-visible { outline: 2px solid var(--border-focus, var(--border-strong)); outline-offset: 2px; }
+@media (pointer: coarse) {
+  .fs-ask-chat__widen { min-height: 44px; }
+}
+
+/* `.fs-ask-dock` — the dock's wrapper element (scripts/pages/timeline.js,
+   TimelineAskDock) is deliberately UNSTYLED, and this block is here so that a
+   reader who greps for the class finds that on purpose rather than a gap.
+   Its box comes from `.middle-column__footer` (styles/app-shell.css) and
+   everything inside it from `.fs-ask-chat--dock` below; a rule here would only
+   be a second place to look. The class is kept because spec §8's manual
+   checklist uses it as the DevTools hook for confirming the bar is a SIBLING
+   of the scroll area, not a child of it. Do not give it layout. */
+
+/* The docked Ask (docs/specs/2026-09-16-ask-dock.md).
+   The conversation is an OVERLAY: absolutely positioned against the dock and
+   rendered only when there is something in it, so the topic list above never
+   moves and never reflows. A flow child here would push the list up and
+   restore the complaint this spec exists to answer. */
+.fs-ask-chat--dock {
+  position: relative;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  padding: 10px 20px;
+  gap: 6px;
+  background: var(--surface-panel);
+}
+.fs-ask-chat--dock .fs-ask-chat__overlay {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 50vh;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-bottom: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-lg);
+}
+.fs-ask-chat--dock .fs-ask-chat__messages {
+  max-height: none;
+  padding: 8px 12px 12px;
+}
+.fs-ask-chat__overlay-close {
+  align-self: flex-end;
+  font: inherit;
+  font-size: 12px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.fs-ask-chat__overlay-close:hover { color: var(--text-primary); }
+.fs-ask-chat__msg--divider {
+  align-self: center;
+  max-width: 100%;
+}
+.fs-ask-chat__divider-text {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: center;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Visually hidden, still read by screen readers. */
+.fs-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 .fs-ask-chat__input {
   flex: 1;
@@ -8171,6 +8383,15 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
     flex: 1 1 calc(50% - 4px);
     min-width: 0;
   }
+  /* Compact strip keeps its 6px gap under this media query too (higher
+     specificity than .fs-kpi-strip above); tile basis matches that gap so
+     the 2-per-row wrap stays consistent. */
+  .fs-kpi-strip.fs-kpi-strip--compact {
+    gap: 6px;
+  }
+  .fs-kpi-strip--compact .fs-stat-card {
+    flex: 1 1 calc(50% - 3px);
+  }
   /* Morning brief full width */
   .fs-morning-brief-card {
     width: 100%;
@@ -11725,19 +11946,51 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-email-preview__subject,
 .fs-email-preview__intro { margin: 0 0 12px; }
 
-.fs-email-preview__group {
-  margin: 0 0 18px;
-  padding: 0 0 14px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.fs-email-preview__group:last-of-type { border-bottom: 0; }
-
-.fs-email-preview__topic { font-weight: var(--font-weight-semibold); }
 .fs-email-preview__time  { font-weight: 400; color: var(--text-tertiary); }
 
-.fs-email-preview__items { margin: 4px 0 8px; padding-left: 20px; }
-.fs-email-preview__items li { margin: 0 0 3px; overflow-wrap: anywhere; }
+/* The hand-off is a three-column table: AGENDA ITEM / ASSIGNED / DUE DATE.
+   The preview renders the same three columns the clipboard payload does —
+   a preview in a different shape from the payload is a preview of something
+   else. (The old `__items` bullet list went with actionLine, and `__group` /
+   `__topic` went with the group-per-block markup the table replaced.)
 
+   2026-09-18 handoff-sync: the table is now ONE FLAT list — every action
+   row, then every topic row, nothing interleaved. `__topic-row` used to be
+   a bold heading that spanned the table; it is now an ordinary 3-cell row
+   whose ASSIGNED/DUE DATE cells read "N/A" (greyed, not a heading) — N/A is
+   not the em dash an unowned action shows (§0/§1.5 of the plan). Photos are
+   grouped under `__photo-section` / `__photo-group` BELOW the table now,
+   not inside it. */
+.fs-email-preview__table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4px 0 8px;
+}
+.fs-email-preview__table th {
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  border-bottom: 2px solid var(--border-strong, var(--border-subtle));
+  white-space: nowrap;
+}
+.fs-email-preview__table td {
+  padding: 6px 10px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-wrap: anywhere;
+}
+/* A topic row (no action items at all) is greyed, matching the HTML email
+   flavour's inline `color:#666` (§1.5) — an ordinary row, not a heading. */
+.fs-email-preview__topic-row td { color: var(--text-tertiary); }
+
+.fs-email-preview__photo-section { margin-top: 12px; }
+.fs-email-preview__photo-group { margin-bottom: 12px; }
+.fs-email-preview__photo-group-title {
+  margin: 0 0 6px;
+  font-weight: var(--font-weight-semibold);
+}
 .fs-email-preview__photos { display: flex; flex-wrap: wrap; gap: 8px; }
 .fs-email-preview__photo {
   max-width: 200px; height: auto;
@@ -12642,8 +12895,204 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   overflow-wrap: anywhere;
 }
 
+/* A generated section's KPI row sits inline rather than in the header grid. */
+.fs-report-view__facts--inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+/* The header's labels are a column and share a 7.5rem gutter. Inline they are
+   pairs, and that gutter puts a hand's width between "Recordings" and "3". */
+.fs-report-view__facts--inline .fs-report-view__k { min-width: 0; }
+
+/* The table wrapper scrolls, never the modal body: an Actions table is five
+   columns wide and a phone is not. */
+.fs-report-view__tablewrap { overflow-x: auto; }
+
+.fs-report-view__table {
+  border-collapse: collapse;
+  width: 100%;
+  /* Without a floor the table obeys `width: 100%` at any width and squeezes
+     the columns instead of overflowing -- so `overflow-x` on the wrapper never
+     fires and an action reads "Chase the st / eel" on a 320px screen. The
+     floor is what turns squeezing into scrolling. */
+  min-width: 28rem;
+  font-size: var(--font-size-sm);
+}
+
+.fs-report-view__table th {
+  text-align: left;
+  padding: var(--space-1) var(--space-3) var(--space-1) 0;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-default);
+  white-space: nowrap;
+}
+
+.fs-report-view__table td {
+  padding: var(--space-2) var(--space-3) var(--space-2) 0;
+  vertical-align: top;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-subtle, var(--border-default));
+  /* `break-word` and not `anywhere`: `anywhere` counts toward min-content, so
+     the browser is free to shrink the column to one character and break words
+     mid-syllable rather than let the wrapper scroll. */
+  overflow-wrap: break-word;
+}
+
+.fs-report-view__table tr:last-child td { border-bottom: none; }
+
+/* The first column is the thing itself; the rest are its attributes. */
+.fs-report-view__table td:first-child { color: var(--text-primary); }
+.fs-report-view__table td:not(:first-child) { color: var(--text-secondary); }
+
+/* The site and the day, under the report's name. */
+.fs-report-view__subtitle {
+  margin-top: calc(var(--space-2) * -1);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+/* An entry: the thing, its state beside it, one line underneath. */
+.fs-report-view__entries {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.fs-report-view__entry-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.fs-report-view__entry-title {
+  font-size: var(--font-size-base);
+  line-height: 1.5;
+  color: var(--text-primary);
+  overflow-wrap: break-word;
+}
+
+/* The state, set small and quiet: it qualifies the thing, it is not the thing. */
+.fs-report-view__chip {
+  flex: 0 0 auto;
+  padding: 1px var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full, 999px);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+/* Weather impact, yellow through red. Tinted fills rather than text colour: a
+   one-word chip at 11px does not carry a hue reliably, and the point is that it
+   is legible at a glance without being read. The border stays so the shape
+   matches a neutral chip, and the text keeps the theme's own colour so it is
+   readable on both grounds. */
+.fs-report-view__chip--low {
+  background: color-mix(in srgb, #d9a219 14%, transparent);
+  border-color: color-mix(in srgb, #d9a219 36%, transparent);
+  color: var(--text-primary);
+}
+.fs-report-view__chip--moderate {
+  background: color-mix(in srgb, #e08421 18%, transparent);
+  border-color: color-mix(in srgb, #e08421 42%, transparent);
+  color: var(--text-primary);
+}
+.fs-report-view__chip--high {
+  background: color-mix(in srgb, #d9601f 22%, transparent);
+  border-color: color-mix(in srgb, #d9601f 48%, transparent);
+  color: var(--text-primary);
+}
+.fs-report-view__chip--severe {
+  background: color-mix(in srgb, #c0392b 24%, transparent);
+  border-color: color-mix(in srgb, #c0392b 55%, transparent);
+  color: var(--text-primary);
+}
+
+.fs-report-view__entry-note {
+  margin-top: 2px;
+  font-size: var(--font-size-sm);
+  line-height: 1.55;
+  color: var(--text-secondary);
+  overflow-wrap: break-word;
+}
+
+/* Photographs, not a list of their filenames. */
+.fs-report-view__photos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-3);
+}
+
+.fs-report-view__photo { margin: 0; }
+
+.fs-report-view__photo-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-sunken, transparent);
+}
+
+.fs-report-view__photo-cap {
+  margin-top: 2px;
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+
 .fs-report-view__state {
   padding: var(--space-6) 0;
   font-size: var(--font-size-base);
   color: var(--text-secondary);
 }
+
+/* ── Ask · answered from the open web ─────────────────────────────────────
+   Sits ABOVE the answer, unlike the corroboration block which sits below it.
+   Corroboration annotates an answer that came from the customer's own
+   recordings; this one says the answer did NOT. A reader who meets that fact
+   after the prose has already read it as their own record. */
+
+.fs-ask-web {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--accent-primary, #C9762B);
+  background: var(--surface-panel-muted);
+  border-radius: var(--radius-sm, 4px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fs-ask-web__label {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.fs-ask-web__sources { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+
+.fs-ask-web__source {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--border-default);
+}
+.fs-ask-web__source:hover,
+.fs-ask-web__source:focus-visible { color: var(--text-primary); }

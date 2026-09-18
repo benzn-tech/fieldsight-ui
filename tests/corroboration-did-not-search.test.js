@@ -166,3 +166,34 @@ test('the link is still the one the vendor gave us', () => {
      never returned. The redirect is the only URL we have. */
   assert.match(askChat, /href: s\.url/);
 });
+
+/* ---- three failures, three sentences ------------------------------------ */
+
+test('a check that broke is not reported as a check that ran late', () => {
+  /* Measured on TEST: a model returned prose instead of JSON and the reader
+     was told the check ran out of time — in ten seconds, against a budget of
+     twenty-seven. "Ran out of time" invites trying again; trying again fails
+     identically. */
+  assert.match(askChat, /res\.failed/);
+  assert.match(askChat, /could not be completed/);
+  const branch = askChat.slice(askChat.indexOf('res.failed'), askChat.indexOf('res.failed') + 400);
+  assert.ok(!/ran out of time/i.test(branch), 'it borrowed the timeout wording');
+});
+
+test('a broken check still renders something', () => {
+  /* The whole family of bugs this component keeps hitting: a body carrying
+     only a failure flag has no items, no dropped, no truncation and no
+     timeout, so the early return would swallow it into nothing.
+
+     `searched: true` is not decoration here. A reconcile failure IS that
+     shape — the web was consulted, then the verdict step broke — and it is
+     the only shape that isolates the new clause. Written first with
+     `searched: false`, this test passed with the clause deleted, because the
+     searched branch was doing the work. The mutation check caught it. */
+  const hasNothingToShow = loadPredicate();
+  assert.strictEqual(
+    hasNothingToShow({ corroborations: [], dropped: [], truncated: false,
+                       timed_out: false, searched: true, failed: true }),
+    false
+  );
+});

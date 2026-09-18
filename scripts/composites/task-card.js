@@ -43,6 +43,8 @@
                       `!== 'work'` check — same convention those adapters
                       follow). No review controls here (see timeline.js
                       for those) — purely informational.
+                      `version` (spec 2026-09-15 §8) — 1 + content_edits rows;
+                      >= 2 renders a quiet `vN` prefix inside the title.
      isMine         boolean — apply --mine accent border
      onSelect       (task) => void — click handler on the row body
      checkable      boolean — show check button instead of avatar
@@ -108,6 +110,20 @@
 (function () {
   'use strict';
 
+  /* spec 2026-09-15 §8.2 — the title prefix is the only position with a fixed
+     left edge at every middle-column width (the meta row wraps beside a
+     variable-width title between 420 and 560). null below v2. */
+  function versionChipFor(task) {
+    var v = task && task.version;
+    if (typeof v !== 'number' || v < 2) return null;
+    var times = (v - 1) === 1 ? '1 time' : (v - 1) + ' times';
+    return {
+      text:      'v' + v,
+      title:     'Edited ' + times + ' — open to see history',
+      ariaLabel: 'Version ' + v + ', edited ' + times,
+    };
+  }
+
   function TaskCard(props) {
     var Card    = window.FieldSight.Card;
     var Avatar  = window.FieldSight.Avatar;
@@ -121,6 +137,7 @@
     /* feat/leftover-batch-select (T1) — additive, no-op when `batchMode`
        is omitted/falsy (see prop-trio doc in the file header above). */
     var batchMode = !!props.batchMode;
+    var chip = versionChipFor(task);
 
     /* checkingOff: true → row enters animation. Stays true until
        onAnimationEnd; the parent's onCheckedOff then unmounts us. */
@@ -274,6 +291,13 @@
           leading,
           React.createElement('div', { className: 'fs-task-card__main' },
             React.createElement('div', { className: 'fs-task-card__title' },
+              chip ? React.createElement(Badge, {
+                tone: 'neutral', variant: 'outline', size: 'sm',
+                className: 'fs-task-card__version',
+                title: chip.title,
+                'aria-label': chip.ariaLabel,
+              }, chip.text) : null,
+              chip ? ' ' : null,
               task.title),
           ),
           React.createElement('div', { className: 'fs-task-card__meta' },
@@ -344,4 +368,8 @@
 
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.TaskCard = TaskCard;
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { TaskCard: TaskCard, versionChipFor: versionChipFor };
+  }
 })();

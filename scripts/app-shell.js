@@ -6,13 +6,13 @@
 /* global React, ReactDOM, window */
 
 const STORAGE_KEYS = {
-  middleWidth:  'fs.appshell.middleWidth',
+  middleWidth:  'fs.appshell.middleWidth.v3',
   navCollapsed: 'fs.appshell.navCollapsed',
   theme:        'fs.settings.theme',
   density:      'fs.settings.density',
 };
 
-const MIDDLE_WIDTH_DEFAULT = 320;
+const MIDDLE_WIDTH_DEFAULT = 560;
 
 /* ---------- Mobile bottom-nav item icons (mirrors NAV_ICONS in left-nav.js) */
 const NAV_ICONS_BOTTOM = {
@@ -761,8 +761,8 @@ function WeatherPopover(props) {
     ) : null,
   );
 }
-const MIDDLE_WIDTH_MIN     = 280;
-const MIDDLE_WIDTH_MAX     = 480;
+const MIDDLE_WIDTH_MIN     = 360;
+const MIDDLE_WIDTH_MAX     = 896;
 
 /* ---------- Date subtitle helper ------------------------------------------ */
 function formatTodayDate() {
@@ -1048,6 +1048,30 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
       })(),
     ),
 
+    /* Footer slot — OUTSIDE the scrolling content (spec 2026-09-16 §3).
+       A third flex child of the same column as the 56px header and the
+       flex:1 scroll area. Inside the scroll area it would look correct and
+       silently restore the scroll-to-bottom problem the dock exists to fix.
+       Read from the page registry exactly like .Provider (~1369), .Middle
+       (~998) and .Right (~1087); a route without one renders nothing and
+       keeps today's layout byte for byte. */
+    (function () {
+      var page = window.FieldSight.getPageForRoute && window.FieldSight.getPageForRoute(route);
+      if (page && page.Footer) {
+        return React.createElement('div', {
+          className: 'middle-column__footer',
+          style: { flexShrink: 0 },
+        },
+          React.createElement(page.Footer, {
+            route:        route,
+            onSelect:     onSelect,
+            selectedItem: selectedItem,
+          }),
+        );
+      }
+      return null;
+    })(),
+
     /* Drag handle on right edge — controlled by AppShell.
        Sprint 4.7: hidden on full-width pages (no neighbouring column
        to resize against). */
@@ -1153,7 +1177,11 @@ function AppShell({ showDevSwitcher = false }) {
 
   /* Persisted middle column width */
   const [middleWidth, setMiddleWidth] = React.useState(function() {
-    return (dd && dd.read(STORAGE_KEYS.middleWidth, MIDDLE_WIDTH_DEFAULT)) || MIDDLE_WIDTH_DEFAULT;
+    /* .v2 key: widths saved inside the old 280-480 range are not a preference
+       about the new one (spec 2026-09-15 §9.2). read() does not clamp, so a
+       hand-edited out-of-range value is clamped here on first paint. */
+    if (!dd) return MIDDLE_WIDTH_DEFAULT;
+    return dd.clamp(dd.read(STORAGE_KEYS.middleWidth, MIDDLE_WIDTH_DEFAULT), MIDDLE_WIDTH_MIN, MIDDLE_WIDTH_MAX);
   });
 
   /* Selected item for right detail panel */

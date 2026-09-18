@@ -182,6 +182,45 @@
     return !!(sessions && sessions.length >= 2);
   }
 
+  /* Which meeting a per-meeting report would be ABOUT.
+
+     The selected one -- or, when nothing is selected and the day holds exactly
+     one, that one. The picker above only renders for >=2 sessions, and the
+     report button used to require a selection, so a one-meeting day had a
+     button nothing could enable. A stale selection is never swapped for the
+     one-meeting fallback: that would report on a different meeting than the
+     user chose. */
+  function reportableSession(sessions, selectedSessionId) {
+    var list = sessions || [];
+    if (selectedSessionId != null) {
+      return list.filter(function (s) { return s.session_id === selectedSessionId; })[0] || null;
+    }
+    return list.length === 1 ? list[0] : null;
+  }
+
+  /* Which report a Generate click makes, or null when there is nothing to report.
+     A selected meeting is a meeting report; "All day" with at least one meeting is a
+     day report (spec 2026-09-15 §5.1); a day with no meeting has neither. */
+  function generateReportScope(session, sessionCount) {
+    if (session) return 'session';
+    return sessionCount > 0 ? 'day' : null;
+  }
+
+  /* The disabled button's tooltip. "Pick one above" is only true when the
+     picker is actually rendered. */
+  function generateReportUnavailableReason(sessionCount) {
+    if (!sessionCount) {
+      return 'No meeting was recorded this day, so there is nothing to report on here. '
+        + 'The whole day is the daily report, on the Reports page.';
+    }
+    // Unreachable from GenerateReportButton now that a day with at least one
+    // meeting reports on the whole day (generateReportScope returns 'day', so
+    // the button is never disabled here for sessionCount > 0) — kept for the
+    // sessionCount > 0 case still exercised directly by tests below.
+    return 'Reports here are per meeting — pick one above. '
+      + 'The whole day is the daily report, on the Reports page.';
+  }
+
   /* null/undefined sessionId = "All day" (no filtering) — returns the list
      unchanged, INCLUDING session_kind:'report' topics (which carry no
      session_id at all and would otherwise never match anything). A real
@@ -192,6 +231,82 @@
     var list = topics || [];
     if (sessionId == null) return list;
     return list.filter(function (t) { return !!t && t.session_id === sessionId; });
+  }
+
+  /* Whether the day's briefs are worth fetching yet (F4).
+
+     The answer used to be "always". The effect fired on every day view and
+     issued one GET /sessions/{id}/brief per session before anyone had shown
+     the slightest interest in the hand-off — and nothing on the day view
+     displays a brief, only the modal does. On prod every one of those reads
+     is also a guaranteed miss: SESSION_BRIEF is false there and there are
+     zero brief artifacts, so an N-session day spent N round-trips to learn
+     nothing, on every open.
+
+     `wantedFor` is the date the hand-off was opened on, matched against the
+     date being viewed, so interest does not carry across days.
+
+     A plain function rather than a guard inside the effect because a guard
+     inside an effect is reachable only by rendering the whole page against a
+     settled report, a session list and a resolved owner. This is the whole
+     decision, and it can be driven directly. */
+  function shouldLoadBriefs(o) {
+    o = o || {};
+    if (!o.date || !o.folder) return false;
+    if (o.status !== 'ok') return false;
+    if (!(o.sessions || []).length) return false;
+    return o.wantedFor === o.date;
+  }
+
+  /* The hand-off table's second source (F4). A brief is written per SESSION
+     and there is no batch route, so this is N reads for N sessions: issued
+     together, and each one's failure is its own.
+
+     A brief that is denied, not found, still pending or outright rejected
+     contributes NOTHING — not a placeholder, not an empty shell. A placeholder
+     would be a claim the meeting said nothing, and briefsBySession would
+     count it as a session that yielded no tasks.
+
+     The wrapper is the contract buildPreviewModel reads: {sessionId, brief},
+     with the artifact underneath. getSessionBrief resolves the artifact ITSELF
+     (status and tasks at the top level), so handing its result straight on
+     would give the model a list whose every `b.brief` is undefined — zero
+     rows, a silent permanent fallback, and a feature that looks wired. */
+  function loadSessionBriefs(sessions, opts) {
+    opts = opts || {};
+    var list = (sessions || []).filter(function (s) { return s && s.session_id; });
+    var org = (((window.FS || {}).api || {}).org) || {};
+    if (!list.length || typeof org.getSessionBrief !== 'function') return Promise.resolve([]);
+    return Promise.all(list.map(function (s) {
+      var p;
+      try {
+        p = org.getSessionBrief({ sessionId: s.session_id, date: opts.date, user: opts.user });
+      } catch (e) {
+        return Promise.resolve(null);
+      }
+      return Promise.resolve(p).then(function (b) {
+        /* The envelope flags first: _accessDenied/_notFound carry a NUMERIC
+           `status` under the same key the brief uses for a string, so the
+           string test alone would read 403 as "not ready" by luck. */
+        if (!b || b._accessDenied || b._notFound) return null;
+        if (b.status !== 'ready') return null;
+        return { sessionId: s.session_id, brief: b };
+      }).catch(function () { return null; });
+    })).then(function (out) {
+      return out.filter(Boolean);
+    });
+  }
+
+  /* Narrow the day's briefs the same way filterTopicsBySession narrows the
+     day's topics. Without this, picking one meeting in the session picker
+     would hand the modal THAT meeting's topics and EVERY meeting's brief
+     tasks — and since the brief set would then be the larger of the two, the
+     thinner-brief floor would wave it through and the table would carry work
+     from meetings the user had just filtered away. */
+  function scopeBriefsToSession(briefs, sessionId) {
+    var list = briefs || [];
+    if (sessionId == null) return list;
+    return list.filter(function (b) { return !!b && b.sessionId === sessionId; });
   }
 
   /* Group sessions that share a `block` (a meeting split across recording
@@ -795,7 +910,7 @@
        everywhere else in this strip, so it needs no new vocabulary. */
     var dayOnly = !props.sessionScoped;
 
-    return React.createElement(KpiStrip, null,
+    return React.createElement(KpiStrip, { compact: true },
       React.createElement(StatCard, {
         value: topics, label: 'Topics',
       }),
@@ -975,18 +1090,21 @@
      Q&A is Phase 4.
      ===================================================================== */
   /* ---- alerts Ask route (routing spec §3.5) ------------------------------
-     AskChat is mounted in THREE places on this page — once in
-     AggregatedDayView and twice in TimelineRightDetail — and only the page's
-     day view is in a position to fetch the programme. Wiring the provider to
-     one mount would have made the route work on one route and be silently
-     absent on the other two, which is the same mistake the topic-link
-     placement made and had to be corrected for.
-
-     So the tasks live at module scope, written by whichever view fetched
-     them, and every mount reads the same provider. An empty cache means the
-     route does not exist and the question goes to the agent — the designed
+     Timeline has ONE AskChat (the day view, TimelineMiddleColumn); topic
+     detail pins a topic onto it instead of mounting its own (spec
+     2026-09-15-one-ask-scoped §3). The tasks still live at module scope,
+     written by whichever view fetched them. An empty cache means the route
+     does not exist and the question goes to the agent — the designed
      degradation, not a bug. */
   var _programmeTasks = null;
+
+  /* The dock is a SIBLING of the middle column (it mounts in the shell's
+     Footer slot) and cannot see that column's state, so the suggestions the
+     alerts route needs are cached here, the way _programmeTasks already is.
+     Written on success only: an empty list is not a neutral default here --
+     silentTasks would read it as "every task is silent" -- so a failed or
+     in-flight fetch keeps the last known list rather than claiming silence. */
+  var _askSuggestions = [];
 
   function makeAlertsProvider(suggestions) {
     if (!_programmeTasks || !_programmeTasks.length) return null;
@@ -1008,6 +1126,209 @@
         lateness: null,
       };
     };
+  }
+
+  /* =====================================================================
+     The docked Ask (docs/specs/2026-09-16-ask-dock.md §4)
+     ---------------------------------------------------------------------
+     The page's single AskChat lives in the dock (TimelineAskDock below,
+     mounted as the page Footer); the Provider only shares the ask context
+     between the dock and whatever reads the current selection (same slot
+     TodayProvider uses, app-shell.js ~1365). It holds ONLY the ask context
+     — it does not move any existing Timeline state.
+
+     createContext is guarded because Node tests load this file with a
+     React stub that has none; without a context, useTimelineAsk returns an
+     inert value and the page still renders. */
+  var TimelineAskContext = (typeof React !== 'undefined' && React && React.createContext)
+    ? React.createContext(null)
+    : null;
+
+  var NO_TIMELINE_ASK = {
+    askContext: {},
+    setAskContext: function () {},
+    askReady: false,
+    setAskReady: function () {},
+  };
+
+  function TimelineAskProvider(props) {
+    var refCtx   = React.useState({});
+    var refReady = React.useState(false);
+    var value = {
+      askContext:    refCtx[0],
+      setAskContext: function (next) { refCtx[1](next || {}); },
+      /* "A day's content is resolved on screen" — published by the middle
+         column, read by the dock. It is a separate fact from the scope on
+         purpose: see askDockHasContent below. */
+      askReady:      refReady[0],
+      setAskReady:   function (next) { refReady[1](!!next); },
+    };
+    if (!TimelineAskContext) return React.createElement(React.Fragment, null, props.children);
+    return React.createElement(TimelineAskContext.Provider, { value: value }, props.children);
+  }
+
+  function useTimelineAsk() {
+    var v = (TimelineAskContext && React.useContext) ? React.useContext(TimelineAskContext) : null;
+    return v || NO_TIMELINE_ASK;
+  }
+
+  /* The day scope for a loaded report. `report.site_id` exists only on the
+     Aurora timeline path; without it the site is omitted entirely (the chip
+     shows date + owner and the request carries no site_id). siteId is only
+     set alongside a non-empty siteName so the Ask never narrows by site
+     without a visible site label on the chip. */
+  function askContextForDay(report, date, routeUser) {
+    var ctx = {};
+    if (date) ctx.date = date;
+    if (report && report.site_id && report.site) {
+      ctx.siteId = report.site_id;
+      ctx.siteName = report.site;
+    }
+    var folder = routeUser
+      || (report && report.user_name && window.FS.api.folderName(report.user_name))
+      || '';
+    if (folder) ctx.authorFolder = folder;
+    if (report && report.user_name) ctx.authorName = report.user_name;
+    return ctx;
+  }
+
+  /* Current context + a pinned topic. A topic is only ever pinned alongside
+     its own day, so when the current context is empty (palette hand-off,
+     day chip removed) or on another day, the topic's day scope is used. */
+  function askContextWithTopic(current, topic, dayContext) {
+    if (!topic || !topic.topic_row_id) return null;
+    var day = dayContext || {};
+    var sameDay = !!(current && current.date && current.date === day.date
+      && current.authorFolder === day.authorFolder
+      && (!(current.siteId && day.siteId) || current.siteId === day.siteId));
+    var base = sameDay ? current : day;
+    return Object.assign({}, base, {
+      topicRowId: topic.topic_row_id,
+      topicTitle: topic.topic_title || '',
+    });
+  }
+
+  /* The aggregated site view's day scope (spec 2026-09-16 §2.1): date + site,
+     never an author. An owner change clears the conversation (askDayResetKey
+     below), but the aggregated view has no single owner — the reader moves
+     between people's topics constantly, so putting one in scope would clear
+     the conversation on every cross-person click, contradicting "switching
+     topics does not clear" (Task 6 controller ruling). siteId is only set
+     alongside a non-empty siteName, same rule as askContextForDay: never
+     narrow by a project the chip cannot name. */
+  function askContextForSite(site, siteName, date) {
+    var ctx = {};
+    if (date) ctx.date = date;
+    if (site && siteName) {
+      ctx.siteId = site;
+      ctx.siteName = siteName;
+    }
+    return ctx;
+  }
+
+  /* The day scope is rebuilt only when the day actually changes: a refetch
+     of the same day (content edit refresh, retry) goes loading → ok again
+     and must keep a pinned topic. null while loading = do nothing.
+
+     `kind` is a discriminator ('user' | 'site'), always the first segment,
+     so the day branch's key and the site branch's key CANNOT collide by
+     format alone (Task 6 fix round, minor). Before this they only avoided
+     colliding by coincidence: the site branch always passed '' for the
+     third segment, which only the day branch could also produce, and only
+     when `site` was itself falsy. A bare string equality can't tell "day
+     branch, no owner" from "site branch" apart once both omit that segment;
+     the prefix makes that structurally impossible regardless of what either
+     branch passes.
+
+     `subject` and `detail` are deliberately neutral: the two call sites put
+     different things in them. The 'user' branch passes the author folder as
+     `subject` and the report's resolved site_id (or a falsy value) as
+     `detail`, so a site re-attribution on the same day still changes the
+     key. The 'site' branch passes the site uuid as `subject` and a '1'/'0'
+     "name resolved yet" flag as `detail`, so the key changes once
+     `sitesList` fills in the name and the same uuid republishes with it. */
+  function askDayResetKey(kind, status, date, subject, detail) {
+    if (status === 'loading') return null;
+    return [kind, date || '', subject || '', detail || ''].join('|');
+  }
+
+  /* Is a day's content actually resolved on screen? The dock gates on this,
+     published by the middle column, instead of re-deriving it from the scope.
+     A non-empty scope is NOT evidence that anything resolved: askContextForDay
+     sets `ctx.date` from the route's date alone, whatever the report turned
+     out to be, so the first version of this gate (`if (!context.date)`)
+     suppressed nothing and shipped a {date}-only bar — no site, no author —
+     onto the project picker and the admin user picker (Task 4 review).
+
+     Loading and either picker resolve nothing. An ordinary day resolves even
+     when it holds no report (the dock stays, day-scoped, unchanged intent),
+     and so does the aggregated site view (spec §2.1, Task 6). access_denied
+     is ALSO nothing resolved (Task 6 fix round, ruling): it is another
+     "no content on screen" screen, same class as the two pickers, so a
+     date-only Ask there is the same misleading state the readiness gate was
+     built to remove. */
+  function askDockHasContent(status, showSitePicker, showUserPicker) {
+    if (status === 'loading' || status === 'access_denied') return false;
+    if (showSitePicker || showUserPicker) return false;
+    return true;
+  }
+
+  /* The page's one Ask, docked under the middle column's scroll area (spec
+     2026-09-16 §1, §4). Mounted by the shell's Footer slot, so it is a
+     SIBLING of the list and never something the reader can scroll to.
+     The scope is derived from the selection, never clicked. */
+  function TimelineAskDock(props) {
+    var AskChat = window.FieldSight.AskChat;
+    var askApi  = useTimelineAsk();
+    var day     = askApi.askContext || {};
+
+    /* The palette hand-off lives HERE, not in the middle column: as a sibling
+       the dock's first render happens with no chance for that column's
+       day-reset effect to reach it in time, so a question typed in the global
+       palette would otherwise be auto-sent with the day scope. Read-and-clear
+       once, on the first render (a lazy useState initializer, not an effect),
+       exactly as the middle column used to — AskChat's own mount effect
+       auto-sends, so the value must be right on its FIRST render. */
+    var refPrefill = React.useState(function () {
+      try {
+        var v = sessionStorage.getItem('fs.ask.prefill');
+        if (v) sessionStorage.removeItem('fs.ask.prefill');
+        return v || '';
+      } catch (_) { return ''; }
+    });
+    var prefill = refPrefill[0];
+    var fromPaletteRef = React.useRef(!!prefill);
+    React.useEffect(function () { fromPaletteRef.current = false; }, []);
+
+    var sel   = props.selectedItem;
+    var topic = (sel && (sel.kind === 'topic' || sel.kind === 'meeting_topic')) ? sel.topic : null;
+    /* Returns null for a topic with no topic_row_id (meeting topics), which is
+       exactly spec §4's "a topic without one -> the day context". */
+    var withTopic = topic ? askContextWithTopic(day, topic, day) : null;
+    var context = fromPaletteRef.current ? {} : (withTopic || day);
+
+    if (!AskChat) return null;
+    /* Nothing resolved on screen (project picker, first paint, admin
+       available-users disambiguation): an Ask with nothing to narrow to is not
+       the day Ask, so render nothing rather than a silently global bar
+       (controller ruling 1). The dock reads the column's published fact and
+       does not infer it — a truthy context.date is not evidence of anything,
+       which is exactly why the first version of this guard never fired. */
+    if (!askApi.askReady && !fromPaletteRef.current) return null;
+
+    return React.createElement('div', { className: 'fs-ask-dock' },
+      React.createElement(AskChat, {
+        variant:         'dock',
+        user:            context.authorFolder,
+        context:         context,
+        onContextChange: askApi.setAskContext,
+        /* Supplied only when the programme actually loaded. AskChat treats an
+           absent provider as "this route does not exist", so a failed fetch
+           degrades to the agent rather than to a wrong answer. */
+        alertsProvider:  makeAlertsProvider(_askSuggestions),
+        initialQuestion: prefill,
+      }),
+    );
   }
 
   function AggregatedDayView(props) {
@@ -1045,7 +1366,9 @@
       var cancelled = false;
       window.FS.api.programme.getSuggestions({ site: site, state: 'all' })
         .then(function (res) {
-          if (!cancelled) setSuggestions((res && res.suggestions) || []);
+          if (cancelled) return;
+          _askSuggestions = (res && res.suggestions) || [];
+          setSuggestions(_askSuggestions);
         })
         .catch(function () { if (!cancelled) setSuggestions([]); });
       return function () { cancelled = true; };
@@ -1708,7 +2031,9 @@
       var cancelled = false;
       window.FS.api.programme.getSuggestions({ site: suggSite, state: 'all' })
         .then(function (res) {
-          if (!cancelled) setSuggestions((res && res.suggestions) || []);
+          if (cancelled) return;
+          _askSuggestions = (res && res.suggestions) || [];
+          setSuggestions(_askSuggestions);
         })
         .catch(function () { if (!cancelled) setSuggestions([]); });
       return function () { cancelled = true; };
@@ -1761,7 +2086,7 @@
       if (!folder || !date) { setSessionsState({ status: 'idle', sessions: [], excluded: null }); return undefined; }
       var cancelled = false;
       setSessionsState({ status: 'loading', sessions: [], excluded: null });
-      window.FS.api.org.getSessions({ date: date, user: folder }).then(function (res) {
+      window.FS.api.org.getSessionsCached(date, folder).then(function (res) {
         if (cancelled) return;
         if (!res || res._accessDenied || res._notFound) {
           setSessionsState({ status: 'ok', sessions: [], excluded: null });
@@ -1786,6 +2111,67 @@
       });
       return function () { cancelled = true; };
     }, [date, user, state.status, state.report]);
+
+    /* The briefs behind the hand-off table (F4), read off the sessions the
+       effect above already loaded — a second list request for a day whose
+       list is in hand would be a second answer to a question already
+       answered.
+
+       DEFERRED until the hand-off is opened; see shouldLoadBriefs for why.
+
+       A PARTIAL set is handed to buildPreviewModel exactly as fetched, not
+       padded or worked around here. As of the 2026-09-18 handoff-sync plan
+       (§0/§1.3, fix round the same day), "if a brief exists, use it" is
+       PER SESSION: a session's own usable brief (loaded, >= 1 task) replaces
+       THAT session's own action items, and never anyone else's. A session
+       whose own fetch failed, is still pending, or whose brief has zero
+       tasks keeps its extraction items exactly as before — a sibling
+       session's success can never make them disappear. `rowsSource` on the
+       model reflects the real mix: 'brief' only when every row substituted,
+       'action_items' only when none did, 'mixed' otherwise. */
+    var refBriefs    = React.useState([]);
+    var dayBriefs    = refBriefs[0];
+    var setDayBriefs = refBriefs[1];
+    /* The date the hand-off was opened on, or null for "nobody has asked".
+       A date rather than a boolean so the interest expires with the day it
+       was expressed about: moving to another day leaves this pointing at the
+       old one, the guard below stops matching, and the new day starts closed
+       again — without a second effect racing this one to clear a flag. */
+    var refWanted    = React.useState(null);
+    var briefsFor    = refWanted[0];
+    var setBriefsFor = refWanted[1];
+
+    /* Same owner-folder resolution as the sessions effect above: the self-view
+       has user===null and the brief belongs to whoever recorded. Resolved
+       during render rather than inside the effect so the effect can DEPEND on
+       it. It is derived from `state.report`, which the effect reads and the
+       dependency list did not name; depending on the resolved STRING closes
+       that gap without making the effect re-run on every new report object
+       that resolves to the same folder. */
+    var briefFolder = user
+      || ((state.report && state.report.user_name)
+            ? window.FS.api.folderName(state.report.user_name)
+            : null)
+      || null;
+
+    React.useEffect(function () {
+      var loaded = sessionsState.sessions || [];
+      if (!shouldLoadBriefs({
+        status:    sessionsState.status,
+        sessions:  loaded,
+        folder:    briefFolder,
+        date:      date,
+        wantedFor: briefsFor,
+      })) {
+        setDayBriefs([]);
+        return undefined;
+      }
+      var cancelled = false;
+      loadSessionBriefs(loaded, { date: date, user: briefFolder }).then(function (list) {
+        if (!cancelled) setDayBriefs(list);
+      });
+      return function () { cancelled = true; };
+    }, [date, briefFolder, sessionsState.status, sessionsState.sessions, briefsFor]);
 
     /* A new date/user has entirely different session_ids — drop any active
        filter rather than silently show zero topics against a stale id. */
@@ -2052,22 +2438,88 @@
       }
     }, [state.status, targetTopicId, targetTopicTitle, targetTurnTime, date]);
 
-    /* Task C — Search's "Ask FieldSight" hand-off (search-palette.js).
-       Read-and-clear the sessionStorage prefill exactly once per mount,
-       via a lazy useState initializer rather than an effect so the value
-       is ready in time for AskChat's own mount-time prefill effect
-       (ask-chat.js) — that effect only runs once on ITS mount too, so it
-       must see the real value on AskChat's first render, not one render
-       later. Threaded into the report-level AskChat mount below. Must
-       sit above the early returns (:401+) — rules of hooks. */
-    var refAskPrefill = React.useState(function () {
-      try {
-        var v = sessionStorage.getItem('fs.ask.prefill');
-        if (v) sessionStorage.removeItem('fs.ask.prefill');
-        return v || '';
-      } catch (_) { return ''; }
-    });
-    var askPrefill = refAskPrefill[0];
+    /* One Ask, scoped — the viewed day/site/owner is the default scope this
+       column publishes; the dock (TimelineAskDock, mounted in the shell's
+       Footer slot) reads it and narrows it by the selection. Reset whenever
+       the loaded day or owner changes. The palette hand-off is NOT read here
+       any more: it lives in the dock, which is the component whose first
+       render the auto-send actually depends on (spec 2026-09-16 §4). */
+    var askApi = useTimelineAsk();
+    var askReport = state.report;
+    var askReportReady = !!(askReport && !askReport._notFound && !askReport.available_users);
+    var askOwner = user || (askReportReady && askReport.user_name) || '';
+
+    /* "Is this the multi-person view?" — asked once, because it is NOT the
+       same as `!user` any more. The own-day handover deliberately leaves
+       `user` set to the caller (so moving to a date where they DID record
+       shows their own day again, with no URL rewrite) and signals itself
+       through state. Every branch that used to test `!user` has to test this
+       instead, or the handover sets a state nothing renders and the page
+       falls through to the very empty day it was trying to avoid — which is
+       exactly what it did. Read here, before the reset effect below, since
+       the aggregated site view (Task 6, spec §2.1) needs it to publish a
+       date+site scope instead of the day+owner one. */
+    var teamView = !user || !!state.aggregated;
+
+    /* The two "this screen is a picker, not a day" predicates, named once and
+       read BOTH by the readiness fact below and by the branches that render
+       them. A second copy of either condition is how the dock and the screen
+       drift apart without anything throwing. */
+    var showSitePicker = !site && teamView && sitesList.length > 1;
+    var showUserPicker = !!(askReport && askReport.available_users && !state.meeting);
+
+    var askDayKeyRef = React.useRef(null);
+    React.useEffect(function () {
+      /* The aggregated site view has no single owner (the reader moves
+         between people's topics), so it publishes date+site only, never an
+         author — putting one in scope would clear the conversation on every
+         cross-person topic click (Task 6 controller ruling, spec §2.1).
+         Same effect, same ref, same "loading" gate as the day+owner path
+         below — only the built context and the dedup key differ.
+
+         `sitesList` starts [] and fills asynchronously, so on a direct link
+         (site from the URL or FS.siteContext) this branch commonly runs
+         ONCE before the list has landed, with `siteName` still undefined —
+         askContextForSite correctly omits siteId/siteName then. The key
+         carries whether the name resolved yet ('1'/'0') so that when
+         `sitesList` lands and this effect re-runs, the key is DIFFERENT and
+         the scope republishes with the name; without that bit the key was
+         identical before and after the list loaded, the dedup below
+         swallowed the second run, and the visit stayed unscoped by project
+         for the rest of the visit (Task 6 review). The bit only ever moves
+         0 -> 1 once, so a later `sitesList` refresh that still resolves the
+         same name republishes nothing further.
+
+         Known, not fixed: this republish (the 0 -> 1 name-resolved one, in
+         particular) can land AFTER a reader has clicked "Ask across
+         everything" (which sets context to {} in ask-chat.js). If it does,
+         it clears the widened answer the reader is looking at. The window
+         is sub-second — a network response beating the seconds a human
+         needs to read an empty answer and click the button — so this is
+         recorded rather than chased with more state. */
+      if (site && teamView) {
+        var siteName = (sitesList.find(function (s) { return s.site_id === site; }) || {}).name;
+        var siteDayKey = askDayResetKey('site', state.status, date, site, siteName ? '1' : '0');
+        if (siteDayKey === null || siteDayKey === askDayKeyRef.current) return;
+        askDayKeyRef.current = siteDayKey;
+        askApi.setAskContext(askContextForSite(site, siteName, date));
+        return;
+      }
+      var dayKey = askDayResetKey('user', state.status, date, askOwner,
+                                  askReportReady && askReport.site_id);
+      if (dayKey === null || dayKey === askDayKeyRef.current) return;
+      askDayKeyRef.current = dayKey;
+      askApi.setAskContext(askContextForDay(askReportReady ? askReport : null, date, user));
+    }, [state.status, date, askOwner, askReportReady && askReport.site_id,
+        site, teamView, sitesList]);
+
+    /* Tell the dock whether this screen resolved anything. The dock is a
+       SIBLING (the shell's Footer slot), so it cannot see this column's state
+       and must not guess it from the scope — askDockHasContent says why. */
+    var askDockReady = askDockHasContent(state.status, showSitePicker, showUserPicker);
+    React.useEffect(function () {
+      askApi.setAskReady(askDockReady);
+    }, [askDockReady]);
 
     /* Loading */
     if (state.status === 'loading') {
@@ -2119,16 +2571,6 @@
       );
     }
 
-    /* "Is this the multi-person view?" — asked once, because it is NOT the
-       same as `!user` any more. The own-day handover deliberately leaves
-       `user` set to the caller (so moving to a date where they DID record
-       shows their own day again, with no URL rewrite) and signals itself
-       through state. Every branch that used to test `!user` has to test this
-       instead, or the handover sets a state nothing renders and the page
-       falls through to the very empty day it was trying to avoid — which is
-       exactly what it did. */
-    var teamView = !user || !!state.aggregated;
-
     /* Batch A — multi-project caller with no project chosen: offer the
        project picker instead of the raw cross-site user list
        (available_users below) once we know there's more than one option.
@@ -2136,7 +2578,7 @@
        branch simply doesn't match yet — the 'loading' branch above (from
        the still-in-flight, non-short-circuited fetch below) covers that
        window without any extra state. */
-    if (!site && teamView && sitesList.length > 1) {
+    if (showSitePicker) {
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: null,
@@ -2183,7 +2625,7 @@
     var hasMeeting = !!meeting;
 
     /* Admin disambiguation shape: { date, available_users:[...] } */
-    if (report && report.available_users && !hasMeeting) {
+    if (showUserPicker) {
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: null,
@@ -2237,7 +2679,6 @@
         && window.FS.api.folderName(caller.name) === ownerFolder);
     var canEditContent = hasContentEditPerm || isOwnReport;
 
-    var AskChat            = window.FieldSight.AskChat;
     var MeetingTopicCard   = window.FieldSight.MeetingTopicCard;
     var PhotoGrid          = window.FieldSight.PhotoGrid;
     var mentionedDates     = window.FS && window.FS.api
@@ -2383,11 +2824,20 @@
       reportDate: report.report_date || date,
       deepLink:   (typeof window !== 'undefined' && window.location) ? window.location.href : '',
       isDone:     _isActionDone,
+      /* Scoped the same way `topics` above is: one meeting selected means one
+         meeting's brief. */
+      briefs:     scopeBriefsToSession(dayBriefs, selectedSessionId),
+      /* Opening the hand-off is the interest that pays for the fetch. Until
+         this fires, `dayBriefs` is [] and the table is the action_items one
+         it has always been. */
+      onNeedBriefs: function () { setBriefsFor(date); },
     });
     /* Delivery-C Tier-2 generate control — sits beside the mailto draft, active
        only when a specific meeting is selected (the modal is per-session). */
     var _genReportEl = React.createElement(GenerateReportButton, {
-      session:    _selectedSession,
+      /* Not _selectedSession: a one-meeting day has no picker to select from. */
+      session:    reportableSession(daySessions, selectedSessionId),
+      sessionCount: daySessions.length,
       date:       date,
       userFolder: _draftUserFolder,
       siteName:   report.site || site || '',
@@ -2648,34 +3098,11 @@
           )
         : null,
 
-      /* Per-report Ask Agent (PLAN Phase G). Stateless — each question
-         is independent. Scope='both' grounds across transcript +
-         report. */
-      AskChat ? React.createElement(React.Fragment, null,
-        React.createElement('div', { className: 'fs-timeline-page__section-label' },
-          'Ask agent'),
-        React.createElement(AskChat, {
-          date:            date,
-          user:            user || (report && report.user_name && window.FS.api.folderName(report.user_name)),
-          scope:           'both',
-          /* Supplied only when the programme actually loaded. AskChat treats
-             an absent provider as "this route does not exist", so a failed
-             fetch degrades to the agent rather than to a wrong answer.
-
-             `silent` is passed as null unless the suggestion fetch used
-             state:'all' — programmeMentions refuses to claim silence without
-             that coverage, and flattening it here would undo the refusal. */
-          alertsProvider: makeAlertsProvider(suggestions),
-          placeholder:     'Ask anything about today’s report…',
-          compact:         true,
-          initialQuestion: askPrefill,
-          suggestions: [
-            'What were today’s safety highlights?',
-            'Which actions are still open?',
-            'Any decisions about the scaffold inspection?',
-          ],
-        }),
-      ) : null,
+      /* The page's one Ask is no longer in the body: it is docked under this
+         column's scroll area, mounted by the shell's Footer slot as
+         TimelineAskDock (spec 2026-09-16 §1). Nothing takes its place here —
+         a bar the reader has to scroll to is the problem the spec exists to
+         fix. */
     );
   }
 
@@ -2811,7 +3238,17 @@
         type:      'button',
         className: 'fs-btn fs-btn--tertiary fs-btn--sm',
         title:     'See the hand-off with its photos, then copy it into any email',
-        onClick:   function () { setOpen(true); },
+        onClick:   function () {
+          /* Ask for the briefs at the moment the hand-off is opened, rather
+             than on every day view. The modal opens immediately either way —
+             it does not wait — so the table starts on action_items and
+             rebuilds when the briefs land. That rebuild is exactly what
+             props.briefs in buildPreviewModel's memo dependencies is for;
+             without it the modal would sit on the fallback table with
+             nothing to say it had not updated. */
+          if (props.onNeedBriefs) props.onNeedBriefs();
+          setOpen(true);
+        },
       }, 'Preview & copy'),
       React.createElement(Modal, {
         open:       open,
@@ -2824,6 +3261,9 @@
         userFolder: props.userFolder,
         isDone:     props.isDone,
         deepLink:   props.deepLink,
+        /* Forwarding into this component is not enough — THIS list is what
+           reaches the modal, and buildPreviewModel reads opts.briefs off it. */
+        briefs:     props.briefs,
       }),
     );
   }
@@ -2916,13 +3356,13 @@
        — had no answer on screen. It does have an answer: the whole day IS a
        report, the nightly daily one, and /reports can regenerate it. Say that
        instead of disappearing. */
-    if (!props.session) {
+    var scope = generateReportScope(props.session, props.sessionCount);
+    if (!scope) {
       return React.createElement('button', {
         type:      'button',
         className: 'fs-btn fs-btn--secondary fs-btn--sm fs-generate-report',
         disabled:  true,
-        title:     'Reports here are per meeting — pick one above. '
-                   + 'The whole day is the daily report, on the Reports page.',
+        title:     generateReportUnavailableReason(props.sessionCount),
       }, 'Generate report');
     }
     return React.createElement(React.Fragment, null,
@@ -2930,11 +3370,13 @@
         type:      'button',
         className: 'fs-btn fs-btn--primary fs-btn--sm fs-generate-report',
         onClick:   function () { setOpen(true); },
-        title:     'Generate a report for this meeting',
+        title:     scope === 'day' ? 'Generate a report for this whole day'
+                                   : 'Generate a report for this meeting',
       }, 'Generate report'),
       React.createElement(Modal, {
         open:       open,
         onClose:    function () { setOpen(false); },
+        scope:      scope,
         session:    props.session,
         date:       props.date,
         userFolder: props.userFolder,
@@ -2987,11 +3429,9 @@
     { key: 'audio',      label: 'Audio' },
     { key: 'video',      label: 'Video' },
     { key: 'photos',     label: 'Photos' },
-    { key: 'ask',        label: 'Ask' },
   ];
   var MEETING_TABS = [
     { key: 'overview', label: 'Overview' },
-    { key: 'ask',      label: 'Ask' },
   ];
 
   /* Status / category palettes for meeting topics — kept in sync with
@@ -3345,7 +3785,9 @@
         var p = {}; p[props.field] = next; return p;
       })()).then(function (res) {
         setBusy(false);
-        if (!res || res._accessDenied || res._notFound) {
+        /* spec 2026-09-15 §4 site 1 — also covers Today's title editor, which
+           mounts this same component (no call in today.js for the title). */
+        if (!window.FS.api.actions.settleSave(res, { table: props.table, id: props.id }).ok) {
           setValue(props.value || '');
           var toast = window.FS && window.FS.toast;
           if (toast) toast.show({ message: (res && res.error) || 'Could not save edit',
@@ -3429,9 +3871,22 @@
   /* editable-content-correction (Task 18 Step 1) — content_edits audit
      trail for one row, mirrors tasks.js's ActionHistoryPanel (fetch on
      mount, render a list). */
+  /* spec 2026-09-15 §5 — extracted so the callback that bumps the reload
+     tick is itself under direct test (a source-scan alone can't tell an
+     emptied callback from a working one). Returns an unsubscribe fn always,
+     even when events are unavailable, so the caller never has to branch. */
+  function subscribeContentReload(events, table, id, bump) {
+    if (events && events.onContentEdited) {
+      return events.onContentEdited(table, id, function () { bump(); });
+    }
+    return function () {};
+  }
+
   function ContentHistoryPanel(props) {
     var dataRef = React.useState({ status: 'loading' });
     var data = dataRef[0], setData = dataRef[1];
+    var tickRef = React.useState(0);
+    var reloadTick = tickRef[0], setReloadTick = tickRef[1];
     React.useEffect(function () {
       var alive = true;
       window.FS.api.actions.getContentHistory(props.table, props.id).then(function (res) {
@@ -3439,6 +3894,13 @@
         setData({ status: 'ok', edits: (res && res.edits) || [] });
       }).catch(function () { if (alive) setData({ status: 'error', edits: [] }); });
       return function () { alive = false; };
+    }, [props.table, props.id, reloadTick]);
+    /* spec 2026-09-15 §5 — a save to THIS row re-reads the trail (the server
+       assigns created_at/actor_name; never append optimistically). */
+    React.useEffect(function () {
+      return subscribeContentReload(window.FS && window.FS.events, props.table, props.id, function () {
+        setReloadTick(function (n) { return n + 1; });
+      });
     }, [props.table, props.id]);
     if (data.status === 'loading') return React.createElement('div', { className: 'fs-muted' }, 'Loading…');
     if (!data.edits.length) return React.createElement('div', { className: 'fs-muted' }, 'No edits yet.');
@@ -3563,12 +4025,17 @@
       if (!api || !api.updateAction) { return; }
       api.updateAction(a.id, { responsible: name }).then(function (res) {
         /* 403/404 resolve to envelopes rather than throwing (org.js write
-           convention), so a rejection is not always a rejected promise. */
-        if (!res || res._accessDenied || res._notFound || res.error) {
+           convention). spec 2026-09-15 §4 site 4: Saved on ok, error toast
+           (site 2's shape) on refusal, never a silent revert. */
+        if (!api.settleSave(res, { table: 'action_items', id: a.id }).ok) {
           setOwners(function (m) { var n = Object.assign({}, m); n[a.id] = before; return n; });
+          var toast = window.FS && window.FS.toast;
+          if (toast) toast.show({ message: (res && res.error) || 'Could not update task', tone: 'error', duration: 5000 });
         }
-      }).catch(function () {
+      }).catch(function (err) {
         setOwners(function (m) { var n = Object.assign({}, m); n[a.id] = before; return n; });
+        var toast = window.FS && window.FS.toast;
+        if (toast) toast.show({ message: (err && err.error) || 'Could not update task', tone: 'error', duration: 5000 });
       });
     }
 
@@ -3727,6 +4194,11 @@
                        already renders (topic-card.js ~228). ActionItemRow
                        already handles both props; this just feeds it. */
                     checkedAt:      state.checked_at,
+                    /* spec 2026-09-15 §2 — History disclosure; TodoHistory
+                       joins the provenance on the topic's own session. */
+                    withHistory:    true,
+                    sessionId:      topic.session_id || null,
+                    sessionKind:    topic.session_kind || null,
                   }),
                   rowEditable ? editToggle(editKey, 'action item text') : null,
                 ),
@@ -4079,7 +4551,6 @@
     var AudioPlaylist  = fs.AudioPlaylist;
     var VideoPlayer    = fs.VideoPlayer;
     var PhotoGrid      = fs.PhotoGrid;
-    var AskChat        = fs.AskChat;
 
     /* user-dimension audit key plan (Task 5) — report OWNER's folder,
        never the caller. sel.user is the section/topic owner folder set
@@ -4126,19 +4597,6 @@
     if (isMeeting) {
       bodyByTab = {
         overview: React.createElement(MeetingOverviewTab, { topic: topic }),
-        ask:      AskChat ? React.createElement(AskChat, {
-          alertsProvider: makeAlertsProvider(null),
-          date:        sel.date,
-          user:        mediaProps.user,
-          scope:       'both',  /* meeting transcripts may sit alongside; widen scope */
-          topic_id:    topic.topic_id,
-          placeholder: 'Ask about this meeting topic…',
-          suggestions: [
-            'What was decided?',
-            'Who owns the follow-ups?',
-            'Any open questions?',
-          ],
-        }) : null,
       };
     } else {
       bodyByTab = {
@@ -4164,19 +4622,6 @@
           userDisplayName: ownerFolder || sel.user_name,
           date:            sel.date,
           canEditContent:  canEditContent,
-        }) : null,
-        ask:        AskChat        ? React.createElement(AskChat, {
-          alertsProvider: makeAlertsProvider(null),
-          date:        sel.date,
-          user:        mediaProps.user,
-          scope:       'both',
-          topic_id:    topic.topic_id,
-          placeholder: 'Ask about this topic…',
-          suggestions: [
-            'What was decided?',
-            'Who is responsible for follow-ups?',
-            'Were any risks flagged?',
-          ],
         }) : null,
       };
     }
@@ -4267,8 +4712,13 @@
   if (!window.FieldSight) window.FieldSight = {};
   if (!window.FieldSight.PAGES) window.FieldSight.PAGES = {};
   window.FieldSight.PAGES['/timeline'] = {
-    Middle: TimelineMiddleColumn,
-    Right:  TimelineRightDetail,
+    /* One Ask, scoped — the Provider shares the ask context, and the dock
+       mounts in the shell's Footer slot so it sits OUTSIDE the middle
+       column's scroll area (spec 2026-09-16 §3). */
+    Provider: TimelineAskProvider,
+    Middle:   TimelineMiddleColumn,
+    Right:    TimelineRightDetail,
+    Footer:   TimelineAskDock,
   };
 
   /* fix/closed-by-display — ContentHistoryPanel is generic over
@@ -4309,6 +4759,7 @@
       diffWords: diffWords,
       formatEditTime: formatEditTime,
       formatContentEdit: formatContentEdit,
+      subscribeContentReload: subscribeContentReload,
       findLatestReportDate: findLatestReportDate,
       capturedFolders: capturedFolders,
       /* live recording KPIs */
@@ -4321,7 +4772,16 @@
       TopicCorrectionPropagate: TopicCorrectionPropagate,
       /* session picker (feat 5) */
       shouldShowSessionPicker: shouldShowSessionPicker,
+      reportableSession: reportableSession,
+      generateReportUnavailableReason: generateReportUnavailableReason,
+      generateReportScope: generateReportScope,
       filterTopicsBySession: filterTopicsBySession,
+      /* the hand-off table's briefs (F4) */
+      loadSessionBriefs: loadSessionBriefs,
+      scopeBriefsToSession: scopeBriefsToSession,
+      shouldLoadBriefs: shouldLoadBriefs,
+      DraftEmailButton: DraftEmailButton,
+      PreviewEmailButton: PreviewEmailButton,
       groupSessionsByBlock: groupSessionsByBlock,
       formatParticipants: formatParticipants,
       formatSessionSummary: formatSessionSummary,
@@ -4332,6 +4792,17 @@
       formatActionLine: formatActionLine,
       assembleEmailBody: assembleEmailBody,
       buildSessionEmailDraft: buildSessionEmailDraft,
+      /* the docked Ask (spec 2026-09-16) */
+      DAILY_TABS: DAILY_TABS,
+      MEETING_TABS: MEETING_TABS,
+      TimelineAskProvider: TimelineAskProvider,
+      useTimelineAsk: useTimelineAsk,
+      askContextForDay: askContextForDay,
+      askContextWithTopic: askContextWithTopic,
+      askContextForSite: askContextForSite,
+      TimelineAskDock: TimelineAskDock,
+      askDayResetKey: askDayResetKey,
+      askDockHasContent: askDockHasContent,
     };
   }
 

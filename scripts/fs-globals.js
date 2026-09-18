@@ -242,7 +242,9 @@
       permissions: [
         P('task','view',SCOPES.SELF), P('event','capture',SCOPES.SELF),
         P('hazard','create',SCOPES.SELF), P('evidence','view',SCOPES.SELF),
-        P('report','view',SCOPES.SELF), P('dashboard','view',SCOPES.SELF),
+        P('report','view',SCOPES.SELF),
+        P('report','create',SCOPES.SELF),    /* spec 2026-09-15 D7 — own day only; the server pins the folder */
+        P('dashboard','view',SCOPES.SELF),
         P('settings','view',SCOPES.SELF),
         P('template','manage',SCOPES.SELF),  /* Sprint 10 B.0 — personal library */
         P('template','view',SCOPES.ORG),     /* Sprint 10 B.0 — view org library */

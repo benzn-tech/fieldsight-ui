@@ -1,7 +1,7 @@
 /* ==========================================================================
    FieldSight API · Ask Agent — BACKEND-CONTEXT §4.12
    --------------------------------------------------------------------------
-   POST /api/ask  body { date, user, question, scope?, topic_id? }
+   POST /api/ask  body { question, date?, user?, site_id?, author_folder?, topic_row_id?, scoped?, tz?, scope?, topic_id? }
      → { answer, citations, model, ... }
 
    Stateless on the server (BACKEND-CONTEXT §10) — multi-turn must be
@@ -53,7 +53,34 @@
         question: opts.question,
         scope:    opts.scope,
         topic_id: opts.topic_id,
+        /* Scoped Ask (backend spec 2026-09-15 §3). Requests, not filters: the
+           backend validates each one and reports what it enforced in
+           `applied_scope`. Undefined values vanish in JSON.stringify, which is
+           how an absent field stays absent on the wire. */
+        site_id:       opts.site_id,
+        author_folder: opts.author_folder,
+        topic_row_id:  opts.topic_row_id,
       };
+      /* Pass-through only: the caller (requestBodyFor) decides when narrowing
+         applies. Only `true` is ever forwarded -- omitting the key for every
+         other value keeps existing callers, which never set this, producing
+         an identical body. */
+      if (opts.scoped === true) body.scoped = true;
+      /* Conversation memory (ask conversation memory spec §3.1). The caller
+         (ask-chat's requestBodyFor) decides when there is history to send and
+         has already shaped it as [{question, answer}]; this layer only carries
+         it. Forwarded ONLY as a non-empty array, because absent and `[]` do
+         not mean the same thing to the backend: absent says "nothing came
+         before", `[]` would be a claim about a turn that did.
+
+         This body is a whitelist rebuilt field by field, so a field the
+         caller sets and this list omits is dropped silently and the request
+         looks correct at the call site -- which is exactly what happened
+         between ui#316 and this fix: ask-chat built `history`, the wire
+         carried {question, tz}, and the backend logged history_turns=0. */
+      if (Array.isArray(opts.history) && opts.history.length) {
+        body.history = opts.history;
+      }
       /* The zone the question is being asked FROM. The backend reads relative
          time out of the question ("yesterday", "this week") and can only
          resolve it against the asker's own calendar day — and the browser is

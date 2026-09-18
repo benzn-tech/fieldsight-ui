@@ -40,11 +40,10 @@
   // ---- pure helpers (exported for node --test) --------------------------
 
   function buildGeneratePayload(ctx) {
-    // ctx = {session, date, userFolder, form:{templateId,title,attendees,fields}, deliver, recipients}
+    // ctx = {scope?, session, date, userFolder, form:{templateId,title,attendees,fields}, deliver, recipients, topicRowIds?}
     var form = (ctx && ctx.form) || {};
     var deliver = ctx && ctx.deliver === 'email' ? 'email' : 'download';
-    return {
-      sessionId: ctx && ctx.session ? ctx.session.session_id : undefined,
+    var payload = {
       date: ctx ? ctx.date : undefined,
       user: ctx ? ctx.userFolder : undefined,
       templateId: form.templateId || null,
@@ -55,14 +54,56 @@
       // recipients only travel when emailing (download has no addressees)
       recipients: deliver === 'email' && Array.isArray(ctx.recipients) ? ctx.recipients : [],
     };
+    // A day is addressed by its date and has no session id (spec 2026-09-15 §5.1).
+    // A meeting payload is exactly what it was before a day scope existed.
+    if (ctx && ctx.scope === 'day') {
+      payload.scope = 'day';
+    } else {
+      payload.sessionId = ctx && ctx.session ? ctx.session.session_id : undefined;
+    }
+    // ABSENT means "everything in scope". Only a real subset travels: the backend
+    // rejects an empty list (asking for nothing) and treats a missing one as everything.
+    if (ctx && Array.isArray(ctx.topicRowIds) && ctx.topicRowIds.length) {
+      payload.topicRowIds = ctx.topicRowIds.slice();
+    }
+    return payload;
   }
 
-  function interpretReportStatus(res) {
+  /* Shared translation of the org client's "no folder mapping" server text (see
+     scripts/api/_fetch.js's 403 envelope) into the one thing the reviewer can
+     actually act on. Returns null when the raw text does not match, so callers
+     fall back to their own generic wording. */
+  function noFolderMappingMessage(raw) {
+    return /no folder mapping/i.test(raw || '')
+      ? 'Your account has no recording folder yet, so there is nothing of yours to report on.'
+      : null;
+  }
+
+  /* What to tell the reviewer when the preview could not be built. A worker whose account
+     has no recording folder gets a 403 from the server; "unavailable" would hide the one
+     thing they can act on (spec 2026-09-15 §5.7). */
+  function previewErrorMessage(res) {
+    var raw = (res && res.error) || '';
+    return noFolderMappingMessage(raw) || raw || 'Preview is unavailable here.';
+  }
+
+  /* The server's reason when a report did not start (spec §5.2), not a generic line. */
+  function generateErrorMessage(res) {
+    return (res && res.error) || 'The report did not start.';
+  }
+
+  function interpretReportStatus(res, scope) {
     // Map a generate / status response to a UI phase. Mirrors the F1 client's
     // envelopes: {_accessDenied}/{_notFound} (never thrown), {status:'unavailable'}
     // (gated off), and the async {queued|done|error} contract.
-    if (!res || res._accessDenied) return { phase: 'error', message: 'You don’t have access to this report.' };
-    if (res._notFound) return { phase: 'error', message: 'Session not found.' };
+    if (!res) return { phase: 'error', message: 'You don’t have access to this report.' };
+    if (res._accessDenied) {
+      var deniedMessage = noFolderMappingMessage(res.error) || res.error || 'You don’t have access to this report.';
+      return { phase: 'error', message: deniedMessage };
+    }
+    if (res._notFound) {
+      return { phase: 'error', message: scope === 'day' ? 'Nothing was found for this day.' : 'Session not found.' };
+    }
     var status = res.status;
     if (status === 'done') return { phase: 'done', docUrl: res.docUrl || null, emailed: !!res.emailed };
     if (status === 'error') return { phase: 'error', message: res.error || 'Report generation failed.' };
@@ -90,10 +131,82 @@
       .filter(function (s) { return !!s; });
   }
 
-  function canGenerate(deliver, recipients) {
+  function canGenerate(deliver, recipients, selection) {
     // Email delivery needs at least one recipient (the backend rejects email with
     // none); download is always allowed. Gates the review step's Generate button.
+    // `selection` is selectedRowIds' result: null = the whole meeting, [] = the
+    // reviewer unticked everything, which is a report about nothing.
+    if (Array.isArray(selection) && selection.length === 0) return false;
     return deliver !== 'email' || (Array.isArray(recipients) && recipients.length > 0);
+  }
+
+  // ---- Choosing what the report covers ------------------------------------
+  //
+  // A topic's time_range is the device's wall clock ("13:40 – 13:41"), and the
+  // timeline shows it verbatim, so a window picked here is in the same clock the
+  // device stamped. No timezone conversion exists anywhere in this path, and
+  // none is needed while both ends of the comparison are that one clock.
+
+  function _minutes(h, m) {
+    h = Number(h); m = Number(m);
+    if (!(h >= 0 && h <= 23 && m >= 0 && m <= 59)) return null;
+    return h * 60 + m;
+  }
+
+  function parseClock(v) {
+    // What an <input type="time"> produces: "HH:MM". Anything else is no clock.
+    var m = /^(\d{1,2}):(\d{2})$/.exec(String(v == null ? '' : v).trim());
+    return m ? _minutes(m[1], m[2]) : null;
+  }
+
+  function parseTimeRange(tr) {
+    // "HH:MM[:SS] <dash> HH:MM[:SS]" with any dash, or a single time. Returns
+    // {start,end} in minutes, or null when the string cannot place the topic --
+    // including a range that runs backwards, which is either a model error or a
+    // midnight wrap, and in both cases we cannot say which minutes it covers.
+    if (typeof tr !== 'string') return null;
+    var re = /(\d{1,2}):(\d{2})(?::\d{2})?/g, found = [], m;
+    while ((m = re.exec(tr)) && found.length < 2) {
+      var v = _minutes(m[1], m[2]);
+      if (v === null) return null;
+      found.push(v);
+    }
+    if (!found.length) return null;
+    var start = found[0], end = found.length > 1 ? found[1] : found[0];
+    return end < start ? null : { start: start, end: end };
+  }
+
+  function overlapsWindow(timeRange, from, to) {
+    // OVERLAP, not "starts inside": a discussion running 11:20-11:50 is still
+    // going on when a 9:00-11:30 window closes. An unplaceable topic or an
+    // unreadable window selects nothing -- a range must never widen to "all".
+    var r = parseTimeRange(timeRange), f = parseClock(from), t = parseClock(to);
+    if (!r || f === null || t === null || f > t) return false;
+    return r.start <= t && r.end >= f;
+  }
+
+  function windowChecked(topics, from, to) {
+    // The tick state a window produces: {topic_row_id: bool}.
+    var out = {};
+    (topics || []).forEach(function (t) {
+      if (t && t.topic_row_id) out[t.topic_row_id] = overlapsWindow(t.time_range, from, to);
+    });
+    return out;
+  }
+
+  function selectedRowIds(topics, checked) {
+    // null when every choosable topic is ticked (send nothing: the whole
+    // meeting), otherwise the ticked ids in meeting order -- possibly [].
+    // A topic is ticked unless explicitly unticked, so a fresh modal is the
+    // whole meeting. A topic with no topic_row_id cannot be named in a
+    // selection at all; it is not counted either way.
+    var ids = [], all = true;
+    (topics || []).forEach(function (t) {
+      if (!t || !t.topic_row_id) return;
+      if (checked && checked[t.topic_row_id] === false) all = false;
+      else ids.push(t.topic_row_id);
+    });
+    return all ? null : ids;
   }
 
   // ---- React shell (browser only; not exercised by node tests) ----------
@@ -176,8 +289,17 @@
     var s_result = React.useState(null); var result = s_result[0], setResult = s_result[1];
     var s_error = React.useState(null); var error = s_error[0], setError = s_error[1];
     var s_photos = React.useState({}); var photoSrc = s_photos[0], setPhotoSrc = s_photos[1];
+    var s_checked = React.useState({}); var checked = s_checked[0], setChecked = s_checked[1];
+    var s_wf = React.useState(''); var winFrom = s_wf[0], setWinFrom = s_wf[1];
+    var s_wt = React.useState(''); var winTo = s_wt[0], setWinTo = s_wt[1];
 
     function sid() { return props.session ? props.session.session_id : null; }
+
+    function scopeOpts() {
+      return props.scope === 'day'
+        ? { scope: 'day', date: props.date, user: props.userFolder }
+        : { sessionId: sid(), date: props.date, user: props.userFolder };
+    }
 
     // Reset the wizard whenever it (re)opens.
     React.useEffect(function () {
@@ -185,6 +307,7 @@
         setStep('preview'); setReqId(null); setResult(null); setError(null);
         setPreview(null); setPreviewErr(null); setPhotoSrc({});
         setDeliver('download'); setRecip([]); setRecipText('');
+        setChecked({}); setWinFrom(''); setWinTo('');
       }
     }, [props.open]);
 
@@ -195,12 +318,10 @@
     React.useEffect(function () {
       if (!props.open || !org.getSessionReportPreview) return undefined;
       var alive = true;
-      Promise.resolve(org.getSessionReportPreview({
-        sessionId: sid(), date: props.date, user: props.userFolder,
-      })).then(function (res) {
+      Promise.resolve(org.getSessionReportPreview(scopeOpts())).then(function (res) {
         if (!alive) return;
         if (!res || res._accessDenied || res._notFound || res.status === 'unavailable') {
-          setPreviewErr((res && res.error) || 'Preview is unavailable here.'); return;
+          setPreviewErr(previewErrorMessage(res)); return;
         }
         setPreview(res);
         var d = previewFieldDefaults(res);
@@ -245,11 +366,10 @@
       var alive = true, timer = null;
       function tick() {
         if (!alive) return;
-        Promise.resolve(org.getSessionReportStatus({
-          sessionId: sid(), date: props.date, user: props.userFolder, requestId: reqId,
-        })).then(function (res) {
+        Promise.resolve(org.getSessionReportStatus(Object.assign(scopeOpts(), { requestId: reqId })))
+          .then(function (res) {
           if (!alive) return;
-          var v = interpretReportStatus(res);
+          var v = interpretReportStatus(res, props.scope);
           if (v.phase === 'done') { setResult(v); setStep('done'); }
           else if (v.phase === 'error') { setError(v.message); setStep('error'); }
           else { timer = setTimeout(tick, 2000); }
@@ -264,15 +384,17 @@
     function onGenerate() {
       setError(null); setStep('generating');
       var payload = buildGeneratePayload({
+        scope: props.scope,
         session: props.session, date: props.date, userFolder: props.userFolder,
         form: form, deliver: deliver, recipients: recipients,
+        topicRowIds: selectedRowIds(preview ? preview.topics : [], checked),
       });
       Promise.resolve(org.generateSessionReport(payload)).then(function (res) {
-        var v = interpretReportStatus(res);
+        var v = interpretReportStatus(res, props.scope);
         if (v.phase === 'error') { setError(v.message); setStep('error'); return; }
         if (v.phase === 'done') { setResult(v); setStep('done'); return; }
         if (res && res.requestId) { setReqId(res.requestId); }      // hands off to the poll effect
-        else { setError('The report did not start.'); setStep('error'); }
+        else { setError(generateErrorMessage(res)); setStep('error'); }
       }).catch(function () { setError('Could not start report generation.'); setStep('error'); });
     }
 
@@ -298,6 +420,17 @@
       }, label);
     }
 
+    var pTopics = (preview && preview.topics) || [];
+    var choosable = pTopics.filter(function (t) { return t && t.topic_row_id; }).length;
+    var selection = selectedRowIds(pTopics, checked);
+    var chosenCount = selection === null ? choosable : selection.length;
+    var unplaceable = pTopics.filter(function (t) {
+      return t && t.topic_row_id && !parseTimeRange(t.time_range);
+    }).length;
+    function toggle(id) {
+      setChecked(function (c) { var n = Object.assign({}, c); n[id] = (c[id] === false); return n; });
+    }
+
     // Step bodies — placeholders for F3 (preview) / F4 (fill) / F6 (done UI).
     var body;
     if (step === 'preview') {
@@ -307,14 +440,33 @@
         body = h('div', { className: 'fs-srm__step' }, h('p', { className: 'fs-srm__hint' }, 'Loading preview…'));
       } else {
         body = h('div', { className: 'fs-srm__step fs-srm__preview' },
-          h('h3', { className: 'fs-srm__preview-title' }, preview.title || 'Session report'),
+          h('h3', { className: 'fs-srm__preview-title' },
+            preview.title || (props.scope === 'day' ? 'Day report' : 'Session report')),
           h('p', { className: 'fs-srm__preview-meta' }, [preview.siteName, preview.date].filter(Boolean).join(' · ')),
           (preview.participants && preview.participants.length)
             ? h('p', { className: 'fs-srm__preview-attendees' }, 'Attendees: ' + preview.participants.join(', ')) : null,
+          choosable ? h('div', { className: 'fs-srm__window' },
+            h('span', { className: 'fs-srm__window-label' }, 'Cover only'),
+            h('input', { type: 'time', className: 'fs-input fs-srm__window-time', value: winFrom,
+              'aria-label': 'Window start', onChange: function (e) { setWinFrom(e.target.value); } }),
+            h('span', null, '–'),
+            h('input', { type: 'time', className: 'fs-input fs-srm__window-time', value: winTo,
+              'aria-label': 'Window end', onChange: function (e) { setWinTo(e.target.value); } }),
+            btn('Select this window', function () { setChecked(windowChecked(pTopics, winFrom, winTo)); }),
+            btn('Select all', function () { setChecked({}); }),
+            h('span', { className: 'fs-srm__window-count' },
+              chosenCount + ' of ' + choosable + ' topics'
+              + (unplaceable ? ' · ' + unplaceable + ' without a time, not picked by a window' : ''))) : null,
           h('div', { className: 'fs-srm__preview-topics' },
             (preview.topics || []).map(function (t, i) {
-              return h('div', { key: i, className: 'fs-srm__preview-topic' },
-                h('h4', null, t.topic_title || t.title || ('Topic ' + (i + 1))),
+              var on = !t.topic_row_id || checked[t.topic_row_id] !== false;
+              return h('div', { key: i, className: 'fs-srm__preview-topic' + (on ? '' : ' fs-srm__preview-topic--off') },
+                h('h4', null,
+                  t.topic_row_id ? h('input', { type: 'checkbox', checked: on,
+                    'aria-label': 'Include this topic', onChange: function () { toggle(t.topic_row_id); } }) : null,
+                  ' ',
+                  t.time_range ? h('span', { className: 'fs-srm__preview-time' }, t.time_range + ' · ') : null,
+                  t.topic_title || t.title || ('Topic ' + (i + 1))),
                 t.summary ? h('p', null, t.summary) : null,
                 (t.action_items && t.action_items.length)
                   ? h('ul', { className: 'fs-srm__preview-actions' },
@@ -336,7 +488,8 @@
         h('p', { className: 'fs-srm__hint' }, 'Review, choose how to deliver, then generate.'),
         h('ul', { className: 'fs-srm__review-summary' },
           h('li', null, 'Title: ' + (form.title || '—')),
-          h('li', null, 'Attendees: ' + ((form.attendees || []).length))),
+          h('li', null, 'Attendees: ' + ((form.attendees || []).length)),
+          h('li', null, 'Topics: ' + chosenCount + ' of ' + choosable)),
         h(DeliveryChooser, {
           deliver: deliver, onDeliver: setDeliver,
           recipientsText: recipText,
@@ -368,8 +521,11 @@
       btn('Back', function () { setStep('fill'); }),
       h('button', {
         type: 'button', className: 'fs-btn fs-btn--primary',
-        disabled: !canGenerate(deliver, recipients),
-        title: canGenerate(deliver, recipients) ? undefined : 'Add at least one recipient to email the report',
+        disabled: !canGenerate(deliver, recipients, selection),
+        title: canGenerate(deliver, recipients, selection) ? undefined
+          : (Array.isArray(selection) && !selection.length
+              ? 'Tick at least one topic to report on'
+              : 'Add at least one recipient to email the report'),
         onClick: onGenerate,
       }, 'Generate report'));
     else if (step === 'generating') footer = h('footer', { className: 'fs-srm__footer' },
@@ -381,7 +537,7 @@
 
     return h(ModalOverlay, {
       open: !!props.open, onClose: props.onClose, closeOnBackdrop: false,
-      size: 'lg', title: 'Session report',
+      size: 'lg', title: props.scope === 'day' ? 'Day report' : 'Session report',
     }, h('div', { className: 'fs-srm' }, body, footer));
   }
 
@@ -390,6 +546,8 @@
 
   // Pure-helper export for node --test (browser ignores this).
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { buildGeneratePayload: buildGeneratePayload, interpretReportStatus: interpretReportStatus, previewFieldDefaults: previewFieldDefaults, parseAttendees: parseAttendees, canGenerate: canGenerate, STEPS: STEPS };
+    module.exports = { buildGeneratePayload: buildGeneratePayload, interpretReportStatus: interpretReportStatus, previewFieldDefaults: previewFieldDefaults, parseAttendees: parseAttendees, canGenerate: canGenerate, STEPS: STEPS,
+      parseTimeRange: parseTimeRange, parseClock: parseClock, overlapsWindow: overlapsWindow, windowChecked: windowChecked, selectedRowIds: selectedRowIds,
+      previewErrorMessage: previewErrorMessage, generateErrorMessage: generateErrorMessage, noFolderMappingMessage: noFolderMappingMessage };
   }
 })();

@@ -150,6 +150,7 @@ action:      'Reroute hose along fence line.',
             responsible: 'Jack Gibson',
             deadline:    'Today 08:30',
             priority:    'high',
+            version:     2,
           },
           {
             id:          '55c48cd4-b3e5-43d8-8a5e-7991fbc1998f',
@@ -157,6 +158,7 @@ action:      'Reroute hose along fence line.',
             responsible: 'Sarah Chen',
             deadline:    'Today 09:00',
             priority:    'medium',
+            version:     3,
           },
         ],
         safety_flags: [
@@ -252,6 +254,9 @@ action:      'Route along fence line.',
       {
         topic_id:    3,
         topic_row_id: '7d0c0003-0429-4a29-9b00-000000000003',
+        /* Report-sourced topic (spec 2026-09-15 §3.3): no session, no time. */
+        session_id:   null,
+        session_kind: 'report',
         time_range:  '13:30 ' + EN + ' 14:00',
         topic_title: 'Wind warning — secure tarps and edge protection',
         category:    'safety',
@@ -642,10 +647,16 @@ action:      'Reinspect tie-downs every 2h until 18:00.',
     Object.keys(byUser).forEach(function (folder) {
       var rep = byUser[folder];
       (rep.topics || []).forEach(function (t) {
-        if (t.session_id) return;                       // never overwrite an explicit one
-        var start = String(t.time_range || '').split(EN)[0].trim() || '00:00';
-        t.session_id = (rep.device || 'Benl1') + '_' + (rep.report_date || date)
-          + '_' + start.replace(/:/g, '-') + '-00';
+        if (t.session_kind !== 'report') {               // report-sourced: never gets a session
+          if (!t.session_id) {
+            var start = String(t.time_range || '').split(EN)[0].trim() || '00:00';
+            t.session_id = (rep.device || 'Benl1') + '_' + (rep.report_date || date)
+              + '_' + start.replace(/:/g, '-') + '-00';
+          }
+          if (!t.session_kind) t.session_kind = 'extraction';
+        }
+        /* spec §8.1 — version = 1 + content_edits rows; mocks default to 1. */
+        (t.action_items || []).forEach(function (a) { if (a.version == null) a.version = 1; });
       });
     });
   });
