@@ -928,10 +928,14 @@
               'Not on any project')
           : React.createElement('ul', { className: 'fs-team-projects' },
               projects.map(function (p) {
+                var roleNote = staffing.projectRoleNote(u);
                 return React.createElement('li', { key: p.site_id, className: 'fs-team-projects__row' },
                   React.createElement('span', { className: 'fs-team-projects__name' },
                     siteDisplayName(p.site_id)),
-                  canEdit
+                  roleNote
+                    ? React.createElement('span', { className: 'fs-team-projects__role fs-team-detail__muted' },
+                        roleNote)
+                    : canEdit
                     ? React.createElement('select', {
                         className: 'fs-settings__select fs-team-projects__role',
                         value: p.role,
