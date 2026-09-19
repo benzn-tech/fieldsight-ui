@@ -1626,3 +1626,49 @@ test('a section that has already been consumed by a task never ALSO produces a s
     'Site meeting — Weekly coordination meeting held on site.',
   ], 'exactly ONE sunk row — the two covered sections are not doubled up');
 });
+
+/* =========================================================================
+   Vendor/link leak guard (owner's ruling, 2026-09-20)
+
+   Customers must never learn which model/vendor we use, and the hand-off
+   they paste into an email must never carry our internal app link. The
+   footer used to be "Generated from FieldSight — <deepLink>"; it is now
+   the fixed string below, period. `deepLink` is passed in EVERY test
+   below even though nothing reads it any more — the point is to prove
+   that supplying one again in the future (a call site nobody cleaned up,
+   or a new one added later) still cannot leak it back in.
+   ========================================================================= */
+
+test('buildPreviewModel: the footer is the fixed string, with no link, even when deepLink is supplied', () => {
+  const m = buildPreviewModel({
+    topics: [topic()],
+    deepLink: 'https://main.d2fssznicvuckr.amplifyapp.com/#/timeline?date=2026-07-25&site=UCPK&user=Ben_Lin',
+  });
+  assert.strictEqual(m.footer, 'Generated from FieldSight');
+});
+
+test('the copied hand-off (HTML flavour) carries no http URL and no model/vendor name, even with deepLink supplied', () => {
+  const m = buildPreviewModel({
+    topics: [topic()],
+    deepLink: 'https://main.d2fssznicvuckr.amplifyapp.com/#/timeline?date=2026-07-25&site=UCPK&user=Ben_Lin',
+  });
+  const html = renderEmailHtml(m, {});
+  assert.ok(!/https?:\/\//i.test(html), 'no http(s) URL of ours anywhere in the copied HTML');
+  assert.ok(!/amplifyapp\.com/i.test(html), 'no internal app domain in the copied HTML');
+  ['gemini', 'muse', 'qwen', 'claude', 'anthropic', 'openrouter'].forEach((name) => {
+    assert.ok(!new RegExp(name, 'i').test(html), 'no vendor/model name "' + name + '" in the copied HTML');
+  });
+});
+
+test('the copied hand-off (plain-text flavour) carries no http URL and no model/vendor name, even with deepLink supplied', () => {
+  const m = buildPreviewModel({
+    topics: [topic()],
+    deepLink: 'https://main.d2fssznicvuckr.amplifyapp.com/#/timeline?date=2026-07-25&site=UCPK&user=Ben_Lin',
+  });
+  const text = renderEmailText(m);
+  assert.ok(!/https?:\/\//i.test(text), 'no http(s) URL of ours anywhere in the copied text');
+  assert.ok(!/amplifyapp\.com/i.test(text), 'no internal app domain in the copied text');
+  ['gemini', 'muse', 'qwen', 'claude', 'anthropic', 'openrouter'].forEach((name) => {
+    assert.ok(!new RegExp(name, 'i').test(text), 'no vendor/model name "' + name + '" in the copied text');
+  });
+});

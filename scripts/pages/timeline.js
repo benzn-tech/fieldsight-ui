@@ -465,8 +465,11 @@
      (mailto is plain text — no formatting). Groups by topic (a blank line +
      the topic title before its first item). When `omitted > 0`, a visible
      "… +N more items" line is appended — items are NEVER silently dropped.
-     The "Discussed with:" line lists participant NAMES only; the footer's
-     deep link doubles as the overflow escape hatch. */
+     The "Discussed with:" line lists participant NAMES only. The footer
+     used to double as the overflow escape hatch via a deep link; the
+     product owner ruled that link out entirely (no internal app URL in a
+     customer-facing paste), so the "… +N more items" line above is now the
+     only escape hatch for a truncated list. */
   function assembleEmailBody(entries, omitted, ctx) {
     var lines = [ctx.intro, ''];
     var lastTopic = null;
@@ -500,8 +503,13 @@
      Length ceiling: mailto has a practical ~2000-encoded-char limit; we
      budget ~1800 to be safe. When the fully-populated URL would exceed the
      budget we include the largest prefix of items that fits and append a
-     visible "… +N more items" line (+ the footer deep link as the escape
-     hatch). Because the list is a single meeting this rarely triggers. */
+     visible "… +N more items" line. Because the list is a single meeting
+     this rarely triggers.
+
+     `opts.deepLink` is intentionally not read: the footer never carries a
+     link (owner's ruling — see buildPreviewModel() in
+     email-preview-modal.js for the fuller note). Callers may still pass it
+     for now; it is ignored. */
   function buildSessionEmailDraft(opts) {
     opts = opts || {};
     var topics    = opts.topics || [];
@@ -509,7 +517,6 @@
     var date      = opts.date || '';
     var reportDate = opts.reportDate || date;
     var siteName  = opts.siteName || (session && session.site_name) || '';
-    var deepLink  = opts.deepLink || '';
     var budget    = opts.budget || 1800;
 
     var groups = collectSessionActionItems(topics, opts.isDone);
@@ -529,7 +536,8 @@
       intro: 'Outstanding action items from ' + (siteName ? siteName + ' — ' : '')
         + sessionLabel + (date ? ' (' + date + ')' : '') + ':',
       participants: participants,
-      footer: 'Generated from FieldSight' + (deepLink ? ' — ' + deepLink : ''),
+      /* No link, ever (owner's ruling): see the note above this function. */
+      footer: 'Generated from FieldSight',
     };
 
     /* Flatten to per-item entries, preserving topic grouping. */
@@ -1684,8 +1692,9 @@
                 siteName:   report.site,
                 date:       props.date,
                 reportDate: report.report_date || props.date,
-                deepLink:   (typeof window !== 'undefined' && window.location)
-                  ? window.location.href : '',
+                /* No `deepLink` prop (owner's ruling — the hand-off must
+                   never carry our internal app URL); see the note in
+                   buildSessionEmailDraft(). */
                 /* Mirrors the single-person view's _isActionDone: the Aurora
                    status column wins when present, else the check-off overlay.
                    Keyed on THIS section's folder — the audit key carries a user
@@ -2822,7 +2831,8 @@
       siteName:   report.site || site || '',
       date:       date,
       reportDate: report.report_date || date,
-      deepLink:   (typeof window !== 'undefined' && window.location) ? window.location.href : '',
+      /* No `deepLink` prop (owner's ruling — no internal app URL in a
+         customer-facing hand-off); see buildSessionEmailDraft(). */
       isDone:     _isActionDone,
       /* Scoped the same way `topics` above is: one meeting selected means one
          meeting's brief. */
@@ -3163,7 +3173,6 @@
       siteName:   props.siteName,
       date:       props.date,
       reportDate: props.reportDate || props.date,
-      deepLink:   props.deepLink,
       isDone:     props.isDone,
     });
     if (!draft) {
@@ -3260,7 +3269,8 @@
         siteName:   props.siteName,
         userFolder: props.userFolder,
         isDone:     props.isDone,
-        deepLink:   props.deepLink,
+        /* No `deepLink` prop forwarded (owner's ruling); see
+           buildSessionEmailDraft(). */
         /* Forwarding into this component is not enough — THIS list is what
            reaches the modal, and buildPreviewModel reads opts.briefs off it. */
         briefs:     props.briefs,
