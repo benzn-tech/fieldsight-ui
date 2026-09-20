@@ -47,7 +47,14 @@
      siteName    string?
      userFolder  string? — resolves photo S3 keys; no photos without it
      isDone      (action, topicId, idx) => boolean
-     deepLink    string?
+
+     `deepLink` is intentionally not a prop here. The footer used to read
+     "Generated from FieldSight — <link>"; the product owner ruled the link
+     out entirely (customers must never get our internal app URL in a
+     paste), so the footer is now the fixed string below and nothing in
+     this module reads a link out of `opts`/`props`. Do not re-add it —
+     see `footer:` in buildPreviewModel() and the anti-leak test in
+     tests/email-preview-modal.test.js.
 
    Exported to: window.FieldSight.EmailPreviewModal
    Pure helpers (buildPreviewModel, renderEmailHtml, renderEmailText) are
@@ -548,8 +555,10 @@
       rowsSource: rowsSource,
       totalItems: totalItems,
       totalPhotos: totalPhotos,
-      footer: 'Generated from FieldSight'
-        + (opts.deepLink ? ' — ' + opts.deepLink : ''),
+      /* No link, ever (owner's ruling): a customer pasting this hand-off
+         must never carry our internal app URL. `opts.deepLink` is not
+         read even when a caller still supplies one. */
+      footer: 'Generated from FieldSight',
     };
   }
 
@@ -727,7 +736,7 @@
          buildPreviewModel, and without it a brief arriving after the modal
          first rendered would leave the table built from action_items with
          nothing to say it had not updated. */
-    }, [props.topics, props.session, props.date, props.siteName, props.deepLink,
+    }, [props.topics, props.session, props.date, props.siteName,
         props.briefs]);
 
     var srcRef   = React.useState({});

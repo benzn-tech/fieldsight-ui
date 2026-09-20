@@ -230,6 +230,55 @@ test('addableProjects is empty when they are on everything', () => {
     s.addableProjects(BO, [{ v: 'site-a', l: 'A' }, { v: 'site-b', l: 'B' }]), []);
 });
 
+/* ---- company-wide positions have no per-project role --------------------- */
+
+test('a company-wide position (gm) reads as company-wide', () => {
+  const s = load();
+  assert.strictEqual(s.isCompanyWide({ role: 'gm' }), true);
+  assert.strictEqual(s.projectRoleNote({ role: 'gm' }),
+    'Company-wide access — project role does not apply');
+});
+
+test('a company-wide position (admin) reads as company-wide', () => {
+  const s = load();
+  assert.strictEqual(s.isCompanyWide({ role: 'admin' }), true);
+  assert.strictEqual(s.projectRoleNote({ role: 'admin' }),
+    'Company-wide access — project role does not apply');
+});
+
+test('a company-wide position (regional_manager) reads as company-wide', () => {
+  const s = load();
+  assert.strictEqual(s.isCompanyWide({ role: 'regional_manager' }), true);
+});
+
+test('a company-wide position (platform_admin) reads as company-wide', () => {
+  const s = load();
+  assert.strictEqual(s.isCompanyWide({ role: 'platform_admin' }), true);
+});
+
+test('per-project roles (worker, site_manager, pm) are not company-wide', () => {
+  const s = load();
+  ['worker', 'site_manager', 'pm'].forEach(function (role) {
+    assert.strictEqual(s.isCompanyWide({ role: role }), false);
+    assert.strictEqual(s.projectRoleNote({ role: role }), null);
+  });
+});
+
+test('a user with no role or an unknown role is not company-wide and does not throw', () => {
+  const s = load();
+  assert.strictEqual(s.isCompanyWide({}), false);
+  assert.strictEqual(s.isCompanyWide(null), false);
+  assert.strictEqual(s.isCompanyWide({ role: 'something-made-up' }), false);
+  assert.strictEqual(s.projectRoleNote({}), null);
+  assert.strictEqual(s.projectRoleNote(null), null);
+});
+
+test('isCompanyWide is case-insensitive', () => {
+  const s = load();
+  assert.strictEqual(s.isCompanyWide({ role: 'GM' }), true);
+  assert.strictEqual(s.isCompanyWide({ role: 'Admin' }), true);
+});
+
 /* ---- the header chip ----------------------------------------------------- */
 
 const NAME = (id) => ({ 'site-a': 'Alpha', 'site-b': 'Bravo' }[id] || id);

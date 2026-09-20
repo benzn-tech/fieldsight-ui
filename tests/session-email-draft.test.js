@@ -161,7 +161,11 @@ test('assembleEmailBody groups lines under their topic title and appends "… +N
    buildSessionEmailDraft — the whole thing
    ========================================================================= */
 
-test('buildSessionEmailDraft builds subject + grouped body for a session, to is empty', () => {
+test('buildSessionEmailDraft builds subject + grouped body for a session, to is empty, and NEVER leaks a deep link even when one is supplied', () => {
+  // Owner's ruling: the customer-facing hand-off must never carry our
+  // internal app URL. `deepLink` is passed here deliberately (a caller
+  // might still supply one, e.g. an old call site not yet cleaned up) to
+  // pin that the footer/body drop it on the floor regardless.
   const draft = buildSessionEmailDraft({
     topics: topics(), date: '2026-07-25', siteName: 'UC PK',
     session: { label: '13:05 – 14:22', participants: ['Ben', 'Neil', 'James'] },
@@ -177,6 +181,12 @@ test('buildSessionEmailDraft builds subject + grouped body for a session, to is 
   assert.ok(draft.body.indexOf('Delivery review\n- [MEDIUM] Confirm crane slot — James (due —)') !== -1);
   // participant names in the body, never in the recipient field
   assert.ok(draft.body.indexOf('Discussed with: Ben, Neil, James') !== -1);
+  // the footer is the fixed string, with no link appended
+  assert.ok(draft.body.indexOf('Generated from FieldSight') !== -1, 'footer present');
+  assert.strictEqual(draft.body.indexOf('app.example'), -1,
+    'the supplied deepLink must never appear in the body');
+  assert.strictEqual(draft.url.indexOf('app.example'), -1,
+    'the supplied deepLink must never appear in the encoded mailto url either');
 });
 
 test('buildSessionEmailDraft: the mailto to: field is ALWAYS empty and no email lookup occurs', () => {
@@ -209,7 +219,7 @@ test('buildSessionEmailDraft returns null when there is nothing outstanding to s
   assert.strictEqual(buildSessionEmailDraft({ topics: personalOnly, date: '2026-07-25', siteName: 'UC PK' }), null);
 });
 
-test('buildSessionEmailDraft truncates to the budget, appends "+N more", and drops NOTHING silently', () => {
+test('buildSessionEmailDraft truncates to the budget, appends "+N more", and drops NOTHING silently (and still no deep link)', () => {
   // Twelve open items across two topics; a tight budget forces truncation.
   const many = [
     { topic_id: 0, topic_title: 'Morning walk', action_items: [] },
@@ -233,6 +243,10 @@ test('buildSessionEmailDraft truncates to the budget, appends "+N more", and dro
   assert.strictEqual(draft.includedItems + draft.omittedItems, draft.totalItems);
   assert.ok(draft.body.indexOf('… +' + draft.omittedItems + ' more item') !== -1, 'visible overflow line naming the exact count');
   if (draft.includedItems > 0) assert.ok(draft.url.length <= 500, 'the chosen URL fits the budget');
+  // the overflow line is the ONLY escape hatch now — no deep link anywhere,
+  // even though one was supplied above.
+  assert.strictEqual(draft.body.indexOf('app.example'), -1,
+    'a truncated hand-off must not fall back to leaking the deep link');
 });
 
 test('buildSessionEmailDraft: a comfortably small meeting is never truncated', () => {

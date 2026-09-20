@@ -18,6 +18,7 @@
 (function () {
   var MEMBERSHIP_ROLES = ['pm', 'site_manager', 'worker'];
   var UNSTAFFED = '__none__';
+  var COMPANY_WIDE_ROLES = ['admin', 'gm', 'regional_manager', 'platform_admin'];
 
   /* Every project the person is on, with the role held on THAT project.
      Falls back to the mock fixture shape (sites[] and no memberships) so the
@@ -131,10 +132,33 @@
     return projects.length === 1 ? first : first + ' +' + (projects.length - 1);
   }
 
+  /* Is this person's POSITION (u.role) a company-wide tier rather than a
+     per-site one? admin/gm/regional_manager/platform_admin already see every
+     site and every author -- visible_scope() branches on the company-level
+     role first and never reads memberships.role for them -- so a per-project
+     role select on their row would be editable but meaningless. */
+  function isCompanyWide(user) {
+    var role = user && user.role;
+    if (typeof role !== 'string') return false;
+    return COMPANY_WIDE_ROLES.indexOf(role.toLowerCase()) >= 0;
+  }
+
+  /* The sentence to show in place of the per-project role select for a
+     company-wide position, or null when the person's role is a real
+     per-site one and the select still means something. */
+  function projectRoleNote(user) {
+    return isCompanyWide(user)
+      ? 'Company-wide access — project role does not apply'
+      : null;
+  }
+
   if (!window.FS) window.FS = {};
   window.FS.staffing = {
     MEMBERSHIP_ROLES: MEMBERSHIP_ROLES,
     UNSTAFFED: UNSTAFFED,
+    COMPANY_WIDE_ROLES: COMPANY_WIDE_ROLES,
+    isCompanyWide: isCompanyWide,
+    projectRoleNote: projectRoleNote,
     projectsOf: projectsOf,
     roleOnSite: roleOnSite,
     groupByProject: groupByProject,
