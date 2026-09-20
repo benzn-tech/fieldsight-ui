@@ -1185,10 +1185,11 @@
                customer's own recordings, and this points out of them. Reading
                order carries the same separation the styling does. */
             m.role === 'assistant' ? renderCorroboration(m.corrob) : null,
-            m.role === 'assistant' && m.model
-              ? React.createElement('div', { className: 'fs-ask-chat__model' },
-                  m.model)
-              : null,
+            /* Customers must never learn which model/vendor answers Ask
+               (owner's ruling). `m.model` is deliberately never rendered —
+               the backend is being changed in parallel to stop sending it
+               at all, so this reads `m.model` nowhere and breaks on
+               neither its presence nor its absence. */
             /* Which route answered. The routing spec requires the answer to
                say — a route the reader cannot see is one they cannot
                correct. */
