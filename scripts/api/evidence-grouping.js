@@ -160,7 +160,61 @@
     };
   }
 
+  /* The day's photos grouped by WHERE they were taken.
+
+     A photo belongs to this day and that place. The place already travels on
+     the report as `photo_groups` — [{location, filenames}], written by the
+     day's location markers (migration 0054) — and Timeline already renders
+     it. Evidence did not, so every photo that reaches no topic arrived in one
+     undifferentiated "No topic" pile, which is most of them: 71 of 90 on prod
+     days that HAVE a report.
+
+     `location: null` is a real heading the backend emits on purpose — "taken
+     before anyone said where they were" — and it lands in `ungrouped` here
+     rather than under an invented room.
+
+     THE FLAT LIST DECIDES WHAT EXISTS, the grouping only decides where it
+     goes. The two come from different queries on the backend and can
+     disagree: a photo the grouping never mentions is shown ungrouped rather
+     than dropped, and a group whose photos are all absent from the day (a
+     tombstoned photo is filtered out of the flat list but can still be named
+     by a marker) renders no heading rather than an empty one.
+
+     Same shape and same invariant as groupByTopic: every photo in, exactly
+     once, out. */
+  function groupByPlace(photos, photoGroups) {
+    var list = (photos || []).map(function (p, i) {
+      return Object.assign({}, p, { _i: i });
+    });
+    var byName = {};
+    list.forEach(function (p) { byName[p.filename] = p; });
+
+    var order = [], placed = {};
+    (photoGroups || []).forEach(function (g) {
+      if (!g || g.location == null || g.location === '') return;
+      var rows = [];
+      (g.filenames || []).forEach(function (name) {
+        /* `placed` guards against one photo being claimed by two locations.
+           The backend assigns each photo exactly one, so this should never
+           fire — but a grouping that silently doubles a photo is the defect
+           the topic binding actually has on prod, and it is cheap not to
+           repeat it here. */
+        if (placed[name] || !byName[name]) return;
+        placed[name] = true;
+        rows.push(byName[name]);
+      });
+      if (!rows.length) return;
+      rows.sort(byTime);
+      order.push({ location: g.location, photos: rows });
+    });
+
+    var ungrouped = list.filter(function (p) { return !placed[p.filename]; });
+    ungrouped.sort(byTime);
+    return { groups: order, ungrouped: ungrouped };
+  }
+
   var mod = { photoTime: photoTime, groupByTopic: groupByTopic,
+              groupByPlace: groupByPlace,
               folderName: folderName,
               photosForReport: photosForReport,
               reportFromUploadFacts: reportFromUploadFacts };
