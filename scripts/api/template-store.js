@@ -168,6 +168,11 @@
       title: t.name,
       description: t.description,
       created_at: t.created_at,
+      /* The version a chooser should pin to. Between picking a template and
+         pressing Generate, somebody else can save a new version; a report
+         written to "whatever is current when the worker gets there" would not
+         be the template the person was looking at. */
+      version: t.current_version,
       _status: t.current_version > 0 ? 'ready' : 'empty',
       versions: (t.versions || []).map(toVersion),
     };
