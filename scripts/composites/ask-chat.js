@@ -1295,7 +1295,16 @@
              over the topic list, which is the thing Hide was for. */
           onFocus:   function () { setFocused(true); },
           onBlur:    function () { setFocused(false); },
-          disabled:  busy,
+          /* NOT disabled while a question is in flight. An answer takes
+             13-17s on the corroborated path and the p90 for the plain one is
+             8.6s; locking the box for that long takes the next question away
+             from the person for the whole wait, and disabling an input also
+             drops focus, so they come back to a box they have to click into
+             again. Typing ahead costs nothing: `send()` already refuses while
+             `busy` and only clears `q` on a send that actually happened, so
+             an early Enter keeps the text rather than losing it. The SEND
+             BUTTON stays disabled -- that is where "not yet" belongs, and it
+             says so by reading '…'. */
         }),
         React.createElement('button', {
           type:      'submit',
