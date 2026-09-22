@@ -32,6 +32,44 @@
   var TYPE_LABEL = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' };
   var TYPE_TONE  = { daily: 'info', weekly: 'success', monthly: 'accent' };
 
+  /* ---------- Ordering ---------------------------------------------------
+     BY THE DAY THE REPORT IS ABOUT, never by the moment it was written.
+
+     This list used to be sorted on generated_at -- the S3 object's
+     LastModified -- which silently overrode the ordering the server had
+     already applied: lambda_org_api._read_org_report_history ends with
+     `reports.sort(key=lambda r: r["date"], reverse=True)`. Two sorts on two
+     different keys, and the client's won.
+
+     The cost only showed after a regenerate. Re-running an old report
+     rewrites its object, LastModified jumps to now, and a report ABOUT the
+     11th surfaces above one about the 21st. The list stopped being a calendar
+     and became a log of what had lately been re-run, which is not what
+     anybody opens this page to read.
+
+     The tie-breaks are not decoration. `date` is not unique -- one date can
+     carry a daily, a weekly and a monthly report -- so without them the order
+     of same-date rows is whatever the sort implementation happens to do, and
+     two renders of identical data can disagree. generated_at puts the
+     freshest of them first; `key` makes the comparator total.
+
+     A row whose `date` is '' sorts last, which is where it belongs: that
+     empty string means the server's REPORT_DATE_IN_KEY_RE found no date in
+     the key, and a row we cannot place in time must not head a list whose
+     whole job is to be in time order. */
+
+  function compareReportRows(a, b) {
+    var byDate = (b.date || '').localeCompare(a.date || '');
+    if (byDate !== 0) return byDate;
+    var byGen = (b.generated_at || '').localeCompare(a.generated_at || '');
+    if (byGen !== 0) return byGen;
+    return (a.key || '').localeCompare(b.key || '');
+  }
+
+  function sortReportRows(rows) {
+    return (rows || []).slice().sort(compareReportRows);
+  }
+
   function fmtSize(bytes) {
     if (bytes == null) return '';
     if (bytes < 1024)        return bytes + ' B';
@@ -477,9 +515,7 @@
           setState({ status: 'access_denied', message: res.error, rows: [] });
           return;
         }
-        var sorted = (res.reports || []).slice().sort(function (a, b) {
-          return (b.generated_at || '').localeCompare(a.generated_at || '');
-        });
+        var sorted = sortReportRows(res.reports);
         setState({ status: 'ok', rows: sorted });
         if (reselectRef.current && props.onSelect) {
           var fresh = sorted.filter(function (r) { return r.key === reselectRef.current; })[0];
