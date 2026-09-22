@@ -131,21 +131,80 @@
     return !!(opts.callerFolder && opts.folder && opts.callerFolder === opts.folder);
   }
 
-  /* The POST body. `consent_given` is hard-false here BY DESIGN: consent is a
-     different act from naming — it stores a voiceprint, which is biometric
-     data, and the consent required is the consent of the person whose voice
-     it is. Phase 1 ships no consent UI (spec §Consent). Do not add a flag to
-     this function; add a deliberate surface with real wording instead. */
+  /* Who in the directory this name refers to, or null.
+
+     `consented_by` is a USER ID and the backend refuses `consent_given` without one
+     (lambda_org_api: "record whose voice this is, not who is doing the labelling"). So
+     consent can only be offered for a name that resolves to a directory entry — and on a
+     site the people most often named are subcontractors and visitors who have none. That
+     is not a gap to paper over: it is the reason the strict path enrolled nobody for
+     months, and the panel says so out loud rather than offering a control that 400s.
+
+     Matched case-insensitively on the display name, which is the same key
+     `users.resolve_display_name` uses on the backend. Two people sharing a name resolve to
+     neither: picking one of them at random would attach a voiceprint, and a consent
+     record, to the wrong person. */
+  function subjectIdForName(name, members) {
+    var want = String(name == null ? '' : name).trim().toLowerCase();
+    if (!want) return null;
+    var hits = (members || []).filter(function (m) {
+      return m && m.id && String(m.name || '').trim().toLowerCase() === want;
+    });
+    return hits.length === 1 ? String(hits[0].id) : null;
+  }
+
+  /* Whether the consent control may be offered for this name, and if not, why.
+
+     The reason is returned rather than the control merely hidden. A checkbox that is absent
+     for two different causes — the feature is off here, versus this person has no directory
+     entry — teaches the user nothing, and the second is fixable by them (add the person to
+     the site roster) while the first is not. */
+  function consentOffer(opts) {
+    opts = opts || {};
+    if (!opts.featureAvailable) {
+      return { offer: false, reason: null };
+    }
+    var id = subjectIdForName(opts.displayName, opts.members);
+    if (!id) {
+      return {
+        offer: false,
+        id: null,
+        reason: 'Only someone in your site roster can be recorded as having agreed — '
+          + 'their voice pattern has to be stored against their directory entry.',
+      };
+    }
+    return { offer: true, id: id, reason: null };
+  }
+
+  /* The POST body.
+
+     `consent_given` was hard-coded `false` here from Phase 1 until 2026-09-22, with a
+     comment saying not to add a flag but to build "a deliberate surface with real wording
+     instead". That surface now exists (NamePanel's consent block), so the flag travels —
+     and it travels ONLY from that surface.
+
+     Consent is still a different act from naming. Naming propagates a name inside one
+     meeting by comparing audio the company already holds; consent stores a voice pattern,
+     which is biometric data under the NZ Privacy Act, so the person recognisable in FUTURE
+     meetings has to be the one who agreed. Two consequences kept in code rather than in a
+     comment:
+
+       * the default is `false`. An omitted or malformed opts object enrols nobody, which is
+         the pre-2026-09-22 behaviour exactly.
+       * `consented_by` is only ever a resolved directory id, never the caller's own id and
+         never the typed name. The backend cannot tell the subject agreeing apart from the
+         labeller clicking a box on their behalf, so this half must not blur them either. */
   function correctionBody(seg, opts) {
     opts = opts || {};
+    var consented = opts.consentGiven === true && !!opts.consentedBy;
     return {
       user: opts.user || '',
       source_filename: seg.source_filename,
       start_sec: seg.chunk_start,
       end_sec: seg.chunk_start + seg.duration,
       display_name: String(opts.displayName || '').trim(),
-      consent_given: false,
-      consented_by: null,
+      consent_given: consented,
+      consented_by: consented ? String(opts.consentedBy) : null,
     };
   }
 
@@ -393,6 +452,8 @@
     roleMayName: roleMayName,
     mayName: mayName,
     correctionBody: correctionBody,
+    subjectIdForName: subjectIdForName,
+    consentOffer: consentOffer,
     featureAvailable: featureAvailable,
     displayLabel: displayLabel,
     isSpeakerLabel: isSpeakerLabel,

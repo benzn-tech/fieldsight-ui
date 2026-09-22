@@ -60,15 +60,86 @@ test('end_sec is chunk_start + duration, never chunk_start + (end - start)', () 
     'fixture must keep a seam gap, or the test proves nothing');
 });
 
-test('the correction body never asks for consent', () => {
+test('naming alone still asks for no consent', () => {
   const body = sn.correctionBody(SEAM_SEGMENT, { user: 'Benl1', displayName: 'Ben L' });
-  /* Consent stores a voiceprint — biometric data, and the consent required is
-     that of the person whose voice it is. Phase 1 ships no consent UI. */
+  /* Consent stores a voiceprint — biometric data, and the consent required is that of the
+     person whose voice it is. The consent surface exists since 2026-09-22, and this pins
+     that the DEFAULT is unchanged: a caller who does not go through that surface enrols
+     nobody, exactly as before it existed. */
   assert.strictEqual(body.consent_given, false);
   assert.strictEqual(body.consented_by, null);
   assert.strictEqual(body.display_name, 'Ben L');
   assert.strictEqual(body.user, 'Benl1');
   assert.strictEqual(body.source_filename, SEAM_SEGMENT.source_filename);
+});
+
+test('consent travels only with a resolved subject id', () => {
+  /* The backend refuses `consent_given` without `consented_by` ("record whose voice this
+     is, not who is doing the labelling"). A half-filled consent would 400 — and, worse,
+     would look to the user like they had recorded an agreement. */
+  const half = sn.correctionBody(SEAM_SEGMENT, {
+    user: 'Benl1', displayName: 'Ben L', consentGiven: true,
+  });
+  assert.strictEqual(half.consent_given, false, 'consent without a subject must not travel');
+  assert.strictEqual(half.consented_by, null);
+
+  const full = sn.correctionBody(SEAM_SEGMENT, {
+    user: 'Benl1', displayName: 'Ben L', consentGiven: true, consentedBy: 'u-123',
+  });
+  assert.strictEqual(full.consent_given, true);
+  assert.strictEqual(full.consented_by, 'u-123');
+});
+
+test('consent is never implied by a truthy value that is not true', () => {
+  /* `consentGiven: 'false'` and `consentGiven: 1` are both things a caller can produce by
+     accident from a form value or a query string. Only the boolean counts. */
+  ['false', 1, 'on', {}].forEach((v) => {
+    const body = sn.correctionBody(SEAM_SEGMENT, {
+      displayName: 'Ben L', consentGiven: v, consentedBy: 'u-123',
+    });
+    assert.strictEqual(body.consent_given, false, `consentGiven=${JSON.stringify(v)}`);
+    assert.strictEqual(body.consented_by, null);
+  });
+});
+
+test('a name shared by two people resolves to neither', () => {
+  /* Picking one of them would attach a voiceprint AND a consent record to the wrong
+     person, and nothing downstream could tell. */
+  const members = [
+    { id: 'u-1', name: 'Jesse' },
+    { id: 'u-2', name: 'Jesse' },
+    { id: 'u-3', name: 'Ben L' },
+  ];
+  assert.strictEqual(sn.subjectIdForName('Jesse', members), null);
+  assert.strictEqual(sn.subjectIdForName('ben l', members), 'u-3', 'case-insensitive');
+  assert.strictEqual(sn.subjectIdForName('Nobody', members), null);
+  assert.strictEqual(sn.subjectIdForName('', members), null);
+});
+
+test('a member with no id cannot be a consent subject', () => {
+  /* The roster carries people the org-api returned without an id in some shapes. Treating
+     a missing id as a match would send `consented_by: undefined`. */
+  assert.strictEqual(sn.subjectIdForName('Ben L', [{ name: 'Ben L' }]), null);
+});
+
+test('the consent control explains its own absence', () => {
+  /* Two different causes must not produce the same silence: the feature being off here is
+     not something the user can act on, and a person missing from the roster is. */
+  const off = sn.consentOffer({ featureAvailable: false, displayName: 'Ben L', members: [] });
+  assert.strictEqual(off.offer, false);
+  assert.strictEqual(off.reason, null, 'feature off says nothing — there is nothing to do');
+
+  const unknown = sn.consentOffer({
+    featureAvailable: true, displayName: 'A Subcontractor', members: [{ id: 'u-1', name: 'Ben L' }],
+  });
+  assert.strictEqual(unknown.offer, false);
+  assert.ok(unknown.reason && unknown.reason.length > 20,
+    'a person off the roster must be told why, because they can fix it');
+
+  const ok = sn.consentOffer({
+    featureAvailable: true, displayName: 'Ben L', members: [{ id: 'u-1', name: 'Ben L' }],
+  });
+  assert.deepStrictEqual({ offer: ok.offer, id: ok.id }, { offer: true, id: 'u-1' });
 });
 
 test('the session reference carries both a date and a sid', () => {
