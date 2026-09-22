@@ -1,17 +1,38 @@
 /* ==========================================================================
-   FieldSight Template Store — Sprint 10 B.0
+   FieldSight Template Store — org API backed
    --------------------------------------------------------------------------
-   LocalStorage-backed template API. All operations return Promises and
-   mirror the real backend surface (PLAN §6 candidate B) so the swap-in
-   is a backend-only change with no UI rework.
+   The Library's templates now live in Aurora (fieldsight-pipeline migration
+   0062) and are reached through the org API. This file keeps the exact
+   function names and return shapes the pages already call, which is what the
+   previous localStorage version was written to make possible:
 
-   Storage key: 'fs_templates_v1'
-   Seed:        window.FieldSight.fixtures.templates (templates.fixture.js)
+       "mirror the real backend surface so the swap-in is a backend-only
+        change with no UI rework"
 
-   ADE extraction is simulated: create() stores a stub with
-   _status:'extracting', then after ADE_DELAY_MS materialises the
-   schema and notifies any registered onExtracted listeners so the
-   Library page can re-render without polling.
+   So /library and /reports are unchanged by this file. What changed is that a
+   template now outlives the tab that made it and is visible to the rest of the
+   company.
+
+   TWO SHAPES, ONE ADAPTER, AND NOTHING DROPPED BETWEEN THEM
+   ---------------------------------------------------------
+   The editor speaks {title, kind, fields, prompt_hint, children}. The backend
+   body is what report_template.render_prompt consumes: {sections:[{key, title,
+   purpose}], catch_all, excluded_subjects, style}. They meet here, at the api
+   layer, and nowhere else -- a component must never have to know about both.
+
+   `prompt_hint` and `purpose` are the same sentence under two names, so they
+   map onto each other. `kind`, `fields` and `children` mean nothing to the
+   prompt, and they are CARRIED THROUGH as extra keys on the section rather
+   than dropped: a field a component sends and this layer quietly discards is
+   exactly how the templateVersion bug happened, and the server ignores keys it
+   does not read. `catch_all` has no editor control yet, so a default is
+   supplied on create and whatever the server holds is preserved on save.
+
+   WHAT IS STILL LOCAL, ON PURPOSE
+   -------------------------------
+   Favourites. They are one viewer's pinned row, they mean nothing to anybody
+   else, and they are exactly the per-viewer convenience localStorage is for.
+   Everything that has to survive a different browser is now server-side.
 
    Exposed as: window.FS.api.templates  (CRUD)
                window.FS.templateStore  (listener helpers)
@@ -20,91 +41,153 @@
 (function () {
   'use strict';
 
-  var STORAGE_KEY  = 'fs_templates_v1';
-  var ADE_DELAY_MS = 2200;
+  var FAV_KEY = 'fs.lib.favourites';
+  var FAV_CAP = 6;
 
-  /* ── Helpers ──────────────────────────────────────────────────────────── */
-
-  function clone(obj) { return JSON.parse(JSON.stringify(obj)); }
+  function api() { return window.FS.api; }
+  function orgLive() { return !api().useMocks && !!api().orgBaseUrl; }
 
   function delay(ms) {
     return new Promise(function (resolve) { setTimeout(resolve, ms); });
   }
 
-  function genId(prefix) {
-    return prefix + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-  }
+  function clone(obj) { return JSON.parse(JSON.stringify(obj)); }
 
-  /* ── Store I/O ─────────────────────────────────────────────────────────── */
+  /* ── Starting points for a new template ────────────────────────────────
+     These were the "ADE extraction" results. Nothing extracted them: the
+     upload modal validated a file, discarded it, showed a spinner for 2.2
+     seconds and handed back whichever of these matched the report type. They
+     are kept because a new template that starts empty is worse than one that
+     starts with the sections most of these reports want -- but they are
+     STARTING POINTS, and the copy calling them an extraction is wrong.
+     (Fixing that wording is a UI change, tracked separately.) */
 
-  function seedFromFixtures() {
-    var fx = window.FieldSight && window.FieldSight.fixtures && window.FieldSight.fixtures.templates;
-    if (!fx) return { org: [], personal: [] };
-    return { org: (fx.org || []).map(clone), personal: (fx.personal || []).map(clone) };
-  }
-
-  function loadStore() {
-    try {
-      var raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) return JSON.parse(raw);
-    } catch (_) { /* corrupt — re-seed */ }
-    var seeded = seedFromFixtures();
-    saveStore(seeded);
-    return seeded;
-  }
-
-  function saveStore(store) {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(store)); } catch (_) {}
-  }
-
-  function allOf(store) {
-    return (store.org || []).concat(store.personal || []);
-  }
-
-  function findIn(store, id) {
-    return allOf(store).find(function (t) { return t.id === id; }) || null;
-  }
-
-  function scopeKey(t) { return t.scope === 'org' ? 'org' : 'personal'; }
-
-  /* ── ADE stub ─────────────────────────────────────────────────────────── */
-
-  var STUB_SCHEMAS = {
-    daily: { sections: [
-      { title: 'Daily Summary',   kind: 'narrative', fields: [],                                  prompt_hint: 'Key activities and overall progress' },
-      { title: 'Workforce',       kind: 'kpi',       fields: ['headcount', 'subcontractors'],     prompt_hint: 'Labour numbers on site' },
-      { title: 'Key Decisions',   kind: 'list',      fields: [],                                  prompt_hint: 'Decisions affecting programme or cost' },
-      { title: 'Open Actions',    kind: 'table',     fields: ['action', 'owner', 'due_date'],     prompt_hint: 'Outstanding tasks' },
-      { title: 'Photos',          kind: 'photos',    fields: [],                                  prompt_hint: 'Site progress photos' },
-    ]},
-    weekly: { sections: [
-      { title: 'Executive Summary',  kind: 'narrative', fields: [],                                        prompt_hint: 'One-paragraph summary for distribution' },
-      { title: 'Programme KPIs',     kind: 'kpi',       fields: ['completion_pct', 'days_variance'],       prompt_hint: 'Key metrics vs baseline' },
-      { title: 'Completed',          kind: 'list',      fields: [],                                        prompt_hint: 'Tasks completed this week' },
-      { title: 'Planned Next Week',  kind: 'list',      fields: [],                                        prompt_hint: 'Tasks for the coming week' },
-      { title: 'Issues & Risks',     kind: 'table',     fields: ['issue', 'impact', 'mitigation'],         prompt_hint: 'Open issues' },
-    ]},
-    monthly: { sections: [
-      { title: 'Monthly Summary',   kind: 'narrative', fields: [],                                prompt_hint: 'Month-level summary' },
-      { title: 'Progress KPIs',     kind: 'kpi',       fields: ['completion_pct', 'budget_pct'],  prompt_hint: 'Programme and cost metrics' },
-      { title: 'Milestones',        kind: 'list',      fields: [],                                prompt_hint: 'Milestones achieved and upcoming' },
-      { title: 'Commercial Update', kind: 'narrative', fields: [],                                prompt_hint: 'Cost and variation summary' },
-      { title: 'Photos',            kind: 'photos',    fields: [],                                prompt_hint: 'Progress photos' },
-    ]},
-    incident: { sections: [
+  var STARTING_SECTIONS = {
+    daily: [
+      { title: 'Daily Summary', kind: 'narrative', fields: [], prompt_hint: 'Key activities and overall progress' },
+      { title: 'Workforce',     kind: 'kpi',       fields: ['headcount', 'subcontractors'], prompt_hint: 'Labour numbers on site' },
+      { title: 'Key Decisions', kind: 'list',      fields: [], prompt_hint: 'Decisions affecting programme or cost' },
+      { title: 'Open Actions',  kind: 'table',     fields: ['action', 'owner', 'due_date'], prompt_hint: 'Outstanding tasks' },
+      { title: 'Photos',        kind: 'photos',    fields: [], prompt_hint: 'Site progress photos' },
+    ],
+    weekly: [
+      { title: 'Executive Summary', kind: 'narrative', fields: [], prompt_hint: 'One-paragraph summary for distribution' },
+      { title: 'Programme KPIs',    kind: 'kpi',       fields: ['completion_pct', 'days_variance'], prompt_hint: 'Key metrics vs baseline' },
+      { title: 'Completed',         kind: 'list',      fields: [], prompt_hint: 'Tasks completed this week' },
+      { title: 'Planned Next Week', kind: 'list',      fields: [], prompt_hint: 'Tasks for the coming week' },
+      { title: 'Issues & Risks',    kind: 'table',     fields: ['issue', 'impact', 'mitigation'], prompt_hint: 'Open issues' },
+    ],
+    monthly: [
+      { title: 'Monthly Summary',   kind: 'narrative', fields: [], prompt_hint: 'Month-level summary' },
+      { title: 'Progress KPIs',     kind: 'kpi',       fields: ['completion_pct', 'budget_pct'], prompt_hint: 'Programme and cost metrics' },
+      { title: 'Milestones',        kind: 'list',      fields: [], prompt_hint: 'Milestones achieved and upcoming' },
+      { title: 'Commercial Update', kind: 'narrative', fields: [], prompt_hint: 'Cost and variation summary' },
+      { title: 'Photos',            kind: 'photos',    fields: [], prompt_hint: 'Progress photos' },
+    ],
+    incident: [
       { title: 'Incident Details',   kind: 'kpi',       fields: ['date_time', 'location', 'severity'], prompt_hint: 'Who, what, when, where' },
-      { title: 'Description',        kind: 'narrative', fields: [],                                    prompt_hint: 'Factual account' },
-      { title: 'Immediate Actions',  kind: 'list',      fields: [],                                    prompt_hint: 'Steps taken immediately' },
-      { title: 'Corrective Actions', kind: 'table',     fields: ['action', 'owner', 'due_date'],       prompt_hint: 'Prevention actions' },
-      { title: 'Photos & Evidence',  kind: 'photos',    fields: [],                                    prompt_hint: 'Scene photos' },
-    ]},
+      { title: 'Description',        kind: 'narrative', fields: [], prompt_hint: 'Factual account' },
+      { title: 'Immediate Actions',  kind: 'list',      fields: [], prompt_hint: 'Steps taken immediately' },
+      { title: 'Corrective Actions', kind: 'table',     fields: ['action', 'owner', 'due_date'], prompt_hint: 'Prevention actions' },
+      { title: 'Photos & Evidence',  kind: 'photos',    fields: [], prompt_hint: 'Scene photos' },
+    ],
   };
 
-  function stubbedSchema(reportType) {
-    return clone(STUB_SCHEMAS[reportType] || STUB_SCHEMAS.daily);
+  var DEFAULT_CATCH_ALL = {
+    key: 'other',
+    title: 'Anything else',
+    purpose: 'Only what will still matter next week and fits nowhere above. '
+           + 'One sentence each. If there is nothing, write "Nothing here."',
+  };
+
+  /* ── Shape adapter ─────────────────────────────────────────────────────── */
+
+  function slugKey(title, i) {
+    var k = String(title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return k || ('section-' + (i + 1));
   }
 
-  /* ── Extraction listeners ─────────────────────────────────────────────── */
+  /* editor section -> backend section. Unknown keys ride along. */
+  function toBackendSection(s, i) {
+    var out = Object.assign({}, s);
+    delete out.prompt_hint;
+    out.key = s.key || slugKey(s.title, i);
+    out.title = s.title;
+    /* render_prompt needs a non-empty purpose and the server rejects a section
+       without one, so an untouched hint is carried over rather than blanked. */
+    out.purpose = s.purpose || s.prompt_hint || '';
+    if (s.children && s.children.length) {
+      out.children = s.children.map(toBackendSection);
+    }
+    return out;
+  }
+
+  /* backend section -> editor section. */
+  function toEditorSection(s) {
+    var out = Object.assign({}, s);
+    out.prompt_hint = s.prompt_hint || s.purpose || '';
+    out.kind = s.kind || 'narrative';
+    out.fields = s.fields || [];
+    if (s.children && s.children.length) {
+      out.children = s.children.map(toEditorSection);
+    }
+    return out;
+  }
+
+  function toBackendBody(schema, previousBody) {
+    var prev = previousBody || {};
+    schema = schema || {};
+    return {
+      sections: (schema.sections || []).map(toBackendSection),
+      /* Preserved, never regenerated: the editor has no control for these, so
+         writing a default on every save would silently overwrite whatever the
+         company put there by any other route. */
+      catch_all: schema.catch_all || prev.catch_all || clone(DEFAULT_CATCH_ALL),
+      excluded_subjects: schema.excluded_subjects || prev.excluded_subjects || [],
+      style: schema.style || prev.style || [],
+    };
+  }
+
+  function toEditorSchema(body) {
+    if (!body) return { sections: [] };
+    return Object.assign({}, body, {
+      sections: (body.sections || []).map(toEditorSection),
+    });
+  }
+
+  /* A server template row -> the shape /library and /reports already render.
+     `active` is not a column: it is whether a schedule is bound to this
+     template, which is the same question the old store answered locally. */
+  function toRow(t, boundIds) {
+    return {
+      id: t.id,
+      scope: t.scope,
+      report_type: t.report_type,
+      active: !!(boundIds && boundIds[t.id]),
+      owner_user_id: t.owner_user_id,
+      title: t.name,
+      description: t.description,
+      created_at: t.created_at,
+      _status: t.current_version > 0 ? 'ready' : 'empty',
+      versions: (t.versions || []).map(toVersion),
+    };
+  }
+
+  function toVersion(v) {
+    return {
+      id: v.id,
+      version: v.version,
+      schema: toEditorSchema(v.body),
+      created_at: v.created_at,
+      created_by_user_id: v.created_by,
+      change_note: v.change_note,
+    };
+  }
+
+  /* ── Extraction listeners ──────────────────────────────────────────────
+     Kept so the Library can re-render after a create without polling. There is
+     no asynchronous extraction any more -- the server answers with the
+     finished template -- so this fires at once. */
 
   var _listeners = [];
 
@@ -117,188 +200,178 @@
     return function () { _listeners = _listeners.filter(function (f) { return f !== fn; }); };
   }
 
+  /* ── Bindings ──────────────────────────────────────────────────────────
+     list() needs to know which templates a schedule points at: one extra GET
+     per list, not one per row. A bindings failure must not empty the Library,
+     so it degrades to "nothing is active" -- wrong in the safer direction: a
+     bound template reads as unbound, rather than an unbound one reading as
+     bound and persuading somebody to leave it alone. */
+
+  function fetchBoundIds() {
+    return api().orgRequest('/templates/bindings').then(function (res) {
+      var map = {};
+      ((res && res.bindings) || []).forEach(function (b) { map[b.template_id] = b; });
+      return map;
+    }).catch(function () { return {}; });
+  }
+
   /* ── API ──────────────────────────────────────────────────────────────── */
 
-  /* GET /api/templates?scope=org|personal|all */
+  function unavailable(what) {
+    return Promise.reject({
+      status: 0,
+      message: 'The template library needs the org API. ' + what + ' is unavailable here.',
+    });
+  }
+
   function list(scope) {
-    return delay(40).then(function () {
-      var store = loadStore();
-      var rows;
-      if (scope === 'org')           rows = store.org      || [];
-      else if (scope === 'personal') rows = store.personal || [];
-      else                           rows = allOf(store);
-      /* Hide soft-deleted entries */
-      return { templates: rows.filter(function (t) { return !t._deleted; }).map(clone) };
-    });
-  }
-
-  /* GET /api/templates/{id} */
-  function get(id) {
-    return delay(30).then(function () {
-      var t = findIn(loadStore(), id);
-      if (!t) return Promise.reject({ status: 404, message: 'Template not found' });
-      return clone(t);
-    });
-  }
-
-  /* POST /api/templates — initiates upload + async ADE extraction.
-     Returns immediately with _status:'extracting'.
-     After ADE_DELAY_MS, schema lands and onExtracted fires. */
-  function create(data) {
-    var id  = genId('tpl');
-    var now = new Date().toISOString();
-    var key = (data.scope === 'org') ? 'org' : 'personal';
-
-    var stub = {
-      id:            id,
-      scope:         data.scope         || 'personal',
-      report_type:   data.report_type   || 'daily',
-      active:        false,
-      owner_user_id: data.owner_user_id || null,
-      title:         data.title         || 'New Template',
-      description:   data.description   || '',
-      created_at:    now,
-      _status:       'extracting',
-      versions:      [],
-    };
-
-    var store = loadStore();
-    store[key] = (store[key] || []).concat([stub]);
-    saveStore(store);
-
-    /* Simulate ADE completing after a delay */
-    delay(ADE_DELAY_MS).then(function () {
-      var s2  = loadStore();
-      var arr = s2[key] || [];
-      var idx = arr.findIndex(function (t) { return t.id === id; });
-      if (idx < 0) return;
-      var ver = {
-        id:                  genId('ver'),
-        schema:              stubbedSchema(stub.report_type),
-        created_at:          new Date().toISOString(),
-        created_by_user_id:  data.owner_user_id || 'system',
-        change_note:         'Extracted by ADE (fixture stub)',
-      };
-      arr[idx] = Object.assign({}, arr[idx], { _status: 'ready', versions: [ver] });
-      s2[key]  = arr;
-      saveStore(s2);
-      _notifyExtracted(id);
-    });
-
-    return delay(0).then(function () { return clone(stub); });
-  }
-
-  /* PATCH /api/templates/{id}/schema — creates a new immutable version */
-  function updateSchema(id, schema, changeNote) {
-    return delay(50).then(function () {
-      var store = loadStore();
-      var t     = findIn(store, id);
-      if (!t) return Promise.reject({ status: 404, message: 'Template not found' });
-      var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
-      var ver = {
-        id:                  genId('ver'),
-        schema:              clone(schema),
-        created_at:          new Date().toISOString(),
-        created_by_user_id:  caller.device_id || caller.sub || 'unknown',
-        change_note:         changeNote || null,
-      };
-      var key = scopeKey(t);
-      store[key] = store[key].map(function (tmpl) {
-        if (tmpl.id !== id) return tmpl;
-        return Object.assign({}, tmpl, { versions: tmpl.versions.concat([ver]) });
-      });
-      saveStore(store);
-      return clone(findIn(store, id));
-    });
-  }
-
-  /* POST /api/templates/{id}/activate — set as default for its scope+report_type */
-  function activate(id) {
-    return delay(40).then(function () {
-      var store = loadStore();
-      var t     = findIn(store, id);
-      if (!t) return Promise.reject({ status: 404, message: 'Template not found' });
-      /* Deactivate same scope+report_type siblings */
-      ['org', 'personal'].forEach(function (k) {
-        store[k] = (store[k] || []).map(function (tmpl) {
-          if (tmpl.id === id) return tmpl;
-          if (tmpl.scope === t.scope && tmpl.report_type === t.report_type) {
-            return Object.assign({}, tmpl, { active: false });
-          }
-          return tmpl;
-        });
-      });
-      /* Activate target */
-      var key = scopeKey(t);
-      store[key] = store[key].map(function (tmpl) {
-        if (tmpl.id !== id) return tmpl;
-        return Object.assign({}, tmpl, { active: true });
-      });
-      saveStore(store);
-      return clone(findIn(store, id));
-    });
-  }
-
-  /* DELETE /api/templates/{id} — soft-delete; versions preserved */
-  function remove(id) {
-    return delay(40).then(function () {
-      var store = loadStore();
-      var t     = findIn(store, id);
-      if (!t) return Promise.reject({ status: 404, message: 'Template not found' });
-      var key   = scopeKey(t);
-      store[key] = store[key].map(function (tmpl) {
-        if (tmpl.id !== id) return tmpl;
-        return Object.assign({}, tmpl, { _deleted: true, active: false });
-      });
-      saveStore(store);
-      return { ok: true };
-    });
-  }
-
-  /* GET /api/templates/{id}/versions */
-  function listVersions(id) {
-    return delay(30).then(function () {
-      var t = findIn(loadStore(), id);
-      if (!t) return Promise.reject({ status: 404, message: 'Template not found' });
-      return { versions: (t.versions || []).map(clone) };
-    });
-  }
-
-  /* POST /api/templates/{id}/versions/{vid}/restore */
-  function restore(id, vid) {
-    return delay(30).then(function () {
-      var t   = findIn(loadStore(), id);
-      if (!t) return Promise.reject({ status: 404, message: 'Template not found' });
-      var ver = (t.versions || []).find(function (v) { return v.id === vid; });
-      if (!ver) return Promise.reject({ status: 404, message: 'Version not found' });
-      return updateSchema(id, ver.schema, 'Restored from version ' + vid);
-    });
-  }
-
-  /* GET /api/templates/usage */
-  function usageStats() {
-    return delay(20).then(function () {
-      var store = loadStore();
-      var orgCount = (store.org || []).filter(function (t) { return !t._deleted; }).length;
+    if (!orgLive()) return unavailable('Listing templates');
+    var params = (scope === 'org' || scope === 'personal') ? { scope: scope } : undefined;
+    return Promise.all([
+      api().orgRequest('/templates', { params: params }),
+      fetchBoundIds(),
+    ]).then(function (both) {
+      var bound = both[1];
       return {
-        org_count:             orgCount,
-        personal_count:        (store.personal || []).filter(function (t) { return !t._deleted; }).length,
-        ade_calls_this_month:  Math.min(orgCount, 6),
-        ade_cap:               50,
+        templates: ((both[0] && both[0].templates) || []).map(function (t) {
+          return toRow(t, bound);
+        }),
       };
     });
   }
 
-  /* ── Favourites ─────────────────────────────────────────────────────────
-     Sprint 10 follow-up: Heidi-style favourites row at top of /library.
-     Per-user pin list, max 6 entries. localStorage key `fs.lib.favourites`
-     (separate from store key so favouriting doesn't clutter the
-     template store). Each entry is just a template_id; resolution to
-     template happens at render time so a deleted template falls out
-     of the row gracefully. */
+  function get(id) {
+    if (!orgLive()) return unavailable('Opening a template');
+    return Promise.all([
+      api().orgRequest('/templates/' + encodeURIComponent(id)),
+      fetchBoundIds(),
+    ]).then(function (both) { return toRow(both[0], both[1]); });
+  }
 
-  var FAV_KEY  = 'fs.lib.favourites';
-  var FAV_CAP  = 6;
+  function create(data) {
+    if (!orgLive()) return unavailable('Creating a template');
+    data = data || {};
+    var reportType = data.report_type || 'daily';
+    var starting = STARTING_SECTIONS[reportType] || STARTING_SECTIONS.daily;
+    return api().orgRequest('/templates', {
+      method: 'POST',
+      retry: false,
+      body: {
+        scope: data.scope || 'personal',
+        report_type: reportType,
+        name: data.title || 'New Template',
+        description: data.description || '',
+        body: toBackendBody({ sections: clone(starting) }),
+        change_note: 'Created',
+      },
+    }).then(function (row) {
+      var shaped = toRow(row, {});
+      /* The old store fired this 2.2s after create, when its fake extraction
+         "finished". The template is complete here, so listeners are told at
+         once rather than on a timer that no longer measures anything. */
+      _notifyExtracted(shaped.id);
+      return shaped;
+    });
+  }
+
+  function updateSchema(id, schema, changeNote) {
+    if (!orgLive()) return unavailable('Saving a template');
+    /* Read the current version first, so catch_all / style / excluded_subjects
+       survive a save made from an editor that cannot see them. */
+    return api().orgRequest('/templates/' + encodeURIComponent(id) + '/versions')
+      .then(function (res) {
+        var latest = ((res && res.versions) || [])[0];
+        return api().orgRequest('/templates/' + encodeURIComponent(id) + '/versions', {
+          method: 'POST',
+          retry: false,          /* a retried save is a second version */
+          body: {
+            body: toBackendBody(schema, latest && latest.body),
+            change_note: changeNote || null,
+          },
+        });
+      })
+      .then(function () { return get(id); });
+  }
+
+  function activate(id) {
+    if (!orgLive()) return unavailable('Activating a template');
+    return api().orgRequest('/templates/' + encodeURIComponent(id))
+      .then(function (t) {
+        if (t.scope !== 'org') {
+          return Promise.reject({
+            status: 400,
+            message: 'Only an organisation template can be used for a scheduled report.',
+          });
+        }
+        if (['daily', 'weekly', 'monthly'].indexOf(t.report_type) < 0) {
+          return Promise.reject({
+            status: 400,
+            message: 'Only daily, weekly and monthly reports run on a schedule.',
+          });
+        }
+        return api().orgRequest('/templates/bindings/' + encodeURIComponent(t.report_type), {
+          method: 'PUT',
+          retry: false,
+          body: { template_id: id },
+        });
+      })
+      .then(function () { return get(id); });
+  }
+
+  function remove(id) {
+    if (!orgLive()) return unavailable('Deleting a template');
+    return api().orgRequest('/templates/' + encodeURIComponent(id), {
+      method: 'DELETE',
+      retry: false,
+    }).then(function () { return { ok: true }; });
+  }
+
+  function listVersions(id) {
+    if (!orgLive()) return unavailable('Reading a template history');
+    return api().orgRequest('/templates/' + encodeURIComponent(id) + '/versions')
+      .then(function (res) {
+        return { versions: ((res && res.versions) || []).map(toVersion) };
+      });
+  }
+
+  function restore(id, vid) {
+    if (!orgLive()) return unavailable('Restoring a version');
+    /* The Library holds version ROW ids; the route takes the version NUMBER,
+       which is the thing that is stable and readable in a change note. */
+    return listVersions(id).then(function (res) {
+      var hit = (res.versions || []).filter(function (v) { return v.id === vid; })[0];
+      if (!hit) return Promise.reject({ status: 404, message: 'Version not found' });
+      return api().orgRequest(
+        '/templates/' + encodeURIComponent(id) + '/versions/'
+        + encodeURIComponent(hit.version) + '/restore',
+        { method: 'POST', retry: false });
+    }).then(function () { return get(id); });
+  }
+
+  function copyToPersonal(id, name) {
+    if (!orgLive()) return unavailable('Copying a template');
+    return api().orgRequest('/templates/' + encodeURIComponent(id) + '/copy', {
+      method: 'POST',
+      retry: false,
+      body: name ? { name: name } : {},
+    }).then(function (row) { return toRow(row, {}); });
+  }
+
+  function usageStats() {
+    if (!orgLive()) return Promise.resolve({ org_count: 0, personal_count: 0 });
+    return list().then(function (res) {
+      var rows = res.templates || [];
+      return {
+        org_count: rows.filter(function (t) { return t.scope === 'org'; }).length,
+        personal_count: rows.filter(function (t) { return t.scope === 'personal'; }).length,
+      };
+    });
+  }
+
+  /* ── Favourites — per viewer, and deliberately still local ──────────────
+     One person's pinned row. It means nothing to anybody else, it does not
+     need to survive a different browser, and moving it to the server would
+     buy nothing and cost a round trip on every render. */
 
   function loadFavourites() {
     try {
@@ -307,20 +380,19 @@
       return Array.isArray(arr) ? arr : [];
     } catch (_) { return []; }
   }
+
   function saveFavourites(arr) {
     try { localStorage.setItem(FAV_KEY, JSON.stringify(arr.slice(0, FAV_CAP))); } catch (_) {}
   }
 
   function getFavourites() {
-    return delay(10).then(function () { return loadFavourites().slice(); });
+    return delay(0).then(function () { return loadFavourites().slice(); });
   }
 
-  function isFavourite(id) {
-    return loadFavourites().indexOf(id) >= 0;
-  }
+  function isFavourite(id) { return loadFavourites().indexOf(id) >= 0; }
 
   function addFavourite(id) {
-    return delay(10).then(function () {
+    return delay(0).then(function () {
       var favs = loadFavourites();
       if (favs.indexOf(id) < 0 && favs.length < FAV_CAP) {
         favs.push(id);
@@ -331,7 +403,7 @@
   }
 
   function removeFavourite(id) {
-    return delay(10).then(function () {
+    return delay(0).then(function () {
       var favs = loadFavourites().filter(function (x) { return x !== id; });
       saveFavourites(favs);
       return favs;
@@ -344,26 +416,30 @@
 
   /* ── Expose ──────────────────────────────────────────────────────────── */
 
-  if (!window.FS)      window.FS      = {};
-  if (!window.FS.api)  window.FS.api  = {};
+  if (!window.FS)     window.FS     = {};
+  if (!window.FS.api) window.FS.api = {};
 
   window.FS.api.templates = {
-    list:          list,
-    get:           get,
-    create:        create,
-    updateSchema:  updateSchema,
-    activate:      activate,
-    'delete':      remove,
-    listVersions:  listVersions,
-    restore:       restore,
-    usageStats:    usageStats,
-    /* Sprint 10 follow-up — favourites */
+    list:           list,
+    get:            get,
+    create:         create,
+    updateSchema:   updateSchema,
+    activate:       activate,
+    'delete':       remove,
+    listVersions:   listVersions,
+    restore:        restore,
+    copyToPersonal: copyToPersonal,
+    usageStats:     usageStats,
     getFavourites:    getFavourites,
     isFavourite:      isFavourite,
     addFavourite:     addFavourite,
     removeFavourite:  removeFavourite,
     toggleFavourite:  toggleFavourite,
     FAVOURITES_CAP:   FAV_CAP,
+    /* Exported for tests: the two shapes meet here and nowhere else. */
+    _toBackendBody:   toBackendBody,
+    _toEditorSchema:  toEditorSchema,
+    _toRow:           toRow,
   };
 
   if (!window.FS.templateStore) window.FS.templateStore = {};
