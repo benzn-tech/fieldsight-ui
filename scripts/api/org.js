@@ -912,14 +912,22 @@
          so a request that names no template is byte-identical to the one this
          function has always sent. */
       var body = {
-        templateId:      opts.templateId,
-        templateVersion: opts.templateVersion,
-        title:           opts.title,
-        attendees:       opts.attendees,
-        fields:          opts.fields || {},
-        deliver:         opts.deliver || 'download',
-        recipients:      opts.recipients || [],
+        templateId: opts.templateId,
+        title:      opts.title,
+        attendees:  opts.attendees,
+        fields:     opts.fields || {},
+        deliver:    opts.deliver || 'download',
+        recipients: opts.recipients || [],
       };
+      /* Added only when there is one, rather than sitting on the object as
+         `undefined`. JSON.stringify drops an undefined value either way, so
+         the REQUEST is identical -- but the body object is also handed to
+         tests and to anything that inspects it before encoding, and a key
+         that is present-but-undefined is not the same object as one without
+         it. Absent means absent at every layer, not just on the wire. */
+      if (opts.templateVersion !== undefined && opts.templateVersion !== null) {
+        body.templateVersion = opts.templateVersion;
+      }
       /* Only a real subset travels. Absent is "the whole meeting" on the
          backend, and an empty list is a 400 there -- so neither [] nor null may
          be sent, and an untouched modal sends exactly what it always did. */

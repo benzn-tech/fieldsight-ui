@@ -82,6 +82,19 @@ test('version 1 is not mistaken for absent', async () => {
 
 /* ---- naming no template must not change ------------------------------------ */
 
+test('no template named: the body OBJECT is unchanged, not just the encoding', async () => {
+  /* This is the assertion that was missing first time round. templateVersion
+     began life as a plain `templateVersion: opts.templateVersion` on the
+     object literal, which JSON.stringify drops -- so the request was right and
+     two existing tests still broke, because they deepStrictEqual the body
+     BEFORE it is encoded and a present-but-undefined key is not an absent one.
+     Absent has to mean absent at every layer. */
+  const org = loadOrg();
+  await org.generateSessionReport(Object.assign({}, BASE));
+  assert.ok(!('templateVersion' in calls[0].body),
+    'the key must not sit on the object at all');
+});
+
 test('no template named: neither field survives encoding', async () => {
   const org = loadOrg();
   await org.generateSessionReport(Object.assign({}, BASE));
