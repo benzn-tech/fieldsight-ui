@@ -399,12 +399,29 @@
 
   /* Render the citations block under an assistant answer. Every field is passed
      as a React text child (auto-escaped) — the snippet/topic/site come from
-     retrieved chunk text (transcripts) and must never reach innerHTML. */
-  function renderCitations(citations) {
+     retrieved chunk text (transcripts) and must never reach innerHTML.
+
+     `fromWeb` (backend spec 2026-09-22, "union not either/or"): on the web
+     branch these citations are the customer's own record excerpts that the
+     verdict judged could not fully answer the question — they are NOT the
+     web answer's source list, and the web prose right below carries its own
+     inline [1]/[2]/... markers pointing at WEB sources. If this block used
+     the same "Sources · N" heading and the same "[i+1]" numbering as the
+     grounded path, a reader would map the web answer's [2] onto record card
+     [2] — a worse mix-up than the one that used to throw these away. So on
+     this path the heading names them as records explicitly, and the card
+     marker is a bullet, never a bracketed number, so it can never be read as
+     an inline reference into the answer text above or below it. */
+  function renderCitations(citations, fromWeb) {
     if (!citations || !citations.length) return null;
-    return React.createElement('div', { className: 'fs-ask-chat__citations' },
+    return React.createElement('div', {
+      className: 'fs-ask-chat__citations'
+        + (fromWeb ? ' fs-ask-chat__citations--records' : ''),
+    },
       React.createElement('div', { className: 'fs-ask-chat__citations-label' },
-        'Sources · ' + citations.length),
+        fromWeb
+          ? 'What we found in your records · ' + citations.length
+          : 'Sources · ' + citations.length),
       citations.map(function (c, i) {
         var tgt = citationTarget(c.source_s3_key);
         var meta = [c.site_name, c.report_date].filter(Boolean).join(' · ');
@@ -439,7 +456,13 @@
             if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); }
           } : null,
         },
-          React.createElement('span', { className: 'fs-ask-chat__cite-num' }, '[' + (i + 1) + ']'),
+          /* Bracketed numbers are the grounded path's contract: card [i+1]
+             maps positionally to inline [n] in ITS OWN answer text. On the
+             fromWeb block the answer above/below is the web prose, whose own
+             [1]/[2]/... point at web sources, not at these cards -- so this
+             block never uses that numbering, only a bullet. */
+          React.createElement('span', { className: 'fs-ask-chat__cite-num' },
+            fromWeb ? '•' : '[' + (i + 1) + ']'),
           React.createElement('div', { className: 'fs-ask-chat__cite-body' },
             meta ? React.createElement('div', { className: 'fs-ask-chat__cite-meta' }, meta) : null,
             c.topic_title
@@ -1139,6 +1162,15 @@
               ? React.createElement('div', { className: 'fs-ask-chat__asked' },
                   'Searched for: ' + m.asked)
               : null,
+            /* Records first, web after (spec 2026-09-22): a union, not
+               either/or. On a fromWeb message these are the customer's own
+               record excerpts the verdict judged insufficient -- rendered
+               here, ABOVE the "From the open web" label and the web prose,
+               so the reading order matches the plan's own name for it. See
+               renderCitations for why this block's heading and card marker
+               must not look like the web answer's own [1]/[2] source list. */
+            m.role === 'assistant' && m.fromWeb
+              ? renderCitations(m.citations, true) : null,
             m.role === 'assistant' ? renderWebOrigin(m) : null,
             /* `question_admission` already returns the sentence explaining a
                refusal (a name, a commercially sensitive topic, ...); nothing
@@ -1161,7 +1193,9 @@
                     })
                   : React.createElement('div', { className: 'fs-ask-chat__msg-text' },
                       m.text)),
-            m.role === 'assistant' ? renderCitations(m.citations) : null,
+            /* Already rendered above (records-first) for fromWeb messages --
+               this is the grounded path's own "Sources" block only. */
+            m.role === 'assistant' && !m.fromWeb ? renderCitations(m.citations) : null,
             /* A scoped answer that found nothing: offer the same question
                across everything. The host clears the context; the reset
                effect re-sends once the new (empty) context has rendered.
