@@ -71,6 +71,69 @@
 (function () {
   'use strict';
 
+  /* The brief a report carries, or NOTHING — never an empty brief.
+     `date` + `userFolder` travel with it so MorningBriefCard's "Read full
+     brief" button can deep-link to /timeline?date=…&user=… (M-5).
+
+     The null return is the whole point. `executive_summary` reaches the
+     client ONLY through the nightly S3 document (lambda_org_api.py:6750),
+     written by cron(0 16 * * ? *) — 04:00 NZ the NEXT day, keyed to the
+     PREVIOUS date — so on the day Today is actually looking at, the field is
+     null. Returning `{bullets: []}` there made "no brief exists" and "here is
+     a brief with nothing in it" the same value, and the page rendered the
+     second: an empty <ul> under a "Morning Brief" heading, every day, for
+     everyone. A caller can now tell the two apart and ask a finished day
+     instead (see today.js loadMorningBrief).
+
+     Blanks are dropped rather than rendered as empty bullets — a model that
+     emits '' for a quiet day should not put a bullet on screen. */
+  function briefFromReport(report, date, userFolder) {
+    if (!report || report._notFound || report._accessDenied ||
+        report.available_users) return null;
+    var raw = report.executive_summary;
+    var list = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+    var bullets = list
+      .map(function (b) { return String(b == null ? '' : b).trim(); })
+      .filter(function (b) { return b.length > 0; });
+    if (!bullets.length) return null;
+    return {
+      bullets:    bullets,
+      date:       report.report_date || date || null,
+      userFolder: userFolder || null,
+    };
+  }
+
+  /* The first of `days` that actually has a brief, walked in order.
+
+     A LISTED DAY IS A CANDIDATE, NOT A GUARANTEE. Observed in the browser,
+     not reasoned about: /api/dates listed 2026-04-29 with hasReport true and
+     getTimeline for that date answered _notFound. GeneratedTodaySection
+     already walks its own candidates in sequence for the same reason ("the
+     date index is site-scoped while getSessions is default-to-self"), and a
+     loader that tried only the newest showed nothing on a day when an older
+     one would have answered.
+
+     Sequential on purpose, exactly like GeneratedTodaySection: the common
+     case — recorded yesterday — costs one call, and we stop at the first day
+     that answers rather than fanning out across five.
+
+     One day failing does not abandon the days after it. A 504 is the gateway
+     giving up, not a statement about the day.
+
+     `fetchTimeline(date) -> Promise<report>` is injected so this stays a pure
+     function of its inputs and can be tested without a network or a cache. */
+  function firstBriefIn(days, fetchTimeline, userFolder) {
+    return (days || []).reduce(function (chain, day) {
+      return chain.then(function (found) {
+        if (found) return found;
+        return Promise.resolve()
+          .then(function () { return fetchTimeline(day); })
+          .then(function (report) { return briefFromReport(report, day, userFolder); })
+          .catch(function () { return null; });
+      });
+    }, Promise.resolve(null));
+  }
+
   /* Map a topic's category onto the existing Activity card "channel" field.
      The channel labels are display-only — pick something sensible. */
   var CATEGORY_CHANNEL = {
@@ -350,18 +413,10 @@
        date + userFolder are passed through so MorningBriefCard's
        "Read full brief" button can deep-link to the canonical
        /timeline?date=…&user=… view (M-5). */
-    var bullets = Array.isArray(report.executive_summary)
-      ? report.executive_summary.slice()
-      : (report.executive_summary ? [String(report.executive_summary)] : []);
-
-    var morningBrief = {
-      generatedAt: '5:42 AM',
-      bullets:     bullets,
-      date:        report.report_date || ctx.date || null,
-      userFolder:  report.user_name
-                     ? window.FS.api.folderName(report.user_name)
-                     : null,
-    };
+    var morningBrief = briefFromReport(
+      report, ctx.date,
+      report.user_name ? window.FS.api.folderName(report.user_name) : null
+    ) || { bullets: [], date: report.report_date || ctx.date || null, userFolder: null };
 
     /* ---- urgent: safety topics + non-empty safety_flags + high obs ----
        P-01 (Sprint 3): expose riskLevel + recommendedAction on every
@@ -622,7 +677,8 @@
 
   if (!window.FS) window.FS = {};
   if (!window.FS.api) window.FS.api = {};
-  window.FS.api.todayAdapter = { adapt: adapt };
+  window.FS.api.todayAdapter = { adapt: adapt, briefFromReport: briefFromReport,
+                                 firstBriefIn: firstBriefIn };
   /* fix/timeline-buttons-and-deadline — flat on FS.api (mirrors
      FS.api.addDaysISO / FS.api.folderName) so scripts/composites/
      action-item-row.js (Timeline's action-item deadline render) can
@@ -636,5 +692,12 @@
      row PATCH /api/org/action-items/{id} returns, without duplicating the
      STATUS_TONE map or re-running adapt()/a full page reload. */
   window.FS.api.deriveStatus = deriveStatus;
+
+  /* Expose the pure helper to Node's test runner only (CommonJS). No-op in
+     the browser (this file is a plain <script>, `module` is undefined) —
+     mirrors composites/action-item-row.js's own guard. */
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { briefFromReport: briefFromReport, firstBriefIn: firstBriefIn };
+  }
 
 })();
