@@ -194,7 +194,12 @@
   <!-- Backend-shaped data layer (Sprint 2.1, Phase A): fixtures → api modules → adapter -->
   <!--   1. FS.api namespace + helpers (must precede every api/* and adapter) -->
   <script src="scripts/api/index.js?v=99"></script>
-  <script src="scripts/api/_fetch.js?v=8"></script>
+  <!-- Before _fetch.js: it asks FS.wakingNotice to speak when a whole run of
+       failures looks like a backend resuming from pause. _fetch.js tolerates
+       this module's absence, but loading it later would leave the very first
+       cold request -- the one that matters -- with nothing to say. -->
+  <script src="scripts/composites/waking-notice.js?v=1"></script>
+  <script src="scripts/api/_fetch.js?v=9"></script>
   <!-- TTL read-cache for session-stable reads (getTimeline/getDates/getSpan) -->
   <script src="scripts/api/_cache.js?v=1"></script>
   <!--   2. Fixtures populate window.FieldSight.fixtures.* -->
