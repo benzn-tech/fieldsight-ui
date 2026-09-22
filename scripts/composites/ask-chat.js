@@ -202,14 +202,31 @@
      `sources` carries `domain` because this vendor returns Google grounding
      redirects -- parsing the URL would attribute every source to
      `vertexaisearch.cloud.google.com`, which is the opposite of naming a
-     publisher. */
+     publisher.
+
+     `web.answer` is the web prose itself. It renders inside this block, under
+     the label, so provenance never blurs into the grounded answer above it.
+     But it renders ONLY when it differs (trimmed) from `m.text`: today
+     `res.answer` IS the web answer, so the two fields hold the same string
+     and printing both would show the prose twice. Once the backend change in
+     flight (feat/the-records-get-their-own-answer) ships, `res.answer`
+     becomes the grounded answer and `web.answer` stays the web prose -- they
+     diverge and this starts rendering, with no frontend change needed at
+     that point. See tests/ask-web-prose-inside-block.test.js. */
   function renderWebOrigin(m) {
     if (!m.fromWeb) return null;
     var web = m.web || {};
     var sources = web.sources || [];
+    /* Skip web.answer when it duplicates m.text -- trimmed exact match. */
+    var webAnswer = typeof web.answer === 'string' ? web.answer.trim() : '';
+    var messageText = typeof m.text === 'string' ? m.text.trim() : '';
+    var showAnswer = !!webAnswer && webAnswer !== messageText;
     return React.createElement('div', { className: 'fs-ask-web' },
       React.createElement('div', { className: 'fs-ask-web__label' },
         'From the open web — not from your recordings'),
+      showAnswer
+        ? React.createElement('div', { className: 'fs-ask-web__answer' }, web.answer)
+        : null,
       sources.length
         ? React.createElement('div', { className: 'fs-ask-web__sources' },
             sources.map(function (s, i) {
