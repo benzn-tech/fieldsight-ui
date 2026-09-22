@@ -20,7 +20,7 @@
 
    Right detail (B.3 skip-edit primary path):
      • While extracting: spinner + progress note
-     • Once ready: 2-col "Source" vs "Extracted schema" review
+     • Once ready: the template's sections, editable
        + Test-render panel (fills schema sections with sample content)
        + "✓ Use this template" CTA (activates in one click)
 
@@ -165,7 +165,7 @@
       setRetry(function (n) { return n + 1; });
       setSel(stub);
       if (window.FS && window.FS.toast) {
-        window.FS.toast.show({ message: 'Template uploaded — extracting schema…', tone: 'info' });
+        window.FS.toast.show({ message: 'Template created — edit its sections below', tone: 'info' });
       }
     }
 
@@ -262,7 +262,7 @@
 
       state.status === 'ok' && rows.length === 0 && React.createElement('div', { className: 'fs-library__empty' },
         React.createElement('p', null, tab === 'personal'
-          ? 'No personal templates yet. Upload one to get started.'
+          ? 'No personal templates yet. Create one to get started.'
           : 'No org templates yet.' + (canManageOrg ? ' Upload one to make it available to all users.' : '')
         ),
       ),
@@ -963,8 +963,8 @@
         ),
         React.createElement('div', { className: 'fs-library__extracting' },
           React.createElement('div', { className: 'fs-library__extracting-spinner' }),
-          React.createElement('p', { className: 'fs-library__extracting-label' }, 'AI is extracting the template schema…'),
-          React.createElement('p', { className: 'fs-library__extracting-sub' }, 'This usually takes a few seconds. The page will update automatically.'),
+          React.createElement('p', { className: 'fs-library__extracting-label' }, 'Setting up your template…'),
+          React.createElement('p', { className: 'fs-library__extracting-sub' }, 'This only takes a moment.'),
         ),
       );
     }
@@ -1038,25 +1038,20 @@
         : /* preview */
           React.createElement(React.Fragment, null,
 
-            /* Side-by-side: Source vs Extracted schema */
+            /* THE "YOUR FILE" PANEL IS GONE, and it has to be.
+               It showed `sel.title + '.docx'` as a filename -- the template's
+               NAME with an extension glued on, not the file anybody chose --
+               beside the sentence "AI read your file and identified N
+               sections". Nothing is read from the file and nothing about it is
+               stored, so every part of that panel was invented, and it was
+               stated as fact about the person's own document.
+
+               What is left is the one true statement: here are the sections
+               this template has, and you can edit them. */
             React.createElement('div', { className: 'fs-library__review-grid' },
 
               React.createElement('div', { className: 'fs-library__review-panel' },
-                React.createElement('h3', { className: 'fs-library__review-panel-title' }, 'Your file'),
-                React.createElement('div', { className: 'fs-library__source-card' },
-                  React.createElement('div', { className: 'fs-library__source-icon' }, '📄'),
-                  React.createElement('div', { className: 'fs-library__source-info' },
-                    React.createElement('span', { className: 'fs-library__source-filename' }, sel.title + '.docx'),
-                    React.createElement('span', { className: 'fs-library__source-meta' }, RT_LABEL[sel.report_type] + ' · uploaded ' + fmtDate(sel.created_at)),
-                  ),
-                ),
-                React.createElement('p', { className: 'fs-library__review-note' },
-                  'AI read your file and identified ' + schema.sections.length + ' section' + (schema.sections.length === 1 ? '' : 's') + ' below.',
-                ),
-              ),
-
-              React.createElement('div', { className: 'fs-library__review-panel' },
-                React.createElement('h3', { className: 'fs-library__review-panel-title' }, 'Extracted schema'),
+                React.createElement('h3', { className: 'fs-library__review-panel-title' }, 'Sections'),
                 React.createElement('ol', { className: 'fs-library__schema-list' },
                   schema.sections.map(function (s, i) {
                     return React.createElement('li', { key: i, className: 'fs-library__schema-item' },

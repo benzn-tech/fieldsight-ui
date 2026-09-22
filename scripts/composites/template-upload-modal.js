@@ -2,9 +2,17 @@
    FieldSight · TemplateUploadModal — Sprint 10 B.2
    --------------------------------------------------------------------------
    Drag-drop upload modal for adding a new report template to the library.
-   On submit it calls FS.api.templates.create() which immediately returns
-   a stub with _status:'extracting' and fires the real schema extraction
-   (simulated) in the background.
+   NOTHING IS READ FROM THE FILE. It is checked for extension and size and
+   then dropped: `create()` below is handed only the scope, report type, title
+   and description. The sections a new template starts with come from
+   STARTING_SECTIONS in api/template-store.js, chosen by report type.
+
+   This used to be dressed up as an AI extraction -- a spinner, "AI is
+   extracting schema", and a review panel stating "AI read your file and
+   identified N sections". It read the file in no sense at all, and an owner
+   testing it spent his time changing files to find the format it liked.
+   The wording here now says what actually happens. Whether the file control
+   should exist at all is a product decision, recorded separately.
 
    Props:
      scope       'org' | 'personal'   — which library to add to
@@ -128,14 +136,18 @@
     if (phase === 'uploading' || phase === 'extracting') {
       return React.createElement(ModalOverlay, { open: true, onClose: onCancel },
         React.createElement('div', { className: 'fs-tpl-upload' },
-          React.createElement('h2', { className: 'fs-tpl-upload__title' }, 'Upload template'),
+          React.createElement('h2', { className: 'fs-tpl-upload__title' }, 'New template'),
           React.createElement('div', { className: 'fs-tpl-upload__progress' },
             React.createElement('div', { className: 'fs-tpl-upload__spinner' }),
             React.createElement('p', { className: 'fs-tpl-upload__phase-label' },
-              phase === 'uploading' ? 'Uploading file…' : 'AI is extracting schema — this takes a moment…',
+              phase === 'uploading' ? 'Creating…' : 'Setting up your template…',
             ),
             React.createElement('p', { className: 'fs-tpl-upload__phase-sub' },
-              'You can close this and come back. We\'ll update the library when it\'s ready.',
+              /* Was true when creation was a 2.2s fake extraction you could
+                 walk away from. It is one request now, and by the time this
+                 shows the template already exists -- so "come back later"
+                 describes a wait that no longer happens. */
+              'This only takes a moment.',
             ),
           ),
           React.createElement('div', { className: 'fs-tpl-upload__footer' },
@@ -148,12 +160,12 @@
     if (phase === 'done') {
       return React.createElement(ModalOverlay, { open: true, onClose: onCancel },
         React.createElement('div', { className: 'fs-tpl-upload' },
-          React.createElement('h2', { className: 'fs-tpl-upload__title' }, 'Upload template'),
+          React.createElement('h2', { className: 'fs-tpl-upload__title' }, 'New template'),
           React.createElement('div', { className: 'fs-tpl-upload__progress' },
             React.createElement('div', { className: 'fs-tpl-upload__check' }, '✓'),
-            React.createElement('p', { className: 'fs-tpl-upload__phase-label' }, 'Extracting in the background…'),
+            React.createElement('p', { className: 'fs-tpl-upload__phase-label' }, 'Template created'),
             React.createElement('p', { className: 'fs-tpl-upload__phase-sub' },
-              'Your template will appear in the library in a few seconds.',
+              'It is in your library now, with a starting set of sections to edit.',
             ),
           ),
           React.createElement('div', { className: 'fs-tpl-upload__footer' },
@@ -166,7 +178,7 @@
     if (phase === 'error') {
       return React.createElement(ModalOverlay, { open: true, onClose: onCancel },
         React.createElement('div', { className: 'fs-tpl-upload' },
-          React.createElement('h2', { className: 'fs-tpl-upload__title' }, 'Upload template'),
+          React.createElement('h2', { className: 'fs-tpl-upload__title' }, 'New template'),
           React.createElement('p', { className: 'fs-tpl-upload__error' }, errMsg || 'Something went wrong.'),
           React.createElement('div', { className: 'fs-tpl-upload__footer' },
             React.createElement(Button, { variant: 'ghost', onClick: function () { setPhase('idle'); setErr(''); } }, 'Try again'),
@@ -179,9 +191,11 @@
     /* idle / dragging */
     return React.createElement(ModalOverlay, { open: true, onClose: onCancel },
       React.createElement('div', { className: 'fs-tpl-upload' },
-        React.createElement('h2', { className: 'fs-tpl-upload__title' }, 'Upload template'),
+        React.createElement('h2', { className: 'fs-tpl-upload__title' }, 'New template'),
         React.createElement('p', { className: 'fs-tpl-upload__subtitle' },
-          'Upload a sample report in your preferred format. AI will extract the section structure for you.',
+          'Choose the kind of report and name it. You get a starting set of sections '
+          + 'for that kind, which you then edit in the library. Nothing is read '
+          + 'from the file you attach yet.',
         ),
 
         /* Drop zone */
@@ -260,7 +274,7 @@
 
         React.createElement('div', { className: 'fs-tpl-upload__footer' },
           React.createElement(Button, { variant: 'ghost', onClick: onCancel }, 'Cancel'),
-          React.createElement(Button, { variant: 'primary', onClick: handleUpload, disabled: !file }, 'Upload & extract'),
+          React.createElement(Button, { variant: 'primary', onClick: handleUpload, disabled: !file }, 'Create template'),
         ),
       ),
     );
