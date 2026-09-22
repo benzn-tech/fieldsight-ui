@@ -13095,6 +13095,13 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   font-family: var(--font-mono);
 }
 
+.fs-ask-web__answer {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
 .fs-ask-web__sources { display: flex; flex-wrap: wrap; gap: 6px 10px; }
 
 .fs-ask-web__source {
