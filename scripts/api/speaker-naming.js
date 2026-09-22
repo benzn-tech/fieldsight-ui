@@ -440,8 +440,41 @@
     return out;
   }
 
+  /* The sessions in this view that hold at least one CONFIRMED name, and who those people
+     are. What the "update the report with these names" control needs to know.
+
+     `confirmed` only. `tentative` is the system's guess — propagation caps every inferred
+     name at tentative on purpose — and a guess handed to the extraction model as a
+     confirmed name comes back as a fact in a report. The backend filters on the same field
+     (`speaker_state !== 'confirmed'` → skipped), so a control offered on tentative names
+     would queue a paid model call that changes nothing.
+
+     Keyed on the SESSION (`sid<32 hex>`), not the file: a day's view can hold several
+     meetings, and the regenerate route takes one session at a time. A control that sent
+     the first session id it found would silently leave the others stale.
+
+     Names are deduped and sorted so the label is stable across re-renders — an unstable
+     button caption reads as the count changing on its own. */
+  function confirmedSessions(segments) {
+    var bySession = {};
+    (segments || []).forEach(function (s) {
+      if (!s || s.speaker_state !== 'confirmed') return;
+      var name = String(s.speaker_name || '').trim();
+      if (!name) return;
+      var m = SID_RE.exec(String(s.source_filename || ''));
+      if (!m) return;
+      var sid = m[0].toLowerCase();
+      if (!bySession[sid]) bySession[sid] = {};
+      bySession[sid][name] = true;
+    });
+    return Object.keys(bySession).sort().map(function (sid) {
+      return { sessionBase: sid, names: Object.keys(bySession[sid]).sort() };
+    });
+  }
+
   var mod = {
     MIN_TURN_SECONDS: MIN_TURN_SECONDS,
+    confirmedSessions: confirmedSessions,
     folderToName: folderToName,
     mentionedNames: mentionedNames,
     nameCandidates: nameCandidates,

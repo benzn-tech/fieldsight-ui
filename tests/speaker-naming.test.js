@@ -573,3 +573,60 @@ test('one real name among the labels is still placed by position', () => {
      it is one name against two speakers, which is the case above. */
   assert.equal(sn.hintIsAmbiguous(['spk_0', 'Ben'], 2), true);
 });
+
+/* --- regenerating the report with confirmed names ------------------------- */
+
+const SID_A = 'sid' + 'a'.repeat(32);
+const SID_B = 'sid' + 'b'.repeat(32);
+
+function sessionSeg(sid, name, state) {
+  return {
+    source_filename: 'Benl1_2026-09-10_09-00-00_' + sid + '_c0000_srcwav.json',
+    speaker_name: name,
+    speaker_state: state,
+  };
+}
+
+test('only confirmed names reach the regenerate control', () => {
+  /* `tentative` is the system's guess — propagation caps every inferred name at it on
+     purpose. The backend skips them too, so offering the control on a tentative name
+     queues a paid model call that changes nothing. */
+  const out = sn.confirmedSessions([
+    sessionSeg(SID_A, 'Ben L', 'confirmed'),
+    sessionSeg(SID_A, 'Mike', 'tentative'),
+    sessionSeg(SID_A, '', 'confirmed'),
+  ]);
+  assert.strictEqual(out.length, 1);
+  assert.deepStrictEqual(out[0].names, ['Ben L']);
+});
+
+test('a day holding two meetings offers each one separately', () => {
+  /* A control that sent the first session id it found would leave the other stale, and
+     nothing on screen would say so. */
+  const out = sn.confirmedSessions([
+    sessionSeg(SID_A, 'Ben L', 'confirmed'),
+    sessionSeg(SID_B, 'Mike', 'confirmed'),
+    sessionSeg(SID_B, 'Ben L', 'confirmed'),
+  ]);
+  assert.deepStrictEqual(out.map((x) => x.sessionBase), [SID_A, SID_B]);
+  assert.deepStrictEqual(out[1].names, ['Ben L', 'Mike']);
+});
+
+test('the session id is the shape the backend anchors on', () => {
+  /* The route rejects anything that is not exactly sid<32 hex>, because the value becomes
+     an S3 key. A legacy filename carries no sid at all and must produce nothing rather
+     than a guess. */
+  const out = sn.confirmedSessions([
+    { source_filename: 'RealPTT_2026-03-20_12-18-34.json',
+      speaker_name: 'Ben L', speaker_state: 'confirmed' },
+  ]);
+  assert.deepStrictEqual(out, []);
+  const ok = sn.confirmedSessions([sessionSeg(SID_A, 'Ben L', 'confirmed')]);
+  assert.match(ok[0].sessionBase, /^sid[0-9a-f]{32}$/);
+});
+
+test('nothing named offers no control at all', () => {
+  assert.deepStrictEqual(sn.confirmedSessions([]), []);
+  assert.deepStrictEqual(sn.confirmedSessions(null), []);
+  assert.deepStrictEqual(sn.confirmedSessions([sessionSeg(SID_A, 'Ben L', 'tentative')]), []);
+});

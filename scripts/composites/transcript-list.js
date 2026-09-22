@@ -391,6 +391,13 @@
     var roster    = refRoster[0];
     var setRoster = refRoster[1];
 
+    /* Per-session state for the "rewrite the summary" control. Keyed on the session rather
+       than a single flag, because a day's view can hold several meetings and asking for
+       one must not disable the others. */
+    var refRegen = React.useState({});
+    var regen    = refRegen[0];
+    var setRegen = refRegen[1];
+
     React.useEffect(function () {
       var cancelled = false;
       /* A naming re-fetch must NOT blank the list back to "Loading…" — that
@@ -643,6 +650,55 @@
       });
     }
 
+    /* Ask the backend to redo the extraction with the confirmed names.
+
+       No optimistic anything and no re-fetch: the extraction runs on another Lambda
+       through a thinking-mode round trip, and the documents it rewrites are not on this
+       screen. Saying "asked for" and stopping is the honest report — a spinner that
+       resolved to nothing visible would be worse than a sentence. */
+    function regenerateSession(s) {
+      var org = window.FS.api.org;
+      if (!org || !org.regenerateSession) return;
+      setRegen(function (prev) {
+        var next = Object.assign({}, prev);
+        next[s.sessionBase] = { state: 'busy' };
+        return next;
+      });
+      function settle(state, message) {
+        setRegen(function (prev) {
+          var next = Object.assign({}, prev);
+          next[s.sessionBase] = { state: state, message: message };
+          return next;
+        });
+      }
+      org.regenerateSession(s.sessionBase, { date: date, user: user })
+        .then(function (res) {
+          if (res && res._notAvailable) {
+            settle(null, 'Rewriting is not available in this environment.');
+            return;
+          }
+          if (res && (res._accessDenied || res._notFound)) {
+            settle(null, res.error || 'You do not have permission to rewrite this summary.');
+            return;
+          }
+          /* `namedTurns`, not the status code. Regenerating with ZERO confirmed names
+             re-runs the same prompt for the same answer and costs a model call — the
+             backend returns the count so the caller can say so rather than let somebody
+             watch nothing change for the second time. */
+          if (res && res.namedTurns === 0) {
+            settle(null, 'No confirmed names reached the backend, so nothing would change. '
+              + 'Nothing was rewritten.');
+            return;
+          }
+          settle('done', 'Asked for. The summary, action items and draft email are '
+            + 'rewritten in the background — usually a few minutes. Reload the report to '
+            + 'see them.');
+        })
+        .catch(function () {
+          settle(null, 'Could not ask for a rewrite.');
+        });
+    }
+
     function removeName(seg, name) {
       var ref = sn.sessionRefForSegment(seg);
       if (!ref || !name) return;
@@ -781,6 +837,49 @@
       notice
         ? React.createElement('div', { className: 'fs-transcript-list__notice' }, notice)
         : null,
+
+      /* Renaming a speaker does NOT change Overview, Action Items or the draft email, and
+         until now nothing on screen said so — the user renamed somebody, looked at the
+         summary, saw `spk_0` still there, and reasonably concluded the rename had failed.
+         (It had not: `turn_name_overlay` has exactly one call site, the transcript.)
+
+         This does not rewrite those documents. It re-runs the extraction with the
+         confirmed names so the MODEL reasons about them — which is the only sound option,
+         because nothing records which speaker an extracted name came from and a
+         find-and-replace would reassign a task from one Jesse to a different Jesse.
+
+         One control per SESSION, because a day's view can hold several meetings and the
+         route takes one at a time. */
+      (namingOn ? sn.confirmedSessions(state.segments) : []).map(function (s) {
+        var st = regen[s.sessionBase] || {};
+        return React.createElement('div', {
+          key: 'regen-' + s.sessionBase,
+          className: 'fs-transcript-list__regen',
+        },
+          React.createElement('span', null,
+            s.names.join(', ')
+              + (s.names.length === 1 ? ' is named' : ' are named')
+              + ' in this meeting’s transcript. The summary, action items and draft email '
+              + 'still use whatever names were heard out loud.'),
+          React.createElement('button', {
+            type: 'button',
+            className: 'fs-transcript-list__regen-button',
+            /* Disabled once requested, not merely after it finishes: the extraction is a
+               paid model call on another Lambda and a second click is a second one. */
+            disabled: !!st.state,
+            onClick: function () { regenerateSession(s); },
+            /* "Asked for", not "Done". The 202 says the request was queued; the extraction
+               itself runs elsewhere and may take minutes. A button that reads Done the
+               instant the request returns is claiming an outcome nobody has observed. */
+          }, st.state === 'busy' ? 'Asking…'
+            : st.state === 'done' ? 'Asked for'
+            : 'Rewrite the summary with these names'),
+          st.message
+            ? React.createElement('span', {
+                className: 'fs-transcript-list__name-hint',
+              }, st.message)
+            : null);
+      }),
 
       /* Say that some of these names were not heard, they were assumed. A `?` on a chip
          tells you a name is unconfirmed; it does not tell you the rule behind it, and a

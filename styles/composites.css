@@ -2539,6 +2539,43 @@
   align-items: center;
 }
 
+/* "The transcript says Ben, the summary still says spk_0." A standing explanation
+   rather than a transient toast: the mismatch persists until somebody acts on it,
+   and a message that fades leaves the user with the same wrong conclusion they
+   started with (that the rename failed). */
+.fs-transcript-list__regen {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  background: var(--surface-panel-muted);
+  border-left: 2px solid var(--border-default);
+  border-radius: var(--radius-sm);
+}
+
+.fs-transcript-list__regen-button {
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: var(--surface-app);
+  color: var(--text-primary);
+}
+
+/* Disabled the moment it is clicked and never re-enabled on success: the extraction
+   is a paid model call and a second click buys a second one. */
+.fs-transcript-list__regen-button[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* Consent to store a voice pattern. Set apart from the name choices by a rule and
    a tinted panel, because it is a SECOND act, not a detail of the first: naming
    compares audio the company already holds, this keeps biometric data.

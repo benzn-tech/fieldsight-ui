@@ -952,6 +952,39 @@
     return { _notAvailable: true };
   }
 
+  /* Redo the extraction with the names a person has CONFIRMED.
+
+     Renaming a speaker does not change Overview, Action Items or the draft email, and
+     that is not a synchronisation bug — those hold names people SAID OUT LOUD
+     (`action_items.responsible` on prod carries "Design team", "IT Support", "Karina and
+     Anton"), while the transcript's names say who was TALKING. Nothing records which
+     speaker an extracted name came from, so a find-and-replace would reassign a task from
+     one Jesse to a different Jesse, silently, and would edit a substring of a field naming
+     two people.
+
+     So this does not rewrite anything. It hands the model the confirmed names and lets it
+     re-reason — which is also worth more than a rename: today the prompt shows `spk_0`, so
+     "I'll chase the supplier" has no owner it could name. Given the names, it does.
+
+     `sessionBase` must be exactly `sid<32 hex>`; the backend anchors on that shape because
+     the value becomes an S3 key. 202 means the extraction was QUEUED on another Lambda and
+     takes a thinking-mode round trip — there is no push, so the caller re-reads later.
+
+     Read `namedTurns` in the response, never just the status: regenerating with ZERO
+     confirmed names re-runs the same prompt for the same answer and costs a model call. */
+  async function regenerateSession(sessionBase, body) {
+    if (orgWrite()) {
+      return api.orgRequest(
+        '/sessions/' + encodeURIComponent(sessionBase) + '/regenerate',
+        /* retry:false — a lost 202 retried is a second paid extraction of the same
+           meeting, which is exactly what `reports.regenerate` refuses for the same
+           reason. */
+        { method: 'POST', body: body, retry: false });
+    }
+    await api.delay();
+    return { _notAvailable: true };
+  }
+
   /* Take a name off THIS meeting only. Does not touch the stored voiceprint —
      someone who wants their name off one transcript has not asked for their
      profile to be destroyed. */
@@ -994,6 +1027,7 @@
     getMe: getMe,
     setSpeakerName: setSpeakerName,
     removeSpeakerName: removeSpeakerName,
+    regenerateSession: regenerateSession,
     deleteRecordings: deleteRecordings,
     undeleteRecordings: undeleteRecordings,
     updateProfile: updateProfile,
