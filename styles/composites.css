@@ -712,6 +712,16 @@
   margin-bottom: 0;
 }
 
+/* Shown instead of an empty <ul>. Today only mounts the card when there are
+   bullets, so this is for any other host — and so that "nothing to brief
+   from" is a sentence rather than a blank space under a heading. */
+.fs-morning-brief-card__empty {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
 
 /* =========================================================================
    OnSiteCard — AvatarGroup + count
