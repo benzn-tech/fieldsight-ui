@@ -3519,6 +3519,16 @@
   font-family: var(--font-mono);
   margin-bottom: 2px;
 }
+/* Records-first block on a from-the-web answer (spec 2026-09-22): visually
+   distinct from the grounded path's "Sources" block, and its cards below
+   use a bullet instead of a bracketed number so they cannot be read as the
+   web prose's own [1]/[2] inline markers. */
+.fs-ask-chat__citations--records .fs-ask-chat__citations-label {
+  color: var(--color-accent-600);
+}
+.fs-ask-chat__citations--records .fs-ask-chat__cite-num {
+  color: var(--text-tertiary);
+}
 .fs-ask-chat__cite {
   display: flex;
   gap: 6px;
