@@ -630,3 +630,67 @@ test('nothing named offers no control at all', () => {
   assert.deepStrictEqual(sn.confirmedSessions(null), []);
   assert.deepStrictEqual(sn.confirmedSessions([sessionSeg(SID_A, 'Ben L', 'tentative')]), []);
 });
+
+/* --- lending a name across the files of one session (speaker_group) -------- */
+
+function groupSeg(o) {
+  return Object.assign({
+    speaker: 'spk_0',
+    source_filename: 'Benl1_2026-09-10_09-00-00_sid' + 'c'.repeat(32) + '_c0000_srcwav.json',
+  }, o);
+}
+
+test('a name lent within one voice reaches the other files of the session', () => {
+  /* `spk_0` is scoped to one transcript call, so the per-file rule cannot carry a name
+     from chunk 0 into chunk 1. The anonymous re-bind already answers that question — it
+     clusters the per-call centroids and returns `speaker_group`, a letter stable across
+     the session — so where a group exists it is the right unit. */
+  const segs = [
+    groupSeg({ speaker_group: 'A', duration: 8.2, speaker_name: 'Ivy', speaker_state: 'confirmed' }),
+    groupSeg({ speaker_group: 'A', duration: 0.6,
+      source_filename: 'Benl1_2026-09-10_09-00-30_sid' + 'c'.repeat(32) + '_c0001_srcwav.json' }),
+    groupSeg({ speaker_group: 'B', duration: 0.4 }),
+  ];
+  const got = sn.inferredNames(segs);
+  assert.strictEqual(got[1], 'Ivy', 'a different file in the same voice must get the name');
+  assert.strictEqual(got[2], undefined, 'a different voice borrows nothing');
+});
+
+test('a group carrying two names infers nothing, exactly as a label does', () => {
+  const segs = [
+    groupSeg({ speaker_group: 'A', speaker_name: 'Ivy', speaker_state: 'confirmed' }),
+    groupSeg({ speaker_group: 'A', speaker_name: 'Sam', speaker_state: 'confirmed' }),
+    groupSeg({ speaker_group: 'A' }),
+  ];
+  assert.deepStrictEqual(sn.inferredNames(segs), {});
+});
+
+test('without a group the old per-file rule is unchanged', () => {
+  /* Undiarised files, sessions the re-bind never ran on, and legacy recordings all arrive
+     with no group. They must behave exactly as they did before this existed. */
+  const a = 'f-a.json';
+  const b = 'f-b.json';
+  const segs = [
+    { speaker: 'spk_0', source_filename: a, speaker_name: 'Ivy', speaker_state: 'confirmed' },
+    { speaker: 'spk_0', source_filename: a },
+    { speaker: 'spk_0', source_filename: b },
+  ];
+  const got = sn.inferredNames(segs);
+  assert.strictEqual(got[1], 'Ivy');
+  assert.strictEqual(got[2], undefined,
+    'the same label in a different file is a different person');
+});
+
+test('a grouped segment is never judged by the file rule as well', () => {
+  /* Mixing the two keyspaces in one bucket would let a file-scoped label borrow a name
+     that only the group justified, and the reverse. A segment is judged under one rule. */
+  const f = 'f-a.json';
+  const segs = [
+    { speaker: 'spk_0', source_filename: f, speaker_group: 'A',
+      speaker_name: 'Ivy', speaker_state: 'confirmed' },
+    { speaker: 'spk_0', source_filename: f },
+  ];
+  const got = sn.inferredNames(segs);
+  assert.strictEqual(got[1], undefined,
+    'an ungrouped turn must not inherit from a grouped one through the file bucket');
+});

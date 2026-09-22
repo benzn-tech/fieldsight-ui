@@ -304,26 +304,62 @@
        intended character, which parses fine, passes every test, and makes git
        and grep treat the whole module as binary. A structure with no separator
        cannot have either failure. */
+    /* **`speaker_group` first, and it is what makes this reach past one file.**
+
+       The per-file rule below is correct and too narrow. Diarisation labels are scoped to
+       ONE transcript call (BUG 8.6), so `spk_0` here and `spk_0` in the next file are not
+       the same person and must not share a name. That is why the grouping was nested by
+       file in the first place.
+
+       But the anonymous re-bind already answers that question properly: it clusters the
+       per-call centroids with ECAPA and writes `speaker_label_groups`, which the transcript
+       response returns as `speaker_group` — a letter that IS stable across the files of one
+       session. Measured 55.4% -> 96.3% label purity. It is enabled on TEST and prod alike
+       and does not depend on the naming switch.
+
+       So where a group exists, group by it: the short turns of one voice get the name even
+       when the turns that carried it sat in a different chunk. Where it does not — an
+       undiarised file, a session the re-bind never ran on, a legacy recording — fall back
+       to file+label, which is exactly the previous behaviour.
+
+       The two keyspaces are kept in separate buckets rather than merged into one map. A
+       group letter and a filename could collide as strings, and more importantly a segment
+       must be judged under ONE rule: mixing grouped and ungrouped segments in a single
+       bucket would let a file-scoped label borrow a name that only the group justified. */
+    var byGroup = {};
     var byFile = {};
     segs.forEach(function (s, i) {
-      if (!s || !s.source_filename || !s.speaker) return;
+      if (!s || !s.speaker) return;
+      if (s.speaker_group) {
+        (byGroup[s.speaker_group] || (byGroup[s.speaker_group] = [])).push(i);
+        return;
+      }
+      if (!s.source_filename) return;
       var byLabel = byFile[s.source_filename] || (byFile[s.source_filename] = {});
       (byLabel[s.speaker] || (byLabel[s.speaker] = [])).push(i);
     });
     var out = {};
-    Object.keys(byFile).forEach(function (file) {
-      Object.keys(byFile[file]).forEach(function (label) {
-        var idxs = byFile[file][label];
-        var names = {};
-        idxs.forEach(function (i) {
-          if (segs[i].speaker_name) names[segs[i].speaker_name] = true;
-        });
-        var distinct = Object.keys(names);
-        if (distinct.length !== 1) return;
-        idxs.forEach(function (i) {
-          if (!segs[i].speaker_name) out[i] = distinct[0];
-        });
+
+    /* ONE rule, applied to whichever buckets exist: if the turns the voiceprint DID reach
+       agree unanimously on a name, lend it to the ones it could not. Unanimity is the
+       load-bearing part — two different names under one group means the separation is
+       wrong there, and the honest response to a contradiction is to infer nothing rather
+       than to pick the majority. */
+    function lend(idxs) {
+      var names = {};
+      idxs.forEach(function (i) {
+        if (segs[i].speaker_name) names[segs[i].speaker_name] = true;
       });
+      var distinct = Object.keys(names);
+      if (distinct.length !== 1) return;
+      idxs.forEach(function (i) {
+        if (!segs[i].speaker_name) out[i] = distinct[0];
+      });
+    }
+
+    Object.keys(byGroup).forEach(function (g) { lend(byGroup[g]); });
+    Object.keys(byFile).forEach(function (file) {
+      Object.keys(byFile[file]).forEach(function (label) { lend(byFile[file][label]); });
     });
     return out;
   }
