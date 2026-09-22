@@ -907,9 +907,10 @@
          field it did believe it had sent, and the search would start in the
          backend, which is the one place the bug is not.
 
-         Both travel as undefined until the modal has a template picker
-         (nothing sets them today), and JSON.stringify omits undefined keys --
-         so a request that names no template is byte-identical to the one this
+         The modal's template chooser now sets both when someone picks a
+         template. Picking "None" -- the standard assembled report, and still
+         the default -- leaves both undefined, and JSON.stringify omits
+         undefined keys, so that request stays byte-identical to the one this
          function has always sent. */
       var body = {
         templateId: opts.templateId,

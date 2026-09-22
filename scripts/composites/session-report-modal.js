@@ -54,6 +54,19 @@
       // recipients only travel when emailing (download has no addressees)
       recipients: deliver === 'email' && Array.isArray(ctx.recipients) ? ctx.recipients : [],
     };
+    /* Pinned to the version the chooser showed, not to "whatever is current
+       when the worker gets there": between picking a template and pressing
+       Generate, somebody else can save a new version, and the report would
+       then not be the template this person was looking at.
+
+       Added only when there is one, never as a present-but-undefined key.
+       scripts/api/org.js learned the same thing one batch ago -- the encoding
+       drops undefined either way, but this object is read before it is
+       encoded, and absent has to mean absent at every layer. */
+    if (form.templateId && form.templateVersion != null) {
+      payload.templateVersion = form.templateVersion;
+    }
+
     // A day is addressed by its date and has no session id (spec 2026-09-15 §5.1).
     // A meeting payload is exactly what it was before a day scope existed.
     if (ctx && ctx.scope === 'day') {
@@ -131,7 +144,26 @@
       .filter(function (s) { return !!s; });
   }
 
-  function canGenerate(deliver, recipients, selection) {
+  /* A NAMED TEMPLATE AND EMAIL ARE MUTUALLY EXCLUSIVE, and the backend says so
+     first: lambda_org_api._generation_request refuses that combination outright
+     ("a generated report can only be downloaded for now"), because the worker's
+     generate branch always writes `emailed: false` and would produce a document
+     nobody receives.
+
+     So the UI must never let someone assemble that request. Not as politeness
+     -- a form that can only be submitted to a 400 is a form that teaches people
+     the feature is broken. Returns the reason, or null when the pair is fine,
+     so the control can say WHY it is disabled rather than just being dead. */
+  function emailBlockedBecause(templateId) {
+    return templateId
+      ? 'A report written to a template can only be downloaded for now.'
+      : null;
+  }
+
+  function canGenerate(deliver, recipients, selection, templateId) {
+    /* Belt and braces with the radio being disabled: if email is somehow still
+       selected alongside a template, Generate must not fire. */
+    if (deliver === 'email' && emailBlockedBecause(templateId)) return false;
     // Email delivery needs at least one recipient (the backend rejects email with
     // none); download is always allowed. Gates the review step's Generate button.
     // `selection` is selectedRowIds' result: null = the whole meeting, [] = the
@@ -211,6 +243,64 @@
 
   // ---- React shell (browser only; not exercised by node tests) ----------
 
+  /* Which template the report is written to. Absent is not a gap in the form:
+     it is the assembled report -- today's behaviour, zero model calls -- so
+     "None" is a real, first-class choice and is the default.
+
+     Templates come from the Library (FS.api.templates). A failure to load them
+     is NOT an empty list: an empty list reads as "your company has no
+     templates", which is a different and wrong statement, and it would quietly
+     remove the only choice this step exists to offer. */
+  function TemplateChooser(props) {
+    var h = React.createElement;
+    var s_state = React.useState({ phase: 'loading', rows: [] });
+    var st = s_state[0], setSt = s_state[1];
+
+    React.useEffect(function () {
+      var alive = true;
+      var api = (((window.FS || {}).api) || {}).templates;
+      if (!api || !api.list) { setSt({ phase: 'unavailable', rows: [] }); return undefined; }
+      api.list().then(function (res) {
+        if (!alive) return;
+        var rows = ((res && res.templates) || []).filter(function (t) {
+          /* A template with no content yet cannot write anything, and the
+             backend refuses it. Offering it would be offering a 400. */
+          return t._status !== 'empty';
+        });
+        setSt({ phase: 'ok', rows: rows });
+      }).catch(function () {
+        if (alive) setSt({ phase: 'error', rows: [] });
+      });
+      return function () { alive = false; };
+    }, []);
+
+    var options = [h('option', { key: '_none', value: '' }, 'None - the standard report')];
+    st.rows.forEach(function (t) {
+      options.push(h('option', { key: t.id, value: t.id },
+        t.title + (t.scope === 'personal' ? ' (yours)' : '')));
+    });
+
+    return h('label', { className: 'fs-field fs-srm__template' },
+      h('span', { className: 'fs-field__label' }, 'Template'),
+      h('select', {
+        className: 'fs-input', value: props.templateId || '',
+        disabled: st.phase === 'loading',
+        onChange: function (e) {
+          var id = e.target.value || null;
+          var row = st.rows.filter(function (t) { return t.id === id; })[0];
+          props.onChoose(id, row && row.version);
+        },
+      }, options),
+      st.phase === 'error'
+        ? h('span', { className: 'fs-field__hint fs-field__hint--error' },
+            'Could not load your templates. The standard report is still available.')
+        : null,
+      st.phase === 'unavailable'
+        ? h('span', { className: 'fs-field__hint' },
+            'Templates are unavailable here; the standard report is still available.')
+        : null);
+  }
+
   function FillStep(props) {
     var h = React.createElement;
     var form = props.form || {}, setForm = props.setForm || function () {};
@@ -233,6 +323,13 @@
         h('span', { className: 'fs-field__label' }, label), node);
     }
     return h('div', { className: 'fs-srm__step fs-srm__fill' },
+      /* First, because it is the choice the rest of the report follows from --
+         and because someone who came here to use a particular format should
+         not have to fill a title before discovering whether they can. */
+      h(TemplateChooser, {
+        templateId: form.templateId,
+        onChoose: props.onChooseTemplate || function () {},
+      }),
       field('Report title', h('input', {
         type: 'text', className: 'fs-input', value: form.title || '',
         onChange: function (e) { setTitle(e.target.value); },
@@ -253,15 +350,26 @@
 
   function DeliveryChooser(props) {
     var h = React.createElement;
-    function mode(value, label) {
-      return h('label', { className: 'fs-srm__delivery-mode' },
+    function mode(value, label, blockedBecause) {
+      /* Disabled WITH its reason, never hidden. A control that vanishes is
+         indistinguishable from a feature that was removed -- this file's
+         sibling in timeline.js already learned that the hard way. */
+      return h('label', {
+        className: 'fs-srm__delivery-mode'
+          + (blockedBecause ? ' fs-srm__delivery-mode--blocked' : ''),
+        title: blockedBecause || undefined,
+      },
         h('input', {
           type: 'radio', name: 'fs-srm-deliver', checked: props.deliver === value,
-          onChange: function () { props.onDeliver(value); },
+          disabled: !!blockedBecause,
+          onChange: function () { if (!blockedBecause) props.onDeliver(value); },
         }), ' ' + label);
     }
+    var emailBlocked = props.emailBlockedBecause || null;
     return h('div', { className: 'fs-srm__delivery' },
-      h('div', { className: 'fs-srm__delivery-modes' }, mode('download', 'Download'), mode('email', 'Email')),
+      h('div', { className: 'fs-srm__delivery-modes' },
+        mode('download', 'Download', null), mode('email', 'Email', emailBlocked)),
+      emailBlocked ? h('p', { className: 'fs-srm__delivery-note' }, emailBlocked) : null,
       props.deliver === 'email'
         ? h('label', { className: 'fs-field' },
             h('span', { className: 'fs-field__label' }, 'Recipients (one per line)'),
@@ -482,7 +590,18 @@
             })));
       }
     } else if (step === 'fill') {
-      body = h(FillStep, { form: form, setForm: setForm });
+      body = h(FillStep, {
+        form: form, setForm: setForm,
+        onChooseTemplate: function (id, version) {
+          setForm(function (f) {
+            return Object.assign({}, f, { templateId: id, templateVersion: id ? version : null });
+          });
+          /* Choosing a template while Email is selected would leave the form in
+             the one state the backend refuses. Fall back to download rather
+             than letting Generate be dead with no explanation. */
+          if (id) setDeliver('download');
+        },
+      });
     } else if (step === 'review') {
       body = h('div', { className: 'fs-srm__step fs-srm__review' },
         h('p', { className: 'fs-srm__hint' }, 'Review, choose how to deliver, then generate.'),
@@ -492,6 +611,7 @@
           h('li', null, 'Topics: ' + chosenCount + ' of ' + choosable)),
         h(DeliveryChooser, {
           deliver: deliver, onDeliver: setDeliver,
+          emailBlockedBecause: emailBlockedBecause(form.templateId),
           recipientsText: recipText,
           onRecipients: function (v) { setRecipText(v); setRecip(parseAttendees(v)); },
         }));
@@ -521,8 +641,8 @@
       btn('Back', function () { setStep('fill'); }),
       h('button', {
         type: 'button', className: 'fs-btn fs-btn--primary',
-        disabled: !canGenerate(deliver, recipients, selection),
-        title: canGenerate(deliver, recipients, selection) ? undefined
+        disabled: !canGenerate(deliver, recipients, selection, form.templateId),
+        title: canGenerate(deliver, recipients, selection, form.templateId) ? undefined
           : (Array.isArray(selection) && !selection.length
               ? 'Tick at least one topic to report on'
               : 'Add at least one recipient to email the report'),
