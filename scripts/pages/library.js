@@ -64,6 +64,16 @@
     return d.getUTCDate() + ' ' + months[d.getUTCMonth()] + ' ' + p[0];
   }
 
+  /* How many sections a row should claim. The server counts it (one query for
+     the whole list); a schema in hand is used when it is there. null means
+     nobody could say, and the row then says nothing rather than "0 sections",
+     which would be a claim about the template that nothing checked. */
+  function sectionCount(tpl) {
+    if (tpl && typeof tpl.section_count === 'number') return tpl.section_count;
+    var schema = activeSchema(tpl);
+    return schema && schema.sections ? schema.sections.length : null;
+  }
+
   function activeSchema(tpl) {
     if (!tpl || !tpl.versions || !tpl.versions.length) return null;
     var vers = tpl.versions;
@@ -295,9 +305,15 @@
               }),
               tpl.scope === 'personal' && React.createElement('span', { className: 'fs-library__personal-tag' }, 'Personal'),
               isExtracting && React.createElement('span', { className: 'fs-library__extracting-tag' }, 'Extracting…'),
-              !isExtracting && hasSchema && React.createElement('span', { className: 'fs-library__sections-count' },
-                activeSchema(tpl) ? activeSchema(tpl).sections.length + ' sections' : '',
-              ),
+              /* From the server's count when it sent one, falling back to the
+                 loaded schema. The list does not carry every template's body
+                 -- that would hand back every version of every template to
+                 draw one number -- so counting the schema alone showed
+                 nothing at all on this page. */
+              !isExtracting && sectionCount(tpl) !== null
+                && React.createElement('span', { className: 'fs-library__sections-count' },
+                  sectionCount(tpl) + ' section' + (sectionCount(tpl) === 1 ? '' : 's'),
+                ),
             ),
             /* Sprint 10 follow-up — favourite toggle (right-aligned star). */
             React.createElement('button', {
@@ -969,13 +985,39 @@
       );
     }
 
-    /* ── No schema yet ── */
+    /* ── Nothing to show, and WHY ──────────────────────────────────────
+       This was one sentence, "No schema available yet.", for three unrelated
+       situations. One of them shipped: the API stopped sending `versions` on
+       read, every template came back empty, and the page told people their
+       template had no content while it sat intact in Aurora. A sentence about
+       the template, describing a fault in the request.
+
+       So the three are separated. The one that matters is the middle one --
+       it is the only one where the person should not go looking at their own
+       template for the problem. (This repo has form here: a 403 swallowed
+       into an empty state, and "no results" covering both a refused filter and
+       a dead search backend.) */
     if (!schema) {
+      var reason;
+      if (sel.current_version === 0) {
+        /* Genuinely empty: created, no body written yet. */
+        reason = 'This template has no sections yet. Add one to get started.';
+      } else if (sel.current_version > 0) {
+        /* The template HAS content -- the response did not carry it. Naming
+           the version is deliberate: it is the evidence that the content
+           exists, and it is what anybody debugging this needs first. */
+        reason = 'This template has content (version ' + sel.current_version
+               + ') but it did not come back with this request. Reload the page;'
+               + ' if it keeps happening, the report is worth passing on.';
+      } else {
+        /* current_version absent altogether: an older or partial payload. */
+        reason = 'Could not read this template’s sections. Reload the page.';
+      }
       return React.createElement('div', { className: 'fs-library__right' },
         React.createElement('div', { className: 'fs-library__right-header' },
           React.createElement('h2', { className: 'fs-library__right-title' }, sel.title),
         ),
-        React.createElement('p', { style: { color: 'var(--text-secondary)', padding: '16px' } }, 'No schema available yet.'),
+        React.createElement('p', { style: { color: 'var(--text-secondary)', padding: '16px' } }, reason),
       );
     }
 

@@ -173,6 +173,13 @@
          written to "whatever is current when the worker gets there" would not
          be the template the person was looking at. */
       version: t.current_version,
+      /* Carried through, not derived. The right-hand panel needs to tell
+         "this template has no sections yet" from "the sections did not come
+         back with this request", and only the server's own count can say
+         which. Deriving it from `versions` is what hid the bug: an empty
+         versions list looked exactly like an empty template. */
+      current_version: t.current_version,
+      section_count: t.section_count,
       _status: t.current_version > 0 ? 'ready' : 'empty',
       versions: (t.versions || []).map(toVersion),
     };
