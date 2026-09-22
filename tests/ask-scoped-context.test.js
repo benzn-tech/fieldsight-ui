@@ -1512,3 +1512,39 @@ test('S10 the middle column publishes readiness from the same predicates it rend
   assert.strictEqual(countOccurrences(mid, 'available_users'), 9,
     'available_users appears a different number of times than the known-good source — a second copy of the user-picker predicate');
 });
+
+test('D-c3 a scoped ask that fell to the web still offers "Ask across everything"', async () => {
+  /* The button's comment has always said "a scoped answer that found nothing",
+     but the condition tested `citations.length` alone. That was equivalent only
+     because the web branch used to discard its citations. Once the backend
+     returns them (records-first union, 2026-09-22), the citations test alone
+     hides this button on exactly the answers that need it -- and on a scoped ask
+     it is the ONLY route to a web-wide search, so hiding it is a dead end with
+     no other exit.
+
+     Both shapes are pinned here so neither half can drift back: records present
+     AND from_web must still offer the widen, while records present WITHOUT
+     from_web (the records did answer) must not. */
+  const widenAfter = async function (props, res) {
+    const h = mountAsk();
+    h.render(props);
+    await h.ask('q');
+    await h.settle(0, res);
+    return h;
+  };
+  const onContextChange = c => c;
+  const WITH_RECORDS = {
+    answer: 'a',
+    citations: [{ source_s3_key: 'reports/2026-09-03/Ben/x' }],
+    applied_scope: { date: '2026-09-03' },
+  };
+
+  assert.strictEqual((await widenAfter({ context: SCOPED, onContextChange },
+    Object.assign({}, WITH_RECORDS, { from_web: true, web: { answer: 'w', sources: [] } })))
+    .byClass('fs-ask-chat__widen').length, 1,
+    'the records did not answer it -- that is the case the widen button exists for');
+
+  assert.strictEqual((await widenAfter({ context: SCOPED, onContextChange }, WITH_RECORDS))
+    .byClass('fs-ask-chat__widen').length, 0,
+    'the records DID answer it, so widening is not what the reader needs');
+});

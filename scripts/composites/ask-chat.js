@@ -1196,14 +1196,29 @@
             /* Already rendered above (records-first) for fromWeb messages --
                this is the grounded path's own "Sources" block only. */
             m.role === 'assistant' && !m.fromWeb ? renderCitations(m.citations) : null,
-            /* A scoped answer that found nothing: offer the same question
-               across everything. The host clears the context; the reset
-               effect re-sends once the new (empty) context has rendered.
+            /* A scoped answer whose records did not answer it: offer the same
+               question across everything. The host clears the context; the
+               reset effect re-sends once the new (empty) context has rendered.
                Only when the backend reported an applied_scope: one that
-               predates scoping already searched everything. */
+               predates scoping already searched everything.
+
+               "Did not answer" is TWO cases, not one. Empty citations is the
+               obvious one. The other is `fromWeb`: the backend retrieved
+               records, asked a verdict whether they could answer, was told no,
+               and answered from the open web instead -- which is exactly when
+               widening is most likely to help.
+
+               Until 2026-09-22 this read `!(m.citations && m.citations.length)`
+               alone and that was equivalent, because the web branch discarded
+               its citations. Now that it returns them (records-first union), the
+               citations test ALONE would hide this button on precisely the
+               answers that need it -- and on a scoped ask this button is the
+               only route to a web-wide search at all. So the condition now says
+               what the comment always said. */
             m.role === 'assistant' && m.scoped && m.scopeResponse
                 && m.scopeResponse.applied_scope && !m.error
-                && !(m.citations && m.citations.length) && props.onContextChange
+                && (m.fromWeb || !(m.citations && m.citations.length))
+                && props.onContextChange
               ? React.createElement('button', {
                   type: 'button',
                   className: 'fs-ask-chat__widen',
