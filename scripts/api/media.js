@@ -87,8 +87,22 @@
      cost only itself, not the whole strip. So a rejected key is simply absent
      from the map, and callers render what came back.
 
-     Filenames are deduped first: a photo can evidence more than one topic and
-     presigning it twice is a wasted round trip against the same key. */
+     Filenames are deduped first, because the same key can reach this function
+     twice and presigning it twice is a wasted round trip.
+
+     The reason given here used to be "a photo can evidence more than one
+     topic", stated as a fact about the product. On prod it was a fact about a
+     BUG: measured 2026-09-23, 22 of 161 distinct bound photos hung off more
+     than one topic, and every one came from the backend matching a DAY-wide
+     photo list against a SINGLE extraction's topics (fixed in the pipeline by
+     photo_rebind.rebind_day_photos). None was a photo genuinely evidencing two
+     subjects.
+
+     The dedup stays and is not weaker for it. A human may still bind one photo
+     to a second topic on purpose, and the email preview and the session-report
+     preview can each ask for overlapping strips — presigning one key twice
+     would be waste in every one of those cases. What changed is only the claim
+     about why the duplicates were there. */
   async function photoUrls(opts) {
     var names = [];
     (opts.filenames || []).forEach(function (f) {

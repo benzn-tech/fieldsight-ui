@@ -102,10 +102,34 @@
      is a difference, never a concat. A concat would show every bound photo
      twice: once under its topic and once under No topic.
 
-     The bound rows are emitted exactly as before, INCLUDING the same photo
-     appearing under two topics, which media.js:90-91 records as real. Those
-     are not duplicates — they are one photo in two folders. Only the unbound
+     The bound rows are emitted exactly as before, and a photo that arrives
+     under two topics is still rendered under both. Only the unbound
      computation dedupes.
+
+     WHAT THIS USED TO SAY, AND WHY IT IS WRONG. Until 2026-09-23 the sentence
+     here was: "INCLUDING the same photo appearing under two topics, which
+     media.js records as real. Those are not duplicates — they are one photo in
+     two folders." It reads as a design decision. It was a description of a
+     BUG, written from the front end, where the two rows are indistinguishable
+     from an intentional double-file.
+
+     Measured on prod that day: `topic_photos` held 193 rows over 161 distinct
+     photos and 22 of them (13.7%) hung off more than one topic — every single
+     one because `lambda_item_writer` matched a DAY-wide photo list against ONE
+     extraction's topics while keying idempotency on `source_s3_key`, so each
+     of the seven artifacts Ben_UCPK2 produced in one afternoon claimed the
+     same pictures. NOT ONE of them was a photo that genuinely evidenced two
+     subjects. The backend now binds the whole day in one pass
+     (pipeline: photo_rebind.rebind_day_photos), so these rows are going away.
+
+     The belief is left here rather than deleted because it is a reasonable
+     one — a photo really can evidence two topics — and a reader who only saw
+     it disappear would put it back on instinct. What makes it wrong is not the
+     idea; it is that on this data the duplicates never came from it.
+
+     This layer keeps rendering what it is given either way. It is not the
+     place to decide how many topics a photo belongs to, and a front end that
+     silently deduped would have hidden the defect instead of surfacing it.
 
      A day without the field (an older backend, or a verbatim-history day)
      yields precisely what it yielded before. */
