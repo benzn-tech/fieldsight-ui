@@ -42,8 +42,15 @@
     return dot > 0 ? name.slice(dot).toLowerCase() : '';
   }
 
+  /* OPTIONAL, because nothing is read from it. Requiring a document in order
+     to get past a screen that discards it was the worst of both: it stopped
+     anybody who had no file to hand, and it implied the file mattered.
+
+     Still validated when one IS attached -- the day a real extraction exists,
+     the formats it will accept are already the formats people have been
+     giving it, rather than a surprise. */
   function validateFile(f) {
-    if (!f) return 'Please choose a file.';
+    if (!f) return null;
     if (!ACCEPTED_EXTS.includes(fileExt(f.name))) return 'Unsupported file type. Use PDF, DOCX, MD, or an image.';
     if (f.size > MAX_SIZE_MB * 1024 * 1024)       return 'File is too large (max ' + MAX_SIZE_MB + ' MB).';
     return null;
@@ -194,8 +201,7 @@
         React.createElement('h2', { className: 'fs-tpl-upload__title' }, 'New template'),
         React.createElement('p', { className: 'fs-tpl-upload__subtitle' },
           'Choose the kind of report and name it. You get a starting set of sections '
-          + 'for that kind, which you then edit in the library. Nothing is read '
-          + 'from the file you attach yet.',
+          + 'for that kind, which you then edit in the library.',
         ),
 
         /* Drop zone */
@@ -228,7 +234,7 @@
               )
             : React.createElement('div', { className: 'fs-tpl-upload__drop-hint' },
                 React.createElement('span', { className: 'fs-tpl-upload__drop-icon' }, '⬆'),
-                React.createElement('span', null, 'Drop your template file here, or click to browse'),
+                React.createElement('span', null, 'Optional: attach a report for reference. Nothing is read from it yet.'),
                 React.createElement('span', { className: 'fs-tpl-upload__drop-types' }, 'PDF · DOCX · MD · image — max 50 MB'),
               ),
         ),
@@ -274,7 +280,7 @@
 
         React.createElement('div', { className: 'fs-tpl-upload__footer' },
           React.createElement(Button, { variant: 'ghost', onClick: onCancel }, 'Cancel'),
-          React.createElement(Button, { variant: 'primary', onClick: handleUpload, disabled: !file }, 'Create template'),
+          React.createElement(Button, { variant: 'primary', onClick: handleUpload, disabled: !title.trim() }, 'Create template'),
         ),
       ),
     );
