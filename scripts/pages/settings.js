@@ -51,6 +51,12 @@
     { key: 'profile',       label: 'Profile' },
     { key: 'security',      label: 'Security' },
     { key: 'notifications', label: 'Notifications' },
+    /* Read-only for now, and shown to EVERY role on purpose. The vocabulary
+       is not sensitive, a picker nobody can read is a picker nobody can use,
+       and until anything is actually tagged this screen is the only place the
+       taxonomy exists to be looked at. The edit controls land with the batch
+       that starts writing tags. */
+    { key: 'taxonomy',      label: 'Taxonomy' },
   ];
   var TIME_FORMATS = [{ v: '24h', l: '24-hour (14:30)' }, { v: '12h', l: '12-hour (2:30 PM)' }];
   var DATE_FORMATS = [{ v: 'DD/MM/YYYY', l: 'DD/MM/YYYY' }, { v: 'MM/DD/YYYY', l: 'MM/DD/YYYY' }, { v: 'YYYY-MM-DD', l: 'YYYY-MM-DD' }];
@@ -450,6 +456,91 @@
     );
   }
 
+  /* ---------- Taxonomy (read-only) --------------------------------------
+     The words a topic or an action can be labelled with. Two levels, three
+     scopes: the base set we ship, the company's own, and children a project
+     added for itself.
+
+     NOTHING IS TAGGED YET (migration 0065 lands the store only), so this
+     screen shows the vocabulary and nothing that uses it. That is also why
+     there are no filter chips anywhere else in the app: a chip over a corpus
+     with no assignments is a control that does nothing, which is exactly the
+     failure the Evidence grouping was just fixed for. */
+  function TaxonomyTab() {
+    var s = React.useState({ status: 'loading', tree: [], error: null });
+    var state = s[0], setState = s[1];
+
+    React.useEffect(function () {
+      var cancelled = false;
+      var api = window.FS && window.FS.api && window.FS.api.tags;
+      if (!api) { setState({ status: 'ok', tree: [], error: null }); return; }
+      api.getTags().then(function (res) {
+        if (cancelled) return;
+        if (!res || res._accessDenied) {
+          setState({ status: 'error', tree: [],
+                     error: (res && res.error) || 'Could not load the taxonomy.' });
+          return;
+        }
+        setState({ status: 'ok', tree: api.asTree(res.tags || []), error: null });
+      }).catch(function () {
+        if (cancelled) return;
+        setState({ status: 'error', tree: [], error: 'Could not load the taxonomy.' });
+      });
+      return function () { cancelled = true; };
+    }, []);
+
+    if (state.status === 'loading') {
+      return React.createElement('section', { className: 'fs-settings__section' },
+        React.createElement('div', { className: 'fs-settings__section-desc' }, 'Loading…'));
+    }
+    if (state.status === 'error') {
+      return React.createElement('section', { className: 'fs-settings__section' },
+        React.createElement('div', { className: 'fs-settings__section-desc' }, state.error));
+    }
+
+    var total = state.tree.reduce(function (n, t) { return n + 1 + t.children.length; }, 0);
+
+    return React.createElement('section', { className: 'fs-settings__section' },
+      React.createElement('div', { className: 'fs-settings__section-title' }, 'Taxonomy'),
+      React.createElement('div', { className: 'fs-settings__section-desc' },
+        total
+          ? ('The labels available on this account — ' + total + ' in total. '
+             + 'Nothing is labelled with them yet.')
+          : 'No labels are available on this account yet.'),
+      React.createElement('ul', { className: 'fs-taxonomy' },
+        state.tree.map(function (t) {
+          return React.createElement('li', { key: t.id, className: 'fs-taxonomy__group' },
+            React.createElement('div', { className: 'fs-taxonomy__parent' },
+              React.createElement('span', { className: 'fs-taxonomy__label' }, t.label),
+              /* Only the scopes a customer can act on are named. Labelling
+                 every base-set row "Standard" would put a badge on 82 of 82
+                 rows and say nothing. */
+              t.scope !== 'global'
+                ? React.createElement('span', {
+                    className: 'fs-taxonomy__scope fs-taxonomy__scope--' + t.scope,
+                  }, t.scope === 'site' ? 'Project' : 'Company')
+                : null,
+              !t.is_active
+                ? React.createElement('span', { className: 'fs-taxonomy__off' }, 'Off')
+                : null
+            ),
+            t.children.length
+              ? React.createElement('ul', { className: 'fs-taxonomy__children' },
+                  t.children.map(function (c) {
+                    return React.createElement('li', {
+                      key: c.id, className: 'fs-taxonomy__child',
+                    },
+                      c.label,
+                      c.scope !== 'global'
+                        ? React.createElement('span', {
+                            className: 'fs-taxonomy__scope fs-taxonomy__scope--' + c.scope,
+                          }, c.scope === 'site' ? 'Project' : 'Company')
+                        : null);
+                  }))
+              : null);
+        })));
+  }
+
   /* ---------- Middle column --------------------------------------------- */
   function SettingsMiddleColumn() {
     var ctx = React.useContext(SettingsContext);
@@ -458,6 +549,7 @@
     if (ctx.tab === 'profile') body = React.createElement(ProfileTab, { ctx: ctx });
     else if (ctx.tab === 'security') body = React.createElement(SecurityTab, { ctx: ctx });
     else if (ctx.tab === 'notifications') body = React.createElement(NotificationsTab, { ctx: ctx });
+    else if (ctx.tab === 'taxonomy') body = React.createElement(TaxonomyTab, null);
     else body = React.createElement(PreferencesTab, { ctx: ctx });
 
     return React.createElement('div', { className: 'fs-settings' },
