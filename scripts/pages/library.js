@@ -20,7 +20,7 @@
 
    Right detail (B.3 skip-edit primary path):
      • While extracting: spinner + progress note
-     • Once ready: 2-col "Source" vs "Extracted schema" review
+     • Once ready: the template's sections, editable
        + Test-render panel (fills schema sections with sample content)
        + "✓ Use this template" CTA (activates in one click)
 
@@ -62,6 +62,16 @@
     var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
     var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     return d.getUTCDate() + ' ' + months[d.getUTCMonth()] + ' ' + p[0];
+  }
+
+  /* How many sections a row should claim. The server counts it (one query for
+     the whole list); a schema in hand is used when it is there. null means
+     nobody could say, and the row then says nothing rather than "0 sections",
+     which would be a claim about the template that nothing checked. */
+  function sectionCount(tpl) {
+    if (tpl && typeof tpl.section_count === 'number') return tpl.section_count;
+    var schema = activeSchema(tpl);
+    return schema && schema.sections ? schema.sections.length : null;
   }
 
   function activeSchema(tpl) {
@@ -165,7 +175,7 @@
       setRetry(function (n) { return n + 1; });
       setSel(stub);
       if (window.FS && window.FS.toast) {
-        window.FS.toast.show({ message: 'Template uploaded — extracting schema…', tone: 'info' });
+        window.FS.toast.show({ message: 'Template created — edit its sections below', tone: 'info' });
       }
     }
 
@@ -262,7 +272,7 @@
 
       state.status === 'ok' && rows.length === 0 && React.createElement('div', { className: 'fs-library__empty' },
         React.createElement('p', null, tab === 'personal'
-          ? 'No personal templates yet. Upload one to get started.'
+          ? 'No personal templates yet. Create one to get started.'
           : 'No org templates yet.' + (canManageOrg ? ' Upload one to make it available to all users.' : '')
         ),
       ),
@@ -295,9 +305,15 @@
               }),
               tpl.scope === 'personal' && React.createElement('span', { className: 'fs-library__personal-tag' }, 'Personal'),
               isExtracting && React.createElement('span', { className: 'fs-library__extracting-tag' }, 'Extracting…'),
-              !isExtracting && hasSchema && React.createElement('span', { className: 'fs-library__sections-count' },
-                activeSchema(tpl) ? activeSchema(tpl).sections.length + ' sections' : '',
-              ),
+              /* From the server's count when it sent one, falling back to the
+                 loaded schema. The list does not carry every template's body
+                 -- that would hand back every version of every template to
+                 draw one number -- so counting the schema alone showed
+                 nothing at all on this page. */
+              !isExtracting && sectionCount(tpl) !== null
+                && React.createElement('span', { className: 'fs-library__sections-count' },
+                  sectionCount(tpl) + ' section' + (sectionCount(tpl) === 1 ? '' : 's'),
+                ),
             ),
             /* Sprint 10 follow-up — favourite toggle (right-aligned star). */
             React.createElement('button', {
@@ -963,19 +979,45 @@
         ),
         React.createElement('div', { className: 'fs-library__extracting' },
           React.createElement('div', { className: 'fs-library__extracting-spinner' }),
-          React.createElement('p', { className: 'fs-library__extracting-label' }, 'AI is extracting the template schema…'),
-          React.createElement('p', { className: 'fs-library__extracting-sub' }, 'This usually takes a few seconds. The page will update automatically.'),
+          React.createElement('p', { className: 'fs-library__extracting-label' }, 'Setting up your template…'),
+          React.createElement('p', { className: 'fs-library__extracting-sub' }, 'This only takes a moment.'),
         ),
       );
     }
 
-    /* ── No schema yet ── */
+    /* ── Nothing to show, and WHY ──────────────────────────────────────
+       This was one sentence, "No schema available yet.", for three unrelated
+       situations. One of them shipped: the API stopped sending `versions` on
+       read, every template came back empty, and the page told people their
+       template had no content while it sat intact in Aurora. A sentence about
+       the template, describing a fault in the request.
+
+       So the three are separated. The one that matters is the middle one --
+       it is the only one where the person should not go looking at their own
+       template for the problem. (This repo has form here: a 403 swallowed
+       into an empty state, and "no results" covering both a refused filter and
+       a dead search backend.) */
     if (!schema) {
+      var reason;
+      if (sel.current_version === 0) {
+        /* Genuinely empty: created, no body written yet. */
+        reason = 'This template has no sections yet. Add one to get started.';
+      } else if (sel.current_version > 0) {
+        /* The template HAS content -- the response did not carry it. Naming
+           the version is deliberate: it is the evidence that the content
+           exists, and it is what anybody debugging this needs first. */
+        reason = 'This template has content (version ' + sel.current_version
+               + ') but it did not come back with this request. Reload the page;'
+               + ' if it keeps happening, the report is worth passing on.';
+      } else {
+        /* current_version absent altogether: an older or partial payload. */
+        reason = 'Could not read this template’s sections. Reload the page.';
+      }
       return React.createElement('div', { className: 'fs-library__right' },
         React.createElement('div', { className: 'fs-library__right-header' },
           React.createElement('h2', { className: 'fs-library__right-title' }, sel.title),
         ),
-        React.createElement('p', { style: { color: 'var(--text-secondary)', padding: '16px' } }, 'No schema available yet.'),
+        React.createElement('p', { style: { color: 'var(--text-secondary)', padding: '16px' } }, reason),
       );
     }
 
@@ -1038,25 +1080,20 @@
         : /* preview */
           React.createElement(React.Fragment, null,
 
-            /* Side-by-side: Source vs Extracted schema */
+            /* THE "YOUR FILE" PANEL IS GONE, and it has to be.
+               It showed `sel.title + '.docx'` as a filename -- the template's
+               NAME with an extension glued on, not the file anybody chose --
+               beside the sentence "AI read your file and identified N
+               sections". Nothing is read from the file and nothing about it is
+               stored, so every part of that panel was invented, and it was
+               stated as fact about the person's own document.
+
+               What is left is the one true statement: here are the sections
+               this template has, and you can edit them. */
             React.createElement('div', { className: 'fs-library__review-grid' },
 
               React.createElement('div', { className: 'fs-library__review-panel' },
-                React.createElement('h3', { className: 'fs-library__review-panel-title' }, 'Your file'),
-                React.createElement('div', { className: 'fs-library__source-card' },
-                  React.createElement('div', { className: 'fs-library__source-icon' }, '📄'),
-                  React.createElement('div', { className: 'fs-library__source-info' },
-                    React.createElement('span', { className: 'fs-library__source-filename' }, sel.title + '.docx'),
-                    React.createElement('span', { className: 'fs-library__source-meta' }, RT_LABEL[sel.report_type] + ' · uploaded ' + fmtDate(sel.created_at)),
-                  ),
-                ),
-                React.createElement('p', { className: 'fs-library__review-note' },
-                  'AI read your file and identified ' + schema.sections.length + ' section' + (schema.sections.length === 1 ? '' : 's') + ' below.',
-                ),
-              ),
-
-              React.createElement('div', { className: 'fs-library__review-panel' },
-                React.createElement('h3', { className: 'fs-library__review-panel-title' }, 'Extracted schema'),
+                React.createElement('h3', { className: 'fs-library__review-panel-title' }, 'Sections'),
                 React.createElement('ol', { className: 'fs-library__schema-list' },
                   schema.sections.map(function (s, i) {
                     return React.createElement('li', { key: i, className: 'fs-library__schema-item' },
