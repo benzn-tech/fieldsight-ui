@@ -7223,6 +7223,51 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 }
 
 /* ---- Voices tab: the company's voiceprint library ---- */
+.fs-voices {
+  padding: var(--space-4) 0;
+}
+
+/* Carries the biometric-data notice, the empty state's reason, and every result
+   message. All three are prose the reader has to be able to finish, so nothing
+   here truncates or clips. */
+.fs-voices__hint {
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-4);
+  max-width: 68ch;
+}
+
+.fs-voices__basis {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.fs-voices__select {
+  font: inherit;
+  font-size: var(--font-size-sm);
+  padding: 6px 8px;
+  color: var(--text-primary);
+  background: var(--surface-input);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  /* The option text is a full sentence — this control must be allowed to be
+     wide on desktop and to wrap onto its own line on a phone rather than
+     clipping the distinction between "notice" and "attestation". */
+  max-width: 100%;
+}
+
+/* 320x427dp is a real target here (the F2SP screen), where a five-column table
+   silently overflows rather than scrolling. Give it its own scroll context. */
+.fs-voices__table-wrap {
+  overflow-x: auto;
+}
+
 .fs-voices__table {
   width: 100%;
   border-collapse: collapse;
