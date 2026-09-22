@@ -895,13 +895,30 @@
   async function generateSessionReport(opts) {
     opts = opts || {};
     if (sessionReportLive()) {
+      /* THIS OBJECT IS A WHITELIST, and a field missing from it is dropped in
+         silence -- the caller's opts are never spread, so a field a component
+         starts sending arrives here and goes no further.
+
+         templateVersion is listed because templateId alone is not a request
+         the backend can serve. lambda_org_api._generation_request reads BOTH:
+         given a templateId it does `int(body.get("templateVersion"))` and
+         answers 400 "templateVersion must be a number" when that is absent.
+         So a modal that sent only the id would fail with a message about a
+         field it did believe it had sent, and the search would start in the
+         backend, which is the one place the bug is not.
+
+         Both travel as undefined until the modal has a template picker
+         (nothing sets them today), and JSON.stringify omits undefined keys --
+         so a request that names no template is byte-identical to the one this
+         function has always sent. */
       var body = {
-        templateId: opts.templateId,
-        title:      opts.title,
-        attendees:  opts.attendees,
-        fields:     opts.fields || {},
-        deliver:    opts.deliver || 'download',
-        recipients: opts.recipients || [],
+        templateId:      opts.templateId,
+        templateVersion: opts.templateVersion,
+        title:           opts.title,
+        attendees:       opts.attendees,
+        fields:          opts.fields || {},
+        deliver:         opts.deliver || 'download',
+        recipients:      opts.recipients || [],
       };
       /* Only a real subset travels. Absent is "the whole meeting" on the
          backend, and an empty list is a 400 there -- so neither [] nor null may
