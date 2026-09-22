@@ -215,6 +215,41 @@
     }).catch(function () { return {}; });
   }
 
+  /* ── Mock mode ─────────────────────────────────────────────────────────
+     Every api module in this repo has a `useMocks` arm, and the demo shell
+     (`?mocks=1`) is how this product is shown to people. A Library that only
+     works against a live backend would go blank in the one mode whose whole
+     job is to have something in it.
+
+     In memory, not localStorage: a demo should start from the fixtures every
+     time rather than from whatever the last person clicked, and the reason the
+     old store reached for localStorage -- there was nowhere else for a real
+     template to live -- no longer applies. */
+
+  var _mock = null;
+
+  function mockStore() {
+    if (_mock) return _mock;
+    var fx = (window.FieldSight && window.FieldSight.fixtures
+              && window.FieldSight.fixtures.templates) || {};
+    _mock = { rows: (fx.org || []).concat(fx.personal || []).map(clone) };
+    return _mock;
+  }
+
+  function mockFind(id) {
+    return mockStore().rows.filter(function (t) { return t.id === id && !t._deleted; })[0] || null;
+  }
+
+  function mockResolve(value) {
+    return delay(30).then(function () { return clone(value); });
+  }
+
+  function mockMissing() {
+    return delay(30).then(function () {
+      return Promise.reject({ status: 404, message: 'Template not found' });
+    });
+  }
+
   /* ── API ──────────────────────────────────────────────────────────────── */
 
   function unavailable(what) {
@@ -225,6 +260,13 @@
   }
 
   function list(scope) {
+    if (api().useMocks) {
+      var rows = mockStore().rows.filter(function (t) { return !t._deleted; });
+      if (scope === 'org' || scope === 'personal') {
+        rows = rows.filter(function (t) { return t.scope === scope; });
+      }
+      return mockResolve({ templates: rows });
+    }
     if (!orgLive()) return unavailable('Listing templates');
     var params = (scope === 'org' || scope === 'personal') ? { scope: scope } : undefined;
     return Promise.all([
@@ -241,6 +283,10 @@
   }
 
   function get(id) {
+    if (api().useMocks) {
+      var hit = mockFind(id);
+      return hit ? mockResolve(hit) : mockMissing();
+    }
     if (!orgLive()) return unavailable('Opening a template');
     return Promise.all([
       api().orgRequest('/templates/' + encodeURIComponent(id)),
@@ -249,8 +295,26 @@
   }
 
   function create(data) {
-    if (!orgLive()) return unavailable('Creating a template');
     data = data || {};
+    if (api().useMocks) {
+      var rt = data.report_type || 'daily';
+      var row = {
+        id: 'tpl-mock-' + (mockStore().rows.length + 1),
+        scope: data.scope || 'personal', report_type: rt, active: false,
+        owner_user_id: data.owner_user_id || null,
+        title: data.title || 'New Template', description: data.description || '',
+        created_at: new Date().toISOString(), _status: 'ready',
+        versions: [{ id: 'ver-mock-1',
+                     schema: toEditorSchema(toBackendBody({
+                       sections: clone(STARTING_SECTIONS[rt] || STARTING_SECTIONS.daily) })),
+                     created_at: new Date().toISOString(),
+                     created_by_user_id: data.owner_user_id || 'you',
+                     change_note: 'Created' }],
+      };
+      mockStore().rows.push(row);
+      return mockResolve(row).then(function (r) { _notifyExtracted(r.id); return r; });
+    }
+    if (!orgLive()) return unavailable('Creating a template');
     var reportType = data.report_type || 'daily';
     var starting = STARTING_SECTIONS[reportType] || STARTING_SECTIONS.daily;
     return api().orgRequest('/templates', {
@@ -275,6 +339,16 @@
   }
 
   function updateSchema(id, schema, changeNote) {
+    if (api().useMocks) {
+      var hit = mockFind(id);
+      if (!hit) return mockMissing();
+      hit.versions = (hit.versions || []).concat([{
+        id: 'ver-mock-' + ((hit.versions || []).length + 1),
+        schema: clone(schema), created_at: new Date().toISOString(),
+        created_by_user_id: 'you', change_note: changeNote || 'Edited sections',
+      }]);
+      return mockResolve(hit);
+    }
     if (!orgLive()) return unavailable('Saving a template');
     /* Read the current version first, so catch_all / style / excluded_subjects
        survive a save made from an editor that cannot see them. */
@@ -294,6 +368,15 @@
   }
 
   function activate(id) {
+    if (api().useMocks) {
+      var hit = mockFind(id);
+      if (!hit) return mockMissing();
+      mockStore().rows.forEach(function (t) {
+        if (t.scope === hit.scope && t.report_type === hit.report_type) t.active = false;
+      });
+      hit.active = true;
+      return mockResolve(hit);
+    }
     if (!orgLive()) return unavailable('Activating a template');
     return api().orgRequest('/templates/' + encodeURIComponent(id))
       .then(function (t) {
@@ -319,6 +402,12 @@
   }
 
   function remove(id) {
+    if (api().useMocks) {
+      var hit = mockFind(id);
+      if (!hit) return mockMissing();
+      hit._deleted = true; hit.active = false;
+      return mockResolve({ ok: true });
+    }
     if (!orgLive()) return unavailable('Deleting a template');
     return api().orgRequest('/templates/' + encodeURIComponent(id), {
       method: 'DELETE',
@@ -327,6 +416,10 @@
   }
 
   function listVersions(id) {
+    if (api().useMocks) {
+      var hit = mockFind(id);
+      return hit ? mockResolve({ versions: hit.versions || [] }) : mockMissing();
+    }
     if (!orgLive()) return unavailable('Reading a template history');
     return api().orgRequest('/templates/' + encodeURIComponent(id) + '/versions')
       .then(function (res) {
@@ -335,6 +428,13 @@
   }
 
   function restore(id, vid) {
+    if (api().useMocks) {
+      var hit = mockFind(id);
+      if (!hit) return mockMissing();
+      var ver = (hit.versions || []).filter(function (v) { return v.id === vid; })[0];
+      if (!ver) return mockMissing();
+      return updateSchema(id, ver.schema, 'Restored from version ' + vid);
+    }
     if (!orgLive()) return unavailable('Restoring a version');
     /* The Library holds version ROW ids; the route takes the version NUMBER,
        which is the thing that is stable and readable in a change note. */
@@ -358,6 +458,14 @@
   }
 
   function usageStats() {
+    if (api().useMocks) {
+      return list().then(function (res) {
+        return {
+          org_count: res.templates.filter(function (t) { return t.scope === 'org'; }).length,
+          personal_count: res.templates.filter(function (t) { return t.scope === 'personal'; }).length,
+        };
+      });
+    }
     if (!orgLive()) return Promise.resolve({ org_count: 0, personal_count: 0 });
     return list().then(function (res) {
       var rows = res.templates || [];
