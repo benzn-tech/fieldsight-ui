@@ -19,6 +19,14 @@
        empathetic state instead of a generic toast.
      • Honour the no-localStorage rule for tokens — those live in
        sessionStorage via FS.session.
+     • Tell a cold backend apart from a broken one. Aurora is configured to
+       pause when idle, and a resume after a long pause can outlast API
+       Gateway's 29 s ceiling, so the first request of a quiet morning can
+       fail while nothing is wrong. When EVERY attempt failed and every
+       failure was a timeout or a 502/503/504, the thrown error carries
+       `waking: true` and FS.wakingNotice (if loaded) is asked to say so in
+       words. A 500 is NOT folded in: that is an application fault, and
+       dressing it as "please wait" would hide a real bug.
 
    Exported to:
      window.FS.api.request(path, opts)
@@ -32,6 +40,9 @@
          retry:     boolean — false to attempt once (default: retry 5xx and
                     network faults on a 1s/2s/4s ladder). Use false when a
                     retry re-runs work the first attempt is still doing.
+         retryDelaysMs: number[] — override the ladder (also sets how many
+                    attempts there are: delays.length + 1). Exists so a test
+                    can exercise the exhausted path without sleeping 7 s.
        }
        → resolves to either:
             the JSON body, or
@@ -48,6 +59,36 @@
 
   var DEFAULT_TIMEOUT_MS = 10000;
   var RETRY_DELAYS_MS    = [1000, 2000, 4000];
+
+  /* The statuses a paused-then-resuming backend produces, and only those.
+     502/503/504 all mean "the thing in front of the app gave up waiting or
+     found nothing listening"; a 500 means the app answered and the answer was
+     a fault. Adding 500 here would make every server bug read as "please
+     wait", which is worse than a blunt error because it stops anyone
+     reporting it. */
+  var WAKE_STATUSES = [502, 503, 504];
+
+  function isWakeStatus(status) {
+    return WAKE_STATUSES.indexOf(status) !== -1;
+  }
+
+  /* The notice is optional on purpose: _fetch.js loads in previews and under
+     node with no DOM, and a missing composite must never turn a backend
+     hiccup into a TypeError on top of it. */
+  function wakingNotice() {
+    var n = window.FS && window.FS.wakingNotice;
+    return (n && typeof n.show === 'function' && typeof n.hide === 'function') ? n : null;
+  }
+
+  function showWaking() {
+    var n = wakingNotice();
+    if (n) { try { n.show(); } catch (e) { /* never break the request path */ } }
+  }
+
+  function hideWaking() {
+    var n = wakingNotice();
+    if (n) { try { n.hide(); } catch (e) { /* never break the request path */ } }
+  }
 
   /* ---------- Utilities --------------------------------------------------- */
 
@@ -125,14 +166,19 @@
 
   /* Retry wrapper: retries on 5xx or network-level errors.
      4xx responses are returned immediately (caller decides). */
-  async function fetchWithRetry(url, fetchOpts, timeoutMs, retry) {
+  async function fetchWithRetry(url, fetchOpts, timeoutMs, retry, delays) {
     /* `retry: false` is for requests where a second attempt is not free.
        /ask spends a RAG search and a model call per try, so retrying a slow
        answer buys a duplicate of the same work, four times the tokens, and a
        user who waits 47s to be told the agent was unreachable while four
        copies of their question are still being answered. */
-    var maxAttempts = retry === false ? 1 : RETRY_DELAYS_MS.length + 1;
+    var ladder = (delays && delays.length) ? delays : RETRY_DELAYS_MS;
+    var maxAttempts = retry === false ? 1 : ladder.length + 1;
     var lastErr;
+    /* Does the WHOLE run look like a backend that is waking up? Starts true
+       and is falsified by the first failure that does not fit, so a run that
+       times out twice and then 500s is not reported as a wake. */
+    var wakeShaped = true;
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         var res = await fetchWithTimeout(url, fetchOpts, timeoutMs);
@@ -140,20 +186,30 @@
         lastErr = new Error('HTTP ' + res.status);
         lastErr.status = res.status;
         lastErr._response = res;                   /* carry body for callers */
+        if (!isWakeStatus(res.status)) wakeShaped = false;
       } catch (err) {
         lastErr = err;
         /* AbortError from caller signal should not be retried. */
         if (err.name === 'AbortError' && fetchOpts.signal && fetchOpts.signal.aborted) {
           throw err;
         }
+        /* Our own deadline counts as wake-shaped; anything else (DNS, CORS,
+           offline) does not, because those do not get better by waiting. */
+        if (!err.timeout) wakeShaped = false;
       }
       if (attempt < maxAttempts - 1) {
-        await sleep(RETRY_DELAYS_MS[attempt]);
+        await sleep(ladder[attempt]);
       }
     }
     /* All attempts exhausted — surface the last 5xx response if available,
-       otherwise throw the transport error. */
-    if (lastErr && lastErr._response) return lastErr._response;
+       otherwise throw the transport error. Either way, carry the verdict:
+       the Response is the only channel back to request() on the 5xx path,
+       and it is an ordinary object, so the flag rides on it. */
+    if (lastErr && lastErr._response) {
+      lastErr._response._fsWaking = wakeShaped;
+      return lastErr._response;
+    }
+    if (lastErr && wakeShaped) lastErr.waking = true;
     throw lastErr;
   }
 
@@ -202,12 +258,27 @@
                  ? (opts.body instanceof FormData ? opts.body : JSON.stringify(opts.body))
                  : undefined,
       signal:  opts.signal,
-    }, timeoutMs, opts.retry);
+    }, timeoutMs, opts.retry, opts.retryDelaysMs);
   }
 
   async function request(path, opts) {
     opts = opts || {};
-    var res = await rawRequest(path, opts);
+    var res;
+    try {
+      res = await rawRequest(path, opts);
+    } catch (err) {
+      /* The transport-error path never reaches the checks below, so the
+         notice has to be raised here as well as at the 5xx branch. */
+      if (err && err.waking) showWaking();
+      throw err;
+    }
+
+    /* A response of ANY status is proof the backend answered, so the notice is
+       retracted here rather than on a timer -- and before the 401/403/404
+       early returns below, which are answers too. The one exception is the
+       exhausted wake-shaped run, which arrives as a response and is the
+       reason the notice exists. */
+    if (!res._fsWaking) hideWaking();
 
     /* 401 — refresh once and retry. */
     if (res.status === 401 && !opts._retried && window.FS.session) {
@@ -247,6 +318,14 @@
                           || ('HTTP ' + res.status));
       err.status = res.status;
       err.body   = body;
+      /* NOT returned as a { _waking: true } envelope in the style of
+         _notFound / _accessDenied: every caller on this path reaches a
+         `catch` today, and an envelope would be read as data by all of them
+         at once. The flag rides on the error that was already being thrown. */
+      if (res._fsWaking) {
+        err.waking = true;
+        showWaking();
+      }
       throw err;
     }
 
