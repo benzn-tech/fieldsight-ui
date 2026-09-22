@@ -51,7 +51,28 @@
     { key: 'profile',       label: 'Profile' },
     { key: 'security',      label: 'Security' },
     { key: 'notifications', label: 'Notifications' },
+    /* Gated, unlike the four above: the read route 403s for anyone outside the backend's
+       correction roles, so showing the tab to a worker offers a page whose only possible
+       outcome is a denial. `roleMayName` is the same list the naming control uses — one
+       source, so the two cannot drift apart. */
+    { key: 'voices',        label: 'Voices', gate: 'voiceprints' },
   ];
+
+  /* The backend's own vocabulary for why a company may hold voice patterns at all.
+     Free text is not accepted: the column has a CHECK and an unrecognised value is a 400.
+     Descriptions rather than bare slugs, because "notice" and "attestation" are legal
+     distinctions that nobody reading a dropdown would guess. */
+  var BASIS_OPTS = [
+    { v: '',            l: 'Not settled — enrolment falls back to the strict rule' },
+    { v: 'notice',      l: 'Notice — the site induction tells workers their voice is captured' },
+    { v: 'attestation', l: 'Attestation — whoever names a speaker states that person agreed' },
+    { v: 'confirmed',   l: 'Confirmed — the person themselves has agreed, on record' },
+  ];
+
+  function mayManageVoiceprints(user) {
+    var sn = window.FS && window.FS.speakerNaming;
+    return !!(sn && sn.roleMayName((user || {}).role));
+  }
   var TIME_FORMATS = [{ v: '24h', l: '24-hour (14:30)' }, { v: '12h', l: '12-hour (2:30 PM)' }];
   var DATE_FORMATS = [{ v: 'DD/MM/YYYY', l: 'DD/MM/YYYY' }, { v: 'MM/DD/YYYY', l: 'MM/DD/YYYY' }, { v: 'YYYY-MM-DD', l: 'YYYY-MM-DD' }];
   var TIMEZONES = [
@@ -216,7 +237,9 @@
   /* ---------- Tab strip ------------------------------------------------- */
   function TabStrip(ctx) {
     return React.createElement('div', { className: 'fs-settings__tabs', role: 'tablist', 'aria-label': 'Settings sections' },
-      TABS.map(function (t) {
+      TABS.filter(function (t) {
+        return t.gate !== 'voiceprints' || mayManageVoiceprints(ctx.user);
+      }).map(function (t) {
         var active = ctx.tab === t.key;
         return React.createElement('button', {
           key: t.key, type: 'button', role: 'tab', 'aria-selected': active,
@@ -451,6 +474,154 @@
   }
 
   /* ---------- Middle column --------------------------------------------- */
+  /* ---------- Voices tab (the company's voiceprint library) --------------
+     Backend: GET /api/org/voiceprints, DELETE /api/org/voiceprints/{id},
+     PUT /api/org/company/voiceprint-basis. All three have existed since the speaker-naming
+     work landed and had no caller at all — until now the only way to look at this data was
+     a database session, and "empty because the enrolment window was refused" and "empty
+     because the embedder died" were indistinguishable. Both have happened on TEST. */
+  function VoicesTab(props) {
+    var ctx = props.ctx;
+    var org = window.FS && window.FS.api && window.FS.api.org;
+    var refRows = React.useState({ status: 'loading', rows: [] });
+    var state = refRows[0], setState = refRows[1];
+    var refBusy = React.useState(null);
+    var busy = refBusy[0], setBusy = refBusy[1];
+    var refNote = React.useState(null);
+    var note = refNote[0], setNote = refNote[1];
+    var refTick = React.useState(0);
+    var tick = refTick[0], setTick = refTick[1];
+
+    React.useEffect(function () {
+      if (!org || !org.getVoiceprints) {
+        setState({ status: 'unavailable', rows: [] });
+        return undefined;
+      }
+      var cancelled = false;
+      org.getVoiceprints().then(function (res) {
+        if (cancelled) return;
+        /* 404 here is SPEAKER_IDENTITY_MODE=off, which is "not enabled in this
+           environment", not a fault. 403 is the role. Collapsing the two into one empty
+           state would say this company has enrolled nobody, which is a different claim. */
+        if (res && res._notFound) { setState({ status: 'disabled', rows: [] }); return; }
+        if (res && res._accessDenied) { setState({ status: 'denied', rows: [] }); return; }
+        setState({ status: 'ready', rows: (res && res.voiceprints) || [] });
+      }).catch(function () {
+        if (!cancelled) setState({ status: 'error', rows: [] });
+      });
+      return function () { cancelled = true; };
+    }, [tick]);
+
+    function withdraw(row) {
+      var label = row.displayName || 'this unnamed voice';
+      /* Says what it destroys AND what it leaves, because the two are easy to confuse and
+         only one of them is reversible (neither is). Removing a name from one meeting is a
+         different control in a different place. */
+      var msg = 'Delete the stored voice pattern for ' + label + '.\n\n'
+        + 'Every passage this profile named will lose that name, in every meeting. '
+        + 'The audit record of the profile survives; the voice data does not. '
+        + 'This cannot be undone.';
+      if (typeof window.confirm === 'function' && !window.confirm(msg)) return;
+      setBusy(row.id);
+      setNote(null);
+      org.withdrawVoiceprint(row.id).then(function (res) {
+        setBusy(null);
+        if (res && res._notAvailable) { setNote('Not available in this environment.'); return; }
+        if (res && (res._accessDenied || res._notFound)) {
+          setNote(res.error || 'You do not have permission to do that.');
+          return;
+        }
+        setNote('Deleted ' + label + ' — ' + (res && res.samplesRemoved != null
+          ? res.samplesRemoved : 0) + ' sample(s) removed.');
+        setTick(function (n) { return n + 1; });
+      }).catch(function () {
+        setBusy(null);
+        setNote('Could not delete that profile.');
+      });
+    }
+
+    function saveBasis(value) {
+      setNote(null);
+      org.setVoiceprintBasis(value || null).then(function (res) {
+        if (res && res._notAvailable) { setNote('Not available in this environment.'); return; }
+        if (res && (res._accessDenied || res._notFound)) {
+          setNote(res.error || 'Only a platform admin can set the consent basis.');
+          return;
+        }
+        setNote('Consent basis saved.');
+      }).catch(function () { setNote('Could not save the consent basis.'); });
+    }
+
+    var body;
+    if (state.status === 'loading') {
+      body = React.createElement('div', { className: 'fs-settings__section-desc' }, 'Loading…');
+    } else if (state.status === 'disabled') {
+      body = React.createElement('div', { className: 'fs-settings__section-desc' },
+        'Voice recognition is not enabled in this environment.');
+    } else if (state.status === 'denied') {
+      body = React.createElement('div', { className: 'fs-settings__section-desc' },
+        'You do not have permission to view this company’s voice library.');
+    } else if (state.status === 'unavailable' || state.status === 'error') {
+      body = React.createElement('div', { className: 'fs-settings__section-desc' },
+        'Could not read the voice library.');
+    } else if (!state.rows.length) {
+      /* Empty is the expected state on every company today, and saying WHY stops it
+         reading as a fault: no company has settled a consent basis, so the strict rule
+         applies and nothing enrols. */
+      body = React.createElement('div', { className: 'fs-settings__section-desc' },
+        'No voices stored. A voice is only stored when somebody names a speaker AND '
+        + 'records that the person agreed — see the consent basis above.');
+    } else {
+      body = React.createElement('table', { className: 'fs-voices__table' },
+        React.createElement('thead', null,
+          React.createElement('tr', null,
+            ['Name', 'Samples', 'Vouched for', 'Status', 'Last attempt', ''].map(
+              function (h, i) { return React.createElement('th', { key: i }, h); }))),
+        React.createElement('tbody', null,
+          state.rows.map(function (r) {
+            return React.createElement('tr', { key: r.id },
+              React.createElement('td', null, r.displayName || '(unnamed voice)'),
+              /* Both numbers, always. A profile with zero samples names nobody, and a
+                 profile made only of clustering inference stays tentative — the row has to
+                 show which kind it is. */
+              React.createElement('td', null, String(r.samples != null ? r.samples : 0)),
+              React.createElement('td', null,
+                String(r.humanSamples != null ? r.humanSamples : 0)),
+              React.createElement('td', null, r.status || ''),
+              React.createElement('td', { title: r.lastAttemptDetail || '' },
+                r.lastAttemptOutcome
+                  ? (r.lastAttemptOutcome + (r.lastAttemptAt
+                      ? ' · ' + String(r.lastAttemptAt).slice(0, 10) : ''))
+                  : '—'),
+              React.createElement('td', null,
+                React.createElement('button', {
+                  type: 'button',
+                  className: 'fs-voices__delete',
+                  disabled: busy === r.id || r.status === 'withdrawn',
+                  onClick: function () { withdraw(r); },
+                }, r.status === 'withdrawn' ? 'Deleted'
+                  : busy === r.id ? 'Deleting…' : 'Delete')));
+          })));
+    }
+
+    return React.createElement('div', { className: 'fs-settings__section' },
+      React.createElement('h3', { className: 'fs-settings__section-title' }, 'Voices'),
+      React.createElement('div', { className: 'fs-settings__section-desc' },
+        'A voice pattern is biometric data. It is stored only so a person can be recognised '
+        + 'in later meetings, and only the person recorded can agree to that — not their '
+        + 'employer, and not whoever names them.'),
+
+      /* platform_admin only, matching the server. Offered to nobody else rather than
+         offered-and-refused. */
+      (ctx.user && ctx.user.role === 'platform_admin')
+        ? Field('Consent basis',
+            SelectInput('', BASIS_OPTS, saveBasis))
+        : null,
+
+      note ? React.createElement('div', { className: 'fs-settings__section-desc' }, note) : null,
+      body);
+  }
+
   function SettingsMiddleColumn() {
     var ctx = React.useContext(SettingsContext);
     if (!ctx) return null;
@@ -458,7 +629,13 @@
     if (ctx.tab === 'profile') body = React.createElement(ProfileTab, { ctx: ctx });
     else if (ctx.tab === 'security') body = React.createElement(SecurityTab, { ctx: ctx });
     else if (ctx.tab === 'notifications') body = React.createElement(NotificationsTab, { ctx: ctx });
-    else body = React.createElement(PreferencesTab, { ctx: ctx });
+    /* Re-checked here, not only in the tab strip. Hiding a tab hides the button, not the
+       state behind it: a role change (the dev role switcher does exactly this) leaves
+       `ctx.tab` pointing at 'voices' while the strip no longer offers it, and the body
+       would render on regardless. */
+    else if (ctx.tab === 'voices' && mayManageVoiceprints(ctx.user)) {
+      body = React.createElement(VoicesTab, { ctx: ctx });
+    } else body = React.createElement(PreferencesTab, { ctx: ctx });
 
     return React.createElement('div', { className: 'fs-settings' },
       React.createElement('div', { className: 'fs-settings__header' },

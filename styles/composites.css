@@ -7222,6 +7222,55 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   margin-bottom: var(--space-4);
 }
 
+/* ---- Voices tab: the company's voiceprint library ---- */
+.fs-voices__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
+
+.fs-voices__table th {
+  text-align: left;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-tertiary);
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border-default);
+  white-space: nowrap;
+}
+
+.fs-voices__table td {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: top;
+}
+
+/* Sample counts are compared down the column — a profile with zero of them names
+   nobody, which is the whole point of showing the number. */
+.fs-voices__table td:nth-child(2),
+.fs-voices__table td:nth-child(3) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Danger, and deliberately not a primary-weight button: deleting a profile un-names
+   every passage it ever named, in every meeting, and cannot be undone. */
+.fs-voices__delete {
+  padding: 4px 10px;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: var(--surface-app);
+  color: var(--text-danger);
+}
+
+.fs-voices__delete[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  color: var(--text-tertiary);
+}
+
 /* ---- Theme radio group ---- */
 
 .fs-settings__radio-group {
