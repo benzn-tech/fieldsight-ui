@@ -773,31 +773,12 @@ function formatTodayDate() {
   return days[d.getDay()] + ' · ' + d.getDate() + ' ' + months[d.getMonth()];
 }
 
-/* ---------- Share / copy-link helper (Sprint 8.10.2) -------------------- */
-async function shareCurrentLink() {
-  var url = window.location.href;
-  /* Prefer Web Share API on mobile when available. */
-  if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent || '')) {
-    try {
-      await navigator.share({ title: document.title, url: url });
-      return;
-    } catch (_) { /* user dismissed — fall through to clipboard */ }
-  }
-  try {
-    await navigator.clipboard.writeText(url);
-    if (window.FS && window.FS.toast) {
-      window.FS.toast.show({ message: 'Link copied to clipboard', tone: 'success' });
-    }
-  } catch (_) {
-    if (window.FS && window.FS.toast) {
-      window.FS.toast.show({
-        message: 'Copy failed — URL: ' + url,
-        tone:    'warning',
-        duration: 8000,
-      });
-    }
-  }
-}
+/* The share / copy-link helper used to live here. Its button was replaced
+   by the notification bell (owner's call): copying a link is occasional and
+   the address bar already does it, while knowing whether a report is ready
+   is needed from wherever you are. The helper went with the button rather
+   than being left unused -- an unused function is how a removed control
+   comes back. */
 
 /* ---------- MiddleColumn -------------------------------------------------- */
 
@@ -976,18 +957,14 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
             name: 'search', size: 16,
           }),
         ) : null,
-        /* Sprint 8.10.2 — copy-link / share button */
-        React.createElement('button', {
-          type:         'button',
-          className:    'fs-utility-item fs-share-btn',
-          onClick:      shareCurrentLink,
-          title:        'Copy link to this view',
-          'aria-label': 'Copy link to this view',
-        },
-          window.FieldSight.NavIcon && React.createElement(window.FieldSight.NavIcon, {
-            name: 'share-2', size: 16,
-          }),
-        ),
+        /* The bell took the share button's place, on the owner's call.
+           Copying a link is a thing you do occasionally and can do from the
+           address bar; knowing whether the report you asked for is ready is a
+           thing you need from wherever you happen to be, because writing one
+           takes minutes and nobody can stand and watch. */
+        window.FieldSight.NotificationBell
+          ? React.createElement(window.FieldSight.NotificationBell)
+          : null,
         React.createElement(WeatherIndicator),
       ),
     ),

@@ -137,6 +137,7 @@
   <script type="text/babel" src="scripts/composites/page-error-boundary.js?v=1"></script>
   <!-- Sprint 8.1.4 — Toast notification stack (vanilla JS, no React) -->
   <script src="scripts/composites/toast.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/notification-bell.js?v=1"></script>
   <!-- Sprint 8.1.2 — Safety observation creation modal -->
   <script type="text/babel" src="scripts/composites/safety-create-modal.js?v=5"></script>
   <!-- Sprint 8.1.3 — Quality item creation modal -->
@@ -343,6 +344,10 @@
   <script src="scripts/api/today-programme-adapter.js?v=4"></script>
   <!-- Sprint 10 B.0 — Template store (LocalStorage-backed template API) -->
   <script src="scripts/api/template-store.js?v=2"></script>
+  <!-- Report generation jobs: owns the polling, survives a reload, feeds the bell.
+       Plain script and BEFORE app-shell, which is text/babel and therefore runs
+       later -- the bell reads window.FS.reportJobs on first render. -->
+  <script src="scripts/api/report-jobs.js?v=1"></script>
 
   <!-- Web Task 1/2/3 (2026-07-30) — QR terminal login: vendored generator
        (plain UMD, not Babel-transpiled) + api call + Layer-5 modal. Must
