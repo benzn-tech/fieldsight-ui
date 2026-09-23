@@ -50,6 +50,39 @@
     return !!(sn && sn.roleMayName((user || {}).role));
   }
 
+  /* One sentence per person, in words somebody who has never heard of an embedding
+     can act on.
+
+     The thresholds are deliberately coarse and are NOT a quality score: what was
+     measured is that coherent profiles of five-plus recordings were recognised at
+     0.47-0.63 while thin or incoherent ones sat at 0.19-0.41. So "Ready" claims
+     only "there is enough here to try", never "this will be right", and nothing
+     here reports a confidence the system has not earned.
+
+     `quarantined` does not lower the verdict. Samples set aside are ALREADY
+     excluded from the live count, so a profile with eight good recordings and four
+     set aside is exactly as ready as one with eight and none -- the note exists to
+     explain why a number somebody saw yesterday went down, not to warn them. */
+  function readiness(r) {
+    var live = r.samples != null ? r.samples : 0;
+    var aside = r.quarantined != null ? r.quarantined : 0;
+    var note = aside
+      ? aside + ' recording(s) did not sound like this person and are not used.'
+      : null;
+    if (r.status === 'withdrawn') {
+      return { tone: 'off', label: 'Removed', note: null };
+    }
+    if (live === 0) {
+      return { tone: 'off', label: 'No voice stored',
+               note: aside ? note : 'Name this person in a meeting to store one.' };
+    }
+    if (live < 3) {
+      return { tone: 'warn', label: 'Not enough yet',
+               note: 'Name this person in a few more meetings.' };
+    }
+    return { tone: 'ok', label: 'Ready', note: note };
+  }
+
   function VoiceLibrary() {
     var org = window.FS && window.FS.api && window.FS.api.org;
     var user = (window.AuthMock && window.AuthMock.currentUser) || {};
@@ -62,6 +95,10 @@
     var note = refNote[0], setNote = refNote[1];
     var refTick = React.useState(0);
     var tick = refTick[0], setTick = refTick[1];
+    /* Off by default: the counts are for whoever is diagnosing a profile, not for
+       whoever is reading the page. */
+    var refDetail = React.useState(false);
+    var showDetail = refDetail[0], setShowDetail = refDetail[1];
 
     React.useEffect(function () {
       if (!mayManage(user) || !org || !org.getVoiceprints) {
@@ -157,48 +194,65 @@
                + 'consent basis, so naming a speaker records the name but stores no '
                + 'voice. A platform admin sets it above.');
     } else {
-      /* Wrapped so the table scrolls sideways instead of overflowing its
-         container. The narrow target here is real — 320x427dp — and a table
-         that overflows there does it silently. */
+      /* PLAIN BY DEFAULT, PRECISE ON DEMAND.
+
+         This table used to show Samples / Vouched for / Set aside / Status / Last
+         attempt. Those are the numbers I needed while building it; a site manager
+         opening this page does not know what a sample is, has no way to act on
+         "vouched for", and cannot tell whether 8 is a good number or a bad one.
+         The counts were engineering telemetry shown to a customer.
+
+         So each person gets one sentence about whether the system can recognise
+         them, and what to do if it cannot. The numbers stay -- this panel is the
+         whole of the feature's observability and losing them would undo that --
+         but behind a toggle, where somebody looking for them will find them and
+         nobody else has to read them. */
       body = React.createElement('div', { className: 'fs-voices__table-wrap' },
         React.createElement('table', { className: 'fs-voices__table' },
         React.createElement('thead', null,
           React.createElement('tr', null,
-            ['Name', 'Samples', 'Vouched for', 'Set aside', 'Status', 'Last attempt', ''].map(
-              function (h, i) { return React.createElement('th', { key: i }, h); }))),
+            ['Name', 'Voice recognition', ''].concat(
+              showDetail ? ['Stored from', 'Not used', 'Last attempt'] : []
+            ).map(function (h, i) { return React.createElement('th', { key: i }, h); }))),
         React.createElement('tbody', null,
           state.rows.map(function (r) {
-            return React.createElement('tr', { key: r.id },
-              React.createElement('td', null, r.displayName || '(unnamed voice)'),
-              /* Both numbers, always. A profile with zero samples names nobody,
-                 and a profile made only of clustering inference stays tentative
-                 — the row has to show which kind it is. */
-              React.createElement('td', null, String(r.samples != null ? r.samples : 0)),
-              React.createElement('td', null,
-                String(r.humanSamples != null ? r.humanSamples : 0)),
-              /* Why a well-stocked profile can still match badly. Measured: a profile
-                 holding twelve samples, four of them a wind recording, scored 0.192
-                 where its eight real ones score 0.257. Without this column that
-                 profile reads as the healthiest in the company. */
-              React.createElement('td', {
-                title: r.quarantined
-                  ? 'Samples that do not sound like the rest of this profile. They are '
-                    + 'kept but do not match.' : undefined,
-              }, String(r.quarantined != null ? r.quarantined : 0)),
-              React.createElement('td', null, r.status || ''),
-              React.createElement('td', { title: r.lastAttemptDetail || '' },
-                r.lastAttemptOutcome
-                  ? (r.lastAttemptOutcome + (r.lastAttemptAt
-                      ? ' · ' + String(r.lastAttemptAt).slice(0, 10) : ''))
-                  : '—'),
-              React.createElement('td', null,
+            var q = readiness(r);
+            /* Cells built as an ARRAY and passed as one, rather than spread as
+               arguments: the detail columns are conditional, and mixing a spread
+               with a conditional tail is what broke this the first time. */
+            var cells = [
+              React.createElement('td', { key: 'name' },
+                r.displayName || '(unnamed voice)'),
+              React.createElement('td', { key: 'state', className: 'fs-voices__state' },
+                React.createElement('span', {
+                  className: 'fs-voices__dot fs-voices__dot--' + q.tone,
+                }),
+                q.label,
+                q.note
+                  ? React.createElement('div', { className: 'fs-voices__sub' }, q.note)
+                  : null),
+              React.createElement('td', { key: 'act' },
                 React.createElement('button', {
                   type: 'button',
                   className: 'fs-voices__delete',
                   disabled: busy === r.id || r.status === 'withdrawn',
                   onClick: function () { withdraw(r); },
-                }, r.status === 'withdrawn' ? 'Deleted'
-                  : busy === r.id ? 'Deleting…' : 'Delete')));
+                }, r.status === 'withdrawn' ? 'Removed'
+                  : busy === r.id ? 'Removing…' : 'Remove')),
+            ];
+            if (showDetail) {
+              cells.push(React.createElement('td', { key: 'd1' },
+                String(r.samples != null ? r.samples : 0)));
+              cells.push(React.createElement('td', { key: 'd2' },
+                String(r.quarantined != null ? r.quarantined : 0)));
+              cells.push(React.createElement('td', { key: 'd3',
+                title: r.lastAttemptDetail || '' },
+                r.lastAttemptOutcome
+                  ? (r.lastAttemptOutcome + (r.lastAttemptAt
+                      ? ' · ' + String(r.lastAttemptAt).slice(0, 10) : ''))
+                  : '—'));
+            }
+            return React.createElement('tr', { key: r.id }, cells);
           }))));
     }
 
@@ -223,7 +277,19 @@
         : null,
 
       note ? React.createElement('div', { className: 'fs-voices__hint' }, note) : null,
-      body);
+      body,
+
+      /* The counts, one click away. Offered only when there is something to count,
+         and worded as what it is rather than as a feature: somebody diagnosing a
+         profile goes looking for this, and nobody else should have to decide
+         whether they need it. */
+      (state.status === 'ready' && state.rows.length)
+        ? React.createElement('button', {
+            type: 'button',
+            className: 'fs-voices__detail-toggle',
+            onClick: function () { setShowDetail(!showDetail); },
+          }, showDetail ? 'Hide the numbers' : 'Show the numbers')
+        : null);
   }
 
   if (!window.FieldSight) window.FieldSight = {};

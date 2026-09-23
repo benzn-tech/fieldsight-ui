@@ -111,3 +111,56 @@ test('the library read is company-scoped with no parameter that could widen it',
   assert.match(ORG.slice(at, at + 120), /function getVoiceprints\s*\(\s*\)/,
     'getVoiceprints takes an argument — a company or site parameter here is a tenant leak');
 });
+
+/* --- the panel speaks to a site manager, not to whoever built it ------------ */
+
+const LIBSRC = fs.readFileSync(
+  path.join(__dirname, '..', 'scripts', 'composites', 'voice-library.js'), 'utf8');
+
+function readiness(row) {
+  /* The shipped function, lifted rather than restated: a second copy of the rule
+     would drift from the one on screen, which is this session's most-repeated
+     defect and one I committed myself today in score_session.py. */
+  const body = LIBSRC.slice(LIBSRC.indexOf('function readiness'));
+  const fn = body.slice(0, body.indexOf('\n  function ', 1));
+  // eslint-disable-next-line no-new-func
+  return new Function('r', fn + '\n return readiness(r);')(row);
+}
+
+test('a profile with nothing stored says what to do about it', () => {
+  /* "0" said nothing a site manager could act on. The whole point of the rewrite. */
+  const q = readiness({ samples: 0, quarantined: 0 });
+  assert.match(q.label, /No voice stored/);
+  assert.match(q.note, /Name this person/);
+});
+
+test('a thin profile is not called ready', () => {
+  /* Measured: coherent profiles of five-plus recordings were recognised at
+     0.47–0.63 while thin or incoherent ones sat at 0.19–0.41. "Ready" may claim
+     only "there is enough here to try". */
+  assert.strictEqual(readiness({ samples: 1, quarantined: 0 }).label, 'Not enough yet');
+  assert.strictEqual(readiness({ samples: 2, quarantined: 0 }).label, 'Not enough yet');
+  assert.strictEqual(readiness({ samples: 3, quarantined: 0 }).label, 'Ready');
+});
+
+test('set-aside recordings explain a number that dropped, they do not downgrade it', () => {
+  /* Quarantined samples are ALREADY excluded from the live count, so eight good
+     recordings with four set aside is exactly as ready as eight with none. The note
+     exists so somebody who saw "12" yesterday understands why it says "8" today —
+     not to warn them about a profile that is fine. */
+  const q = readiness({ samples: 8, quarantined: 4 });
+  assert.strictEqual(q.label, 'Ready');
+  assert.match(q.note, /did not sound like this person/);
+  assert.strictEqual(readiness({ samples: 8, quarantined: 0 }).note, null);
+});
+
+test('the counts are off by default and reachable', () => {
+  /* This panel is the whole of the feature's observability — before it, "empty
+     because the window was refused" and "empty because the embedder died" were the
+     same row. Hiding the numbers outright would undo that; showing them to everyone
+     is telemetry pointed at a customer. */
+  assert.match(LIBSRC, /React\.useState\(false\)/, 'the detail toggle is gone');
+  assert.match(LIBSRC, /Show the numbers/);
+  assert.doesNotMatch(LIBSRC, /'Vouched for'/,
+    'the engineering columns are back in the default view');
+});

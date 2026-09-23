@@ -13388,3 +13388,46 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 }
 .fs-ask-web__source:hover,
 .fs-ask-web__source:focus-visible { color: var(--text-primary); }
+
+/* ---- Voices: readiness, not telemetry ---- */
+/* The table said Samples / Vouched for / Set aside / Status / Last attempt. Those
+   are numbers for whoever is diagnosing a profile; a site manager opening this page
+   cannot act on any of them and has no way to tell whether 8 is good. One sentence
+   per person replaced them, and the counts moved behind a toggle. */
+.fs-voices__state {
+  line-height: 1.35;
+}
+
+/* A dot, not a coloured row: colour alone must never be the only signal, so the
+   word beside it always carries the same meaning (ACCESSIBILITY.md). */
+.fs-voices__dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: var(--space-2);
+  vertical-align: middle;
+  background: var(--text-tertiary);
+}
+.fs-voices__dot--ok   { background: var(--color-success-600); }
+.fs-voices__dot--warn { background: var(--color-warning-600); }
+.fs-voices__dot--off  { background: var(--text-tertiary); }
+
+.fs-voices__sub {
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+  margin-top: 2px;
+  max-width: 44ch;
+}
+
+.fs-voices__detail-toggle {
+  margin-top: var(--space-3);
+  padding: 4px 0;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  color: var(--text-tertiary);
+  background: none;
+  border: none;
+  text-decoration: underline;
+  cursor: pointer;
+}
