@@ -103,10 +103,61 @@ test("the server's refusal is shown as the server words it", () => {
 });
 
 test('delete is offered on the same terms the server enforces', () => {
-  /* A button that appears and then gets a 403 is worse than no button. */
-  const m = code(LIBRARY).match(/var canDelete = [\s\S]*?;\n/);
-  assert.ok(m, 'canDelete has moved');
+  /* A button that appears and then gets a 403 is worse than no button.
+     Pinned to the RULE, not to how it is spelled: deleting reuses the editing
+     gate now, which is the same rule said once instead of twice. */
+  const src = code(LIBRARY);
+  const del = src.match(/var canDelete = [^;]*;/);
+  assert.ok(del, 'canDelete has moved');
+  const edit = src.match(/var canEdit = [^;]*;/);
+  assert.ok(edit, 'canEdit has moved');
+  const rule = /canEdit/.test(del[0]) ? edit[0] : del[0];
+  assert.match(rule, /sel\.scope === 'personal'/);
+  assert.match(rule, /template:manage:self/);
+  assert.match(rule, /canManageOrg/);
+});
+
+/* ---- editing is not scheduling --------------------------------------------- */
+
+test('THE regression test: the Edit tab does not depend on scheduling rights', () => {
+  /* It did. `canActivate` answered both "may you change this template?" and
+     "may the scheduled reports use it?", and its old rule -- you may always
+     manage your own -- happened to answer the first correctly. Narrowing it to
+     org + schedulable + gm/admin was right for scheduling and took the Edit
+     tab away from every personal template with it: people could no longer edit
+     the templates they had just made.
+
+     One name, two meanings, and a change made for one of them. */
+  const src = code(LIBRARY);
+  /* Walk back from the tab's own label to whatever guards it. */
+  const at = src.indexOf("}, 'Edit') : null");
+  assert.ok(at > 0, 'the Edit tab has moved');
+  const guards = [...src.slice(Math.max(0, at - 400), at).matchAll(/(can\w+) \?/g)]
+    .map((m) => m[1]);
+  assert.ok(guards.length, 'the Edit tab is no longer guarded by a can* flag');
+  assert.strictEqual(guards[guards.length - 1], 'canEdit',
+    'the Edit tab must follow canEdit, not ' + guards[guards.length - 1]);
+});
+
+test('rolling a version back follows editing too, not scheduling', () => {
+  const m = code(LIBRARY).match(/canManage:\s*can\w+/);
+  assert.ok(m, 'the history panel prop has moved');
+  assert.match(m[0], /canEdit/);
+});
+
+test('editing your own personal template needs nothing but owning it', () => {
+  const m = code(LIBRARY).match(/var canEdit = [^;]*;/);
+  assert.ok(m);
   assert.match(m[0], /sel\.scope === 'personal'/);
   assert.match(m[0], /template:manage:self/);
-  assert.match(m[0], /canManageOrg/);
+  assert.ok(!/isSchedulable/.test(m[0]),
+    'whether a report type runs on a schedule has nothing to do with editing it');
+});
+
+test('a template you cannot edit says so, rather than showing one tab fewer', () => {
+  /* A missing tab is not an explanation: two tabs where a colleague sees
+     three reads as a fault. Fourth time today that two states looked alike. */
+  assert.match(LIBRARY, /fs-library__right-readonly/);
+  assert.match(LIBRARY, /an admin or GM can change it/);
+  assert.match(LIBRARY, /copy it to your library/);
 });

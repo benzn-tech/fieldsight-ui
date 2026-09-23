@@ -11331,6 +11331,15 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   padding: 7px 10px; font-size: 13px; text-align: left;
   border: 1px dashed var(--border-subtle, #e5e7eb); border-radius: 6px;
 }
+.fs-library__right-readonly {
+  margin: 0 0 8px; padding: 8px 10px;
+  font-size: 12px; line-height: 1.5;
+  color: var(--text-secondary, #6b7280);
+  background: var(--surface-subtle, #f9fafb);
+  border: 1px solid var(--border-subtle, #e5e7eb);
+  border-radius: 6px;
+}
+
 .fs-library__editor-add-btn:hover {
   border-color: var(--border-strong, #9ca3af);
   color: var(--text-primary, #111827);
