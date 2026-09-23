@@ -11280,6 +11280,63 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 }
 .fs-library__editor-section-input:focus { background: var(--surface-input); }
 
+/* --- add / describe a section ------------------------------------------- */
+
+/* The purpose sits on its own line under the heading, full width, because it
+   is a sentence and not a label -- squeezing it beside the title would say it
+   matters less than the heading, and it is the half the model actually reads. */
+.fs-library__editor-section-hint {
+  display: flex; gap: 6px; align-items: center;
+  width: 100%; margin-top: 4px; padding-left: 26px;
+}
+
+.fs-library__editor-kind-select {
+  flex: none;
+  font-size: 11px; padding: 2px 4px;
+  border: 1px solid var(--border-subtle, #e5e7eb);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary, #6b7280);
+}
+
+.fs-library__editor-hint-input {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 12px; padding: 3px 6px;
+  border: 1px solid transparent; border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary, #6b7280);
+}
+.fs-library__editor-hint-input::placeholder { opacity: 0.7; }
+.fs-library__editor-hint-input:hover { border-color: var(--border-subtle, #e5e7eb); }
+.fs-library__editor-hint-input:focus {
+  background: var(--surface-input);
+  border-color: var(--border-strong, #9ca3af);
+  color: var(--text-primary, #111827);
+}
+
+.fs-library__editor-addchild-btn,
+.fs-library__editor-add-btn {
+  background: none; cursor: pointer;
+  color: var(--text-secondary, #6b7280);
+}
+.fs-library__editor-addchild-btn {
+  border: 0; font-size: 14px; line-height: 1; padding: 0 4px;
+}
+.fs-library__editor-addchild-btn:hover { color: var(--text-primary, #111827); }
+
+/* Dashed, and the width of the list: it is where the next section goes, not
+   a command sitting off to one side. */
+.fs-library__editor-add-btn {
+  display: block; width: 100%; margin-top: 8px;
+  padding: 7px 10px; font-size: 13px; text-align: left;
+  border: 1px dashed var(--border-subtle, #e5e7eb); border-radius: 6px;
+}
+.fs-library__editor-add-btn:hover {
+  border-color: var(--border-strong, #9ca3af);
+  color: var(--text-primary, #111827);
+}
+
+
 .fs-library__editor-section-controls {
   display: flex;
   align-items: center;
