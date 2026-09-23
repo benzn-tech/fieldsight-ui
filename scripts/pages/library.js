@@ -490,7 +490,17 @@
     );
   }
 
-  /* ── B.4 Schema Editor (rename / reorder / delete) ─────────────────── */
+  /* ── Schema editor: add / describe / rename / reorder / delete ───────
+     A blank section is added with empty fields on purpose. The alternative is
+     seeding it with placeholder wording, and a section's `purpose` IS THE
+     PROMPT -- "Describe this section" would be handed to the model as an
+     instruction and dutifully written up. Empty and refused beats plausible
+     and wrong.
+
+     So the editor enforces the rule the server enforces: every section needs
+     a title and a purpose. Checked here as well, not instead -- the server
+     stays the authority -- because a save that bounces after a round trip
+     makes the person hunt for which of nine sections it meant. */
 
   function SchemaEditor(props) {
     var templateId = props.templateId;
@@ -604,13 +614,16 @@
 
     /* ── Mutations ───────────────────────────────────────────────────── */
 
-    function rename(p, val) {
+    /* One walker for every per-section edit. rename() had its own recursion;
+       a second and third copy for the hint and the kind is three places to fix
+       when the nesting rule changes. */
+    function editAt(p, change) {
       setSections(function (prev) {
         var idx = pathToArr(p);
         function rec(list, i) {
           var copy = list.slice();
           if (i === idx.length - 1) {
-            copy[idx[i]] = Object.assign({}, copy[idx[i]], { title: val });
+            copy[idx[i]] = change(copy[idx[i]]);
             return copy;
           }
           copy[idx[i]] = Object.assign({}, copy[idx[i]], {
@@ -620,6 +633,45 @@
         }
         return rec(prev, 0);
       });
+    }
+
+    /* Both halves of a section are editable. `prompt_hint` was display-only,
+       so a template's headings could be changed and what each heading was FOR
+       could not -- and that sentence is the only part of a section the model
+       actually reads. Adding sections without it would be adding empty ones. */
+    function setHint(p, val) {
+      editAt(p, function (sec) { return Object.assign({}, sec, { prompt_hint: val }); });
+    }
+
+    function setKind(p, val) {
+      editAt(p, function (sec) { return Object.assign({}, sec, { kind: val }); });
+    }
+
+    var addedKey = React.useRef ? React.useRef(null) : { current: null };
+
+    function blankSection() {
+      var key = 'new-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+      addedKey.current = key;
+      return { title: '', kind: 'narrative', fields: [], prompt_hint: '',
+               children: [], _key: key };
+    }
+
+    function addSection() {
+      setSections(function (prev) { return prev.concat([blankSection()]); });
+    }
+
+    /* A sub-section, under a top-level one. The nesting cap is one level, the
+       same cap dragging enforces, so this is offered on parents only. */
+    function addChild(p) {
+      editAt(p, function (sec) {
+        return Object.assign({}, sec, {
+          children: (sec.children || []).concat([blankSection()]),
+        });
+      });
+    }
+
+    function rename(p, val) {
+      editAt(p, function (sec) { return Object.assign({}, sec, { title: val }); });
     }
 
     function del(p) {
@@ -680,7 +732,36 @@
       });
     }
 
+    /* The server's rule, checked here as well and never instead: every section
+       needs a title and a purpose, because render_prompt writes one heading
+       per section and the purpose under it is the instruction. Returns the
+       first offender by name so the message can point at it -- "a section is
+       incomplete" across nine of them is a hunt. */
+    function firstIncomplete(list, trail) {
+      for (var i = 0; i < list.length; i += 1) {
+        var sec = list[i];
+        var where = (trail ? trail + ' › ' : '') + (sec.title || '').trim();
+        if (!(sec.title || '').trim()) {
+          return { what: 'a title', where: trail || 'the list', nth: i + 1 };
+        }
+        if (!(sec.prompt_hint || '').trim()) {
+          return { what: 'a description', where: where, nth: i + 1 };
+        }
+        var inner = firstIncomplete(sec.children || [], where);
+        if (inner) return inner;
+      }
+      return null;
+    }
+
     function save() {
+      var gap = firstIncomplete(sections, '');
+      if (gap) {
+        setSaveErr(gap.what === 'a title'
+          ? ('Section ' + gap.nth + ' needs a title before this can be saved.')
+          : ('“' + gap.where + '” needs a description — that sentence is '
+             + 'what tells the report what belongs in the section.'));
+        return;
+      }
       setSaving(true); setSaveErr(null);
       function strip(arr) {
         return arr.map(function (s) {
@@ -808,9 +889,17 @@
           value:       sec.title,
           onChange:    function (e) { rename(p, e.target.value); },
           'aria-label': 'Section title',
+          placeholder: 'Section heading',
           maxLength:   80,
+          autoFocus:   sec._key === addedKey.current,
         }),
         React.createElement('div', { className: 'fs-library__editor-section-controls' },
+          /* A sub-section, one level only -- the same cap dragging enforces. */
+          !isChild && React.createElement('button', {
+            type: 'button', className: 'fs-library__editor-addchild-btn',
+            onClick: function () { addChild(p); },
+            'aria-label': 'Add a sub-section', title: 'Add a sub-section',
+          }, '+'),
           isChild && React.createElement('button', {
             type: 'button', className: 'fs-library__editor-promote-btn',
             onClick: function () { promote(p); },
@@ -821,6 +910,31 @@
             onClick: function () { del(p); }, disabled: sections.length <= 1 && !isChild,
             'aria-label': 'Delete section', title: 'Delete',
           }, '×'),
+        ),
+
+        /* WHAT THE SECTION IS FOR. This sentence is the only part of a section
+           the model reads -- the heading is just a heading. It was display-only
+           until now, so a template's headings could be changed and their
+           meaning could not. The label says so plainly, because somebody
+           filling it in is writing an instruction, not a caption. */
+        React.createElement('div', { className: 'fs-library__editor-section-hint' },
+          React.createElement('select', {
+            className:   'fs-library__editor-kind-select',
+            value:       sec.kind || 'narrative',
+            onChange:    function (e) { setKind(p, e.target.value); },
+            'aria-label': 'How this section is laid out',
+            title:       'How this section is laid out',
+          }, Object.keys(KIND_LABEL).map(function (k) {
+            return React.createElement('option', { key: k, value: k }, KIND_LABEL[k]);
+          })),
+          React.createElement('input', {
+            className:   'fs-library__editor-hint-input',
+            value:       sec.prompt_hint || '',
+            onChange:    function (e) { setHint(p, e.target.value); },
+            'aria-label': 'What goes in this section',
+            placeholder: 'What goes in this section — e.g. "Hazards raised, and whether a control was agreed"',
+            maxLength:   400,
+          }),
         ),
         /* Recursive children (only top-level can have children — 1-level cap) */
         !isChild && sec.children && sec.children.length > 0
@@ -840,7 +954,10 @@
         React.createElement('strong', null, 'into the middle'),
         ' of another to make it a sub-section. Use ',
         React.createElement('strong', null, '↤'),
-        ' on a sub-section to promote it back to top level. Re-upload to change a section\'s kind.'
+        ' on a sub-section to promote it back to top level.'
+        /* "Re-upload to change a section's kind" used to end this sentence.
+           It was wrong twice over: the kind is editable in place now, and
+           re-uploading never read the file anyway. */
       ),
 
       React.createElement('ol', { className: 'fs-library__editor-section-list' },
@@ -848,6 +965,16 @@
           return renderSectionRow(sec, '' + idx, false, sections.length);
         }),
       ),
+
+      /* Below the list, because that is where the new one appears. A blank
+         section is deliberately blank: seeding it with placeholder wording
+         would put that wording in the prompt, and the model would write it up
+         as an instruction. */
+      React.createElement('button', {
+        type:      'button',
+        className: 'fs-library__editor-add-btn',
+        onClick:   addSection,
+      }, '+ Add section'),
 
       React.createElement('div', { className: 'fs-library__editor-footer' },
         React.createElement('label', { className: 'fs-library__editor-change-label' }, 'Change note'),
