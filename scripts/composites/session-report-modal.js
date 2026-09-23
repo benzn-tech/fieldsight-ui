@@ -288,7 +288,7 @@
         onChange: function (e) {
           var id = e.target.value || null;
           var row = st.rows.filter(function (t) { return t.id === id; })[0];
-          props.onChoose(id, row && row.version);
+          props.onChoose(id, row && row.version, row && row.title);
         },
       }, options),
       st.phase === 'error'
@@ -400,6 +400,9 @@
     var s_checked = React.useState({}); var checked = s_checked[0], setChecked = s_checked[1];
     var s_wf = React.useState(''); var winFrom = s_wf[0], setWinFrom = s_wf[1];
     var s_wt = React.useState(''); var winTo = s_wt[0], setWinTo = s_wt[1];
+    /* Only for the bell's label -- the request carries the id and version. */
+    var s_tname = React.useState(null);
+    var chosenTemplateName = s_tname[0], setChosenTemplateName = s_tname[1];
 
     function sid() { return props.session ? props.session.session_id : null; }
 
@@ -501,7 +504,26 @@
         var v = interpretReportStatus(res, props.scope);
         if (v.phase === 'error') { setError(v.message); setStep('error'); return; }
         if (v.phase === 'done') { setResult(v); setStep('done'); return; }
-        if (res && res.requestId) { setReqId(res.requestId); }      // hands off to the poll effect
+        if (res && res.requestId) {
+          setReqId(res.requestId);                                  // hands off to the poll effect
+          /* AND to the bell, which is what makes leaving safe. The modal's
+             own poll stops when it closes -- that is the moment somebody
+             walks away, which for a report that takes minutes is most of
+             them. The store keeps asking, survives a reload, and the bell
+             is where the answer turns up. Registering here rather than in
+             the poll effect means it is recorded even if this window is
+             shut a second later. */
+          if (window.FS && window.FS.reportJobs) {
+            window.FS.reportJobs.track({
+              requestId: res.requestId,
+              label: (form.title || '').trim()
+                     || (props.scope === 'day' ? 'Day report' : 'Session report'),
+              templateName: chosenTemplateName,
+              scope: props.scope, sessionId: sid(), date: props.date,
+              user: props.userFolder,
+            });
+          }
+        }
         else { setError(generateErrorMessage(res)); setStep('error'); }
       }).catch(function () { setError('Could not start report generation.'); setStep('error'); });
     }
@@ -592,10 +614,11 @@
     } else if (step === 'fill') {
       body = h(FillStep, {
         form: form, setForm: setForm,
-        onChooseTemplate: function (id, version) {
+        onChooseTemplate: function (id, version, name) {
           setForm(function (f) {
             return Object.assign({}, f, { templateId: id, templateVersion: id ? version : null });
           });
+          setChosenTemplateName(id ? (name || null) : null);
           /* Choosing a template while Email is selected would leave the form in
              the one state the backend refuses. Fall back to download rather
              than letting Generate be dead with no explanation. */
@@ -616,7 +639,17 @@
           onRecipients: function (v) { setRecipText(v); setRecip(parseAttendees(v)); },
         }));
     } else if (step === 'generating') {
-      body = h('div', { className: 'fs-srm__step' }, h('p', null, 'Generating your report…'));
+      body = h('div', { className: 'fs-srm__step' },
+        h('p', null, 'Generating your report…'),
+        /* SAY THAT WAITING IS OPTIONAL, here, where the waiting happens.
+           Writing a report takes minutes. The person who started it is often
+           standing in front of somebody, and a modal that only offers Cancel
+           reads as "stay here or lose it". Neither is true: it is being
+           written on the server, and the bell will have it. */
+        h('p', { className: 'fs-srm__hint' },
+          'This takes a few minutes. You can close this and carry on — '
+          + 'it keeps going, and the bell at the top of the page will have it '
+          + 'when it is ready.'));
     } else if (step === 'done') {
       body = h('div', { className: 'fs-srm__step fs-srm__done' },
         h('p', { className: 'fs-srm__done-msg' },
@@ -629,7 +662,15 @@
           : null);
     } else {  // error
       body = h('div', { className: 'fs-srm__step fs-srm__step--error' },
-        h('p', null, error || 'Something went wrong.'));
+        h('p', null, error || 'Something went wrong.'),
+        /* An error here is the REQUEST failing, which is not the same as the
+           report failing -- if it was enqueued, the bell is still following
+           it. Saying so stops somebody generating a second one. */
+        reqId
+          ? h('p', { className: 'fs-srm__hint' },
+              'If it was already started, it is still listed under the bell at '
+              + 'the top of the page.')
+          : null);
     }
 
     var footer;
@@ -649,7 +690,10 @@
         onClick: onGenerate,
       }, 'Generate report'));
     else if (step === 'generating') footer = h('footer', { className: 'fs-srm__footer' },
-      btn('Cancel', props.onClose));
+      /* "Close" and not "Cancel": pressing it stops nothing -- the report is
+         being written either way -- and a button labelled Cancel that does not
+         cancel is worse than no button. */
+      btn('Close', props.onClose, 'primary'));
     else if (step === 'done') footer = h('footer', { className: 'fs-srm__footer' },
       btn('Done', props.onClose, 'primary'));
     else footer = h('footer', { className: 'fs-srm__footer' },
