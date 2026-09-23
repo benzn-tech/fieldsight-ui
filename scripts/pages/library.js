@@ -1174,15 +1174,32 @@
        it never needs to be made active, and the footer now says that instead
        of dangling a control that cannot work. */
     var isSchedulable = ['daily', 'weekly', 'monthly'].indexOf(sel.report_type) >= 0;
+
+    /* TWO DIFFERENT QUESTIONS, and they were one variable.
+
+       canEdit  -- may you change what this template says?
+       canActivate -- may you make the SCHEDULED reports use it?
+
+       `canActivate` used to mean both, and its old rule ("you may always
+       manage your own") happened to answer the first one correctly. Narrowing
+       it to org + schedulable + gm/admin was right for scheduling and took the
+       Edit tab away from every personal template with it -- so people could no
+       longer edit the templates they had just made.
+
+       One name, two meanings, and a change made for one of them. Editing now
+       has its own gate, and it is the same rule as deleting: your own, or the
+       organisation's if you manage those. */
+    var canEdit = sel.scope === 'personal'
+      ? !!(window.FS && window.FS.can && window.FS.can(caller, 'template:manage:self'))
+      : !!canManageOrg;
     var canActivate = sel.scope === 'org' && isSchedulable && canManageOrg;
 
     /* Whoever may change a template may withdraw it: your own personal ones,
        and the organisation's if you manage those. Matches what the server
        enforces rather than guessing at it -- a button that appears and then
        gets a 403 is worse than no button. */
-    var canDelete = sel.scope === 'personal'
-      ? !!(window.FS && window.FS.can && window.FS.can(caller, 'template:manage:self'))
-      : !!canManageOrg;
+    /* Whoever may change a template may withdraw it. Same rule, said once. */
+    var canDelete = canEdit;
 
     /* ── Extracting state ── */
     if (isExtracting) {
@@ -1266,13 +1283,25 @@
       ),
 
       /* Sub-nav: Preview / Edit / History */
+      /* A MISSING TAB IS NOT AN EXPLANATION. Somebody who cannot edit this
+         template sees two tabs where a colleague sees three, and nothing on
+         the page says why -- which reads as a fault, and this is the fourth
+         time today that two different states have looked identical. */
+      !canEdit
+        ? React.createElement('p', { className: 'fs-library__right-readonly' },
+            sel.scope === 'org'
+              ? 'This is an organisation template — an admin or GM can change it. '
+                + 'To make your own version, copy it to your library.'
+              : 'You can read this template but not change it.')
+        : null,
+
       React.createElement('div', { className: 'fs-library__right-subnav', role: 'tablist' },
         React.createElement('button', {
           type: 'button', role: 'tab', 'aria-selected': view === 'preview',
           className: 'fs-library__right-tab' + (view === 'preview' ? ' fs-library__right-tab--active' : ''),
           onClick: function () { setView('preview'); },
         }, 'Preview'),
-        canActivate ? React.createElement('button', {
+        canEdit ? React.createElement('button', {
           type: 'button', role: 'tab', 'aria-selected': view === 'editor',
           className: 'fs-library__right-tab' + (view === 'editor' ? ' fs-library__right-tab--active' : ''),
           onClick: function () { setView('editor'); },
@@ -1299,7 +1328,7 @@
         ? React.createElement(VersionHistoryPanel, {
             templateId:   sel.id,
             latestSchema: schema,
-            canManage:    canActivate,
+            canManage:    canEdit,
             onRestored:   function (updated) { ctx.setSel(updated); ctx.reload(); setView('preview'); },
           })
         : /* preview */
