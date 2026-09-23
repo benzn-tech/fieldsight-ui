@@ -213,6 +213,38 @@
       }
     }
 
+    /* DELETE. The backend soft-deletes: the template leaves the library and
+       every version it ever had is kept, because a withdrawn template is still
+       the template that wrote last month's reports. The confirm says that --
+       "delete" alone would suggest the reports go with it.
+
+       The refusal that matters is 409, raised when a scheduled report still
+       points at this template. It is shown verbatim, because the server knows
+       which schedule and this page does not, and "could not delete" would send
+       someone hunting for a permissions problem that is not there. */
+    function handleDelete(tpl) {
+      if (!tpl) return;
+      var ok = window.confirm(
+        'Delete "' + tpl.title + '"?' + String.fromCharCode(10, 10)
+        + 'It is removed from the library. Reports already written to it keep '
+        + 'their own copy of it, so nothing you have sent out changes.');
+      if (!ok) return;
+      window.FS.api.templates['delete'](tpl.id).then(function () {
+        setSel(null);
+        setRetry(function (n) { return n + 1; });
+        if (window.FS && window.FS.toast) {
+          window.FS.toast.show({ message: '"' + tpl.title + '" deleted', tone: 'success' });
+        }
+      }).catch(function (err) {
+        if (window.FS && window.FS.toast) {
+          window.FS.toast.show({
+            message: (err && err.message) || 'Could not delete this template',
+            tone: 'error',
+          });
+        }
+      });
+    }
+
     function handleActivate(tpl) {
       window.FS.api.templates.activate(tpl.id).then(function (updated) {
         setRetry(function (n) { return n + 1; });
@@ -229,7 +261,7 @@
 
     return React.createElement(LibraryContext.Provider, {
       value: {
-        caller, canManageOrg, tab, setTab, state, sel, setSel,
+        caller, canManageOrg, tab, setTab, state, sel, setSel, handleDelete,
         uploadFor, setUploadFor, handleUploadComplete, handleActivate, reload,
         /* Sprint 10 follow-up — favourites */
         favIds, toggleFavourite,
@@ -1000,9 +1032,30 @@
     var ver          = sel.versions && sel.versions.length ? sel.versions[sel.versions.length - 1] : null;
     var isExtracting = sel._status === 'extracting';
 
-    var canActivate = sel.scope === 'org'
-      ? canManageOrg
-      : !!(window.FS && window.FS.can && window.FS.can(caller, 'template:manage:self'));
+    /* "ACTIVE" MEANS "THE SCHEDULED REPORT USES THIS", not "reports use this".
+       Only an organisation template can hold that job: the nightly daily,
+       weekly and monthly reports go out under the company's name, and a
+       personal template is invisible to everyone else, so nobody but its owner
+       could say what the report even was. The backend refuses the pair
+       outright ("only an organisation template can be used for a scheduled
+       report").
+
+       This used to offer the button on personal templates too, gated on
+       whether you may manage your OWN templates -- which you always may. So it
+       was offered to everybody, and every press was a round trip to a refusal.
+       A personal template is used by CHOOSING it when you generate a report;
+       it never needs to be made active, and the footer now says that instead
+       of dangling a control that cannot work. */
+    var isSchedulable = ['daily', 'weekly', 'monthly'].indexOf(sel.report_type) >= 0;
+    var canActivate = sel.scope === 'org' && isSchedulable && canManageOrg;
+
+    /* Whoever may change a template may withdraw it: your own personal ones,
+       and the organisation's if you manage those. Matches what the server
+       enforces rather than guessing at it -- a button that appears and then
+       gets a 403 is worse than no button. */
+    var canDelete = sel.scope === 'personal'
+      ? !!(window.FS && window.FS.can && window.FS.can(caller, 'template:manage:self'))
+      : !!canManageOrg;
 
     /* ── Extracting state ── */
     if (isExtracting) {
@@ -1069,6 +1122,17 @@
           React.createElement('span', { className: 'fs-library__scope-tag' }, sel.scope === 'org' ? 'Org' : 'Personal'),
         ),
         sel.description && React.createElement('p', { className: 'fs-library__right-desc' }, sel.description),
+        /* Withdraw. Quiet by design -- it is not the thing people came here to
+           do -- but present, because until now the only way to remove a
+           template was to have never made it. The server already refuses to
+           withdraw one a schedule still points at; that refusal is shown as
+           the server words it. */
+        canDelete && React.createElement('button', {
+          type: 'button',
+          className: 'fs-btn fs-btn--ghost fs-btn--sm fs-library__delete',
+          onClick: function () { ctx.handleDelete(sel); },
+          title: 'Remove this template from the library',
+        }, 'Delete template'),
         ver && React.createElement('p', { className: 'fs-library__right-version-note' },
           'Version ' + sel.versions.length + ' · updated ' + fmtDate(ver.created_at),
         ),
@@ -1144,6 +1208,22 @@
 
             /* Test render panel */
             React.createElement(TestRenderPanel, { schema: schema, reportType: sel.report_type }),
+
+            /* Says what this template IS for, when it cannot be scheduled. Not
+               a disabled button: there is nothing here the person is being
+               kept from, so offering one greyed out would invent a
+               restriction that does not exist. */
+            !canActivate && !sel.active
+              ? React.createElement('div', { className: 'fs-library__cta-footer' },
+                  React.createElement('p', { className: 'fs-library__cta-note' },
+                    sel.scope === 'personal'
+                      ? 'This is yours. Pick it when you generate a report from the timeline; personal templates are not used for the scheduled reports.'
+                      : (!isSchedulable
+                          ? 'Pick this when you generate a report from the timeline. Only daily, weekly and monthly reports run on a schedule.'
+                          : 'Only an admin or GM can choose which template the scheduled reports use.'),
+                  ),
+                )
+              : null,
 
             /* CTA footer */
             canActivate && !sel.active
