@@ -222,13 +222,16 @@
        points at this template. It is shown verbatim, because the server knows
        which schedule and this page does not, and "could not delete" would send
        someone hunting for a permissions problem that is not there. */
+    /* Deletes. The panel arms it in two steps and says what it will do, so
+       there is no confirmation here -- and deliberately no window.confirm:
+       a native dialog blocks every event that follows it in this environment.
+
+       The server refuses to delete a template a schedule still points at, and
+       that refusal names the schedule. It is shown as the server words it:
+       this page does not know which report is using it, and "could not delete"
+       would send somebody hunting for a permissions problem that is not there. */
     function handleDelete(tpl) {
       if (!tpl) return;
-      var ok = window.confirm(
-        'Delete "' + tpl.title + '"?' + String.fromCharCode(10, 10)
-        + 'It is removed from the library. Reports already written to it keep '
-        + 'their own copy of it, so nothing you have sent out changes.');
-      if (!ok) return;
       window.FS.api.templates['delete'](tpl.id).then(function () {
         setSel(null);
         setRetry(function (n) { return n + 1; });
@@ -240,6 +243,7 @@
           window.FS.toast.show({
             message: (err && err.message) || 'Could not delete this template',
             tone: 'error',
+            duration: 8000,
           });
         }
       });
@@ -1136,8 +1140,15 @@
     var viewRef = React.useState('preview');
     var view    = viewRef[0]; var setView = viewRef[1];
 
+    var confRef = React.useState(false);
+    var confirmingDelete = confRef[0]; var setConfirmingDelete = confRef[1];
+
     var selId = ctx && ctx.sel ? ctx.sel.id : null;
-    React.useEffect(function () { setView('preview'); }, [selId]);
+    React.useEffect(function () {
+      setView('preview');
+      /* An armed Delete must not follow you onto the next template. */
+      setConfirmingDelete(false);
+    }, [selId]);
 
     if (!ctx) return null;
 
@@ -1266,17 +1277,7 @@
           React.createElement('span', { className: 'fs-library__scope-tag' }, sel.scope === 'org' ? 'Org' : 'Personal'),
         ),
         sel.description && React.createElement('p', { className: 'fs-library__right-desc' }, sel.description),
-        /* Withdraw. Quiet by design -- it is not the thing people came here to
-           do -- but present, because until now the only way to remove a
-           template was to have never made it. The server already refuses to
-           withdraw one a schedule still points at; that refusal is shown as
-           the server words it. */
-        canDelete && React.createElement('button', {
-          type: 'button',
-          className: 'fs-btn fs-btn--ghost fs-btn--sm fs-library__delete',
-          onClick: function () { ctx.handleDelete(sel); },
-          title: 'Remove this template from the library',
-        }, 'Delete template'),
+
         ver && React.createElement('p', { className: 'fs-library__right-version-note' },
           'Version ' + sel.versions.length + ' · updated ' + fmtDate(ver.created_at),
         ),
@@ -1403,6 +1404,51 @@
                 )
               : null,
           ),
+
+      /* DELETE, LAST AND SMALL. Owner's call, and the three things asked for
+         -- red, at the bottom, small -- are one intent: this is destructive,
+         do not let me hit it by accident, and do not give it the weight of
+         something people came here to do. Below a rule, so it cannot read as
+         the last ordinary control of the panel above it.
+
+         Two-step, not window.confirm: a native dialog blocks every event that
+         follows it in this environment, and this repo has the scars. The
+         second press is the confirmation, and it says what it will do.
+
+         "Delete" IS the honest word, even though the server soft-deletes.
+         Nothing can bring the template back -- there is no unarchive route and
+         no UI for one -- so calling it Archive would promise a retrievability
+         that does not exist. The soft delete exists so a report written last
+         month can still say which template wrote it; that is provenance, not
+         a recycle bin. The confirm says so. */
+      canDelete
+        ? React.createElement('div', { className: 'fs-library__danger' },
+            confirmingDelete
+              ? React.createElement(React.Fragment, null,
+                  React.createElement('p', { className: 'fs-library__danger-note' },
+                    'Delete “' + sel.title + '”? This cannot be undone. '
+                    + 'Reports already written to it are not affected.'),
+                  React.createElement('div', { className: 'fs-library__danger-actions' },
+                    React.createElement('button', {
+                      type: 'button',
+                      className: 'fs-library__danger-btn fs-library__danger-btn--confirm',
+                      onClick: function () {
+                        setConfirmingDelete(false);
+                        ctx.handleDelete(sel);
+                      },
+                    }, 'Delete'),
+                    React.createElement('button', {
+                      type: 'button',
+                      className: 'fs-library__danger-cancel',
+                      onClick: function () { setConfirmingDelete(false); },
+                    }, 'Cancel')))
+              : React.createElement('button', {
+                  type: 'button',
+                  className: 'fs-library__danger-btn',
+                  onClick: function () { setConfirmingDelete(true); },
+                  title: 'Delete this template',
+                }, 'Delete template'))
+        : null,
 
     );
   }
