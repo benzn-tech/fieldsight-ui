@@ -74,10 +74,28 @@
     return schema && schema.sections ? schema.sections.length : null;
   }
 
+  /* BY VERSION NUMBER, NOT BY POSITION IN THE ARRAY.
+
+     This used to take the last element, which was right for as long as
+     versions arrived oldest-first -- the localStorage store appended them. The
+     server returns them newest-first (ORDER BY version DESC), so the same line
+     started reading the OLDEST version while looking exactly as correct as
+     before. Nothing in the shape changed; only the order did, and an index is
+     a claim about order.
+
+     Every version carries its own number. Using it makes the order of the
+     array something this function does not have an opinion about. */
+  function newestVersion(tpl) {
+    var vers = (tpl && tpl.versions) || [];
+    if (!vers.length) return null;
+    return vers.reduce(function (best, v) {
+      return (best === null || (v.version || 0) > (best.version || 0)) ? v : best;
+    }, null);
+  }
+
   function activeSchema(tpl) {
-    if (!tpl || !tpl.versions || !tpl.versions.length) return null;
-    var vers = tpl.versions;
-    return vers[vers.length - 1].schema;
+    var v = newestVersion(tpl);
+    return v ? v.schema : null;
   }
 
   /* Sample content for each section kind used in the Test Render panel */
@@ -1043,8 +1061,18 @@
     React.useEffect(function () {
       setLoad({ status: 'loading', versions: [] });
       window.FS.api.templates.listVersions(templateId).then(function (res) {
-        /* Display newest-first */
-        setLoad({ status: 'ok', versions: (res.versions || []).slice().reverse() });
+        /* SORTED, NOT REVERSED. This reversed the list, which was right when
+           versions arrived oldest-first from localStorage and became wrong the
+           day the server started sending them newest-first -- it put the
+           OLDEST at the top and hung "Current" on it. The comment above it
+           said "Display newest-first", which is what it stopped doing.
+
+           Sorting by the number each version carries says what is meant and
+           holds whichever order the response arrives in. */
+        var rows = (res.versions || []).slice().sort(function (a, b) {
+          return (b.version || 0) - (a.version || 0);
+        });
+        setLoad({ status: 'ok', versions: rows });
       }).catch(function () {
         setLoad({ status: 'error', versions: [] });
       });
@@ -1096,7 +1124,11 @@
       React.createElement('div', { className: 'fs-library__history-list' },
         versions.map(function (ver, idx) {
           var isSelected = ver.id === selVid;
-          var isLatest   = idx === 0;
+          /* The highest number, not the first row. Same reason as the sort:
+             position is a claim about order, and the order came from
+             somewhere else. */
+          var isLatest   = ver.version === Math.max.apply(null,
+            versions.map(function (v) { return v.version || 0; }));
           var diff       = isSelected ? diffSections(ver.schema) : null;
 
           return React.createElement('div', {
@@ -1183,7 +1215,7 @@
     }
 
     var schema       = activeSchema(sel);
-    var ver          = sel.versions && sel.versions.length ? sel.versions[sel.versions.length - 1] : null;
+    var ver          = newestVersion(sel);
     var isExtracting = sel._status === 'extracting';
 
     /* "ACTIVE" MEANS "THE SCHEDULED REPORT USES THIS", not "reports use this".
@@ -1294,8 +1326,13 @@
         ),
         sel.description && React.createElement('p', { className: 'fs-library__right-desc' }, sel.description),
 
+        /* THE TEMPLATE'S VERSION NUMBER, not how many versions this response
+           happened to carry. `get` sends the current one and nothing else --
+           one element -- so counting the array said "Version 1" for a template
+           on its fourth edit, every time, however many edits came after. */
         ver && React.createElement('p', { className: 'fs-library__right-version-note' },
-          'Version ' + sel.versions.length + ' · updated ' + fmtDate(ver.created_at),
+          'Version ' + (sel.current_version || ver.version || 1)
+            + ' · updated ' + fmtDate(ver.created_at),
         ),
       ),
 
