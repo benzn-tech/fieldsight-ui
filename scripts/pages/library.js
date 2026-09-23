@@ -494,6 +494,29 @@
     );
   }
 
+  /* THE EDITOR'S ROWS, AS THE SCHEMA THAT LEAVES THE PAGE.
+
+     This lived nameless inside save(), which meant the one step where a
+     person's typing becomes the thing that gets stored could not be driven by
+     a test -- so the chain from "type a sentence in the description box" to
+     "that sentence is in the prompt" had a gap in the middle, exactly where
+     today's failures have kept turning up.
+
+     `_key` and anything else the editor hangs on a row for its own purposes
+     stops here. `prompt_hint` does not: api/template-store.js maps it to
+     `purpose`, which is the sentence report_template.render_prompt writes
+     under the heading, and is the only part of a section the model reads. */
+  function sectionsToSchema(sections) {
+    function strip(arr) {
+      return arr.map(function (s) {
+        var out = { title: s.title, kind: s.kind, fields: s.fields, prompt_hint: s.prompt_hint };
+        if (s.children && s.children.length) out.children = strip(s.children);
+        return out;
+      });
+    }
+    return { sections: strip(sections || []) };
+  }
+
   /* ── Schema editor: add / describe / rename / reorder / delete ───────
      A blank section is added with empty fields on purpose. The alternative is
      seeding it with placeholder wording, and a section's `purpose` IS THE
@@ -767,14 +790,7 @@
         return;
       }
       setSaving(true); setSaveErr(null);
-      function strip(arr) {
-        return arr.map(function (s) {
-          var out = { title: s.title, kind: s.kind, fields: s.fields, prompt_hint: s.prompt_hint };
-          if (s.children && s.children.length) out.children = strip(s.children);
-          return out;
-        });
-      }
-      var newSchema = { sections: strip(sections) };
+      var newSchema = sectionsToSchema(sections);
       window.FS.api.templates.updateSchema(templateId, newSchema, changeNote || 'Edited sections').then(function (updated) {
         setSaving(false);
         if (props.onSaved) props.onSaved(updated);
