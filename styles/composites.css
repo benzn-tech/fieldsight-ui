@@ -11331,6 +11331,52 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   padding: 7px 10px; font-size: 13px; text-align: left;
   border: 1px dashed var(--border-subtle, #e5e7eb); border-radius: 6px;
 }
+/* --- delete: last, small, and unmistakably destructive ------------------- */
+
+/* Below a rule and pushed to the end, so it cannot read as the last ordinary
+   control of the panel above it. Owner asked for red, bottom, small -- three
+   requests pointing at one intent: do not let me hit this by accident, and do
+   not give it the weight of something people came here to do. */
+.fs-library__danger {
+  margin-top: 20px; padding-top: 12px;
+  border-top: 1px solid var(--border-subtle, #e5e7eb);
+}
+
+.fs-library__danger-btn {
+  padding: 4px 10px;
+  font-size: 12px; line-height: 1.4;
+  color: #fff; cursor: pointer;
+  background: var(--color-danger-600, #dc2626);
+  border: 1px solid var(--color-danger-600, #dc2626);
+  border-radius: 5px;
+}
+.fs-library__danger-btn:hover {
+  background: var(--color-danger-700, #b91c1c);
+  border-color: var(--color-danger-700, #b91c1c);
+}
+/* Visible focus, because this is the one control on the panel where arriving
+   by keyboard and not knowing where you are has a cost. */
+.fs-library__danger-btn:focus-visible {
+  outline: 2px solid var(--color-danger-700, #b91c1c);
+  outline-offset: 2px;
+}
+
+.fs-library__danger-note {
+  margin: 0 0 8px;
+  font-size: 12px; line-height: 1.5;
+  color: var(--color-danger-700, #b91c1c);
+}
+
+.fs-library__danger-actions { display: flex; gap: 8px; align-items: center; }
+
+.fs-library__danger-cancel {
+  padding: 4px 8px; font-size: 12px; cursor: pointer;
+  background: none; border: 0;
+  color: var(--text-secondary, #6b7280);
+  text-decoration: underline;
+}
+.fs-library__danger-cancel:hover { color: var(--text-primary, #111827); }
+
 .fs-library__right-readonly {
   margin: 0 0 8px; padding: 8px 10px;
   font-size: 12px; line-height: 1.5;

@@ -82,15 +82,32 @@ test('a template can be deleted at all', () => {
   assert.match(src, /Delete template/);
 });
 
-test('deleting asks first', () => {
-  assert.match(code(LIBRARY), /window\.confirm\(/);
+test('deleting asks first, and not with a native dialog', () => {
+  /* A browser dialog blocks every event that follows it in this environment,
+     and this repo has the scars. The panel arms the button instead: the first
+     press shows what it will do, the second does it. */
+  const src = code(LIBRARY);
+  assert.ok(!/window\.confirm\(/.test(src), 'a native dialog is back');
+  assert.match(src, /confirmingDelete/);
+  assert.match(src, /setConfirmingDelete\(true\)/, 'the first press must only arm it');
 });
 
-test('the confirm says the reports already written are safe', () => {
-  /* The server soft-deletes and keeps every version, because a withdrawn
-     template is still the template that wrote last month's reports. "Delete"
-     on its own would suggest they go with it. */
-  assert.match(LIBRARY, /Reports already written to it keep/);
+test('an armed delete does not follow you onto another template', () => {
+  /* Selecting a different template must disarm it, or the second press lands
+     on something the person never meant to delete. */
+  const m = code(LIBRARY).match(/React\.useEffect\(function \(\) \{[\s\S]*?\}, \[selId\]\);/);
+  assert.ok(m, 'the selection effect has moved');
+  assert.match(m[0], /setConfirmingDelete\(false\)/);
+});
+
+test('the confirmation says it cannot be undone, and what survives it', () => {
+  /* "Delete" is the honest word even though the server soft-deletes: there is
+     no unarchive route and no UI for one, so nothing can bring it back.
+     Calling it Archive would promise a retrievability that does not exist.
+     The soft delete exists so last month's report can still name the template
+     that wrote it -- provenance, not a recycle bin. */
+  assert.match(LIBRARY, /This cannot be undone/);
+  assert.match(LIBRARY, /Reports already written to it are not affected/);
 });
 
 test("the server's refusal is shown as the server words it", () => {
@@ -160,4 +177,26 @@ test('a template you cannot edit says so, rather than showing one tab fewer', ()
   assert.match(LIBRARY, /fs-library__right-readonly/);
   assert.match(LIBRARY, /an admin or GM can change it/);
   assert.match(LIBRARY, /copy it to your library/);
+});
+
+test('delete is last on the panel, small and red, behind a rule', () => {
+  /* Owner asked for red, bottom, small. Three requests, one intent: this is
+     destructive, do not let me hit it by accident, and do not give it the
+     weight of something people came here to do. Position is part of the
+     answer, so it is asserted rather than left to whoever edits next. */
+  const src = code(LIBRARY);
+  const danger = src.indexOf('fs-library__danger');
+  const cta = src.lastIndexOf('fs-library__cta-footer');
+  assert.ok(danger > 0, 'the delete block has moved');
+  assert.ok(danger > cta, 'delete must come after the panel it follows');
+
+  const css = read('styles', 'composites.css');
+  const rule = css.match(/\.fs-library__danger \{[^}]*\}/);
+  assert.ok(rule, 'the separator has gone');
+  assert.match(rule[0], /border-top/, 'it must be set off from what precedes it');
+
+  const btn = css.match(/\.fs-library__danger-btn \{[^}]*\}/);
+  assert.ok(btn, 'the button style has gone');
+  assert.match(btn[0], /danger/, 'it must be red');
+  assert.match(btn[0], /font-size: 12px/, 'it must be small');
 });
