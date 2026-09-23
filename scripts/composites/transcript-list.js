@@ -690,9 +690,18 @@
               + 'Nothing was rewritten.');
             return;
           }
-          settle('done', 'Asked for. The summary, action items and draft email are '
-            + 'rewritten in the background — usually a few minutes. Reload the report to '
-            + 'see them.');
+          /* Says what is rewritten and what is NOT. The extraction re-runs and replaces the
+             topics and action items, and the draft-email preview is built from those, so it
+             picks the names up. An email that has already been SENT is neither changed nor
+             re-sent: `_final_email_context` returns None unless the session is still
+             `finalizing`, which a session somebody is reading a transcript of is not.
+
+             The earlier wording said "the summary, action items and draft email are
+             rewritten", which reads as a correction going out to the people who got the
+             first one. Nothing does. */
+          settle('done', 'Asked for. The summary and action items are rewritten in the '
+            + 'background — usually a few minutes — and the draft email is built from '
+            + 'them. An email already sent is not changed. Reload the report to see it.');
         })
         .catch(function () {
           settle(null, 'Could not ask for a rewrite.');
