@@ -116,6 +116,40 @@
     var selRef    = React.useState(null);
     var sel       = selRef[0]; var setSel = selRef[1];
 
+    /* OPENING A TEMPLATE FETCHES IT.
+       Clicking a row selects the row, and a row comes from the LIST, which
+       deliberately carries no bodies -- returning every version of every
+       template to draw a list would be absurd. So the selected template has
+       to be completed, and opening one is exactly the moment its sections are
+       needed.
+
+       This is the half that was missing when the API was fixed to return
+       sections on `get`: nothing called `get`. The endpoint was correct and
+       unreachable, the panel still had nothing to render, and the backend
+       test passed the whole time because it asked the API a question the page
+       never asked.
+
+       Runs only when there is something to fetch: a template whose
+       current_version is 0 has no body to complete, and one that already has
+       its versions is whole -- which is also what stops this from looping,
+       since the fetch replaces `sel` with a version-carrying copy. */
+    React.useEffect(function () {
+      if (!sel || !sel.id) return undefined;
+      if (sel.versions && sel.versions.length) return undefined;
+      if (!sel.current_version) return undefined;
+      var api = window.FS && window.FS.api && window.FS.api.templates;
+      if (!api || !api.get) return undefined;
+      var alive = true;
+      api.get(sel.id).then(function (full) {
+        /* Only when it actually arrived with content. Replacing the selection
+           with another empty copy would swap one silent failure for a loop. */
+        if (alive && full && full.versions && full.versions.length) setSel(full);
+      }).catch(function () {
+        /* The panel says what it can see; it does not need a second voice. */
+      });
+      return function () { alive = false; };
+    }, [sel && sel.id, sel && sel.versions && sel.versions.length]);
+
     var uploadRef = React.useState(null);  /* null | 'org' | 'personal' */
     var uploadFor = uploadRef[0]; var setUploadFor = uploadRef[1];
 
