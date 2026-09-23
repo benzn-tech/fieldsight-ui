@@ -76,7 +76,8 @@
            would say this company has enrolled nobody, a different claim. */
         if (res && res._notFound) { setState({ status: 'disabled', rows: [] }); return; }
         if (res && res._accessDenied) { setState({ status: 'denied', rows: [] }); return; }
-        setState({ status: 'ready', rows: (res && res.voiceprints) || [] });
+        setState({ status: 'ready', rows: (res && res.voiceprints) || [],
+                   basis: res && res.consentBasis });
       }).catch(function () {
         if (!cancelled) setState({ status: 'error', rows: [] });
       });
@@ -139,11 +140,22 @@
     } else if (state.status === 'unavailable' || state.status === 'error') {
       body = hint('Could not read the voice library.');
     } else if (!state.rows.length) {
-      /* Empty is the expected state on every company today, and saying WHY
-         stops it reading as a fault: no company has settled a consent basis,
-         so the strict rule applies and nothing enrols. */
-      body = hint('No voices stored. A voice is only stored when somebody names a speaker '
-        + 'AND records that the person agreed.');
+      /* TWO different empties, and only one of them is somebody's to fix.
+         Collapsing them is the failure this whole panel exists to end: before it,
+         "empty because the enrolment window was refused" and "empty because the
+         embedder died" were also the same row.
+
+         No consent basis  -> naming a speaker creates no profile AT ALL, so this
+                              library stays empty for ever until somebody settles
+                              one. Actionable, and nothing on screen said so.
+         Basis settled     -> the ordinary new-company empty. Nobody has been
+                              named yet; naming somebody will fill it. */
+      body = state.basis
+        ? hint('No voices stored yet. One is stored the first time somebody names a '
+               + 'speaker and records that the person agreed.')
+        : hint('No voices stored, and none can be: this company has not settled a '
+               + 'consent basis, so naming a speaker records the name but stores no '
+               + 'voice. A platform admin sets it above.');
     } else {
       /* Wrapped so the table scrolls sideways instead of overflowing its
          container. The narrow target here is real — 320x427dp — and a table
@@ -152,7 +164,7 @@
         React.createElement('table', { className: 'fs-voices__table' },
         React.createElement('thead', null,
           React.createElement('tr', null,
-            ['Name', 'Samples', 'Vouched for', 'Status', 'Last attempt', ''].map(
+            ['Name', 'Samples', 'Vouched for', 'Set aside', 'Status', 'Last attempt', ''].map(
               function (h, i) { return React.createElement('th', { key: i }, h); }))),
         React.createElement('tbody', null,
           state.rows.map(function (r) {
@@ -164,6 +176,15 @@
               React.createElement('td', null, String(r.samples != null ? r.samples : 0)),
               React.createElement('td', null,
                 String(r.humanSamples != null ? r.humanSamples : 0)),
+              /* Why a well-stocked profile can still match badly. Measured: a profile
+                 holding twelve samples, four of them a wind recording, scored 0.192
+                 where its eight real ones score 0.257. Without this column that
+                 profile reads as the healthiest in the company. */
+              React.createElement('td', {
+                title: r.quarantined
+                  ? 'Samples that do not sound like the rest of this profile. They are '
+                    + 'kept but do not match.' : undefined,
+              }, String(r.quarantined != null ? r.quarantined : 0)),
               React.createElement('td', null, r.status || ''),
               React.createElement('td', { title: r.lastAttemptDetail || '' },
                 r.lastAttemptOutcome
