@@ -135,6 +135,39 @@
     };
   }
 
+  /* THE TWO WAYS THE FORM CHANGES, as named functions rather than object
+     literals written inline in two effects.
+
+     They are here because the second one was a WHITELIST NOBODY KNEW WAS A
+     WHITELIST. It rebuilt the form from a fixed field list -- templateId,
+     title, attendees, fields -- so when templateVersion was added to the form
+     it was silently dropped the moment the preview landed. The request then
+     carried a template and no version, which is the exact shape of the bug one
+     batch earlier in scripts/api/org.js, reproduced one layer in.
+
+     An object literal that enumerates the fields it keeps is a whitelist. It
+     does not look like one, it has no name, and nothing fails when a new field
+     appears -- it just stops arriving. So: spread, and a test that drives a
+     real choice through both of these into the final payload. */
+
+  function applyPreviewDefaults(form, defaults) {
+    /* Only what the preview knows: the title and attendees it worked out.
+       Everything else the person has already chosen survives. */
+    return Object.assign({}, form, {
+      title: defaults.title,
+      attendees: defaults.attendees,
+    });
+  }
+
+  function applyTemplateChoice(form, id, version) {
+    /* Both together, always. An id with no version is a request the backend
+       can only serve by guessing which version was meant. */
+    return Object.assign({}, form, {
+      templateId: id,
+      templateVersion: id ? version : null,
+    });
+  }
+
   function parseAttendees(text) {
     // Fill-step textarea (one name per line, or comma-separated) -> trimmed,
     // de-blanked array (the F1 generate body's `attendees`). Also parses the
@@ -436,9 +469,7 @@
         }
         setPreview(res);
         var d = previewFieldDefaults(res);
-        setForm(function (f) {
-          return { templateId: f.templateId, title: d.title, attendees: d.attendees, fields: f.fields };
-        });
+        setForm(function (f) { return applyPreviewDefaults(f, d); });
       }).catch(function () { if (alive) setPreviewErr('Could not load the preview.'); });
       return function () { alive = false; };
     }, [props.open]);
@@ -615,9 +646,7 @@
       body = h(FillStep, {
         form: form, setForm: setForm,
         onChooseTemplate: function (id, version, name) {
-          setForm(function (f) {
-            return Object.assign({}, f, { templateId: id, templateVersion: id ? version : null });
-          });
+          setForm(function (f) { return applyTemplateChoice(f, id, version); });
           setChosenTemplateName(id ? (name || null) : null);
           /* Choosing a template while Email is selected would leave the form in
              the one state the backend refuses. Fall back to download rather
@@ -710,7 +739,7 @@
 
   // Pure-helper export for node --test (browser ignores this).
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { buildGeneratePayload: buildGeneratePayload, interpretReportStatus: interpretReportStatus, previewFieldDefaults: previewFieldDefaults, parseAttendees: parseAttendees, canGenerate: canGenerate, STEPS: STEPS,
+    module.exports = { buildGeneratePayload: buildGeneratePayload, interpretReportStatus: interpretReportStatus, previewFieldDefaults: previewFieldDefaults, parseAttendees: parseAttendees, canGenerate: canGenerate, STEPS: STEPS, applyPreviewDefaults: applyPreviewDefaults, applyTemplateChoice: applyTemplateChoice, emailBlockedBecause: emailBlockedBecause,
       parseTimeRange: parseTimeRange, parseClock: parseClock, overlapsWindow: overlapsWindow, windowChecked: windowChecked, selectedRowIds: selectedRowIds,
       previewErrorMessage: previewErrorMessage, generateErrorMessage: generateErrorMessage, noFolderMappingMessage: noFolderMappingMessage };
   }
