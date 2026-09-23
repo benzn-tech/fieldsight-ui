@@ -60,15 +60,86 @@ test('end_sec is chunk_start + duration, never chunk_start + (end - start)', () 
     'fixture must keep a seam gap, or the test proves nothing');
 });
 
-test('the correction body never asks for consent', () => {
+test('naming alone still asks for no consent', () => {
   const body = sn.correctionBody(SEAM_SEGMENT, { user: 'Benl1', displayName: 'Ben L' });
-  /* Consent stores a voiceprint — biometric data, and the consent required is
-     that of the person whose voice it is. Phase 1 ships no consent UI. */
+  /* Consent stores a voiceprint — biometric data, and the consent required is that of the
+     person whose voice it is. The consent surface exists since 2026-09-22, and this pins
+     that the DEFAULT is unchanged: a caller who does not go through that surface enrols
+     nobody, exactly as before it existed. */
   assert.strictEqual(body.consent_given, false);
   assert.strictEqual(body.consented_by, null);
   assert.strictEqual(body.display_name, 'Ben L');
   assert.strictEqual(body.user, 'Benl1');
   assert.strictEqual(body.source_filename, SEAM_SEGMENT.source_filename);
+});
+
+test('consent travels only with a resolved subject id', () => {
+  /* The backend refuses `consent_given` without `consented_by` ("record whose voice this
+     is, not who is doing the labelling"). A half-filled consent would 400 — and, worse,
+     would look to the user like they had recorded an agreement. */
+  const half = sn.correctionBody(SEAM_SEGMENT, {
+    user: 'Benl1', displayName: 'Ben L', consentGiven: true,
+  });
+  assert.strictEqual(half.consent_given, false, 'consent without a subject must not travel');
+  assert.strictEqual(half.consented_by, null);
+
+  const full = sn.correctionBody(SEAM_SEGMENT, {
+    user: 'Benl1', displayName: 'Ben L', consentGiven: true, consentedBy: 'u-123',
+  });
+  assert.strictEqual(full.consent_given, true);
+  assert.strictEqual(full.consented_by, 'u-123');
+});
+
+test('consent is never implied by a truthy value that is not true', () => {
+  /* `consentGiven: 'false'` and `consentGiven: 1` are both things a caller can produce by
+     accident from a form value or a query string. Only the boolean counts. */
+  ['false', 1, 'on', {}].forEach((v) => {
+    const body = sn.correctionBody(SEAM_SEGMENT, {
+      displayName: 'Ben L', consentGiven: v, consentedBy: 'u-123',
+    });
+    assert.strictEqual(body.consent_given, false, `consentGiven=${JSON.stringify(v)}`);
+    assert.strictEqual(body.consented_by, null);
+  });
+});
+
+test('a name shared by two people resolves to neither', () => {
+  /* Picking one of them would attach a voiceprint AND a consent record to the wrong
+     person, and nothing downstream could tell. */
+  const members = [
+    { id: 'u-1', name: 'Jesse' },
+    { id: 'u-2', name: 'Jesse' },
+    { id: 'u-3', name: 'Ben L' },
+  ];
+  assert.strictEqual(sn.subjectIdForName('Jesse', members), null);
+  assert.strictEqual(sn.subjectIdForName('ben l', members), 'u-3', 'case-insensitive');
+  assert.strictEqual(sn.subjectIdForName('Nobody', members), null);
+  assert.strictEqual(sn.subjectIdForName('', members), null);
+});
+
+test('a member with no id cannot be a consent subject', () => {
+  /* The roster carries people the org-api returned without an id in some shapes. Treating
+     a missing id as a match would send `consented_by: undefined`. */
+  assert.strictEqual(sn.subjectIdForName('Ben L', [{ name: 'Ben L' }]), null);
+});
+
+test('the consent control explains its own absence', () => {
+  /* Two different causes must not produce the same silence: the feature being off here is
+     not something the user can act on, and a person missing from the roster is. */
+  const off = sn.consentOffer({ featureAvailable: false, displayName: 'Ben L', members: [] });
+  assert.strictEqual(off.offer, false);
+  assert.strictEqual(off.reason, null, 'feature off says nothing — there is nothing to do');
+
+  const unknown = sn.consentOffer({
+    featureAvailable: true, displayName: 'A Subcontractor', members: [{ id: 'u-1', name: 'Ben L' }],
+  });
+  assert.strictEqual(unknown.offer, false);
+  assert.ok(unknown.reason && unknown.reason.length > 20,
+    'a person off the roster must be told why, because they can fix it');
+
+  const ok = sn.consentOffer({
+    featureAvailable: true, displayName: 'Ben L', members: [{ id: 'u-1', name: 'Ben L' }],
+  });
+  assert.deepStrictEqual({ offer: ok.offer, id: ok.id }, { offer: true, id: 'u-1' });
 });
 
 test('the session reference carries both a date and a sid', () => {
@@ -501,4 +572,125 @@ test('one real name among the labels is still placed by position', () => {
      label from the count does not make the surviving name's position reliable;
      it is one name against two speakers, which is the case above. */
   assert.equal(sn.hintIsAmbiguous(['spk_0', 'Ben'], 2), true);
+});
+
+/* --- regenerating the report with confirmed names ------------------------- */
+
+const SID_A = 'sid' + 'a'.repeat(32);
+const SID_B = 'sid' + 'b'.repeat(32);
+
+function sessionSeg(sid, name, state) {
+  return {
+    source_filename: 'Benl1_2026-09-10_09-00-00_' + sid + '_c0000_srcwav.json',
+    speaker_name: name,
+    speaker_state: state,
+  };
+}
+
+test('only confirmed names reach the regenerate control', () => {
+  /* `tentative` is the system's guess — propagation caps every inferred name at it on
+     purpose. The backend skips them too, so offering the control on a tentative name
+     queues a paid model call that changes nothing. */
+  const out = sn.confirmedSessions([
+    sessionSeg(SID_A, 'Ben L', 'confirmed'),
+    sessionSeg(SID_A, 'Mike', 'tentative'),
+    sessionSeg(SID_A, '', 'confirmed'),
+  ]);
+  assert.strictEqual(out.length, 1);
+  assert.deepStrictEqual(out[0].names, ['Ben L']);
+});
+
+test('a day holding two meetings offers each one separately', () => {
+  /* A control that sent the first session id it found would leave the other stale, and
+     nothing on screen would say so. */
+  const out = sn.confirmedSessions([
+    sessionSeg(SID_A, 'Ben L', 'confirmed'),
+    sessionSeg(SID_B, 'Mike', 'confirmed'),
+    sessionSeg(SID_B, 'Ben L', 'confirmed'),
+  ]);
+  assert.deepStrictEqual(out.map((x) => x.sessionBase), [SID_A, SID_B]);
+  assert.deepStrictEqual(out[1].names, ['Ben L', 'Mike']);
+});
+
+test('the session id is the shape the backend anchors on', () => {
+  /* The route rejects anything that is not exactly sid<32 hex>, because the value becomes
+     an S3 key. A legacy filename carries no sid at all and must produce nothing rather
+     than a guess. */
+  const out = sn.confirmedSessions([
+    { source_filename: 'RealPTT_2026-03-20_12-18-34.json',
+      speaker_name: 'Ben L', speaker_state: 'confirmed' },
+  ]);
+  assert.deepStrictEqual(out, []);
+  const ok = sn.confirmedSessions([sessionSeg(SID_A, 'Ben L', 'confirmed')]);
+  assert.match(ok[0].sessionBase, /^sid[0-9a-f]{32}$/);
+});
+
+test('nothing named offers no control at all', () => {
+  assert.deepStrictEqual(sn.confirmedSessions([]), []);
+  assert.deepStrictEqual(sn.confirmedSessions(null), []);
+  assert.deepStrictEqual(sn.confirmedSessions([sessionSeg(SID_A, 'Ben L', 'tentative')]), []);
+});
+
+/* --- lending a name across the files of one session (speaker_group) -------- */
+
+function groupSeg(o) {
+  return Object.assign({
+    speaker: 'spk_0',
+    source_filename: 'Benl1_2026-09-10_09-00-00_sid' + 'c'.repeat(32) + '_c0000_srcwav.json',
+  }, o);
+}
+
+test('a name lent within one voice reaches the other files of the session', () => {
+  /* `spk_0` is scoped to one transcript call, so the per-file rule cannot carry a name
+     from chunk 0 into chunk 1. The anonymous re-bind already answers that question — it
+     clusters the per-call centroids and returns `speaker_group`, a letter stable across
+     the session — so where a group exists it is the right unit. */
+  const segs = [
+    groupSeg({ speaker_group: 'A', duration: 8.2, speaker_name: 'Ivy', speaker_state: 'confirmed' }),
+    groupSeg({ speaker_group: 'A', duration: 0.6,
+      source_filename: 'Benl1_2026-09-10_09-00-30_sid' + 'c'.repeat(32) + '_c0001_srcwav.json' }),
+    groupSeg({ speaker_group: 'B', duration: 0.4 }),
+  ];
+  const got = sn.inferredNames(segs);
+  assert.strictEqual(got[1], 'Ivy', 'a different file in the same voice must get the name');
+  assert.strictEqual(got[2], undefined, 'a different voice borrows nothing');
+});
+
+test('a group carrying two names infers nothing, exactly as a label does', () => {
+  const segs = [
+    groupSeg({ speaker_group: 'A', speaker_name: 'Ivy', speaker_state: 'confirmed' }),
+    groupSeg({ speaker_group: 'A', speaker_name: 'Sam', speaker_state: 'confirmed' }),
+    groupSeg({ speaker_group: 'A' }),
+  ];
+  assert.deepStrictEqual(sn.inferredNames(segs), {});
+});
+
+test('without a group the old per-file rule is unchanged', () => {
+  /* Undiarised files, sessions the re-bind never ran on, and legacy recordings all arrive
+     with no group. They must behave exactly as they did before this existed. */
+  const a = 'f-a.json';
+  const b = 'f-b.json';
+  const segs = [
+    { speaker: 'spk_0', source_filename: a, speaker_name: 'Ivy', speaker_state: 'confirmed' },
+    { speaker: 'spk_0', source_filename: a },
+    { speaker: 'spk_0', source_filename: b },
+  ];
+  const got = sn.inferredNames(segs);
+  assert.strictEqual(got[1], 'Ivy');
+  assert.strictEqual(got[2], undefined,
+    'the same label in a different file is a different person');
+});
+
+test('a grouped segment is never judged by the file rule as well', () => {
+  /* Mixing the two keyspaces in one bucket would let a file-scoped label borrow a name
+     that only the group justified, and the reverse. A segment is judged under one rule. */
+  const f = 'f-a.json';
+  const segs = [
+    { speaker: 'spk_0', source_filename: f, speaker_group: 'A',
+      speaker_name: 'Ivy', speaker_state: 'confirmed' },
+    { speaker: 'spk_0', source_filename: f },
+  ];
+  const got = sn.inferredNames(segs);
+  assert.strictEqual(got[1], undefined,
+    'an ungrouped turn must not inherit from a grouped one through the file bucket');
 });

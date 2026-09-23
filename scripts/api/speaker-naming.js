@@ -131,21 +131,80 @@
     return !!(opts.callerFolder && opts.folder && opts.callerFolder === opts.folder);
   }
 
-  /* The POST body. `consent_given` is hard-false here BY DESIGN: consent is a
-     different act from naming — it stores a voiceprint, which is biometric
-     data, and the consent required is the consent of the person whose voice
-     it is. Phase 1 ships no consent UI (spec §Consent). Do not add a flag to
-     this function; add a deliberate surface with real wording instead. */
+  /* Who in the directory this name refers to, or null.
+
+     `consented_by` is a USER ID and the backend refuses `consent_given` without one
+     (lambda_org_api: "record whose voice this is, not who is doing the labelling"). So
+     consent can only be offered for a name that resolves to a directory entry — and on a
+     site the people most often named are subcontractors and visitors who have none. That
+     is not a gap to paper over: it is the reason the strict path enrolled nobody for
+     months, and the panel says so out loud rather than offering a control that 400s.
+
+     Matched case-insensitively on the display name, which is the same key
+     `users.resolve_display_name` uses on the backend. Two people sharing a name resolve to
+     neither: picking one of them at random would attach a voiceprint, and a consent
+     record, to the wrong person. */
+  function subjectIdForName(name, members) {
+    var want = String(name == null ? '' : name).trim().toLowerCase();
+    if (!want) return null;
+    var hits = (members || []).filter(function (m) {
+      return m && m.id && String(m.name || '').trim().toLowerCase() === want;
+    });
+    return hits.length === 1 ? String(hits[0].id) : null;
+  }
+
+  /* Whether the consent control may be offered for this name, and if not, why.
+
+     The reason is returned rather than the control merely hidden. A checkbox that is absent
+     for two different causes — the feature is off here, versus this person has no directory
+     entry — teaches the user nothing, and the second is fixable by them (add the person to
+     the site roster) while the first is not. */
+  function consentOffer(opts) {
+    opts = opts || {};
+    if (!opts.featureAvailable) {
+      return { offer: false, reason: null };
+    }
+    var id = subjectIdForName(opts.displayName, opts.members);
+    if (!id) {
+      return {
+        offer: false,
+        id: null,
+        reason: 'Only someone in your site roster can be recorded as having agreed — '
+          + 'their voice pattern has to be stored against their directory entry.',
+      };
+    }
+    return { offer: true, id: id, reason: null };
+  }
+
+  /* The POST body.
+
+     `consent_given` was hard-coded `false` here from Phase 1 until 2026-09-22, with a
+     comment saying not to add a flag but to build "a deliberate surface with real wording
+     instead". That surface now exists (NamePanel's consent block), so the flag travels —
+     and it travels ONLY from that surface.
+
+     Consent is still a different act from naming. Naming propagates a name inside one
+     meeting by comparing audio the company already holds; consent stores a voice pattern,
+     which is biometric data under the NZ Privacy Act, so the person recognisable in FUTURE
+     meetings has to be the one who agreed. Two consequences kept in code rather than in a
+     comment:
+
+       * the default is `false`. An omitted or malformed opts object enrols nobody, which is
+         the pre-2026-09-22 behaviour exactly.
+       * `consented_by` is only ever a resolved directory id, never the caller's own id and
+         never the typed name. The backend cannot tell the subject agreeing apart from the
+         labeller clicking a box on their behalf, so this half must not blur them either. */
   function correctionBody(seg, opts) {
     opts = opts || {};
+    var consented = opts.consentGiven === true && !!opts.consentedBy;
     return {
       user: opts.user || '',
       source_filename: seg.source_filename,
       start_sec: seg.chunk_start,
       end_sec: seg.chunk_start + seg.duration,
       display_name: String(opts.displayName || '').trim(),
-      consent_given: false,
-      consented_by: null,
+      consent_given: consented,
+      consented_by: consented ? String(opts.consentedBy) : null,
     };
   }
 
@@ -245,26 +304,62 @@
        intended character, which parses fine, passes every test, and makes git
        and grep treat the whole module as binary. A structure with no separator
        cannot have either failure. */
+    /* **`speaker_group` first, and it is what makes this reach past one file.**
+
+       The per-file rule below is correct and too narrow. Diarisation labels are scoped to
+       ONE transcript call (BUG 8.6), so `spk_0` here and `spk_0` in the next file are not
+       the same person and must not share a name. That is why the grouping was nested by
+       file in the first place.
+
+       But the anonymous re-bind already answers that question properly: it clusters the
+       per-call centroids with ECAPA and writes `speaker_label_groups`, which the transcript
+       response returns as `speaker_group` — a letter that IS stable across the files of one
+       session. Measured 55.4% -> 96.3% label purity. It is enabled on TEST and prod alike
+       and does not depend on the naming switch.
+
+       So where a group exists, group by it: the short turns of one voice get the name even
+       when the turns that carried it sat in a different chunk. Where it does not — an
+       undiarised file, a session the re-bind never ran on, a legacy recording — fall back
+       to file+label, which is exactly the previous behaviour.
+
+       The two keyspaces are kept in separate buckets rather than merged into one map. A
+       group letter and a filename could collide as strings, and more importantly a segment
+       must be judged under ONE rule: mixing grouped and ungrouped segments in a single
+       bucket would let a file-scoped label borrow a name that only the group justified. */
+    var byGroup = {};
     var byFile = {};
     segs.forEach(function (s, i) {
-      if (!s || !s.source_filename || !s.speaker) return;
+      if (!s || !s.speaker) return;
+      if (s.speaker_group) {
+        (byGroup[s.speaker_group] || (byGroup[s.speaker_group] = [])).push(i);
+        return;
+      }
+      if (!s.source_filename) return;
       var byLabel = byFile[s.source_filename] || (byFile[s.source_filename] = {});
       (byLabel[s.speaker] || (byLabel[s.speaker] = [])).push(i);
     });
     var out = {};
-    Object.keys(byFile).forEach(function (file) {
-      Object.keys(byFile[file]).forEach(function (label) {
-        var idxs = byFile[file][label];
-        var names = {};
-        idxs.forEach(function (i) {
-          if (segs[i].speaker_name) names[segs[i].speaker_name] = true;
-        });
-        var distinct = Object.keys(names);
-        if (distinct.length !== 1) return;
-        idxs.forEach(function (i) {
-          if (!segs[i].speaker_name) out[i] = distinct[0];
-        });
+
+    /* ONE rule, applied to whichever buckets exist: if the turns the voiceprint DID reach
+       agree unanimously on a name, lend it to the ones it could not. Unanimity is the
+       load-bearing part — two different names under one group means the separation is
+       wrong there, and the honest response to a contradiction is to infer nothing rather
+       than to pick the majority. */
+    function lend(idxs) {
+      var names = {};
+      idxs.forEach(function (i) {
+        if (segs[i].speaker_name) names[segs[i].speaker_name] = true;
       });
+      var distinct = Object.keys(names);
+      if (distinct.length !== 1) return;
+      idxs.forEach(function (i) {
+        if (!segs[i].speaker_name) out[i] = distinct[0];
+      });
+    }
+
+    Object.keys(byGroup).forEach(function (g) { lend(byGroup[g]); });
+    Object.keys(byFile).forEach(function (file) {
+      Object.keys(byFile[file]).forEach(function (label) { lend(byFile[file][label]); });
     });
     return out;
   }
@@ -381,8 +476,41 @@
     return out;
   }
 
+  /* The sessions in this view that hold at least one CONFIRMED name, and who those people
+     are. What the "update the report with these names" control needs to know.
+
+     `confirmed` only. `tentative` is the system's guess — propagation caps every inferred
+     name at tentative on purpose — and a guess handed to the extraction model as a
+     confirmed name comes back as a fact in a report. The backend filters on the same field
+     (`speaker_state !== 'confirmed'` → skipped), so a control offered on tentative names
+     would queue a paid model call that changes nothing.
+
+     Keyed on the SESSION (`sid<32 hex>`), not the file: a day's view can hold several
+     meetings, and the regenerate route takes one session at a time. A control that sent
+     the first session id it found would silently leave the others stale.
+
+     Names are deduped and sorted so the label is stable across re-renders — an unstable
+     button caption reads as the count changing on its own. */
+  function confirmedSessions(segments) {
+    var bySession = {};
+    (segments || []).forEach(function (s) {
+      if (!s || s.speaker_state !== 'confirmed') return;
+      var name = String(s.speaker_name || '').trim();
+      if (!name) return;
+      var m = SID_RE.exec(String(s.source_filename || ''));
+      if (!m) return;
+      var sid = m[0].toLowerCase();
+      if (!bySession[sid]) bySession[sid] = {};
+      bySession[sid][name] = true;
+    });
+    return Object.keys(bySession).sort().map(function (sid) {
+      return { sessionBase: sid, names: Object.keys(bySession[sid]).sort() };
+    });
+  }
+
   var mod = {
     MIN_TURN_SECONDS: MIN_TURN_SECONDS,
+    confirmedSessions: confirmedSessions,
     folderToName: folderToName,
     mentionedNames: mentionedNames,
     nameCandidates: nameCandidates,
@@ -393,6 +521,8 @@
     roleMayName: roleMayName,
     mayName: mayName,
     correctionBody: correctionBody,
+    subjectIdForName: subjectIdForName,
+    consentOffer: consentOffer,
     featureAvailable: featureAvailable,
     displayLabel: displayLabel,
     isSpeakerLabel: isSpeakerLabel,

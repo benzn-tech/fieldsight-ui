@@ -1115,6 +1115,18 @@
       { key: 'transcripts', label: 'Transcripts' },
     ];
 
+    /* Voices sits beside the recordings it is about: who the system thinks it
+       can recognise is the same question the Transcripts tab raises two tabs
+       away, and the answer used to be reachable only from a database session.
+
+       Gated, unlike the four above, because the read route 403s for anyone
+       outside the backend's correction roles — offering the tab to a worker
+       offers a page whose only possible outcome is a denial. */
+    if (fs.VoiceLibrary && window.FieldSight.voiceLibraryMayManage(
+        (window.AuthMock && window.AuthMock.currentUser) || {})) {
+      tabs.push({ key: 'voices', label: 'Voices' });
+    }
+
     var body;
     switch (ctx.activeTab) {
       /* Audio and Video group the day into per-recording blocks and carry the
@@ -1135,6 +1147,17 @@
         body = React.createElement(MediaPerDayTab, {
           component: fs.TranscriptList,
         });
+        break;
+      /* Re-checked here, not only where the tab is built. Hiding a tab hides
+         the BUTTON, not the state behind it: the dev role switcher changes
+         `role` without resetting `activeTab`, so a demotion while this tab is
+         open would leave the panel rendering for a role that may no longer
+         read it. The panel gates itself again internally for the same reason. */
+      case 'voices':
+        body = (fs.VoiceLibrary && window.FieldSight.voiceLibraryMayManage(
+          (window.AuthMock && window.AuthMock.currentUser) || {}))
+          ? React.createElement(fs.VoiceLibrary, null)
+          : React.createElement(PhotosTab, null);
         break;
       case 'photos':
       default:
