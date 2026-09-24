@@ -20,7 +20,7 @@
 
    Right detail (B.3 skip-edit primary path):
      • While extracting: spinner + progress note
-     • Once ready: 2-col "Source" vs "Extracted schema" review
+     • Once ready: the template's sections, editable
        + Test-render panel (fills schema sections with sample content)
        + "✓ Use this template" CTA (activates in one click)
 
@@ -51,8 +51,15 @@
   var RT_LABEL = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', incident: 'Incident' };
   var RT_TONE  = { daily: 'info', weekly: 'success', monthly: 'accent', incident: 'danger' };
 
-  var KIND_LABEL = { narrative: 'Narrative', list: 'List', table: 'Table', kpi: 'KPIs', photos: 'Photos' };
-  var KIND_ICON  = { narrative: '¶', list: '•', table: '⊞', kpi: '◆', photos: '🖼' };
+  /* PHOTOS IS GONE FROM HERE, and that is the honest half of wiring the rest up.
+     A generated report is prose the model writes; nothing in that path inserts
+     an image, so "Photos" could only ever produce a heading with a sentence
+     under it -- while this editor's own Test render drew photo placeholders for
+     it. The server refuses the value now, so leaving it offered here would mean
+     a choice that cannot be saved. The other four each make the document do
+     something. */
+  var KIND_LABEL = { narrative: 'Narrative', list: 'List', table: 'Table', kpi: 'KPIs' };
+  var KIND_ICON  = { narrative: '¶', list: '•', table: '⊞', kpi: '◆' };
 
   /* ── Helpers ───────────────────────────────────────────────────────── */
 
@@ -64,10 +71,38 @@
     return d.getUTCDate() + ' ' + months[d.getUTCMonth()] + ' ' + p[0];
   }
 
+  /* How many sections a row should claim. The server counts it (one query for
+     the whole list); a schema in hand is used when it is there. null means
+     nobody could say, and the row then says nothing rather than "0 sections",
+     which would be a claim about the template that nothing checked. */
+  function sectionCount(tpl) {
+    if (tpl && typeof tpl.section_count === 'number') return tpl.section_count;
+    var schema = activeSchema(tpl);
+    return schema && schema.sections ? schema.sections.length : null;
+  }
+
+  /* BY VERSION NUMBER, NOT BY POSITION IN THE ARRAY.
+
+     This used to take the last element, which was right for as long as
+     versions arrived oldest-first -- the localStorage store appended them. The
+     server returns them newest-first (ORDER BY version DESC), so the same line
+     started reading the OLDEST version while looking exactly as correct as
+     before. Nothing in the shape changed; only the order did, and an index is
+     a claim about order.
+
+     Every version carries its own number. Using it makes the order of the
+     array something this function does not have an opinion about. */
+  function newestVersion(tpl) {
+    var vers = (tpl && tpl.versions) || [];
+    if (!vers.length) return null;
+    return vers.reduce(function (best, v) {
+      return (best === null || (v.version || 0) > (best.version || 0)) ? v : best;
+    }, null);
+  }
+
   function activeSchema(tpl) {
-    if (!tpl || !tpl.versions || !tpl.versions.length) return null;
-    var vers = tpl.versions;
-    return vers[vers.length - 1].schema;
+    var v = newestVersion(tpl);
+    return v ? v.schema : null;
   }
 
   /* Sample content for each section kind used in the Test Render panel */
@@ -80,7 +115,6 @@
       { action: 'Confirm crane availability w/c 18 May',        owner: 'Jarley Trainor', due_date: '10 May 2026' },
       { action: 'Submit VO-15 for approval',                    owner: 'James Lamb',    due_date: '15 May 2026' },
     ],
-    photos:    ['Progress photo 1', 'Progress photo 2', 'Progress photo 3'],
   };
 
   /* ── Context ───────────────────────────────────────────────────────── */
@@ -105,6 +139,40 @@
 
     var selRef    = React.useState(null);
     var sel       = selRef[0]; var setSel = selRef[1];
+
+    /* OPENING A TEMPLATE FETCHES IT.
+       Clicking a row selects the row, and a row comes from the LIST, which
+       deliberately carries no bodies -- returning every version of every
+       template to draw a list would be absurd. So the selected template has
+       to be completed, and opening one is exactly the moment its sections are
+       needed.
+
+       This is the half that was missing when the API was fixed to return
+       sections on `get`: nothing called `get`. The endpoint was correct and
+       unreachable, the panel still had nothing to render, and the backend
+       test passed the whole time because it asked the API a question the page
+       never asked.
+
+       Runs only when there is something to fetch: a template whose
+       current_version is 0 has no body to complete, and one that already has
+       its versions is whole -- which is also what stops this from looping,
+       since the fetch replaces `sel` with a version-carrying copy. */
+    React.useEffect(function () {
+      if (!sel || !sel.id) return undefined;
+      if (sel.versions && sel.versions.length) return undefined;
+      if (!sel.current_version) return undefined;
+      var api = window.FS && window.FS.api && window.FS.api.templates;
+      if (!api || !api.get) return undefined;
+      var alive = true;
+      api.get(sel.id).then(function (full) {
+        /* Only when it actually arrived with content. Replacing the selection
+           with another empty copy would swap one silent failure for a loop. */
+        if (alive && full && full.versions && full.versions.length) setSel(full);
+      }).catch(function () {
+        /* The panel says what it can see; it does not need a second voice. */
+      });
+      return function () { alive = false; };
+    }, [sel && sel.id, sel && sel.versions && sel.versions.length]);
 
     var uploadRef = React.useState(null);  /* null | 'org' | 'personal' */
     var uploadFor = uploadRef[0]; var setUploadFor = uploadRef[1];
@@ -165,8 +233,44 @@
       setRetry(function (n) { return n + 1; });
       setSel(stub);
       if (window.FS && window.FS.toast) {
-        window.FS.toast.show({ message: 'Template uploaded — extracting schema…', tone: 'info' });
+        window.FS.toast.show({ message: 'Template created — edit its sections below', tone: 'info' });
       }
+    }
+
+    /* DELETE. The backend soft-deletes: the template leaves the library and
+       every version it ever had is kept, because a withdrawn template is still
+       the template that wrote last month's reports. The confirm says that --
+       "delete" alone would suggest the reports go with it.
+
+       The refusal that matters is 409, raised when a scheduled report still
+       points at this template. It is shown verbatim, because the server knows
+       which schedule and this page does not, and "could not delete" would send
+       someone hunting for a permissions problem that is not there. */
+    /* Deletes. The panel arms it in two steps and says what it will do, so
+       there is no confirmation here -- and deliberately no window.confirm:
+       a native dialog blocks every event that follows it in this environment.
+
+       The server refuses to delete a template a schedule still points at, and
+       that refusal names the schedule. It is shown as the server words it:
+       this page does not know which report is using it, and "could not delete"
+       would send somebody hunting for a permissions problem that is not there. */
+    function handleDelete(tpl) {
+      if (!tpl) return;
+      window.FS.api.templates['delete'](tpl.id).then(function () {
+        setSel(null);
+        setRetry(function (n) { return n + 1; });
+        if (window.FS && window.FS.toast) {
+          window.FS.toast.show({ message: '"' + tpl.title + '" deleted', tone: 'success' });
+        }
+      }).catch(function (err) {
+        if (window.FS && window.FS.toast) {
+          window.FS.toast.show({
+            message: (err && err.message) || 'Could not delete this template',
+            tone: 'error',
+            duration: 8000,
+          });
+        }
+      });
     }
 
     function handleActivate(tpl) {
@@ -185,7 +289,7 @@
 
     return React.createElement(LibraryContext.Provider, {
       value: {
-        caller, canManageOrg, tab, setTab, state, sel, setSel,
+        caller, canManageOrg, tab, setTab, state, sel, setSel, handleDelete,
         uploadFor, setUploadFor, handleUploadComplete, handleActivate, reload,
         /* Sprint 10 follow-up — favourites */
         favIds, toggleFavourite,
@@ -262,7 +366,7 @@
 
       state.status === 'ok' && rows.length === 0 && React.createElement('div', { className: 'fs-library__empty' },
         React.createElement('p', null, tab === 'personal'
-          ? 'No personal templates yet. Upload one to get started.'
+          ? 'No personal templates yet. Create one to get started.'
           : 'No org templates yet.' + (canManageOrg ? ' Upload one to make it available to all users.' : '')
         ),
       ),
@@ -295,9 +399,15 @@
               }),
               tpl.scope === 'personal' && React.createElement('span', { className: 'fs-library__personal-tag' }, 'Personal'),
               isExtracting && React.createElement('span', { className: 'fs-library__extracting-tag' }, 'Extracting…'),
-              !isExtracting && hasSchema && React.createElement('span', { className: 'fs-library__sections-count' },
-                activeSchema(tpl) ? activeSchema(tpl).sections.length + ' sections' : '',
-              ),
+              /* From the server's count when it sent one, falling back to the
+                 loaded schema. The list does not carry every template's body
+                 -- that would hand back every version of every template to
+                 draw one number -- so counting the schema alone showed
+                 nothing at all on this page. */
+              !isExtracting && sectionCount(tpl) !== null
+                && React.createElement('span', { className: 'fs-library__sections-count' },
+                  sectionCount(tpl) + ' section' + (sectionCount(tpl) === 1 ? '' : 's'),
+                ),
             ),
             /* Sprint 10 follow-up — favourite toggle (right-aligned star). */
             React.createElement('button', {
@@ -408,7 +518,47 @@
     );
   }
 
-  /* ── B.4 Schema Editor (rename / reorder / delete) ─────────────────── */
+  /* THE EDITOR'S ROWS, AS THE SCHEMA THAT LEAVES THE PAGE.
+
+     This lived nameless inside save(), which meant the one step where a
+     person's typing becomes the thing that gets stored could not be driven by
+     a test -- so the chain from "type a sentence in the description box" to
+     "that sentence is in the prompt" had a gap in the middle, exactly where
+     today's failures have kept turning up.
+
+     `_key` and anything else the editor hangs on a row for its own purposes
+     stops here. `prompt_hint` does not: api/template-store.js maps it to
+     `purpose`, which is the sentence report_template.render_prompt writes
+     under the heading, and is the only part of a section the model reads. */
+  function sectionsToSchema(sections) {
+    function strip(arr) {
+      return arr.map(function (s) {
+        /* always_present BELONGS IN THIS LIST, and the reason is worth a line:
+           a field the editor can set and this function forgets is dropped
+           silently -- the page keeps showing the checkbox ticked, because the
+           page is showing its own state, and only the report disagrees. This
+           file has produced that bug once already. */
+        var out = { title: s.title, kind: s.kind, fields: s.fields,
+                    prompt_hint: s.prompt_hint, always_present: !!s.always_present,
+                    columns: s.columns || [] };
+        if (s.children && s.children.length) out.children = strip(s.children);
+        return out;
+      });
+    }
+    return { sections: strip(sections || []) };
+  }
+
+  /* ── Schema editor: add / describe / rename / reorder / delete ───────
+     A blank section is added with empty fields on purpose. The alternative is
+     seeding it with placeholder wording, and a section's `purpose` IS THE
+     PROMPT -- "Describe this section" would be handed to the model as an
+     instruction and dutifully written up. Empty and refused beats plausible
+     and wrong.
+
+     So the editor enforces the rule the server enforces: every section needs
+     a title and a purpose. Checked here as well, not instead -- the server
+     stays the authority -- because a save that bounces after a round trip
+     makes the person hunt for which of nine sections it meant. */
 
   function SchemaEditor(props) {
     var templateId = props.templateId;
@@ -427,6 +577,8 @@
             kind:        s.kind,
             fields:      s.fields || [],
             prompt_hint: s.prompt_hint || '',
+            always_present: !!s.always_present,
+            columns:     s.columns || [],
             children:    tagKeys(s.children || []),
             _key:        counter.n++,
           };
@@ -435,6 +587,11 @@
       return tagKeys(schema.sections || []);
     });
     var sections    = secRef[0]; var setSections = secRef[1];
+    /* Which section a failed save is talking about. Held as a path so a
+       sub-section can be named too -- the number alone counted within its own
+       parent and pointed at the wrong row. */
+    var flagRef     = React.useState(null);
+    var flagged     = flagRef[0]; var setFlagged = flagRef[1];
 
     var noteRef     = React.useState('');
     var changeNote  = noteRef[0]; var setChangeNote = noteRef[1];
@@ -522,13 +679,16 @@
 
     /* ── Mutations ───────────────────────────────────────────────────── */
 
-    function rename(p, val) {
+    /* One walker for every per-section edit. rename() had its own recursion;
+       a second and third copy for the hint and the kind is three places to fix
+       when the nesting rule changes. */
+    function editAt(p, change) {
       setSections(function (prev) {
         var idx = pathToArr(p);
         function rec(list, i) {
           var copy = list.slice();
           if (i === idx.length - 1) {
-            copy[idx[i]] = Object.assign({}, copy[idx[i]], { title: val });
+            copy[idx[i]] = change(copy[idx[i]]);
             return copy;
           }
           copy[idx[i]] = Object.assign({}, copy[idx[i]], {
@@ -538,6 +698,55 @@
         }
         return rec(prev, 0);
       });
+    }
+
+    /* Both halves of a section are editable. `prompt_hint` was display-only,
+       so a template's headings could be changed and what each heading was FOR
+       could not -- and that sentence is the only part of a section the model
+       actually reads. Adding sections without it would be adding empty ones. */
+    function setHint(p, val) {
+      editAt(p, function (sec) { return Object.assign({}, sec, { prompt_hint: val }); });
+    }
+
+    function setKind(p, val) {
+      editAt(p, function (sec) { return Object.assign({}, sec, { kind: val }); });
+    }
+
+    function setColumns(p, val) {
+      var names = (val || '').split(/[|,]/).map(function (c) { return c.trim(); })
+        .filter(function (c) { return c; });
+      editAt(p, function (sec) { return Object.assign({}, sec, { columns: names }); });
+    }
+
+    function setAlwaysPresent(p, val) {
+      editAt(p, function (sec) { return Object.assign({}, sec, { always_present: !!val }); });
+    }
+
+    var addedKey = React.useRef ? React.useRef(null) : { current: null };
+
+    function blankSection() {
+      var key = 'new-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+      addedKey.current = key;
+      return { title: '', kind: 'narrative', fields: [], prompt_hint: '',
+               always_present: false, columns: [], children: [], _key: key };
+    }
+
+    function addSection() {
+      setSections(function (prev) { return prev.concat([blankSection()]); });
+    }
+
+    /* A sub-section, under a top-level one. The nesting cap is one level, the
+       same cap dragging enforces, so this is offered on parents only. */
+    function addChild(p) {
+      editAt(p, function (sec) {
+        return Object.assign({}, sec, {
+          children: (sec.children || []).concat([blankSection()]),
+        });
+      });
+    }
+
+    function rename(p, val) {
+      editAt(p, function (sec) { return Object.assign({}, sec, { title: val }); });
     }
 
     function del(p) {
@@ -598,16 +807,69 @@
       });
     }
 
-    function save() {
-      setSaving(true); setSaveErr(null);
-      function strip(arr) {
-        return arr.map(function (s) {
-          var out = { title: s.title, kind: s.kind, fields: s.fields, prompt_hint: s.prompt_hint };
-          if (s.children && s.children.length) out.children = strip(s.children);
-          return out;
-        });
+    /* The server's rule, checked here as well and never instead: every section
+       needs a title and a purpose, because render_prompt writes one heading
+       per section and the purpose under it is the instruction. Returns the
+       first offender by name so the message can point at it -- "a section is
+       incomplete" across nine of them is a hunt. */
+    function firstIncomplete(list, trail, base) {
+      for (var i = 0; i < list.length; i += 1) {
+        var sec = list[i];
+        var where = (trail ? trail + ' › ' : '') + (sec.title || '').trim();
+        var path = (base === undefined || base === '') ? String(i) : base + '.' + i;
+        if (!(sec.title || '').trim()) {
+          return { what: 'a title', where: trail || 'the list', nth: i + 1,
+                   path: path, parent: trail || null };
+        }
+        if (!(sec.prompt_hint || '').trim()) {
+          return { what: 'a description', where: where, nth: i + 1,
+                   path: path, parent: trail || null };
+        }
+        var inner = firstIncomplete(sec.children || [], where, path);
+        if (inner) return inner;
       }
-      var newSchema = { sections: strip(sections) };
+      return null;
+    }
+
+    function ordinal(n) {
+      var names = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth',
+                   'seventh', 'eighth', 'ninth', 'tenth'];
+      return names[n - 1] || (n + 'th');
+    }
+
+    function scrollToFlagged(path) {
+      if (typeof document === 'undefined') return;
+      window.setTimeout(function () {
+        var el = document.querySelector('[data-section-path="' + path + '"]');
+        if (el && el.scrollIntoView) {
+          el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          var input = el.querySelector('.fs-library__editor-section-input');
+          if (input && input.focus) input.focus();
+        }
+      }, 0);
+    }
+
+    function save() {
+      var gap = firstIncomplete(sections, '');
+      if (gap) {
+        /* "Section 6" was not enough to act on, twice over: on a long template
+           it is a counting exercise, and on a sub-section the number counted
+           within its own parent, so it pointed at the wrong row. The path says
+           which one, the highlight shows it, and the scroll puts it on screen. */
+        setFlagged(gap.path);
+        setSaveErr(gap.what === 'a title'
+          ? (gap.parent
+              ? ('The ' + ordinal(gap.nth) + ' section under “' + gap.parent
+                 + '” needs a heading before this can be saved.')
+              : ('Section ' + gap.nth + ' needs a heading before this can be saved.'))
+          : ('“' + gap.where + '” needs a description — that sentence is '
+             + 'what tells the report what belongs in the section.'));
+        scrollToFlagged(gap.path);
+        return;
+      }
+      setFlagged(null);
+      setSaving(true); setSaveErr(null);
+      var newSchema = sectionsToSchema(sections);
       window.FS.api.templates.updateSchema(templateId, newSchema, changeNote || 'Edited sections').then(function (updated) {
         setSaving(false);
         if (props.onSaved) props.onSaved(updated);
@@ -700,8 +962,10 @@
 
       return React.createElement('li', {
         key:       sec._key,
+        'data-section-path': p,
         className: 'fs-library__editor-section'
                    + (isChild ? ' fs-library__editor-section--child' : '')
+                   + (flagged === p ? ' fs-library__editor-section--flagged' : '')
                    + (dragPath === p ? ' fs-library__editor-section--dragging' : '')
                    + (hoveredZone === 'before' ? ' fs-library__editor-section--drop-before' : '')
                    + (hoveredZone === 'into'   ? ' fs-library__editor-section--drop-into'   : '')
@@ -724,11 +988,22 @@
         React.createElement('input', {
           className:   'fs-library__editor-section-input',
           value:       sec.title,
-          onChange:    function (e) { rename(p, e.target.value); },
+          onChange:    function (e) {
+            if (flagged === p) setFlagged(null);
+            rename(p, e.target.value);
+          },
           'aria-label': 'Section title',
+          placeholder: 'Section heading',
           maxLength:   80,
+          autoFocus:   sec._key === addedKey.current,
         }),
         React.createElement('div', { className: 'fs-library__editor-section-controls' },
+          /* A sub-section, one level only -- the same cap dragging enforces. */
+          !isChild && React.createElement('button', {
+            type: 'button', className: 'fs-library__editor-addchild-btn',
+            onClick: function () { addChild(p); },
+            'aria-label': 'Add a sub-section', title: 'Add a sub-section',
+          }, '+'),
           isChild && React.createElement('button', {
             type: 'button', className: 'fs-library__editor-promote-btn',
             onClick: function () { promote(p); },
@@ -739,6 +1014,68 @@
             onClick: function () { del(p); }, disabled: sections.length <= 1 && !isChild,
             'aria-label': 'Delete section', title: 'Delete',
           }, '×'),
+        ),
+
+        /* WHAT THE SECTION IS FOR. This sentence is the only part of a section
+           the model reads -- the heading is just a heading. It was display-only
+           until now, so a template's headings could be changed and their
+           meaning could not. The label says so plainly, because somebody
+           filling it in is writing an instruction, not a caption. */
+        React.createElement('div', { className: 'fs-library__editor-section-hint' },
+          React.createElement('select', {
+            className:   'fs-library__editor-kind-select',
+            value:       sec.kind || 'narrative',
+            onChange:    function (e) { setKind(p, e.target.value); },
+            'aria-label': 'How this section is laid out',
+            title:       'How this section is laid out',
+          }, Object.keys(KIND_LABEL).map(function (k) {
+            return React.createElement('option', { key: k, value: k }, KIND_LABEL[k]);
+          })),
+          React.createElement('input', {
+            className:   'fs-library__editor-hint-input',
+            value:       sec.prompt_hint || '',
+            onChange:    function (e) { setHint(p, e.target.value); },
+            'aria-label': 'What goes in this section',
+            placeholder: 'What goes in this section — e.g. "Hazards raised, and whether a control was agreed"',
+            maxLength:   400,
+          }),
+        ),
+
+        /* THE COLUMNS, and only for a table. Asking for "a table" and naming
+           no columns was measured on the customer's own daily report: the
+           model invented one column, headed with the section's own title,
+           holding lines that had read fine as sentences the day before. Left
+           empty this falls back to the shape the stop-recording email and the
+           Actions table already use, rather than to a guess. */
+        (sec.kind === 'table') && React.createElement('label',
+          { className: 'fs-library__editor-columns' },
+          React.createElement('span', null, 'Columns'),
+          React.createElement('input', {
+            className:   'fs-library__editor-columns-input',
+            value:       (sec.columns || []).join(' | '),
+            onChange:    function (e) { setColumns(p, e.target.value); },
+            'aria-label': 'Table columns, separated by |',
+            placeholder: 'Item | Assigned | Due',
+            maxLength:   200,
+          }),
+        ),
+
+        /* KEEP THE HEADING, NOT "WRITE SOMETHING ANYWAY". The distinction is
+           the whole point of this checkbox existing: somebody who wanted a
+           section that never disappears wrote a sentence into the description
+           demanding the list appear however quiet the day had been, and that
+           sentence went to the model beside our own rules and beat them. This
+           asks for the heading. A quiet day still reads "Nothing here." under
+           it, because the alternative is asking for something to be made up. */
+        React.createElement('label', { className: 'fs-library__editor-always' },
+          React.createElement('input', {
+            type:     'checkbox',
+            checked:  !!sec.always_present,
+            onChange: function (e) { setAlwaysPresent(p, e.target.checked); },
+          }),
+          React.createElement('span', null, 'Always show this heading'),
+          React.createElement('span', { className: 'fs-library__editor-always-note' },
+            '— on a quiet day it reads “Nothing here.”'),
         ),
         /* Recursive children (only top-level can have children — 1-level cap) */
         !isChild && sec.children && sec.children.length > 0
@@ -758,7 +1095,10 @@
         React.createElement('strong', null, 'into the middle'),
         ' of another to make it a sub-section. Use ',
         React.createElement('strong', null, '↤'),
-        ' on a sub-section to promote it back to top level. Re-upload to change a section\'s kind.'
+        ' on a sub-section to promote it back to top level.'
+        /* "Re-upload to change a section's kind" used to end this sentence.
+           It was wrong twice over: the kind is editable in place now, and
+           re-uploading never read the file anyway. */
       ),
 
       React.createElement('ol', { className: 'fs-library__editor-section-list' },
@@ -766,6 +1106,16 @@
           return renderSectionRow(sec, '' + idx, false, sections.length);
         }),
       ),
+
+      /* Below the list, because that is where the new one appears. A blank
+         section is deliberately blank: seeding it with placeholder wording
+         would put that wording in the prompt, and the model would write it up
+         as an instruction. */
+      React.createElement('button', {
+        type:      'button',
+        className: 'fs-library__editor-add-btn',
+        onClick:   addSection,
+      }, '+ Add section'),
 
       React.createElement('div', { className: 'fs-library__editor-footer' },
         React.createElement('label', { className: 'fs-library__editor-change-label' }, 'Change note'),
@@ -814,8 +1164,18 @@
     React.useEffect(function () {
       setLoad({ status: 'loading', versions: [] });
       window.FS.api.templates.listVersions(templateId).then(function (res) {
-        /* Display newest-first */
-        setLoad({ status: 'ok', versions: (res.versions || []).slice().reverse() });
+        /* SORTED, NOT REVERSED. This reversed the list, which was right when
+           versions arrived oldest-first from localStorage and became wrong the
+           day the server started sending them newest-first -- it put the
+           OLDEST at the top and hung "Current" on it. The comment above it
+           said "Display newest-first", which is what it stopped doing.
+
+           Sorting by the number each version carries says what is meant and
+           holds whichever order the response arrives in. */
+        var rows = (res.versions || []).slice().sort(function (a, b) {
+          return (b.version || 0) - (a.version || 0);
+        });
+        setLoad({ status: 'ok', versions: rows });
       }).catch(function () {
         setLoad({ status: 'error', versions: [] });
       });
@@ -867,7 +1227,11 @@
       React.createElement('div', { className: 'fs-library__history-list' },
         versions.map(function (ver, idx) {
           var isSelected = ver.id === selVid;
-          var isLatest   = idx === 0;
+          /* The highest number, not the first row. Same reason as the sort:
+             position is a claim about order, and the order came from
+             somewhere else. */
+          var isLatest   = ver.version === Math.max.apply(null,
+            versions.map(function (v) { return v.version || 0; }));
           var diff       = isSelected ? diffSections(ver.schema) : null;
 
           return React.createElement('div', {
@@ -927,8 +1291,15 @@
     var viewRef = React.useState('preview');
     var view    = viewRef[0]; var setView = viewRef[1];
 
+    var confRef = React.useState(false);
+    var confirmingDelete = confRef[0]; var setConfirmingDelete = confRef[1];
+
     var selId = ctx && ctx.sel ? ctx.sel.id : null;
-    React.useEffect(function () { setView('preview'); }, [selId]);
+    React.useEffect(function () {
+      setView('preview');
+      /* An armed Delete must not follow you onto the next template. */
+      setConfirmingDelete(false);
+    }, [selId]);
 
     if (!ctx) return null;
 
@@ -947,12 +1318,50 @@
     }
 
     var schema       = activeSchema(sel);
-    var ver          = sel.versions && sel.versions.length ? sel.versions[sel.versions.length - 1] : null;
+    var ver          = newestVersion(sel);
     var isExtracting = sel._status === 'extracting';
 
-    var canActivate = sel.scope === 'org'
-      ? canManageOrg
-      : !!(window.FS && window.FS.can && window.FS.can(caller, 'template:manage:self'));
+    /* "ACTIVE" MEANS "THE SCHEDULED REPORT USES THIS", not "reports use this".
+       Only an organisation template can hold that job: the nightly daily,
+       weekly and monthly reports go out under the company's name, and a
+       personal template is invisible to everyone else, so nobody but its owner
+       could say what the report even was. The backend refuses the pair
+       outright ("only an organisation template can be used for a scheduled
+       report").
+
+       This used to offer the button on personal templates too, gated on
+       whether you may manage your OWN templates -- which you always may. So it
+       was offered to everybody, and every press was a round trip to a refusal.
+       A personal template is used by CHOOSING it when you generate a report;
+       it never needs to be made active, and the footer now says that instead
+       of dangling a control that cannot work. */
+    var isSchedulable = ['daily', 'weekly', 'monthly'].indexOf(sel.report_type) >= 0;
+
+    /* TWO DIFFERENT QUESTIONS, and they were one variable.
+
+       canEdit  -- may you change what this template says?
+       canActivate -- may you make the SCHEDULED reports use it?
+
+       `canActivate` used to mean both, and its old rule ("you may always
+       manage your own") happened to answer the first one correctly. Narrowing
+       it to org + schedulable + gm/admin was right for scheduling and took the
+       Edit tab away from every personal template with it -- so people could no
+       longer edit the templates they had just made.
+
+       One name, two meanings, and a change made for one of them. Editing now
+       has its own gate, and it is the same rule as deleting: your own, or the
+       organisation's if you manage those. */
+    var canEdit = sel.scope === 'personal'
+      ? !!(window.FS && window.FS.can && window.FS.can(caller, 'template:manage:self'))
+      : !!canManageOrg;
+    var canActivate = sel.scope === 'org' && isSchedulable && canManageOrg;
+
+    /* Whoever may change a template may withdraw it: your own personal ones,
+       and the organisation's if you manage those. Matches what the server
+       enforces rather than guessing at it -- a button that appears and then
+       gets a 403 is worse than no button. */
+    /* Whoever may change a template may withdraw it. Same rule, said once. */
+    var canDelete = canEdit;
 
     /* ── Extracting state ── */
     if (isExtracting) {
@@ -963,19 +1372,45 @@
         ),
         React.createElement('div', { className: 'fs-library__extracting' },
           React.createElement('div', { className: 'fs-library__extracting-spinner' }),
-          React.createElement('p', { className: 'fs-library__extracting-label' }, 'AI is extracting the template schema…'),
-          React.createElement('p', { className: 'fs-library__extracting-sub' }, 'This usually takes a few seconds. The page will update automatically.'),
+          React.createElement('p', { className: 'fs-library__extracting-label' }, 'Setting up your template…'),
+          React.createElement('p', { className: 'fs-library__extracting-sub' }, 'This only takes a moment.'),
         ),
       );
     }
 
-    /* ── No schema yet ── */
+    /* ── Nothing to show, and WHY ──────────────────────────────────────
+       This was one sentence, "No schema available yet.", for three unrelated
+       situations. One of them shipped: the API stopped sending `versions` on
+       read, every template came back empty, and the page told people their
+       template had no content while it sat intact in Aurora. A sentence about
+       the template, describing a fault in the request.
+
+       So the three are separated. The one that matters is the middle one --
+       it is the only one where the person should not go looking at their own
+       template for the problem. (This repo has form here: a 403 swallowed
+       into an empty state, and "no results" covering both a refused filter and
+       a dead search backend.) */
     if (!schema) {
+      var reason;
+      if (sel.current_version === 0) {
+        /* Genuinely empty: created, no body written yet. */
+        reason = 'This template has no sections yet. Add one to get started.';
+      } else if (sel.current_version > 0) {
+        /* The template HAS content -- the response did not carry it. Naming
+           the version is deliberate: it is the evidence that the content
+           exists, and it is what anybody debugging this needs first. */
+        reason = 'This template has content (version ' + sel.current_version
+               + ') but it did not come back with this request. Reload the page;'
+               + ' if it keeps happening, the report is worth passing on.';
+      } else {
+        /* current_version absent altogether: an older or partial payload. */
+        reason = 'Could not read this template’s sections. Reload the page.';
+      }
       return React.createElement('div', { className: 'fs-library__right' },
         React.createElement('div', { className: 'fs-library__right-header' },
           React.createElement('h2', { className: 'fs-library__right-title' }, sel.title),
         ),
-        React.createElement('p', { style: { color: 'var(--text-secondary)', padding: '16px' } }, 'No schema available yet.'),
+        React.createElement('p', { style: { color: 'var(--text-secondary)', padding: '16px' } }, reason),
       );
     }
 
@@ -993,19 +1428,37 @@
           React.createElement('span', { className: 'fs-library__scope-tag' }, sel.scope === 'org' ? 'Org' : 'Personal'),
         ),
         sel.description && React.createElement('p', { className: 'fs-library__right-desc' }, sel.description),
+
+        /* THE TEMPLATE'S VERSION NUMBER, not how many versions this response
+           happened to carry. `get` sends the current one and nothing else --
+           one element -- so counting the array said "Version 1" for a template
+           on its fourth edit, every time, however many edits came after. */
         ver && React.createElement('p', { className: 'fs-library__right-version-note' },
-          'Version ' + sel.versions.length + ' · updated ' + fmtDate(ver.created_at),
+          'Version ' + (sel.current_version || ver.version || 1)
+            + ' · updated ' + fmtDate(ver.created_at),
         ),
       ),
 
       /* Sub-nav: Preview / Edit / History */
+      /* A MISSING TAB IS NOT AN EXPLANATION. Somebody who cannot edit this
+         template sees two tabs where a colleague sees three, and nothing on
+         the page says why -- which reads as a fault, and this is the fourth
+         time today that two different states have looked identical. */
+      !canEdit
+        ? React.createElement('p', { className: 'fs-library__right-readonly' },
+            sel.scope === 'org'
+              ? 'This is an organisation template — an admin or GM can change it. '
+                + 'To make your own version, copy it to your library.'
+              : 'You can read this template but not change it.')
+        : null,
+
       React.createElement('div', { className: 'fs-library__right-subnav', role: 'tablist' },
         React.createElement('button', {
           type: 'button', role: 'tab', 'aria-selected': view === 'preview',
           className: 'fs-library__right-tab' + (view === 'preview' ? ' fs-library__right-tab--active' : ''),
           onClick: function () { setView('preview'); },
         }, 'Preview'),
-        canActivate ? React.createElement('button', {
+        canEdit ? React.createElement('button', {
           type: 'button', role: 'tab', 'aria-selected': view === 'editor',
           className: 'fs-library__right-tab' + (view === 'editor' ? ' fs-library__right-tab--active' : ''),
           onClick: function () { setView('editor'); },
@@ -1032,31 +1485,26 @@
         ? React.createElement(VersionHistoryPanel, {
             templateId:   sel.id,
             latestSchema: schema,
-            canManage:    canActivate,
+            canManage:    canEdit,
             onRestored:   function (updated) { ctx.setSel(updated); ctx.reload(); setView('preview'); },
           })
         : /* preview */
           React.createElement(React.Fragment, null,
 
-            /* Side-by-side: Source vs Extracted schema */
+            /* THE "YOUR FILE" PANEL IS GONE, and it has to be.
+               It showed `sel.title + '.docx'` as a filename -- the template's
+               NAME with an extension glued on, not the file anybody chose --
+               beside the sentence "AI read your file and identified N
+               sections". Nothing is read from the file and nothing about it is
+               stored, so every part of that panel was invented, and it was
+               stated as fact about the person's own document.
+
+               What is left is the one true statement: here are the sections
+               this template has, and you can edit them. */
             React.createElement('div', { className: 'fs-library__review-grid' },
 
               React.createElement('div', { className: 'fs-library__review-panel' },
-                React.createElement('h3', { className: 'fs-library__review-panel-title' }, 'Your file'),
-                React.createElement('div', { className: 'fs-library__source-card' },
-                  React.createElement('div', { className: 'fs-library__source-icon' }, '📄'),
-                  React.createElement('div', { className: 'fs-library__source-info' },
-                    React.createElement('span', { className: 'fs-library__source-filename' }, sel.title + '.docx'),
-                    React.createElement('span', { className: 'fs-library__source-meta' }, RT_LABEL[sel.report_type] + ' · uploaded ' + fmtDate(sel.created_at)),
-                  ),
-                ),
-                React.createElement('p', { className: 'fs-library__review-note' },
-                  'AI read your file and identified ' + schema.sections.length + ' section' + (schema.sections.length === 1 ? '' : 's') + ' below.',
-                ),
-              ),
-
-              React.createElement('div', { className: 'fs-library__review-panel' },
-                React.createElement('h3', { className: 'fs-library__review-panel-title' }, 'Extracted schema'),
+                React.createElement('h3', { className: 'fs-library__review-panel-title' }, 'Sections'),
                 React.createElement('ol', { className: 'fs-library__schema-list' },
                   schema.sections.map(function (s, i) {
                     return React.createElement('li', { key: i, className: 'fs-library__schema-item' },
@@ -1073,6 +1521,22 @@
 
             /* Test render panel */
             React.createElement(TestRenderPanel, { schema: schema, reportType: sel.report_type }),
+
+            /* Says what this template IS for, when it cannot be scheduled. Not
+               a disabled button: there is nothing here the person is being
+               kept from, so offering one greyed out would invent a
+               restriction that does not exist. */
+            !canActivate && !sel.active
+              ? React.createElement('div', { className: 'fs-library__cta-footer' },
+                  React.createElement('p', { className: 'fs-library__cta-note' },
+                    sel.scope === 'personal'
+                      ? 'This is yours. Pick it when you generate a report from the timeline; personal templates are not used for the scheduled reports.'
+                      : (!isSchedulable
+                          ? 'Pick this when you generate a report from the timeline. Only daily, weekly and monthly reports run on a schedule.'
+                          : 'Only an admin or GM can choose which template the scheduled reports use.'),
+                  ),
+                )
+              : null,
 
             /* CTA footer */
             canActivate && !sel.active
@@ -1096,6 +1560,51 @@
                 )
               : null,
           ),
+
+      /* DELETE, LAST AND SMALL. Owner's call, and the three things asked for
+         -- red, at the bottom, small -- are one intent: this is destructive,
+         do not let me hit it by accident, and do not give it the weight of
+         something people came here to do. Below a rule, so it cannot read as
+         the last ordinary control of the panel above it.
+
+         Two-step, not window.confirm: a native dialog blocks every event that
+         follows it in this environment, and this repo has the scars. The
+         second press is the confirmation, and it says what it will do.
+
+         "Delete" IS the honest word, even though the server soft-deletes.
+         Nothing can bring the template back -- there is no unarchive route and
+         no UI for one -- so calling it Archive would promise a retrievability
+         that does not exist. The soft delete exists so a report written last
+         month can still say which template wrote it; that is provenance, not
+         a recycle bin. The confirm says so. */
+      canDelete
+        ? React.createElement('div', { className: 'fs-library__danger' },
+            confirmingDelete
+              ? React.createElement(React.Fragment, null,
+                  React.createElement('p', { className: 'fs-library__danger-note' },
+                    'Delete “' + sel.title + '”? This cannot be undone. '
+                    + 'Reports already written to it are not affected.'),
+                  React.createElement('div', { className: 'fs-library__danger-actions' },
+                    React.createElement('button', {
+                      type: 'button',
+                      className: 'fs-library__danger-btn fs-library__danger-btn--confirm',
+                      onClick: function () {
+                        setConfirmingDelete(false);
+                        ctx.handleDelete(sel);
+                      },
+                    }, 'Delete'),
+                    React.createElement('button', {
+                      type: 'button',
+                      className: 'fs-library__danger-cancel',
+                      onClick: function () { setConfirmingDelete(false); },
+                    }, 'Cancel')))
+              : React.createElement('button', {
+                  type: 'button',
+                  className: 'fs-library__danger-btn',
+                  onClick: function () { setConfirmingDelete(true); },
+                  title: 'Delete this template',
+                }, 'Delete template'))
+        : null,
 
     );
   }
@@ -1232,16 +1741,6 @@
               );
             }),
           ),
-        );
-
-      case 'photos':
-        return React.createElement('div', { className: 'fs-library__render-photos' },
-          SAMPLE.photos.map(function (label, i) {
-            return React.createElement('div', { key: i, className: 'fs-library__render-photo-thumb' },
-              React.createElement('span', { className: 'fs-library__render-photo-icon' }, '🖼'),
-              React.createElement('span', { className: 'fs-library__render-photo-label' }, label),
-            );
-          }),
         );
 
       default:

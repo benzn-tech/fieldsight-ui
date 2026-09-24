@@ -52,6 +52,7 @@
     { key: 'security',      label: 'Security' },
     { key: 'notifications', label: 'Notifications' },
   ];
+
   var TIME_FORMATS = [{ v: '24h', l: '24-hour (14:30)' }, { v: '12h', l: '12-hour (2:30 PM)' }];
   var DATE_FORMATS = [{ v: 'DD/MM/YYYY', l: 'DD/MM/YYYY' }, { v: 'MM/DD/YYYY', l: 'MM/DD/YYYY' }, { v: 'YYYY-MM-DD', l: 'YYYY-MM-DD' }];
   var TIMEZONES = [

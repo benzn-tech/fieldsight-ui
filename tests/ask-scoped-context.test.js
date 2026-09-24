@@ -306,6 +306,16 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+/* The wait is read off the SEND BUTTON, not the input.
+   The input is deliberately never disabled (a person may type the next
+   question while this one is still running), so its `disabled` is a
+   constant and would pass this assertion even if `busy` were stuck on
+   forever. The button label is the signal that still moves. */
+function sendLabel(h) {
+  const btn = h.byClass('fs-ask-chat__send')[0];
+  return btn && btn.kids && btn.kids[0];
+}
+
 function mountAsk() {
   delete require.cache[require.resolve('../scripts/composites/ask-chat.js')];
   const h = { states: [], refs: [], effects: [], asks: [], pending: [] };
@@ -540,7 +550,7 @@ test('D-e a response to an old context is dropped, but the wait still ends', asy
   assert.strictEqual(h.byClass('fs-ask-chat__msg').length, 0, 'the stale answer was appended');
   assert.ok(!h.byClass('fs-ask-chip__seg').some(n =>
     String(n.props.className).includes('--unenforced')), 'the chips read the stale answer');
-  assert.strictEqual(h.byClass('fs-ask-chat__input')[0].props.disabled, false, 'busy never cleared');
+  assert.strictEqual(sendLabel(h), 'Ask', 'busy never cleared');
 
   /* The error path is dropped the same way. */
   const e = mountAsk();
@@ -551,7 +561,7 @@ test('D-e a response to an old context is dropped, but the wait still ends', asy
   for (let k = 0; k < 5; k++) await flushMicrotasks();
   e.rerender();
   assert.strictEqual(e.byClass('fs-ask-chat__msg').length, 0, 'the stale error was appended');
-  assert.strictEqual(e.byClass('fs-ask-chat__input')[0].props.disabled, false);
+  assert.strictEqual(sendLabel(e), 'Ask');
 });
 
 test('D-f a widen that lands mid-request is sent once the request settles', async () => {
@@ -664,7 +674,7 @@ test('D-m a late answer from the pre-switch scope is not appended after a topic 
   assert.strictEqual(h.byClass('fs-ask-chat__msg--user').length, 1, 'the original question is gone');
   const dividers = h.byClass('fs-ask-chat__msg--divider');
   assert.strictEqual(dividers.length, 1, 'the divider from the switch is gone');
-  assert.strictEqual(h.byClass('fs-ask-chat__input')[0].props.disabled, false, 'busy never cleared');
+  assert.strictEqual(sendLabel(h), 'Ask', 'busy never cleared');
 });
 
 test('D-n a day change that also changes the topic appends no divider', async () => {
@@ -1511,4 +1521,40 @@ test('S10 the middle column publishes readiness from the same predicates it rend
     'sitesList.length > 1 appears more than once — a second copy of the site-picker predicate');
   assert.strictEqual(countOccurrences(mid, 'available_users'), 9,
     'available_users appears a different number of times than the known-good source — a second copy of the user-picker predicate');
+});
+
+test('D-c3 a scoped ask that fell to the web still offers "Ask across everything"', async () => {
+  /* The button's comment has always said "a scoped answer that found nothing",
+     but the condition tested `citations.length` alone. That was equivalent only
+     because the web branch used to discard its citations. Once the backend
+     returns them (records-first union, 2026-09-22), the citations test alone
+     hides this button on exactly the answers that need it -- and on a scoped ask
+     it is the ONLY route to a web-wide search, so hiding it is a dead end with
+     no other exit.
+
+     Both shapes are pinned here so neither half can drift back: records present
+     AND from_web must still offer the widen, while records present WITHOUT
+     from_web (the records did answer) must not. */
+  const widenAfter = async function (props, res) {
+    const h = mountAsk();
+    h.render(props);
+    await h.ask('q');
+    await h.settle(0, res);
+    return h;
+  };
+  const onContextChange = c => c;
+  const WITH_RECORDS = {
+    answer: 'a',
+    citations: [{ source_s3_key: 'reports/2026-09-03/Ben/x' }],
+    applied_scope: { date: '2026-09-03' },
+  };
+
+  assert.strictEqual((await widenAfter({ context: SCOPED, onContextChange },
+    Object.assign({}, WITH_RECORDS, { from_web: true, web: { answer: 'w', sources: [] } })))
+    .byClass('fs-ask-chat__widen').length, 1,
+    'the records did not answer it -- that is the case the widen button exists for');
+
+  assert.strictEqual((await widenAfter({ context: SCOPED, onContextChange }, WITH_RECORDS))
+    .byClass('fs-ask-chat__widen').length, 0,
+    'the records DID answer it, so widening is not what the reader needs');
 });

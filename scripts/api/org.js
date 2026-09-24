@@ -895,6 +895,23 @@
   async function generateSessionReport(opts) {
     opts = opts || {};
     if (sessionReportLive()) {
+      /* THIS OBJECT IS A WHITELIST, and a field missing from it is dropped in
+         silence -- the caller's opts are never spread, so a field a component
+         starts sending arrives here and goes no further.
+
+         templateVersion is listed because templateId alone is not a request
+         the backend can serve. lambda_org_api._generation_request reads BOTH:
+         given a templateId it does `int(body.get("templateVersion"))` and
+         answers 400 "templateVersion must be a number" when that is absent.
+         So a modal that sent only the id would fail with a message about a
+         field it did believe it had sent, and the search would start in the
+         backend, which is the one place the bug is not.
+
+         The modal's template chooser now sets both when someone picks a
+         template. Picking "None" -- the standard assembled report, and still
+         the default -- leaves both undefined, and JSON.stringify omits
+         undefined keys, so that request stays byte-identical to the one this
+         function has always sent. */
       var body = {
         templateId: opts.templateId,
         title:      opts.title,
@@ -903,6 +920,15 @@
         deliver:    opts.deliver || 'download',
         recipients: opts.recipients || [],
       };
+      /* Added only when there is one, rather than sitting on the object as
+         `undefined`. JSON.stringify drops an undefined value either way, so
+         the REQUEST is identical -- but the body object is also handed to
+         tests and to anything that inspects it before encoding, and a key
+         that is present-but-undefined is not the same object as one without
+         it. Absent means absent at every layer, not just on the wire. */
+      if (opts.templateVersion !== undefined && opts.templateVersion !== null) {
+        body.templateVersion = opts.templateVersion;
+      }
       /* Only a real subset travels. Absent is "the whole meeting" on the
          backend, and an empty list is a 400 there -- so neither [] nor null may
          be sent, and an untouched modal sends exactly what it always did. */
@@ -952,6 +978,86 @@
     return { _notAvailable: true };
   }
 
+  /* Redo the extraction with the names a person has CONFIRMED.
+
+     Renaming a speaker does not change Overview, Action Items or the draft email, and
+     that is not a synchronisation bug — those hold names people SAID OUT LOUD
+     (`action_items.responsible` on prod carries "Design team", "IT Support", "Karina and
+     Anton"), while the transcript's names say who was TALKING. Nothing records which
+     speaker an extracted name came from, so a find-and-replace would reassign a task from
+     one Jesse to a different Jesse, silently, and would edit a substring of a field naming
+     two people.
+
+     So this does not rewrite anything. It hands the model the confirmed names and lets it
+     re-reason — which is also worth more than a rename: today the prompt shows `spk_0`, so
+     "I'll chase the supplier" has no owner it could name. Given the names, it does.
+
+     `sessionBase` must be exactly `sid<32 hex>`; the backend anchors on that shape because
+     the value becomes an S3 key. 202 means the extraction was QUEUED on another Lambda and
+     takes a thinking-mode round trip — there is no push, so the caller re-reads later.
+
+     Read `namedTurns` in the response, never just the status: regenerating with ZERO
+     confirmed names re-runs the same prompt for the same answer and costs a model call. */
+  async function regenerateSession(sessionBase, body) {
+    if (orgWrite()) {
+      return api.orgRequest(
+        '/sessions/' + encodeURIComponent(sessionBase) + '/regenerate',
+        /* retry:false — a lost 202 retried is a second paid extraction of the same
+           meeting, which is exactly what `reports.regenerate` refuses for the same
+           reason. */
+        { method: 'POST', body: body, retry: false });
+    }
+    await api.delay();
+    return { _notAvailable: true };
+  }
+
+  /* The company's own voiceprint library. Company-scoped on the server; there is no
+     parameter that could reach another tenant's profiles.
+
+     `samples` is the number that decides whether a profile does anything — a named profile
+     with zero of them names nobody — and `humanSamples` separates what a person vouched for
+     from what the clustering suggested. Both are shown, because "empty because the window
+     was refused" and "empty because the embedder died" produce the same row otherwise, and
+     both have happened.
+
+     No vectors travel. They are biometric data and nothing in a listing needs them. */
+  async function getVoiceprints() {
+    if (orgLive()) return api.orgRequest('/voiceprints');
+    await api.delay();
+    /* A READ stub serves the day's fixture rather than an empty list: `{voiceprints: []}`
+       is not a neutral default, it is the claim that this company has enrolled nobody. */
+    return { voiceprints: (fx().voiceprints || []).slice() };
+  }
+
+  /* Honour a withdrawal: the vectors go, the audit row stays, and every turn those vectors
+     justified is un-named. NOT the same request as removing a name from one meeting —
+     somebody who wants their name off a transcript has not asked for their profile to be
+     destroyed. The caller must say which one they mean. */
+  async function withdrawVoiceprint(voiceprintId) {
+    if (orgWrite()) {
+      return api.orgRequest('/voiceprints/' + encodeURIComponent(voiceprintId),
+        { method: 'DELETE', retry: false });
+    }
+    await api.delay();
+    return { _notAvailable: true };
+  }
+
+  /* On what grounds this company may hold voices at all: notice | attestation | confirmed,
+     or null for "not settled", which is the strict fallback and today the common case.
+
+     platform_admin ONLY on the server, and deliberately a narrower gate than naming: naming
+     a speaker is an everyday act by whoever is on site, while deciding the legal basis for
+     holding biometric data is not. The UI gates on the same role so the control is never
+     offered where the write would 403. */
+  async function setVoiceprintBasis(basis) {
+    if (orgWrite()) {
+      return api.orgRequest('/company/voiceprint-basis',
+        { method: 'PUT', body: { basis: basis }, retry: false });
+    }
+    await api.delay();
+    return { _notAvailable: true };
+  }
+
   /* Take a name off THIS meeting only. Does not touch the stored voiceprint —
      someone who wants their name off one transcript has not asked for their
      profile to be destroyed. */
@@ -994,6 +1100,10 @@
     getMe: getMe,
     setSpeakerName: setSpeakerName,
     removeSpeakerName: removeSpeakerName,
+    regenerateSession: regenerateSession,
+    getVoiceprints: getVoiceprints,
+    withdrawVoiceprint: withdrawVoiceprint,
+    setVoiceprintBasis: setVoiceprintBasis,
     deleteRecordings: deleteRecordings,
     undeleteRecordings: undeleteRecordings,
     updateProfile: updateProfile,

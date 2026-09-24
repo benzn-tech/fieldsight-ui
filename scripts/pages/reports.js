@@ -32,6 +32,44 @@
   var TYPE_LABEL = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' };
   var TYPE_TONE  = { daily: 'info', weekly: 'success', monthly: 'accent' };
 
+  /* ---------- Ordering ---------------------------------------------------
+     BY THE DAY THE REPORT IS ABOUT, never by the moment it was written.
+
+     This list used to be sorted on generated_at -- the S3 object's
+     LastModified -- which silently overrode the ordering the server had
+     already applied: lambda_org_api._read_org_report_history ends with
+     `reports.sort(key=lambda r: r["date"], reverse=True)`. Two sorts on two
+     different keys, and the client's won.
+
+     The cost only showed after a regenerate. Re-running an old report
+     rewrites its object, LastModified jumps to now, and a report ABOUT the
+     11th surfaces above one about the 21st. The list stopped being a calendar
+     and became a log of what had lately been re-run, which is not what
+     anybody opens this page to read.
+
+     The tie-breaks are not decoration. `date` is not unique -- one date can
+     carry a daily, a weekly and a monthly report -- so without them the order
+     of same-date rows is whatever the sort implementation happens to do, and
+     two renders of identical data can disagree. generated_at puts the
+     freshest of them first; `key` makes the comparator total.
+
+     A row whose `date` is '' sorts last, which is where it belongs: that
+     empty string means the server's REPORT_DATE_IN_KEY_RE found no date in
+     the key, and a row we cannot place in time must not head a list whose
+     whole job is to be in time order. */
+
+  function compareReportRows(a, b) {
+    var byDate = (b.date || '').localeCompare(a.date || '');
+    if (byDate !== 0) return byDate;
+    var byGen = (b.generated_at || '').localeCompare(a.generated_at || '');
+    if (byGen !== 0) return byGen;
+    return (a.key || '').localeCompare(b.key || '');
+  }
+
+  function sortReportRows(rows) {
+    return (rows || []).slice().sort(compareReportRows);
+  }
+
   function fmtSize(bytes) {
     if (bytes == null) return '';
     if (bytes < 1024)        return bytes + ' B';
@@ -331,85 +369,6 @@
   }
 
   /* =====================================================================
-     B.6 — TemplateFormatSelector
-     Shows personal templates first, then org; defaults to the active one.
-     Returns null when no templates exist (keeps the generate card clean).
-     ===================================================================== */
-  function TemplateFormatSelector(props) {
-    /* props: onChange(templateId|null) */
-    var loadRef  = React.useState({ status: 'loading', personal: [], org: [] });
-    var load     = loadRef[0]; var setLoad = loadRef[1];
-
-    var selRef   = React.useState('');
-    var selId    = selRef[0]; var setSelId = selRef[1];
-
-    React.useEffect(function () {
-      if (!window.FS || !window.FS.api || !window.FS.api.templates) {
-        setLoad({ status: 'ok', personal: [], org: [] });
-        return;
-      }
-      setLoad({ status: 'loading', personal: [], org: [] });
-      window.FS.api.templates.list().then(function (res) {
-        var all = (res.templates || []);
-        function sortActive(arr) {
-          return arr.slice().sort(function (a, b) { return (b.active ? 1 : 0) - (a.active ? 1 : 0); });
-        }
-        var personal = sortActive(all.filter(function (t) { return t.scope === 'personal'; }));
-        var org      = sortActive(all.filter(function (t) { return t.scope === 'org'; }));
-        setLoad({ status: 'ok', personal: personal, org: org });
-        /* Default: active personal first, then active org */
-        var activePers = personal.find(function (t) { return t.active; });
-        var activeOrg  = org.find(function (t) { return t.active; });
-        var def = (activePers || activeOrg || {}).id || '';
-        setSelId(def);
-        if (props.onChange) props.onChange(def || null);
-      }).catch(function () {
-        setLoad({ status: 'ok', personal: [], org: [] });
-      });
-    }, []);
-
-    function handleChange(e) {
-      var val = e.target.value;
-      setSelId(val);
-      if (props.onChange) props.onChange(val || null);
-    }
-
-    if (load.status === 'loading') return null;
-    if (!load.personal.length && !load.org.length) return null;
-
-    return React.createElement('div', { className: 'fs-reports__format' },
-      React.createElement('label', {
-        className: 'fs-reports__format-label',
-        htmlFor:   'rpt-format-sel',
-      }, 'Output format'),
-      React.createElement('select', {
-        id:        'rpt-format-sel',
-        className: 'fs-reports__format-select',
-        value:     selId,
-        onChange:  handleChange,
-      },
-        React.createElement('option', { value: '' }, '— Standard (FieldSight default) —'),
-        load.personal.length
-          ? React.createElement('optgroup', { label: 'My templates' },
-              load.personal.map(function (t) {
-                return React.createElement('option', { key: t.id, value: t.id },
-                  t.title + (t.active ? ' ✓' : '') + '  (' + (TYPE_LABEL[t.report_type] || t.report_type) + ')');
-              }),
-            )
-          : null,
-        load.org.length
-          ? React.createElement('optgroup', { label: 'Org templates' },
-              load.org.map(function (t) {
-                return React.createElement('option', { key: t.id, value: t.id },
-                  t.title + (t.active ? ' ✓' : '') + '  (' + (TYPE_LABEL[t.report_type] || t.report_type) + ')');
-              }),
-            )
-          : null,
-      ),
-    );
-  }
-
-  /* =====================================================================
      ReportsMiddleColumn
      ===================================================================== */
   function ReportsMiddleColumn(props) {
@@ -461,10 +420,6 @@
     var reg    = refReg[0];
     var setReg = refReg[1];
 
-    /* B.6 — selected output-format template ID (null = standard) */
-    var refTpl   = React.useState(null);
-    var selTplId = refTpl[0];
-    var setSelTplId = refTpl[1];
 
     React.useEffect(function () {
       var cancelled = false;
@@ -477,9 +432,7 @@
           setState({ status: 'access_denied', message: res.error, rows: [] });
           return;
         }
-        var sorted = (res.reports || []).slice().sort(function (a, b) {
-          return (b.generated_at || '').localeCompare(a.generated_at || '');
-        });
+        var sorted = sortReportRows(res.reports);
         setState({ status: 'ok', rows: sorted });
         if (reselectRef.current && props.onSelect) {
           var fresh = sorted.filter(function (r) { return r.key === reselectRef.current; })[0];
@@ -624,8 +577,17 @@
               className: 'fs-reports__regen-msg fs-reports__regen-msg--err',
             }, 'Failed: ' + (reg.error && reg.error.message || 'unknown')) : null,
           ),
-          /* B.6 output-format selector */
-          React.createElement(TemplateFormatSelector, { onChange: setSelTplId }),
+          /* NO TEMPLATE PICKER HERE, and it is not an oversight.
+             There was one. Choosing from it set a variable nothing read:
+             regenerate sends report_type and date, and the template a
+             SCHEDULED report is written to is a company-wide setting, not a
+             per-run choice -- it lives in the Library, and only gm/admin may
+             change it. So the control could not have worked, and meanwhile it
+             told everybody who saw it that their choice mattered.
+
+             Picking a template per report is a real thing; it happens where
+             the report is generated on demand (Timeline -> Generate report),
+             not on this page, which only re-runs the nightly ones. */
         ),
       ) : null,
 

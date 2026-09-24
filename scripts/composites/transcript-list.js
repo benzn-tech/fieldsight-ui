@@ -154,8 +154,38 @@
     var setShowAll = refAll[1];
     var candidates = showAll ? primary.concat(tail) : primary;
 
+    /* --- consent (spec 2026-09-22) ------------------------------------------
+       A SEPARATE act from naming, and the panel says so in those words.
+
+       Naming propagates a name inside this meeting by comparing audio the company already
+       holds. Consent stores a voice pattern so the person is recognisable in FUTURE
+       meetings — biometric data under the NZ Privacy Act, and the agreement required is
+       the agreement of the person RECORDED, not of the person at the keyboard, who is
+       usually a third person again.
+
+       Three properties, each of which was wrong somewhere before this existed:
+         * unchecked every time the panel opens, and re-cleared whenever the chosen name
+           changes. A box that stays ticked while the name underneath it changes records
+           one person's agreement against another person's voice.
+         * offered only for a name that resolves to ONE directory entry, because the
+           backend requires `consented_by` and cannot be given a string.
+         * when it cannot be offered, it says why — see `consentOffer`. */
+    var chosen = customMode ? String(custom || '').trim() : (choice || '');
+    var sn = window.FS.speakerNaming;
+    var offer = sn.consentOffer({
+      featureAvailable: !!props.consentAvailable,
+      displayName: chosen,
+      members: props.roster,
+    });
+    var refConsent = React.useState(false);
+    var consent    = refConsent[0];
+    var setConsent = refConsent[1];
+    React.useEffect(function () { setConsent(false); }, [chosen]);
+
     function save() {
-      props.onSave(customMode ? custom : (choice || ''));
+      props.onSave(chosen, (offer.offer && consent)
+        ? { consentGiven: true, consentedBy: offer.id }
+        : null);
     }
 
     var canSave = customMode ? !!String(custom).trim() : !!choice;
@@ -242,6 +272,37 @@
           })
         : null,
 
+      /* The consent block. Rendered only once a name is chosen, because "did this person
+         agree" is not a question that can be asked before there is a person.
+
+         The wording is the deliberate part and is not to be shortened. It has to say WHAT
+         is stored (a voice pattern), WHAT it is for (recognising them in future meetings),
+         and WHOSE agreement is required (the person recorded). "Tick to enrol" would be
+         none of those, and this is the surface the whole of migration 0042's `consented_by`
+         column exists to make meaningful. */
+      (offer.offer && chosen)
+        ? React.createElement('label', {
+            className: 'fs-transcript-list__name-consent',
+          },
+            React.createElement('input', {
+              type: 'checkbox',
+              checked: consent,
+              onChange: function (e) { setConsent(!!e.target.checked); },
+            }),
+            React.createElement('span', null,
+              chosen + ' has agreed that a pattern of their voice may be stored, so they '
+                + 'can be recognised in future meetings. Only they can agree to this — '
+                + 'not you, and not their employer.'),
+          )
+        : null,
+
+      /* Why the box is absent. A person off the roster is something the user can fix; a
+         silence teaches them nothing and reads as the feature being broken. */
+      (!offer.offer && offer.reason && chosen)
+        ? React.createElement('span', { className: 'fs-transcript-list__name-hint' },
+            offer.reason)
+        : null,
+
       React.createElement('div', { className: 'fs-transcript-list__name-actions' },
         React.createElement('button', {
           type: 'button',
@@ -317,6 +378,25 @@
     var refMembers = React.useState([]);
     var members    = refMembers[0];
     var setMembers = refMembers[1];
+
+    /* The SAME people, carrying their directory ids.
+
+       Kept beside `members` rather than replacing it, because the two answer different
+       questions and only one of them may ever be wrong quietly. `members` feeds the
+       suggestion list, where a missing id costs nothing; `roster` feeds `consented_by`,
+       where a wrong id records the wrong person as having agreed to a voiceprint. Widening
+       `members` into objects would have meant editing every reader of it — and this
+       repository has already paid for a whole-file rewrite that erased a fix. */
+    var refRoster = React.useState([]);
+    var roster    = refRoster[0];
+    var setRoster = refRoster[1];
+
+    /* Per-session state for the "rewrite the summary" control. Keyed on the session rather
+       than a single flag, because a day's view can hold several meetings and asking for
+       one must not disable the others. */
+    var refRegen = React.useState({});
+    var regen    = refRegen[0];
+    var setRegen = refRegen[1];
 
     React.useEffect(function () {
       var cancelled = false;
@@ -425,15 +505,23 @@
       var siteId = (window.FS && window.FS.siteContext)
         ? window.FS.siteContext.get() : null;
 
-      function useRoster(names) {
-        if (!cancelled && names && names.length) setMembers(names);
+      /* One entry point for both shapes, so the id half cannot be threaded through one
+         branch and forgotten in the other — the roster arrives as `users` from the site
+         route and `members` from the company one, and only the site route is exercised in
+         everyday use. */
+      function useRoster(rows) {
+        if (cancelled) return false;
+        var people = (rows || []).filter(function (m) { return m && m.name; });
+        if (!people.length) return false;
+        setMembers(people.map(function (m) { return m.name; }));
+        setRoster(people.map(function (m) { return { name: m.name, id: m.id || null }; }));
+        return true;
       }
       function company() {
         if (!org.getMembers) return;
         org.getMembers().then(function (res) {
           if (!res || res._accessDenied || res._notFound) return;
-          useRoster((res.members || []).map(function (m) { return m && m.name; })
-            .filter(Boolean));
+          useRoster(res.members || []);
         }).catch(function () { /* fewer suggestions, not a broken panel */ });
       }
 
@@ -441,9 +529,7 @@
         org.getSiteMembers(siteId).then(function (res) {
           if (cancelled) return;
           if (!res || res._accessDenied || res._notFound) { company(); return; }
-          var names = (res.users || []).map(function (m) { return m && m.name; })
-            .filter(Boolean);
-          if (names.length) useRoster(names); else company();
+          if (!useRoster(res.users || [])) company();
         }).catch(company);
       } else {
         company();
@@ -508,7 +594,7 @@
       setTimeout(function () { setReloadTick(function (n) { return n + 1; }); }, delay);
     }
 
-    function submitName(seg, index, name) {
+    function submitName(seg, index, name, consent) {
       var ref = sn.sessionRefForSegment(seg);
       if (!ref) return;
       var trimmed = String(name || '').trim();
@@ -520,6 +606,11 @@
       setNotice(null);
       window.FS.api.org.setSpeakerName(ref, sn.correctionBody(seg, {
         user: user, displayName: trimmed,
+        /* Absent unless the panel's consent box was ticked AND the name resolved to one
+           directory entry. `correctionBody` re-checks both rather than trusting this
+           call site: it is the one function every caller goes through. */
+        consentGiven: !!(consent && consent.consentGiven),
+        consentedBy: consent && consent.consentedBy,
       })).then(function (res) {
         if (res && res._notAvailable) {
           setNotice('Naming is not available in this environment.');
@@ -537,12 +628,75 @@
           return;
         }
         pendingRef.current = { name: trimmed, mode: 'set', attempt: 0 };
-        setNotice('Naming…');
+        /* Two effects from one gesture, reported separately — the backend goes to some
+           trouble to keep them apart and until now the UI collapsed both into "Naming…".
+
+           The enrolment line says "requested", never "stored". The backend says
+           `"requested"` rather than `"queued"` on purpose: a window under ten seconds
+           cannot be judged homogeneous and is not enrolled, and propagation refusing on
+           the same window refuses the enrolment with it. Seen on TEST — this endpoint
+           answered while the embedder logged `enrolment refused: window too short`. A
+           confident success message here would be the same class of error as a guard that
+           logs a warning and lets the request through. */
+        setNotice(res && res.enrolment === 'requested'
+          ? 'Naming… Voice enrolment requested for ' + trimmed
+            + ' — it may still be refused if the audio is too short or holds more than '
+            + 'one voice.'
+          : 'Naming…');
         scheduleRefetch();
       }).catch(function () {
         setNotice('Could not save that name.');
         setOptimistic({});
       });
+    }
+
+    /* Ask the backend to redo the extraction with the confirmed names.
+
+       No optimistic anything and no re-fetch: the extraction runs on another Lambda
+       through a thinking-mode round trip, and the documents it rewrites are not on this
+       screen. Saying "asked for" and stopping is the honest report — a spinner that
+       resolved to nothing visible would be worse than a sentence. */
+    function regenerateSession(s) {
+      var org = window.FS.api.org;
+      if (!org || !org.regenerateSession) return;
+      setRegen(function (prev) {
+        var next = Object.assign({}, prev);
+        next[s.sessionBase] = { state: 'busy' };
+        return next;
+      });
+      function settle(state, message) {
+        setRegen(function (prev) {
+          var next = Object.assign({}, prev);
+          next[s.sessionBase] = { state: state, message: message };
+          return next;
+        });
+      }
+      org.regenerateSession(s.sessionBase, { date: date, user: user })
+        .then(function (res) {
+          if (res && res._notAvailable) {
+            settle(null, 'Rewriting is not available in this environment.');
+            return;
+          }
+          if (res && (res._accessDenied || res._notFound)) {
+            settle(null, res.error || 'You do not have permission to rewrite this summary.');
+            return;
+          }
+          /* `namedTurns`, not the status code. Regenerating with ZERO confirmed names
+             re-runs the same prompt for the same answer and costs a model call — the
+             backend returns the count so the caller can say so rather than let somebody
+             watch nothing change for the second time. */
+          if (res && res.namedTurns === 0) {
+            settle(null, 'No confirmed names reached the backend, so nothing would change. '
+              + 'Nothing was rewritten.');
+            return;
+          }
+          settle('done', 'Asked for. The summary, action items and draft email are '
+            + 'rewritten in the background — usually a few minutes. Reload the report to '
+            + 'see them.');
+        })
+        .catch(function () {
+          settle(null, 'Could not ask for a rewrite.');
+        });
     }
 
     function removeName(seg, name) {
@@ -684,6 +838,49 @@
         ? React.createElement('div', { className: 'fs-transcript-list__notice' }, notice)
         : null,
 
+      /* Renaming a speaker does NOT change Overview, Action Items or the draft email, and
+         until now nothing on screen said so — the user renamed somebody, looked at the
+         summary, saw `spk_0` still there, and reasonably concluded the rename had failed.
+         (It had not: `turn_name_overlay` has exactly one call site, the transcript.)
+
+         This does not rewrite those documents. It re-runs the extraction with the
+         confirmed names so the MODEL reasons about them — which is the only sound option,
+         because nothing records which speaker an extracted name came from and a
+         find-and-replace would reassign a task from one Jesse to a different Jesse.
+
+         One control per SESSION, because a day's view can hold several meetings and the
+         route takes one at a time. */
+      (namingOn ? sn.confirmedSessions(state.segments) : []).map(function (s) {
+        var st = regen[s.sessionBase] || {};
+        return React.createElement('div', {
+          key: 'regen-' + s.sessionBase,
+          className: 'fs-transcript-list__regen',
+        },
+          React.createElement('span', null,
+            s.names.join(', ')
+              + (s.names.length === 1 ? ' is named' : ' are named')
+              + ' in this meeting’s transcript. The summary, action items and draft email '
+              + 'still use whatever names were heard out loud.'),
+          React.createElement('button', {
+            type: 'button',
+            className: 'fs-transcript-list__regen-button',
+            /* Disabled once requested, not merely after it finishes: the extraction is a
+               paid model call on another Lambda and a second click is a second one. */
+            disabled: !!st.state,
+            onClick: function () { regenerateSession(s); },
+            /* "Asked for", not "Done". The 202 says the request was queued; the extraction
+               itself runs elsewhere and may take minutes. A button that reads Done the
+               instant the request returns is claiming an outcome nobody has observed. */
+          }, st.state === 'busy' ? 'Asking…'
+            : st.state === 'done' ? 'Asked for'
+            : 'Rewrite the summary with these names'),
+          st.message
+            ? React.createElement('span', {
+                className: 'fs-transcript-list__name-hint',
+              }, st.message)
+            : null);
+      }),
+
       /* Say that some of these names were not heard, they were assumed. A `?` on a chip
          tells you a name is unconfirmed; it does not tell you the rule behind it, and a
          reader who does not know the rule cannot judge when to distrust it. */
@@ -775,8 +972,14 @@
             ? React.createElement(NamePanel, {
                 segment:    s,
                 candidates: candidates,
+                /* The same gate as the naming control itself: consent is only meaningful
+                   where the write route exists. `roster` rather than `members` because
+                   `consented_by` needs an id, and the suggestion list deliberately does
+                   not carry one. */
+                consentAvailable: namingOn,
+                roster:     roster,
                 onJump:  props.onJump ? function () { props.onJump(s); } : null,
-                onSave:  function (name) { submitName(s, i, name); },
+                onSave:  function (name, consent) { submitName(s, i, name, consent); },
                 onRemove: s.speaker_name
                   ? function () { removeName(s, s.speaker_name); } : null,
                 onCancel: function () { setOpenIndex(null); },

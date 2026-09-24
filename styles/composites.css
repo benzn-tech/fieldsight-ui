@@ -2539,6 +2539,75 @@
   align-items: center;
 }
 
+/* "The transcript says Ben, the summary still says spk_0." A standing explanation
+   rather than a transient toast: the mismatch persists until somebody acts on it,
+   and a message that fades leaves the user with the same wrong conclusion they
+   started with (that the rename failed). */
+.fs-transcript-list__regen {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  background: var(--surface-panel-muted);
+  border-left: 2px solid var(--border-default);
+  border-radius: var(--radius-sm);
+}
+
+.fs-transcript-list__regen-button {
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: var(--surface-app);
+  color: var(--text-primary);
+}
+
+/* Disabled the moment it is clicked and never re-enabled on success: the extraction
+   is a paid model call and a second click buys a second one. */
+.fs-transcript-list__regen-button[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Consent to store a voice pattern. Set apart from the name choices by a rule and
+   a tinted panel, because it is a SECOND act, not a detail of the first: naming
+   compares audio the company already holds, this keeps biometric data.
+
+   `align-items: flex-start` and the 2px nudge keep the box level with the first
+   line of what is deliberately a long label. The wording is what makes the
+   consent meaningful, so the layout has to tolerate it wrapping to three lines
+   rather than pressuring anyone to shorten it. */
+.fs-transcript-list__name-consent {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 8px;
+  padding: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  background: var(--surface-panel-muted);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.fs-transcript-list__name-consent input {
+  flex: none;
+  margin-top: 2px;
+  /* 16px is the platform default and deliberately not enlarged to the 44px field
+     target: this control must not be easy to hit by accident. Ticking it records a
+     claim about another person's agreement. */
+  cursor: pointer;
+}
+
 .fs-transcript-list__name-input {
   width: 100%;
   padding: 6px 8px;
@@ -3518,6 +3587,16 @@
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   margin-bottom: 2px;
+}
+/* Records-first block on a from-the-web answer (spec 2026-09-22): visually
+   distinct from the grounded path's "Sources" block, and its cards below
+   use a bullet instead of a bracketed number so they cannot be read as the
+   web prose's own [1]/[2] inline markers. */
+.fs-ask-chat__citations--records .fs-ask-chat__citations-label {
+  color: var(--color-accent-600);
+}
+.fs-ask-chat__citations--records .fs-ask-chat__cite-num {
+  color: var(--text-tertiary);
 }
 .fs-ask-chat__cite {
   display: flex;
@@ -7151,6 +7230,100 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   font-size: var(--font-size-sm);
   color: var(--text-tertiary);
   margin-bottom: var(--space-4);
+}
+
+/* ---- Voices tab: the company's voiceprint library ---- */
+.fs-voices {
+  padding: var(--space-4) 0;
+}
+
+/* Carries the biometric-data notice, the empty state's reason, and every result
+   message. All three are prose the reader has to be able to finish, so nothing
+   here truncates or clips. */
+.fs-voices__hint {
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  margin-bottom: var(--space-4);
+  max-width: 68ch;
+}
+
+.fs-voices__basis {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.fs-voices__select {
+  font: inherit;
+  font-size: var(--font-size-sm);
+  padding: 6px 8px;
+  color: var(--text-primary);
+  background: var(--surface-input);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  /* The option text is a full sentence — this control must be allowed to be
+     wide on desktop and to wrap onto its own line on a phone rather than
+     clipping the distinction between "notice" and "attestation". */
+  max-width: 100%;
+}
+
+/* 320x427dp is a real target here (the F2SP screen), where a five-column table
+   silently overflows rather than scrolling. Give it its own scroll context. */
+.fs-voices__table-wrap {
+  overflow-x: auto;
+}
+
+.fs-voices__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+}
+
+.fs-voices__table th {
+  text-align: left;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-tertiary);
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border-default);
+  white-space: nowrap;
+}
+
+.fs-voices__table td {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: top;
+}
+
+/* Sample counts are compared down the column — a profile with zero of them names
+   nobody, which is the whole point of showing the number. */
+.fs-voices__table td:nth-child(2),
+.fs-voices__table td:nth-child(3) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Danger, and deliberately not a primary-weight button: deleting a profile un-names
+   every passage it ever named, in every meeting, and cannot be undone. */
+.fs-voices__delete {
+  padding: 4px 10px;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: var(--surface-app);
+  color: var(--text-danger);
+}
+
+.fs-voices__delete[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  color: var(--text-tertiary);
 }
 
 /* ---- Theme radio group ---- */
@@ -11071,8 +11244,19 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   gap: 6px;
 }
 
+/* WRAP. Without it every child of this row competes for one line, and the
+   description below -- which asks for width:100% -- wins, squeezing the title
+   input (flex:1, min-width:0) down to nothing. The title field was in the DOM
+   the whole time, zero pixels wide, which is why a section added by hand could
+   never be given a heading and so could never be saved: the error said "needs
+   a title" and there was nowhere to type one.
+
+   The comment under .fs-library__editor-section-hint has said "the purpose sits
+   on its own line under the heading" since the day it was written. This is the
+   line that makes that true. */
 .fs-library__editor-section {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
@@ -11106,6 +11290,158 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   font-family: inherit;
 }
 .fs-library__editor-section-input:focus { background: var(--surface-input); }
+
+/* --- add / describe a section ------------------------------------------- */
+
+/* The purpose sits on its own line under the heading, full width, because it
+   is a sentence and not a label -- squeezing it beside the title would say it
+   matters less than the heading, and it is the half the model actually reads. */
+.fs-library__editor-section-hint {
+  display: flex; gap: 6px; align-items: center;
+  width: 100%; margin-top: 4px; padding-left: 26px;
+}
+
+.fs-library__editor-kind-select {
+  flex: none;
+  font-size: 11px; padding: 2px 4px;
+  border: 1px solid var(--border-subtle, #e5e7eb);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary, #6b7280);
+}
+
+.fs-library__editor-hint-input {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 12px; padding: 3px 6px;
+  border: 1px solid transparent; border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary, #6b7280);
+}
+.fs-library__editor-hint-input::placeholder { opacity: 0.7; }
+.fs-library__editor-hint-input:hover { border-color: var(--border-subtle, #e5e7eb); }
+.fs-library__editor-hint-input:focus {
+  background: var(--surface-input);
+  border-color: var(--border-strong, #9ca3af);
+  color: var(--text-primary, #111827);
+}
+
+/* "Always show this heading" -- indented to the same 26px as the hint row so it
+   reads as belonging to the section above it rather than to the next one. */
+.fs-library__editor-always {
+  display: flex; gap: 6px; align-items: center;
+  width: 100%;
+  margin-top: 2px; padding-left: 26px;
+  font-size: 11px; color: var(--text-secondary, #6b7280);
+  cursor: pointer;
+}
+.fs-library__editor-always input { margin: 0; cursor: pointer; }
+
+/* The columns for a `table` section. Its own line, like the description: it is
+   the second half of that section's brief, not a label beside it. */
+.fs-library__editor-columns {
+  display: flex; gap: 6px; align-items: center;
+  width: 100%; padding-left: 26px;
+  font-size: 11px; color: var(--text-secondary, #6b7280);
+}
+.fs-library__editor-columns-input {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 12px; padding: 3px 6px;
+  border: 1px solid transparent; border-radius: 4px;
+  background: transparent; color: var(--text-secondary, #6b7280);
+}
+.fs-library__editor-columns-input:hover { border-color: var(--border-subtle, #e5e7eb); }
+.fs-library__editor-columns-input:focus {
+  background: var(--surface-input);
+  border-color: var(--border-strong, #9ca3af);
+  color: var(--text-primary, #111827);
+}
+
+/* The section a failed save is talking about. Pointing at it by number was not
+   enough on a nine-section template -- and it was wrong for a sub-section,
+   where the number counted within its own parent. */
+.fs-library__editor-section--flagged {
+  border-color: var(--danger, #dc2626);
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.12);
+}
+.fs-library__editor-always-note { opacity: 0.75; }
+
+.fs-library__editor-addchild-btn,
+.fs-library__editor-add-btn {
+  background: none; cursor: pointer;
+  color: var(--text-secondary, #6b7280);
+}
+.fs-library__editor-addchild-btn {
+  border: 0; font-size: 14px; line-height: 1; padding: 0 4px;
+}
+.fs-library__editor-addchild-btn:hover { color: var(--text-primary, #111827); }
+
+/* Dashed, and the width of the list: it is where the next section goes, not
+   a command sitting off to one side. */
+.fs-library__editor-add-btn {
+  display: block; width: 100%; margin-top: 8px;
+  padding: 7px 10px; font-size: 13px; text-align: left;
+  border: 1px dashed var(--border-subtle, #e5e7eb); border-radius: 6px;
+}
+/* --- delete: last, small, and unmistakably destructive ------------------- */
+
+/* Below a rule and pushed to the end, so it cannot read as the last ordinary
+   control of the panel above it. Owner asked for red, bottom, small -- three
+   requests pointing at one intent: do not let me hit this by accident, and do
+   not give it the weight of something people came here to do. */
+.fs-library__danger {
+  margin-top: 20px; padding-top: 12px;
+  border-top: 1px solid var(--border-subtle, #e5e7eb);
+}
+
+.fs-library__danger-btn {
+  padding: 4px 10px;
+  font-size: 12px; line-height: 1.4;
+  color: #fff; cursor: pointer;
+  background: var(--color-danger-600, #dc2626);
+  border: 1px solid var(--color-danger-600, #dc2626);
+  border-radius: 5px;
+}
+.fs-library__danger-btn:hover {
+  background: var(--color-danger-700, #b91c1c);
+  border-color: var(--color-danger-700, #b91c1c);
+}
+/* Visible focus, because this is the one control on the panel where arriving
+   by keyboard and not knowing where you are has a cost. */
+.fs-library__danger-btn:focus-visible {
+  outline: 2px solid var(--color-danger-700, #b91c1c);
+  outline-offset: 2px;
+}
+
+.fs-library__danger-note {
+  margin: 0 0 8px;
+  font-size: 12px; line-height: 1.5;
+  color: var(--color-danger-700, #b91c1c);
+}
+
+.fs-library__danger-actions { display: flex; gap: 8px; align-items: center; }
+
+.fs-library__danger-cancel {
+  padding: 4px 8px; font-size: 12px; cursor: pointer;
+  background: none; border: 0;
+  color: var(--text-secondary, #6b7280);
+  text-decoration: underline;
+}
+.fs-library__danger-cancel:hover { color: var(--text-primary, #111827); }
+
+.fs-library__right-readonly {
+  margin: 0 0 8px; padding: 8px 10px;
+  font-size: 12px; line-height: 1.5;
+  color: var(--text-secondary, #6b7280);
+  background: var(--surface-subtle, #f9fafb);
+  border: 1px solid var(--border-subtle, #e5e7eb);
+  border-radius: 6px;
+}
+
+.fs-library__editor-add-btn:hover {
+  border-color: var(--border-strong, #9ca3af);
+  color: var(--text-primary, #111827);
+}
+
 
 .fs-library__editor-section-controls {
   display: flex;
@@ -13083,6 +13419,13 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   text-transform: uppercase;
   color: var(--text-secondary);
   font-family: var(--font-mono);
+}
+
+.fs-ask-web__answer {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  white-space: pre-wrap;
 }
 
 .fs-ask-web__sources { display: flex; flex-wrap: wrap; gap: 6px 10px; }

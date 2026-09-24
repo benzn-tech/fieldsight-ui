@@ -202,14 +202,31 @@
      `sources` carries `domain` because this vendor returns Google grounding
      redirects -- parsing the URL would attribute every source to
      `vertexaisearch.cloud.google.com`, which is the opposite of naming a
-     publisher. */
+     publisher.
+
+     `web.answer` is the web prose itself. It renders inside this block, under
+     the label, so provenance never blurs into the grounded answer above it.
+     But it renders ONLY when it differs (trimmed) from `m.text`: today
+     `res.answer` IS the web answer, so the two fields hold the same string
+     and printing both would show the prose twice. Once the backend change in
+     flight (feat/the-records-get-their-own-answer) ships, `res.answer`
+     becomes the grounded answer and `web.answer` stays the web prose -- they
+     diverge and this starts rendering, with no frontend change needed at
+     that point. See tests/ask-web-prose-inside-block.test.js. */
   function renderWebOrigin(m) {
     if (!m.fromWeb) return null;
     var web = m.web || {};
     var sources = web.sources || [];
+    /* Skip web.answer when it duplicates m.text -- trimmed exact match. */
+    var webAnswer = typeof web.answer === 'string' ? web.answer.trim() : '';
+    var messageText = typeof m.text === 'string' ? m.text.trim() : '';
+    var showAnswer = !!webAnswer && webAnswer !== messageText;
     return React.createElement('div', { className: 'fs-ask-web' },
       React.createElement('div', { className: 'fs-ask-web__label' },
         'From the open web — not from your recordings'),
+      showAnswer
+        ? React.createElement('div', { className: 'fs-ask-web__answer' }, web.answer)
+        : null,
       sources.length
         ? React.createElement('div', { className: 'fs-ask-web__sources' },
             sources.map(function (s, i) {
@@ -399,12 +416,29 @@
 
   /* Render the citations block under an assistant answer. Every field is passed
      as a React text child (auto-escaped) — the snippet/topic/site come from
-     retrieved chunk text (transcripts) and must never reach innerHTML. */
-  function renderCitations(citations) {
+     retrieved chunk text (transcripts) and must never reach innerHTML.
+
+     `fromWeb` (backend spec 2026-09-22, "union not either/or"): on the web
+     branch these citations are the customer's own record excerpts that the
+     verdict judged could not fully answer the question — they are NOT the
+     web answer's source list, and the web prose right below carries its own
+     inline [1]/[2]/... markers pointing at WEB sources. If this block used
+     the same "Sources · N" heading and the same "[i+1]" numbering as the
+     grounded path, a reader would map the web answer's [2] onto record card
+     [2] — a worse mix-up than the one that used to throw these away. So on
+     this path the heading names them as records explicitly, and the card
+     marker is a bullet, never a bracketed number, so it can never be read as
+     an inline reference into the answer text above or below it. */
+  function renderCitations(citations, fromWeb) {
     if (!citations || !citations.length) return null;
-    return React.createElement('div', { className: 'fs-ask-chat__citations' },
+    return React.createElement('div', {
+      className: 'fs-ask-chat__citations'
+        + (fromWeb ? ' fs-ask-chat__citations--records' : ''),
+    },
       React.createElement('div', { className: 'fs-ask-chat__citations-label' },
-        'Sources · ' + citations.length),
+        fromWeb
+          ? 'What we found in your records · ' + citations.length
+          : 'Sources · ' + citations.length),
       citations.map(function (c, i) {
         var tgt = citationTarget(c.source_s3_key);
         var meta = [c.site_name, c.report_date].filter(Boolean).join(' · ');
@@ -439,7 +473,13 @@
             if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); }
           } : null,
         },
-          React.createElement('span', { className: 'fs-ask-chat__cite-num' }, '[' + (i + 1) + ']'),
+          /* Bracketed numbers are the grounded path's contract: card [i+1]
+             maps positionally to inline [n] in ITS OWN answer text. On the
+             fromWeb block the answer above/below is the web prose, whose own
+             [1]/[2]/... point at web sources, not at these cards -- so this
+             block never uses that numbering, only a bullet. */
+          React.createElement('span', { className: 'fs-ask-chat__cite-num' },
+            fromWeb ? '•' : '[' + (i + 1) + ']'),
           React.createElement('div', { className: 'fs-ask-chat__cite-body' },
             meta ? React.createElement('div', { className: 'fs-ask-chat__cite-meta' }, meta) : null,
             c.topic_title
@@ -1139,6 +1179,15 @@
               ? React.createElement('div', { className: 'fs-ask-chat__asked' },
                   'Searched for: ' + m.asked)
               : null,
+            /* Records first, web after (spec 2026-09-22): a union, not
+               either/or. On a fromWeb message these are the customer's own
+               record excerpts the verdict judged insufficient -- rendered
+               here, ABOVE the "From the open web" label and the web prose,
+               so the reading order matches the plan's own name for it. See
+               renderCitations for why this block's heading and card marker
+               must not look like the web answer's own [1]/[2] source list. */
+            m.role === 'assistant' && m.fromWeb
+              ? renderCitations(m.citations, true) : null,
             m.role === 'assistant' ? renderWebOrigin(m) : null,
             /* `question_admission` already returns the sentence explaining a
                refusal (a name, a commercially sensitive topic, ...); nothing
@@ -1161,15 +1210,32 @@
                     })
                   : React.createElement('div', { className: 'fs-ask-chat__msg-text' },
                       m.text)),
-            m.role === 'assistant' ? renderCitations(m.citations) : null,
-            /* A scoped answer that found nothing: offer the same question
-               across everything. The host clears the context; the reset
-               effect re-sends once the new (empty) context has rendered.
+            /* Already rendered above (records-first) for fromWeb messages --
+               this is the grounded path's own "Sources" block only. */
+            m.role === 'assistant' && !m.fromWeb ? renderCitations(m.citations) : null,
+            /* A scoped answer whose records did not answer it: offer the same
+               question across everything. The host clears the context; the
+               reset effect re-sends once the new (empty) context has rendered.
                Only when the backend reported an applied_scope: one that
-               predates scoping already searched everything. */
+               predates scoping already searched everything.
+
+               "Did not answer" is TWO cases, not one. Empty citations is the
+               obvious one. The other is `fromWeb`: the backend retrieved
+               records, asked a verdict whether they could answer, was told no,
+               and answered from the open web instead -- which is exactly when
+               widening is most likely to help.
+
+               Until 2026-09-22 this read `!(m.citations && m.citations.length)`
+               alone and that was equivalent, because the web branch discarded
+               its citations. Now that it returns them (records-first union), the
+               citations test ALONE would hide this button on precisely the
+               answers that need it -- and on a scoped ask this button is the
+               only route to a web-wide search at all. So the condition now says
+               what the comment always said. */
             m.role === 'assistant' && m.scoped && m.scopeResponse
                 && m.scopeResponse.applied_scope && !m.error
-                && !(m.citations && m.citations.length) && props.onContextChange
+                && (m.fromWeb || !(m.citations && m.citations.length))
+                && props.onContextChange
               ? React.createElement('button', {
                   type: 'button',
                   className: 'fs-ask-chat__widen',
@@ -1295,7 +1361,16 @@
              over the topic list, which is the thing Hide was for. */
           onFocus:   function () { setFocused(true); },
           onBlur:    function () { setFocused(false); },
-          disabled:  busy,
+          /* NOT disabled while a question is in flight. An answer takes
+             13-17s on the corroborated path and the p90 for the plain one is
+             8.6s; locking the box for that long takes the next question away
+             from the person for the whole wait, and disabling an input also
+             drops focus, so they come back to a box they have to click into
+             again. Typing ahead costs nothing: `send()` already refuses while
+             `busy` and only clears `q` on a send that actually happened, so
+             an early Enter keeps the text rather than losing it. The SEND
+             BUTTON stays disabled -- that is where "not yet" belongs, and it
+             says so by reading '…'. */
         }),
         React.createElement('button', {
           type:      'submit',
