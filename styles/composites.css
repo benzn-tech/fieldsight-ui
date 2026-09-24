@@ -11244,8 +11244,19 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   gap: 6px;
 }
 
+/* WRAP. Without it every child of this row competes for one line, and the
+   description below -- which asks for width:100% -- wins, squeezing the title
+   input (flex:1, min-width:0) down to nothing. The title field was in the DOM
+   the whole time, zero pixels wide, which is why a section added by hand could
+   never be given a heading and so could never be saved: the error said "needs
+   a title" and there was nowhere to type one.
+
+   The comment under .fs-library__editor-section-hint has said "the purpose sits
+   on its own line under the heading" since the day it was written. This is the
+   line that makes that true. */
 .fs-library__editor-section {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
@@ -11318,11 +11329,40 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
    reads as belonging to the section above it rather than to the next one. */
 .fs-library__editor-always {
   display: flex; gap: 6px; align-items: center;
+  width: 100%;
   margin-top: 2px; padding-left: 26px;
   font-size: 11px; color: var(--text-secondary, #6b7280);
   cursor: pointer;
 }
 .fs-library__editor-always input { margin: 0; cursor: pointer; }
+
+/* The columns for a `table` section. Its own line, like the description: it is
+   the second half of that section's brief, not a label beside it. */
+.fs-library__editor-columns {
+  display: flex; gap: 6px; align-items: center;
+  width: 100%; padding-left: 26px;
+  font-size: 11px; color: var(--text-secondary, #6b7280);
+}
+.fs-library__editor-columns-input {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 12px; padding: 3px 6px;
+  border: 1px solid transparent; border-radius: 4px;
+  background: transparent; color: var(--text-secondary, #6b7280);
+}
+.fs-library__editor-columns-input:hover { border-color: var(--border-subtle, #e5e7eb); }
+.fs-library__editor-columns-input:focus {
+  background: var(--surface-input);
+  border-color: var(--border-strong, #9ca3af);
+  color: var(--text-primary, #111827);
+}
+
+/* The section a failed save is talking about. Pointing at it by number was not
+   enough on a nine-section template -- and it was wrong for a sub-section,
+   where the number counted within its own parent. */
+.fs-library__editor-section--flagged {
+  border-color: var(--danger, #dc2626);
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.12);
+}
 .fs-library__editor-always-note { opacity: 0.75; }
 
 .fs-library__editor-addchild-btn,

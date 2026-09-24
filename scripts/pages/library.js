@@ -539,7 +539,8 @@
            page is showing its own state, and only the report disagrees. This
            file has produced that bug once already. */
         var out = { title: s.title, kind: s.kind, fields: s.fields,
-                    prompt_hint: s.prompt_hint, always_present: !!s.always_present };
+                    prompt_hint: s.prompt_hint, always_present: !!s.always_present,
+                    columns: s.columns || [] };
         if (s.children && s.children.length) out.children = strip(s.children);
         return out;
       });
@@ -577,6 +578,7 @@
             fields:      s.fields || [],
             prompt_hint: s.prompt_hint || '',
             always_present: !!s.always_present,
+            columns:     s.columns || [],
             children:    tagKeys(s.children || []),
             _key:        counter.n++,
           };
@@ -585,6 +587,11 @@
       return tagKeys(schema.sections || []);
     });
     var sections    = secRef[0]; var setSections = secRef[1];
+    /* Which section a failed save is talking about. Held as a path so a
+       sub-section can be named too -- the number alone counted within its own
+       parent and pointed at the wrong row. */
+    var flagRef     = React.useState(null);
+    var flagged     = flagRef[0]; var setFlagged = flagRef[1];
 
     var noteRef     = React.useState('');
     var changeNote  = noteRef[0]; var setChangeNote = noteRef[1];
@@ -705,6 +712,12 @@
       editAt(p, function (sec) { return Object.assign({}, sec, { kind: val }); });
     }
 
+    function setColumns(p, val) {
+      var names = (val || '').split(/[|,]/).map(function (c) { return c.trim(); })
+        .filter(function (c) { return c; });
+      editAt(p, function (sec) { return Object.assign({}, sec, { columns: names }); });
+    }
+
     function setAlwaysPresent(p, val) {
       editAt(p, function (sec) { return Object.assign({}, sec, { always_present: !!val }); });
     }
@@ -715,7 +728,7 @@
       var key = 'new-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
       addedKey.current = key;
       return { title: '', kind: 'narrative', fields: [], prompt_hint: '',
-               always_present: false, children: [], _key: key };
+               always_present: false, columns: [], children: [], _key: key };
     }
 
     function addSection() {
@@ -799,31 +812,62 @@
        per section and the purpose under it is the instruction. Returns the
        first offender by name so the message can point at it -- "a section is
        incomplete" across nine of them is a hunt. */
-    function firstIncomplete(list, trail) {
+    function firstIncomplete(list, trail, base) {
       for (var i = 0; i < list.length; i += 1) {
         var sec = list[i];
         var where = (trail ? trail + ' › ' : '') + (sec.title || '').trim();
+        var path = (base === undefined || base === '') ? String(i) : base + '.' + i;
         if (!(sec.title || '').trim()) {
-          return { what: 'a title', where: trail || 'the list', nth: i + 1 };
+          return { what: 'a title', where: trail || 'the list', nth: i + 1,
+                   path: path, parent: trail || null };
         }
         if (!(sec.prompt_hint || '').trim()) {
-          return { what: 'a description', where: where, nth: i + 1 };
+          return { what: 'a description', where: where, nth: i + 1,
+                   path: path, parent: trail || null };
         }
-        var inner = firstIncomplete(sec.children || [], where);
+        var inner = firstIncomplete(sec.children || [], where, path);
         if (inner) return inner;
       }
       return null;
     }
 
+    function ordinal(n) {
+      var names = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth',
+                   'seventh', 'eighth', 'ninth', 'tenth'];
+      return names[n - 1] || (n + 'th');
+    }
+
+    function scrollToFlagged(path) {
+      if (typeof document === 'undefined') return;
+      window.setTimeout(function () {
+        var el = document.querySelector('[data-section-path="' + path + '"]');
+        if (el && el.scrollIntoView) {
+          el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          var input = el.querySelector('.fs-library__editor-section-input');
+          if (input && input.focus) input.focus();
+        }
+      }, 0);
+    }
+
     function save() {
       var gap = firstIncomplete(sections, '');
       if (gap) {
+        /* "Section 6" was not enough to act on, twice over: on a long template
+           it is a counting exercise, and on a sub-section the number counted
+           within its own parent, so it pointed at the wrong row. The path says
+           which one, the highlight shows it, and the scroll puts it on screen. */
+        setFlagged(gap.path);
         setSaveErr(gap.what === 'a title'
-          ? ('Section ' + gap.nth + ' needs a title before this can be saved.')
+          ? (gap.parent
+              ? ('The ' + ordinal(gap.nth) + ' section under “' + gap.parent
+                 + '” needs a heading before this can be saved.')
+              : ('Section ' + gap.nth + ' needs a heading before this can be saved.'))
           : ('“' + gap.where + '” needs a description — that sentence is '
              + 'what tells the report what belongs in the section.'));
+        scrollToFlagged(gap.path);
         return;
       }
+      setFlagged(null);
       setSaving(true); setSaveErr(null);
       var newSchema = sectionsToSchema(sections);
       window.FS.api.templates.updateSchema(templateId, newSchema, changeNote || 'Edited sections').then(function (updated) {
@@ -918,8 +962,10 @@
 
       return React.createElement('li', {
         key:       sec._key,
+        'data-section-path': p,
         className: 'fs-library__editor-section'
                    + (isChild ? ' fs-library__editor-section--child' : '')
+                   + (flagged === p ? ' fs-library__editor-section--flagged' : '')
                    + (dragPath === p ? ' fs-library__editor-section--dragging' : '')
                    + (hoveredZone === 'before' ? ' fs-library__editor-section--drop-before' : '')
                    + (hoveredZone === 'into'   ? ' fs-library__editor-section--drop-into'   : '')
@@ -942,7 +988,10 @@
         React.createElement('input', {
           className:   'fs-library__editor-section-input',
           value:       sec.title,
-          onChange:    function (e) { rename(p, e.target.value); },
+          onChange:    function (e) {
+            if (flagged === p) setFlagged(null);
+            rename(p, e.target.value);
+          },
           'aria-label': 'Section title',
           placeholder: 'Section heading',
           maxLength:   80,
@@ -989,6 +1038,25 @@
             'aria-label': 'What goes in this section',
             placeholder: 'What goes in this section — e.g. "Hazards raised, and whether a control was agreed"',
             maxLength:   400,
+          }),
+        ),
+
+        /* THE COLUMNS, and only for a table. Asking for "a table" and naming
+           no columns was measured on the customer's own daily report: the
+           model invented one column, headed with the section's own title,
+           holding lines that had read fine as sentences the day before. Left
+           empty this falls back to the shape the stop-recording email and the
+           Actions table already use, rather than to a guess. */
+        (sec.kind === 'table') && React.createElement('label',
+          { className: 'fs-library__editor-columns' },
+          React.createElement('span', null, 'Columns'),
+          React.createElement('input', {
+            className:   'fs-library__editor-columns-input',
+            value:       (sec.columns || []).join(' | '),
+            onChange:    function (e) { setColumns(p, e.target.value); },
+            'aria-label': 'Table columns, separated by |',
+            placeholder: 'Item | Assigned | Due',
+            maxLength:   200,
           }),
         ),
 
