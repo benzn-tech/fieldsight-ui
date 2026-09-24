@@ -51,8 +51,15 @@
   var RT_LABEL = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', incident: 'Incident' };
   var RT_TONE  = { daily: 'info', weekly: 'success', monthly: 'accent', incident: 'danger' };
 
-  var KIND_LABEL = { narrative: 'Narrative', list: 'List', table: 'Table', kpi: 'KPIs', photos: 'Photos' };
-  var KIND_ICON  = { narrative: '¶', list: '•', table: '⊞', kpi: '◆', photos: '🖼' };
+  /* PHOTOS IS GONE FROM HERE, and that is the honest half of wiring the rest up.
+     A generated report is prose the model writes; nothing in that path inserts
+     an image, so "Photos" could only ever produce a heading with a sentence
+     under it -- while this editor's own Test render drew photo placeholders for
+     it. The server refuses the value now, so leaving it offered here would mean
+     a choice that cannot be saved. The other four each make the document do
+     something. */
+  var KIND_LABEL = { narrative: 'Narrative', list: 'List', table: 'Table', kpi: 'KPIs' };
+  var KIND_ICON  = { narrative: '¶', list: '•', table: '⊞', kpi: '◆' };
 
   /* ── Helpers ───────────────────────────────────────────────────────── */
 
@@ -108,7 +115,6 @@
       { action: 'Confirm crane availability w/c 18 May',        owner: 'Jarley Trainor', due_date: '10 May 2026' },
       { action: 'Submit VO-15 for approval',                    owner: 'James Lamb',    due_date: '15 May 2026' },
     ],
-    photos:    ['Progress photo 1', 'Progress photo 2', 'Progress photo 3'],
   };
 
   /* ── Context ───────────────────────────────────────────────────────── */
@@ -527,7 +533,13 @@
   function sectionsToSchema(sections) {
     function strip(arr) {
       return arr.map(function (s) {
-        var out = { title: s.title, kind: s.kind, fields: s.fields, prompt_hint: s.prompt_hint };
+        /* always_present BELONGS IN THIS LIST, and the reason is worth a line:
+           a field the editor can set and this function forgets is dropped
+           silently -- the page keeps showing the checkbox ticked, because the
+           page is showing its own state, and only the report disagrees. This
+           file has produced that bug once already. */
+        var out = { title: s.title, kind: s.kind, fields: s.fields,
+                    prompt_hint: s.prompt_hint, always_present: !!s.always_present };
         if (s.children && s.children.length) out.children = strip(s.children);
         return out;
       });
@@ -564,6 +576,7 @@
             kind:        s.kind,
             fields:      s.fields || [],
             prompt_hint: s.prompt_hint || '',
+            always_present: !!s.always_present,
             children:    tagKeys(s.children || []),
             _key:        counter.n++,
           };
@@ -692,13 +705,17 @@
       editAt(p, function (sec) { return Object.assign({}, sec, { kind: val }); });
     }
 
+    function setAlwaysPresent(p, val) {
+      editAt(p, function (sec) { return Object.assign({}, sec, { always_present: !!val }); });
+    }
+
     var addedKey = React.useRef ? React.useRef(null) : { current: null };
 
     function blankSection() {
       var key = 'new-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
       addedKey.current = key;
       return { title: '', kind: 'narrative', fields: [], prompt_hint: '',
-               children: [], _key: key };
+               always_present: false, children: [], _key: key };
     }
 
     function addSection() {
@@ -973,6 +990,24 @@
             placeholder: 'What goes in this section — e.g. "Hazards raised, and whether a control was agreed"',
             maxLength:   400,
           }),
+        ),
+
+        /* KEEP THE HEADING, NOT "WRITE SOMETHING ANYWAY". The distinction is
+           the whole point of this checkbox existing: somebody who wanted a
+           section that never disappears wrote a sentence into the description
+           demanding the list appear however quiet the day had been, and that
+           sentence went to the model beside our own rules and beat them. This
+           asks for the heading. A quiet day still reads "Nothing here." under
+           it, because the alternative is asking for something to be made up. */
+        React.createElement('label', { className: 'fs-library__editor-always' },
+          React.createElement('input', {
+            type:     'checkbox',
+            checked:  !!sec.always_present,
+            onChange: function (e) { setAlwaysPresent(p, e.target.checked); },
+          }),
+          React.createElement('span', null, 'Always show this heading'),
+          React.createElement('span', { className: 'fs-library__editor-always-note' },
+            '— on a quiet day it reads “Nothing here.”'),
         ),
         /* Recursive children (only top-level can have children — 1-level cap) */
         !isChild && sec.children && sec.children.length > 0
@@ -1638,16 +1673,6 @@
               );
             }),
           ),
-        );
-
-      case 'photos':
-        return React.createElement('div', { className: 'fs-library__render-photos' },
-          SAMPLE.photos.map(function (label, i) {
-            return React.createElement('div', { key: i, className: 'fs-library__render-photo-thumb' },
-              React.createElement('span', { className: 'fs-library__render-photo-icon' }, '🖼'),
-              React.createElement('span', { className: 'fs-library__render-photo-label' }, label),
-            );
-          }),
         );
 
       default:

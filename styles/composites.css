@@ -11314,6 +11314,17 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color: var(--text-primary, #111827);
 }
 
+/* "Always show this heading" -- indented to the same 26px as the hint row so it
+   reads as belonging to the section above it rather than to the next one. */
+.fs-library__editor-always {
+  display: flex; gap: 6px; align-items: center;
+  margin-top: 2px; padding-left: 26px;
+  font-size: 11px; color: var(--text-secondary, #6b7280);
+  cursor: pointer;
+}
+.fs-library__editor-always input { margin: 0; cursor: pointer; }
+.fs-library__editor-always-note { opacity: 0.75; }
+
 .fs-library__editor-addchild-btn,
 .fs-library__editor-add-btn {
   background: none; cursor: pointer;
