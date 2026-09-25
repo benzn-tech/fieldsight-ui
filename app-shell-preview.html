@@ -239,6 +239,10 @@
   <script src="scripts/api/timeline.js?v=5"></script>
   <script src="scripts/api/transcripts.js?v=2"></script>
   <script src="scripts/api/speaker-naming.js?v=13"></script>
+  <!-- name-proposals registers on FS.api-adjacent FS.nameProposals, and must load
+       AFTER api/index.js: that file assigns window.FS.api WHOLESALE, so anything
+       registering before it is silently wiped with no error at load. -->
+  <script src="scripts/api/name-proposals.js?v=1"></script>
   <script src="scripts/api/recording-deletion.js?v=3"></script>
   <script src="scripts/api/audio.js?v=1"></script>
   <script src="scripts/api/video.js?v=1"></script>

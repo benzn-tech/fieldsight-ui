@@ -871,6 +871,33 @@ button:not([class*="fs-"]):focus-visible,
 .fs-bell__list { list-style: none; margin: 0; padding: 0; }
 .fs-bell__empty { margin: 0; padding: 16px 12px; color: var(--text-secondary, #6b7280); }
 
+/* Two sources in one panel. A rule between them, not a card each: they are two
+   kinds of the same thing (something to attend to) and boxing each one makes
+   the panel read as two unrelated widgets stacked. */
+.fs-bell__section + .fs-bell__section { border-top: 1px solid var(--border-subtle); }
+
+.fs-bell__row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px; border-top: 1px solid var(--border-subtle);
+}
+.fs-bell__list > .fs-bell__row:first-child { border-top: 0; }
+.fs-bell__row-main { min-width: 0; flex: 1; }
+.fs-bell__row-title {
+  display: block; font-weight: 500; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fs-bell__row-sub { display: block; font-size: 12px; color: var(--text-secondary); }
+.fs-bell__row-action {
+  flex: none; font: inherit; font-size: 13px; cursor: pointer;
+  padding: 5px 12px; border-radius: 6px;
+  border: 1px solid var(--border-default); background: transparent;
+  color: var(--text-primary);
+}
+.fs-bell__row-action:hover { border-color: var(--text-secondary); }
+.fs-bell__row-action:focus-visible {
+  outline: 2px solid var(--color-accent-500); outline-offset: 2px;
+}
+
 .fs-bell__job {
   padding: 10px 12px;
   border-bottom: 1px solid var(--color-border-subtle, #f3f4f6);
