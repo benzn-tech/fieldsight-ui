@@ -284,6 +284,18 @@
      is NOT an empty list: an empty list reads as "your company has no
      templates", which is a different and wrong statement, and it would quietly
      remove the only choice this step exists to offer. */
+  /* THE WRAP IS NOT DECORATION. `.fs-field__control` is `flex: 1 1 0%`,
+     written for a child of `.fs-field__control-wrap` -- a ROW, where it means
+     "fill the width". Put the control straight into `.fs-field`, which is a
+     COLUMN, and the same declaration applies to the height axis instead: the
+     basis becomes 0, and the size modifier's `height: 40px` loses to it. Every
+     single-line input in this dialog rendered 18px tall with its text sitting
+     on the border. The textareas survived only because their min-height beat
+     the basis. Measured in the browser: 18.3px unwrapped, 40px wrapped. */
+  function wrapControl(node) {
+    return React.createElement('div', { className: 'fs-field__control-wrap' }, node);
+  }
+
   function TemplateChooser(props) {
     var h = React.createElement;
     var s_state = React.useState({ phase: 'loading', rows: [] });
@@ -313,17 +325,17 @@
         t.title + (t.scope === 'personal' ? ' (yours)' : '')));
     });
 
-    return h('label', { className: 'fs-field fs-srm__template' },
+    return h('label', { className: 'fs-field fs-field--md fs-field--full-width fs-srm__template' },
       h('span', { className: 'fs-field__label' }, 'Template'),
-      h('select', {
-        className: 'fs-input', value: props.templateId || '',
+      wrapControl(h('select', {
+        className: 'fs-field__control', value: props.templateId || '',
         disabled: st.phase === 'loading',
         onChange: function (e) {
           var id = e.target.value || null;
           var row = st.rows.filter(function (t) { return t.id === id; })[0];
           props.onChoose(id, row && row.version, row && row.title);
         },
-      }, options),
+      }, options)),
       st.phase === 'error'
         ? h('span', { className: 'fs-field__hint fs-field__hint--error' },
             'Could not load your templates. The standard report is still available.')
@@ -352,8 +364,8 @@
       });
     }
     function field(label, node) {
-      return h('label', { className: 'fs-field' },
-        h('span', { className: 'fs-field__label' }, label), node);
+      return h('label', { className: 'fs-field fs-field--md fs-field--full-width' },
+        h('span', { className: 'fs-field__label' }, label), wrapControl(node));
     }
     return h('div', { className: 'fs-srm__step fs-srm__fill' },
       /* First, because it is the choice the rest of the report follows from --
@@ -364,19 +376,19 @@
         onChoose: props.onChooseTemplate || function () {},
       }),
       field('Report title', h('input', {
-        type: 'text', className: 'fs-input', value: form.title || '',
+        type: 'text', className: 'fs-field__control', value: form.title || '',
         onChange: function (e) { setTitle(e.target.value); },
       })),
       field('Attendees (one per line)', h('textarea', {
-        className: 'fs-input', rows: 3, value: attText,
+        className: 'fs-field__control fs-field__control--textarea', rows: 3, value: attText,
         onChange: function (e) { onAtt(e.target.value); },
       })),
       field('Weather', h('input', {
-        type: 'text', className: 'fs-input', value: fields.weather || '',
+        type: 'text', className: 'fs-field__control', value: fields.weather || '',
         onChange: function (e) { setField('weather', e.target.value); },
       })),
       field('Sign-off', h('input', {
-        type: 'text', className: 'fs-input', value: fields.sign_off || '',
+        type: 'text', className: 'fs-field__control', value: fields.sign_off || '',
         onChange: function (e) { setField('sign_off', e.target.value); },
       })));
   }
@@ -404,12 +416,12 @@
         mode('download', 'Download', null), mode('email', 'Email', emailBlocked)),
       emailBlocked ? h('p', { className: 'fs-srm__delivery-note' }, emailBlocked) : null,
       props.deliver === 'email'
-        ? h('label', { className: 'fs-field' },
+        ? h('label', { className: 'fs-field fs-field--md fs-field--full-width' },
             h('span', { className: 'fs-field__label' }, 'Recipients (one per line)'),
-            h('textarea', {
-              className: 'fs-input', rows: 2, value: props.recipientsText, placeholder: 'name@company.com',
+            wrapControl(h('textarea', {
+              className: 'fs-field__control fs-field__control--textarea', rows: 2, value: props.recipientsText, placeholder: 'name@company.com',
               onChange: function (e) { props.onRecipients(e.target.value); },
-            }))
+            })))
         : null);
   }
 
@@ -575,9 +587,16 @@
         }));
     }
 
-    function btn(label, onClick, variant) {
+    /* A VARIANT AND A SIZE, ALWAYS -- that is how the design system's own
+       Button composes its classes (components/button.js), and `.fs-btn` on
+       its own carries neither a height nor a background. This helper used to
+       add a variant only when asked and a size never, so every Back, Cancel
+       and Close in this dialog rendered as a bare unpadded label. */
+    function btn(label, onClick, variant, size) {
       return h('button', {
-        type: 'button', className: 'fs-btn' + (variant ? ' fs-btn--' + variant : ''), onClick: onClick,
+        type: 'button',
+        className: 'fs-btn fs-btn--' + (size || 'md') + ' fs-btn--' + (variant || 'secondary'),
+        onClick: onClick,
       }, label);
     }
 
@@ -608,13 +627,13 @@
             ? h('p', { className: 'fs-srm__preview-attendees' }, 'Attendees: ' + preview.participants.join(', ')) : null,
           choosable ? h('div', { className: 'fs-srm__window' },
             h('span', { className: 'fs-srm__window-label' }, 'Cover only'),
-            h('input', { type: 'time', className: 'fs-input fs-srm__window-time', value: winFrom,
+            h('input', { type: 'time', className: 'fs-field__control fs-srm__window-time', value: winFrom,
               'aria-label': 'Window start', onChange: function (e) { setWinFrom(e.target.value); } }),
             h('span', null, '–'),
-            h('input', { type: 'time', className: 'fs-input fs-srm__window-time', value: winTo,
+            h('input', { type: 'time', className: 'fs-field__control fs-srm__window-time', value: winTo,
               'aria-label': 'Window end', onChange: function (e) { setWinTo(e.target.value); } }),
-            btn('Select this window', function () { setChecked(windowChecked(pTopics, winFrom, winTo)); }),
-            btn('Select all', function () { setChecked({}); }),
+            btn('Select this window', function () { setChecked(windowChecked(pTopics, winFrom, winTo)); }, 'secondary', 'sm'),
+            btn('Select all', function () { setChecked({}); }, 'secondary', 'sm'),
             h('span', { className: 'fs-srm__window-count' },
               chosenCount + ' of ' + choosable + ' topics'
               + (unplaceable ? ' · ' + unplaceable + ' without a time, not picked by a window' : ''))) : null,
@@ -710,7 +729,7 @@
     else if (step === 'review') footer = h('footer', { className: 'fs-srm__footer' },
       btn('Back', function () { setStep('fill'); }),
       h('button', {
-        type: 'button', className: 'fs-btn fs-btn--primary',
+        type: 'button', className: 'fs-btn fs-btn--md fs-btn--primary',
         disabled: !canGenerate(deliver, recipients, selection, form.templateId),
         title: canGenerate(deliver, recipients, selection, form.templateId) ? undefined
           : (Array.isArray(selection) && !selection.length
@@ -741,6 +760,11 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = { buildGeneratePayload: buildGeneratePayload, interpretReportStatus: interpretReportStatus, previewFieldDefaults: previewFieldDefaults, parseAttendees: parseAttendees, canGenerate: canGenerate, STEPS: STEPS, applyPreviewDefaults: applyPreviewDefaults, applyTemplateChoice: applyTemplateChoice, emailBlockedBecause: emailBlockedBecause,
       parseTimeRange: parseTimeRange, parseClock: parseClock, overlapsWindow: overlapsWindow, windowChecked: windowChecked, selectedRowIds: selectedRowIds,
-      previewErrorMessage: previewErrorMessage, generateErrorMessage: generateErrorMessage, noFolderMappingMessage: noFolderMappingMessage };
+      previewErrorMessage: previewErrorMessage, generateErrorMessage: generateErrorMessage, noFolderMappingMessage: noFolderMappingMessage,
+      /* The step components, so their STRUCTURE can be rendered and checked
+         in node. A class that exists but sits in the wrong parent -- a field
+         control outside its wrap -- styles to nothing, and no check on
+         classes alone can see that. */
+      FillStep: FillStep, DeliveryChooser: DeliveryChooser, TemplateChooser: TemplateChooser };
   }
 })();
