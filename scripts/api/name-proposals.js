@@ -38,7 +38,7 @@
   var state = { people: [], total: 0, loaded: false, error: null };
   var subs = [];
   var timer = null;
-  var inflight = false;
+  var inflight = null;
 
   function emit() {
     subs.slice().forEach(function (fn) {
@@ -55,11 +55,18 @@
     };
   }
 
-  async function refresh() {
+  /* Returns the request already in flight rather than nothing. `afterNaming`
+     awaits this and then reads the result; returning early while the bell's own
+     poll was still running would hand it the answer from before the rename. */
+  function refresh() {
+    if (inflight) return inflight;       /* a slow response must not stack requests */
+    inflight = doRefresh();
+    return inflight;
+  }
+
+  async function doRefresh() {
     var org = ((window.FS || {}).api || {}).org;
-    if (!org || !org.getNameProposals) return;
-    if (inflight) return;                 /* a slow response must not stack requests */
-    inflight = true;
+    if (!org || !org.getNameProposals) { inflight = null; return; }
     try {
       var r = await org.getNameProposals();
       state.people = (r && r.people) || [];
@@ -72,9 +79,35 @@
       state.error = (e && e.message) || 'could not reach the server';
     } finally {
       state.loaded = true;
-      inflight = false;
+      inflight = null;
       emit();
     }
+  }
+
+  /* Somebody just named a speaker. Two things follow, on two clocks.
+
+     NOW: if that person already has passages waiting from an earlier rename, open
+     the dialog on them. They have just shown they care who this voice is, which
+     is the moment they are most willing to spend ten seconds answering -- better
+     than any reminder, and better than hoping they open the bell.
+
+     IN ABOUT A MINUTE: the backend is embedding the passage they just named and
+     will then look for others. Nothing exists to show yet, so poll again once it
+     has had time, and let the bell pick the new ones up. Opening a dialog a
+     minute later, while they are doing something else, would be an interruption
+     they did not ask for. */
+  async function afterNaming(displayName) {
+    var name = String(displayName || '').trim().toLowerCase();
+    await refresh();
+    var hit = (state.people || []).find(function (p) {
+      return String(p.displayName || '').trim().toLowerCase() === name;
+    });
+    if (hit && hit.pending > 0) {
+      window.dispatchEvent(new CustomEvent('fs:open-name-proposals', {
+        detail: { voiceprintId: hit.voiceprintId, displayName: hit.displayName },
+      }));
+    }
+    setTimeout(refresh, 90000);
   }
 
   function start() {
@@ -103,6 +136,7 @@
        minute, so one immediate poll would ask before there is anything to
        find. */
     refreshSoon: function (ms) { setTimeout(refresh, ms || 90000); },
+    afterNaming: afterNaming,
   };
 
 })();
