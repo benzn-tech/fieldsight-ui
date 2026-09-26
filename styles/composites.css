@@ -12357,6 +12357,176 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 /* Thumbnails, not a gallery. The reviewer is checking that the right photo
    sits under the right claim before the report is generated; they open the
    Photos tab when they need to look properly. */
+/* =========================================================================
+   Session / day report dialog (.fs-srm)
+
+   THIS DIALOG SHIPPED WITHOUT A STYLESHEET. It was added as "review modal
+   shell + logic core", and of the 36 classes it renders, 27 have never had a
+   rule anywhere in this repo -- only the two photo-preview rules below existed.
+   The owner reported one step of it as "the styles did not load"; every step
+   was unstyled, and had been since it shipped.
+
+   Form fields and buttons are NOT styled here. They use the design system's
+   own .fs-field / .fs-field__control and .fs-btn--{variant} .fs-btn--{size},
+   which already handle focus, disabled and dark mode. Everything below is the
+   dialog's own layout -- spacing, the footer, the pickers -- and nothing it
+   could have borrowed.
+   ========================================================================= */
+
+.fs-srm {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fs-srm__step {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 0 16px;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.fs-srm__step p { margin: 0; }
+.fs-srm__step--error { color: var(--color-danger-600); }
+
+.fs-srm__hint {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.fs-srm__footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* --- step 1: what the report will cover ---------------------------------- */
+
+.fs-srm__preview-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: var(--font-weight-semibold, 600);
+}
+.fs-srm__preview-meta,
+.fs-srm__preview-attendees {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.fs-srm__window {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel-muted);
+}
+.fs-srm__window-label {
+  font-size: 13px;
+  font-weight: var(--font-weight-medium);
+  color: var(--text-secondary);
+}
+/* Inline beside the buttons, so it carries its own size rather than the
+   .fs-field--md one it would get inside a labelled field. */
+.fs-srm__window-time {
+  /* .fs-field__control is `flex: 1 1 0%`, and here it sits directly in a ROW,
+     where that means "take all the spare width". A time input does not want
+     the spare width. */
+  flex: none;
+  width: auto;
+  height: 32px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+.fs-srm__window-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.fs-srm__preview-topics {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fs-srm__preview-topic {
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+.fs-srm__preview-topic h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold, 600);
+}
+.fs-srm__preview-topic p {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+/* Unticked: still shown, so the person can see what they are leaving out,
+   and can tick it back. */
+.fs-srm__preview-topic--off { opacity: 0.45; }
+.fs-srm__preview-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  font-weight: var(--font-weight-regular, 400);
+}
+.fs-srm__preview-actions {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+/* --- step 2: template and the fields around it --------------------------- */
+
+.fs-srm__fill { gap: 16px; }
+
+/* --- step 3: how it is delivered ----------------------------------------- */
+
+.fs-srm__review-summary {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+}
+.fs-srm__delivery {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fs-srm__delivery-modes {
+  display: flex;
+  gap: 16px;
+}
+.fs-srm__delivery-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+/* Disabled WITH its reason, never hidden -- the note beside it says why. */
+.fs-srm__delivery-mode--blocked {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.fs-srm__delivery-note {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* --- after generating ----------------------------------------------------- */
+
+.fs-srm__done-msg { color: var(--text-primary); }
+
 .fs-srm__preview-photos {
   display: flex; flex-wrap: wrap; gap: 8px;
   margin: 8px 0 0;
