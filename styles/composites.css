@@ -12436,6 +12436,10 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 /* Inline beside the buttons, so it carries its own size rather than the
    .fs-field--md one it would get inside a labelled field. */
 .fs-srm__window-time {
+  /* .fs-field__control is `flex: 1 1 0%`, and here it sits directly in a ROW,
+     where that means "take all the spare width". A time input does not want
+     the spare width. */
+  flex: none;
   width: auto;
   height: 32px;
   padding: 0 8px;
