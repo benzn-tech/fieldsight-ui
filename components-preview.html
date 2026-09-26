@@ -112,6 +112,8 @@
   <script type="text/babel" src="scripts/composites/tooltip.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/toast.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/modal-overlay.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/notification-bell.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/name-proposals-dialog.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/email-preview-modal.js?v=15"></script>
   <script type="text/babel" src="scripts/composites/session-report-modal.js?v=5"></script>
   <script type="text/babel" src="scripts/composites/recording-delete-modal.js?v=1"></script>
@@ -182,6 +184,58 @@
           <h2>{title}</h2>
           {children}
         </React.Fragment>
+      );
+    }
+
+    /* Stubs just enough of FS for the bell and the dialog to render with example
+       data. Audio will not play here -- there is no presigner -- and the dialog
+       says "Audio unavailable" rather than hiding the button, which is itself a
+       state worth being able to see. */
+    function VoicesShowcase() {
+      React.useState(() => {
+        window.FS = window.FS || {};
+        window.FS.api = window.FS.api || {};
+        window.FS.api.org = window.FS.api.org || {};
+        const example = {
+          people: [{ voiceprintId: 'vp-demo', displayName: 'Jarley Trainor', pending: 2 }],
+          total: 2,
+          proposals: [
+            { id: 'd1', date: '2026-09-25', userFolder: 'Jarley_Trainor',
+              sourceFilename: 'jarley_2026-09-25_09-12-04_off0.0_to88.4_srcwav.json',
+              startSec: 12.4, endSec: 31.0,
+              text: 'We need the scaffold inspection signed off before the pour on Thursday.' },
+            { id: 'd2', date: '2026-09-24', userFolder: 'Jarley_Trainor',
+              sourceFilename: 'jarley_2026-09-24_14-02-51_off0.0_to61.7_srcwav.json',
+              startSec: 3.0, endSec: 14.6, text: null },
+          ],
+        };
+        if (!window.FS.api.org.getNameProposals) {
+          window.FS.api.org.getNameProposals = async (id) =>
+            id ? { voiceprintId: id, proposals: example.proposals.slice() }
+               : { people: example.people, total: example.total };
+          window.FS.api.org.decideNameProposal = async (id, d) => ({ proposalId: id, decision: d });
+        }
+        if (!window.FS.nameProposals) {
+          window.FS.nameProposals = {
+            get: () => ({ people: example.people, total: example.total }),
+            subscribe: (fn) => { fn({ people: example.people, total: example.total }); return () => {}; },
+            refresh: () => Promise.resolve(),
+          };
+        }
+        return true;
+      });
+      const Bell = window.FieldSight.NotificationBell;
+      const Dialog = window.FieldSight.NameProposalsDialog;
+      return (
+        <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+          {Bell ? <Bell /> : <em>NotificationBell not loaded</em>}
+          <button className="fs-btn fs-btn--secondary fs-btn--sm" onClick={() =>
+            window.dispatchEvent(new CustomEvent('fs:open-name-proposals',
+              { detail: { voiceprintId: 'vp-demo', displayName: 'Jarley Trainor' } }))}>
+            Open the dialog directly
+          </button>
+          {Dialog ? <Dialog /> : <em>NameProposalsDialog not loaded</em>}
+        </div>
       );
     }
 
@@ -1986,6 +2040,16 @@
             </Row>
             <Row label="closed (open=false) renders nothing">
               {TodoHistory && <TodoHistory open={false} actionItemId="cd155836-49f7-44d7-8b7e-e36505140733" />}
+            </Row>
+          </Section>
+
+          {/* Voices to confirm. Neither composite was ever registered here -- the bell
+              shipped without a showcase, so a render regression in it had nowhere to be
+              seen. This installs a self-contained stub rather than loading the api layer,
+              so the section can never break because some unrelated api module did. */}
+          <Section title="Voices to confirm · NotificationBell + NameProposalsDialog">
+            <Row label="bell · one person waiting">
+              <VoicesShowcase />
             </Row>
           </Section>
 

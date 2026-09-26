@@ -628,6 +628,10 @@
           return;
         }
         pendingRef.current = { name: trimmed, mode: 'set', attempt: 0 };
+        /* A rename is the moment to ask about this person's other passages; the
+           store decides whether there is anything to ask yet. */
+        var proposals = (window.FS || {}).nameProposals;
+        if (proposals && proposals.afterNaming) proposals.afterNaming(trimmed);
         /* Two effects from one gesture, reported separately — the backend goes to some
            trouble to keep them apart and until now the UI collapsed both into "Naming…".
 

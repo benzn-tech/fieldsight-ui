@@ -965,6 +965,11 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
         window.FieldSight.NotificationBell
           ? React.createElement(window.FieldSight.NotificationBell)
           : null,
+        /* Mounted once, beside the bell that opens it. It renders nothing until a
+           `fs:open-name-proposals` event names a person. */
+        window.FieldSight.NameProposalsDialog
+          ? React.createElement(window.FieldSight.NameProposalsDialog)
+          : null,
         React.createElement(WeatherIndicator),
       ),
     ),

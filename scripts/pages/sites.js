@@ -591,7 +591,9 @@
     var selectedId    = props.selectedItem && props.selectedItem.kind === 'site'
       ? props.selectedItem.site_id
       : null;
-    var canCreate = ctx.caller && (ctx.caller.isAdmin || (window.FS && window.FS.can && window.FS.can(ctx.caller, 'user:manage')));
+    /* Mirrors the backend create_org_site gate (admin/gm/platform_admin).
+       Not user:manage — project_manager holds that too and every submit 403'd. */
+    var canCreate = ctx.caller && (ctx.caller.isAdmin || ctx.caller.role === 'gm');
     /* batch 2c Task 5 — toggle is live-only (mock fixtures carry no
        archived dimension) and gated the same as the archive action itself. */
     var canToggleArchived = orgLive() && !!(window.FS && window.FS.can && window.FS.can(ctx.caller, 'user:manage'));

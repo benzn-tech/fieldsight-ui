@@ -871,6 +871,35 @@ button:not([class*="fs-"]):focus-visible,
 .fs-bell__list { list-style: none; margin: 0; padding: 0; }
 .fs-bell__empty { margin: 0; padding: 16px 12px; color: var(--text-secondary, #6b7280); }
 
+/* Two sources in one panel. A rule between them, not a card each: they are two
+   kinds of the same thing (something to attend to) and boxing each one makes
+   the panel read as two unrelated widgets stacked. */
+.fs-bell__section + .fs-bell__section { border-top: 1px solid var(--border-subtle); }
+
+.fs-bell__row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px; border-top: 1px solid var(--border-subtle);
+}
+.fs-bell__list > .fs-bell__row:first-child { border-top: 0; }
+.fs-bell__row-main { min-width: 0; flex: 1; }
+.fs-bell__row-title {
+  display: block; font-weight: 500; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fs-bell__row-sub { display: block; font-size: 12px; color: var(--text-secondary); }
+.fs-bell__row-action {
+  flex: none; font: inherit; font-size: 13px; cursor: pointer;
+  padding: 5px 12px; border-radius: 6px;
+  border: 1px solid var(--border-default); background: transparent;
+  color: var(--text-primary);
+}
+.fs-bell__row-action:hover { border-color: var(--text-secondary); }
+.fs-bell__row-action:focus-visible {
+  /* --border-focus, not --color-accent-500: the yellow is a fixed hex at ~1.4:1
+     on the light surface, so a focus ring in it is nearly invisible there. */
+  outline: 2px solid var(--border-focus); outline-offset: 2px;
+}
+
 .fs-bell__job {
   padding: 10px 12px;
   border-bottom: 1px solid var(--color-border-subtle, #f3f4f6);
@@ -1039,4 +1068,35 @@ button:not([class*="fs-"]):focus-visible,
     page-break-inside: avoid;
     break-inside:      avoid;
   }
+}
+
+
+/* ---- NameProposalsDialog -------------------------------------------------
+   Layout only. Buttons are the design system's .fs-btn variants, so the
+   primary answer looks like every other primary answer in the product. */
+.fs-npd { display: flex; flex-direction: column; gap: 14px; }
+.fs-npd__lede { margin: 0; color: var(--text-secondary); line-height: 1.5; }
+.fs-npd__state { margin: 8px 0; color: var(--text-secondary); }
+.fs-npd__list { list-style: none; margin: 0; padding: 0; display: flex;
+                flex-direction: column; gap: 10px; }
+.fs-npd__item {
+  border: 1px solid var(--border-subtle); border-radius: 8px;
+  background: var(--surface-panel); padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.fs-npd__meta { display: flex; gap: 10px; align-items: baseline;
+                font-size: 12px; color: var(--text-secondary); }
+.fs-npd__date { font-weight: 500; color: var(--text-primary); }
+.fs-npd__len { font-variant-numeric: tabular-nums; }
+.fs-npd__words { margin: 0; color: var(--text-primary); line-height: 1.5;
+                 overflow-wrap: anywhere; }
+.fs-npd__nowords { color: var(--text-secondary); font-style: italic; }
+.fs-npd__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fs-npd__spacer { flex: 1 1 auto; }
+.fs-npd__note { margin: 0; color: var(--text-danger); font-size: 13px; }
+.fs-npd__foot { display: flex; justify-content: flex-end;
+                border-top: 1px solid var(--border-subtle); padding-top: 12px; }
+@media (max-width: 480px) {
+  .fs-npd__spacer { display: none; }
+  .fs-npd__actions > .fs-btn { flex: 1 1 auto; }
 }

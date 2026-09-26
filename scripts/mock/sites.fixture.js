@@ -129,11 +129,37 @@
 
   if (!window.FieldSight) window.FieldSight = {};
   if (!window.FieldSight.fixtures) window.FieldSight.fixtures = {};
+  /* Voices waiting to be confirmed. EXAMPLE DATA, served by the READ stub so the
+     bell and its dialog can be seen and checked locally -- an empty list here
+     would not be neutral, it would be the claim that nobody is ever waiting, and
+     the whole surface would look finished and unverifiable. Audio will not play
+     offline (there is no presigner), which the dialog says rather than hides. */
+  var NAME_PROPOSALS = {
+    people: [
+      { voiceprintId: 'vp-example-1', displayName: 'Jarley Trainor', pending: 2,
+        newest: '2026-09-25T09:40:00Z' },
+      { voiceprintId: 'vp-example-2', displayName: 'Sam Yu', pending: 1,
+        newest: '2026-09-24T15:10:00Z' },
+    ],
+    total: 3,
+    proposals: [
+      { id: 'np-example-1', date: '2026-09-25', userFolder: 'Jarley_Trainor',
+        sourceFilename: 'jarley_2026-09-25_09-12-04_off0.0_to88.4_srcwav.json',
+        speakerLabel: 'spk_1', startSec: 12.4, endSec: 31.0, score: 0.58,
+        text: 'We need the scaffold inspection signed off before the pour on Thursday.' },
+      { id: 'np-example-2', date: '2026-09-24', userFolder: 'Jarley_Trainor',
+        sourceFilename: 'jarley_2026-09-24_14-02-51_off0.0_to61.7_srcwav.json',
+        speakerLabel: 'spk_0', startSec: 3.0, endSec: 14.6, score: 0.51,
+        text: 'Can someone check the GIB delivery, it was meant to be here at eight.' },
+    ],
+  };
+
   window.FieldSight.fixtures.sites = {
     sites:          SITES,
     users:          USERS,
     subcontractors: SUBCONTRACTORS,
     regions:        REGIONS,
+    nameProposals:  NAME_PROPOSALS,
   };
 
 })();
