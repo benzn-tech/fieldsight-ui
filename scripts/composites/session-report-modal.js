@@ -313,10 +313,10 @@
         t.title + (t.scope === 'personal' ? ' (yours)' : '')));
     });
 
-    return h('label', { className: 'fs-field fs-srm__template' },
+    return h('label', { className: 'fs-field fs-field--md fs-field--full-width fs-srm__template' },
       h('span', { className: 'fs-field__label' }, 'Template'),
       h('select', {
-        className: 'fs-input', value: props.templateId || '',
+        className: 'fs-field__control', value: props.templateId || '',
         disabled: st.phase === 'loading',
         onChange: function (e) {
           var id = e.target.value || null;
@@ -352,7 +352,7 @@
       });
     }
     function field(label, node) {
-      return h('label', { className: 'fs-field' },
+      return h('label', { className: 'fs-field fs-field--md fs-field--full-width' },
         h('span', { className: 'fs-field__label' }, label), node);
     }
     return h('div', { className: 'fs-srm__step fs-srm__fill' },
@@ -364,19 +364,19 @@
         onChoose: props.onChooseTemplate || function () {},
       }),
       field('Report title', h('input', {
-        type: 'text', className: 'fs-input', value: form.title || '',
+        type: 'text', className: 'fs-field__control', value: form.title || '',
         onChange: function (e) { setTitle(e.target.value); },
       })),
       field('Attendees (one per line)', h('textarea', {
-        className: 'fs-input', rows: 3, value: attText,
+        className: 'fs-field__control fs-field__control--textarea', rows: 3, value: attText,
         onChange: function (e) { onAtt(e.target.value); },
       })),
       field('Weather', h('input', {
-        type: 'text', className: 'fs-input', value: fields.weather || '',
+        type: 'text', className: 'fs-field__control', value: fields.weather || '',
         onChange: function (e) { setField('weather', e.target.value); },
       })),
       field('Sign-off', h('input', {
-        type: 'text', className: 'fs-input', value: fields.sign_off || '',
+        type: 'text', className: 'fs-field__control', value: fields.sign_off || '',
         onChange: function (e) { setField('sign_off', e.target.value); },
       })));
   }
@@ -404,10 +404,10 @@
         mode('download', 'Download', null), mode('email', 'Email', emailBlocked)),
       emailBlocked ? h('p', { className: 'fs-srm__delivery-note' }, emailBlocked) : null,
       props.deliver === 'email'
-        ? h('label', { className: 'fs-field' },
+        ? h('label', { className: 'fs-field fs-field--md fs-field--full-width' },
             h('span', { className: 'fs-field__label' }, 'Recipients (one per line)'),
             h('textarea', {
-              className: 'fs-input', rows: 2, value: props.recipientsText, placeholder: 'name@company.com',
+              className: 'fs-field__control fs-field__control--textarea', rows: 2, value: props.recipientsText, placeholder: 'name@company.com',
               onChange: function (e) { props.onRecipients(e.target.value); },
             }))
         : null);
@@ -575,9 +575,16 @@
         }));
     }
 
-    function btn(label, onClick, variant) {
+    /* A VARIANT AND A SIZE, ALWAYS -- that is how the design system's own
+       Button composes its classes (components/button.js), and `.fs-btn` on
+       its own carries neither a height nor a background. This helper used to
+       add a variant only when asked and a size never, so every Back, Cancel
+       and Close in this dialog rendered as a bare unpadded label. */
+    function btn(label, onClick, variant, size) {
       return h('button', {
-        type: 'button', className: 'fs-btn' + (variant ? ' fs-btn--' + variant : ''), onClick: onClick,
+        type: 'button',
+        className: 'fs-btn fs-btn--' + (size || 'md') + ' fs-btn--' + (variant || 'secondary'),
+        onClick: onClick,
       }, label);
     }
 
@@ -608,13 +615,13 @@
             ? h('p', { className: 'fs-srm__preview-attendees' }, 'Attendees: ' + preview.participants.join(', ')) : null,
           choosable ? h('div', { className: 'fs-srm__window' },
             h('span', { className: 'fs-srm__window-label' }, 'Cover only'),
-            h('input', { type: 'time', className: 'fs-input fs-srm__window-time', value: winFrom,
+            h('input', { type: 'time', className: 'fs-field__control fs-srm__window-time', value: winFrom,
               'aria-label': 'Window start', onChange: function (e) { setWinFrom(e.target.value); } }),
             h('span', null, '–'),
-            h('input', { type: 'time', className: 'fs-input fs-srm__window-time', value: winTo,
+            h('input', { type: 'time', className: 'fs-field__control fs-srm__window-time', value: winTo,
               'aria-label': 'Window end', onChange: function (e) { setWinTo(e.target.value); } }),
-            btn('Select this window', function () { setChecked(windowChecked(pTopics, winFrom, winTo)); }),
-            btn('Select all', function () { setChecked({}); }),
+            btn('Select this window', function () { setChecked(windowChecked(pTopics, winFrom, winTo)); }, 'secondary', 'sm'),
+            btn('Select all', function () { setChecked({}); }, 'secondary', 'sm'),
             h('span', { className: 'fs-srm__window-count' },
               chosenCount + ' of ' + choosable + ' topics'
               + (unplaceable ? ' · ' + unplaceable + ' without a time, not picked by a window' : ''))) : null,
@@ -710,7 +717,7 @@
     else if (step === 'review') footer = h('footer', { className: 'fs-srm__footer' },
       btn('Back', function () { setStep('fill'); }),
       h('button', {
-        type: 'button', className: 'fs-btn fs-btn--primary',
+        type: 'button', className: 'fs-btn fs-btn--md fs-btn--primary',
         disabled: !canGenerate(deliver, recipients, selection, form.templateId),
         title: canGenerate(deliver, recipients, selection, form.templateId) ? undefined
           : (Array.isArray(selection) && !selection.length
