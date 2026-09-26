@@ -284,6 +284,18 @@
      is NOT an empty list: an empty list reads as "your company has no
      templates", which is a different and wrong statement, and it would quietly
      remove the only choice this step exists to offer. */
+  /* THE WRAP IS NOT DECORATION. `.fs-field__control` is `flex: 1 1 0%`,
+     written for a child of `.fs-field__control-wrap` -- a ROW, where it means
+     "fill the width". Put the control straight into `.fs-field`, which is a
+     COLUMN, and the same declaration applies to the height axis instead: the
+     basis becomes 0, and the size modifier's `height: 40px` loses to it. Every
+     single-line input in this dialog rendered 18px tall with its text sitting
+     on the border. The textareas survived only because their min-height beat
+     the basis. Measured in the browser: 18.3px unwrapped, 40px wrapped. */
+  function wrapControl(node) {
+    return React.createElement('div', { className: 'fs-field__control-wrap' }, node);
+  }
+
   function TemplateChooser(props) {
     var h = React.createElement;
     var s_state = React.useState({ phase: 'loading', rows: [] });
@@ -315,7 +327,7 @@
 
     return h('label', { className: 'fs-field fs-field--md fs-field--full-width fs-srm__template' },
       h('span', { className: 'fs-field__label' }, 'Template'),
-      h('select', {
+      wrapControl(h('select', {
         className: 'fs-field__control', value: props.templateId || '',
         disabled: st.phase === 'loading',
         onChange: function (e) {
@@ -323,7 +335,7 @@
           var row = st.rows.filter(function (t) { return t.id === id; })[0];
           props.onChoose(id, row && row.version, row && row.title);
         },
-      }, options),
+      }, options)),
       st.phase === 'error'
         ? h('span', { className: 'fs-field__hint fs-field__hint--error' },
             'Could not load your templates. The standard report is still available.')
@@ -353,7 +365,7 @@
     }
     function field(label, node) {
       return h('label', { className: 'fs-field fs-field--md fs-field--full-width' },
-        h('span', { className: 'fs-field__label' }, label), node);
+        h('span', { className: 'fs-field__label' }, label), wrapControl(node));
     }
     return h('div', { className: 'fs-srm__step fs-srm__fill' },
       /* First, because it is the choice the rest of the report follows from --
@@ -406,10 +418,10 @@
       props.deliver === 'email'
         ? h('label', { className: 'fs-field fs-field--md fs-field--full-width' },
             h('span', { className: 'fs-field__label' }, 'Recipients (one per line)'),
-            h('textarea', {
+            wrapControl(h('textarea', {
               className: 'fs-field__control fs-field__control--textarea', rows: 2, value: props.recipientsText, placeholder: 'name@company.com',
               onChange: function (e) { props.onRecipients(e.target.value); },
-            }))
+            })))
         : null);
   }
 
@@ -748,6 +760,11 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = { buildGeneratePayload: buildGeneratePayload, interpretReportStatus: interpretReportStatus, previewFieldDefaults: previewFieldDefaults, parseAttendees: parseAttendees, canGenerate: canGenerate, STEPS: STEPS, applyPreviewDefaults: applyPreviewDefaults, applyTemplateChoice: applyTemplateChoice, emailBlockedBecause: emailBlockedBecause,
       parseTimeRange: parseTimeRange, parseClock: parseClock, overlapsWindow: overlapsWindow, windowChecked: windowChecked, selectedRowIds: selectedRowIds,
-      previewErrorMessage: previewErrorMessage, generateErrorMessage: generateErrorMessage, noFolderMappingMessage: noFolderMappingMessage };
+      previewErrorMessage: previewErrorMessage, generateErrorMessage: generateErrorMessage, noFolderMappingMessage: noFolderMappingMessage,
+      /* The step components, so their STRUCTURE can be rendered and checked
+         in node. A class that exists but sits in the wrong parent -- a field
+         control outside its wrap -- styles to nothing, and no check on
+         classes alone can see that. */
+      FillStep: FillStep, DeliveryChooser: DeliveryChooser, TemplateChooser: TemplateChooser };
   }
 })();
