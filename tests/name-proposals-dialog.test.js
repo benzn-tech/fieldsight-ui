@@ -83,3 +83,21 @@ test('closing the dialog cannot be sent as a decision', async () => {
       `"${bad}" was accepted -- a close wired to it would consume unanswered questions`);
   }
 });
+
+test('a refusal from the server is not reported as a connection problem', () => {
+  const { notSavedNote } =
+    require(path.join(__dirname, '..', 'scripts', 'composites', 'name-proposals-dialog.js'));
+  const e = new Error('session id must carry its date');
+  e.status = 400;
+  const note = notSavedNote(e);
+  assert.match(note, /session id must carry its date/);
+  assert.doesNotMatch(note, /connection/);
+  assert.match(notSavedNote(new Error('Failed to fetch')), /connection/);
+});
+
+test('the note sits above the passages, where the eye is after a click', () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', 'scripts', 'composites', 'name-proposals-dialog.js'), 'utf8');
+  assert.ok(src.indexOf("className: 'fs-npd__note'") < src.search(/^\s+body,\r?$/m),
+    'the answer note renders below the list again');
+});

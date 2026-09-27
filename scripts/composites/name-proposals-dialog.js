@@ -42,6 +42,19 @@
     return Number(p[2]) + ' ' + months[Number(p[1]) - 1];
   }
 
+  /* What to tell the person when an answer was not saved. A refusal from the server is
+     NOT a connection problem, and saying "check your connection" about one sends them to
+     fix the wrong thing -- on TEST 2026-09-27 a 400 read exactly that, below the list,
+     and was not noticed at all. */
+  function notSavedNote(err) {
+    var status = err && err.status;
+    if (status && status >= 400 && status < 500) {
+      return 'That answer was not saved' + (err.message ? ': ' + err.message : '.')
+        + ' It is still waiting on the bell.';
+    }
+    return 'That answer was not saved. Check your connection and try again.';
+  }
+
   function audioKey(p) {
     /* The transcript and its audio share a stem; the audio lives under
        audio_segments/, never users/.../audio/ -- after batching, a transcript's
@@ -185,9 +198,9 @@
         }
         setItems(function (prev) { return prev.filter(function (x) { return x.id !== p.id; }); });
         setAnswered(function (n) { return n + 1; });
-      }, function () {
+      }, function (err) {
         setBusyId(null);
-        setNote('That answer was not saved. Check your connection and try again.');
+        setNote(notSavedNote(err));
       });
     }
 
@@ -225,8 +238,9 @@
               'These sound like ' + name + '. Listen, then say whether it is them. '
               + 'Anything you leave will wait on the bell.')
           : null,
-        body,
+        /* Above the list, where the eye already is after clicking a row. */
         note ? h('p', { className: 'fs-npd__note', role: 'status' }, note) : null,
+        body,
         h('div', { className: 'fs-npd__foot' },
           h('button', { type: 'button', className: 'fs-btn fs-btn--tertiary fs-btn--md', onClick: close },
             items.length ? 'Decide later' : 'Close'))));
@@ -239,7 +253,7 @@
   /* The key builder decides whether the passage can be heard at all, and a
      module that cannot be required has no coverage -- so it is exported. */
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { audioKey: audioKey, fmtDate: fmtDate };
+    module.exports = { audioKey: audioKey, fmtDate: fmtDate, notSavedNote: notSavedNote };
   }
 
 })();
