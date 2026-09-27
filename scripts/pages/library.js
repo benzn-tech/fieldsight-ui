@@ -285,12 +285,48 @@
       });
     }
 
+    /* COPIES AN ORGANISATION TEMPLATE INTO YOUR OWN LIBRARY, and opens the copy.
+
+       The read-only note on an org template has said "To make your own
+       version, copy it to your library" since the Library moved to the server
+       -- and nothing on the page did it. The route (POST /templates/{id}/copy)
+       and the store call were both there; no control ever called them. So a
+       site manager, who may not change the company's templates, had no way to
+       get one they could change, and the page told them there was.
+
+       Returns the promise so the button can show it is working. The server's
+       refusal is shown as the server words it: a 409 names the clash ("you
+       already have a template called that"), which "could not copy" would not. */
+    function handleCopy(tpl) {
+      if (!tpl) return Promise.resolve();
+      return window.FS.api.templates.copyToPersonal(tpl.id).then(function (copied) {
+        setTab('personal');
+        setSel(copied);
+        setRetry(function (n) { return n + 1; });
+        if (window.FS && window.FS.toast) {
+          window.FS.toast.show({
+            message: 'Copied to your library as "' + copied.title + '". It is yours to edit.',
+            tone: 'success',
+          });
+        }
+      }).catch(function (err) {
+        if (window.FS && window.FS.toast) {
+          window.FS.toast.show({
+            message: (err && err.message) || 'Could not copy this template',
+            tone: 'error',
+            duration: 8000,
+          });
+        }
+      });
+    }
+
     function reload() { setRetry(function (n) { return n + 1; }); }
 
     return React.createElement(LibraryContext.Provider, {
       value: {
         caller, canManageOrg, tab, setTab, state, sel, setSel, handleDelete,
         uploadFor, setUploadFor, handleUploadComplete, handleActivate, reload,
+        handleCopy,
         /* Sprint 10 follow-up — favourites */
         favIds, toggleFavourite,
       },
@@ -1294,6 +1330,9 @@
     var confRef = React.useState(false);
     var confirmingDelete = confRef[0]; var setConfirmingDelete = confRef[1];
 
+    var copyRef = React.useState(false);
+    var copying = copyRef[0]; var setCopying = copyRef[1];
+
     var selId = ctx && ctx.sel ? ctx.sel.id : null;
     React.useEffect(function () {
       setView('preview');
@@ -1450,6 +1489,23 @@
               ? 'This is an organisation template — an admin or GM can change it. '
                 + 'To make your own version, copy it to your library.'
               : 'You can read this template but not change it.')
+        : null,
+
+      /* THE CONTROL THE NOTE ABOVE HAS ALWAYS PROMISED. Offered on every
+         organisation template and to every role -- the route is open to all
+         of them on purpose, and an admin who wants a private variant needs it
+         as much as a site manager does. */
+      sel.scope === 'org' && ctx.handleCopy
+        ? React.createElement('div', { className: 'fs-library__right-copy' },
+            React.createElement('button', {
+              type:      'button',
+              className: 'fs-btn fs-btn--secondary fs-btn--sm fs-library__copy',
+              disabled:  copying,
+              onClick:   function () {
+                setCopying(true);
+                Promise.resolve(ctx.handleCopy(sel)).then(function () { setCopying(false); });
+              },
+            }, copying ? 'Copying…' : 'Copy to my library'))
         : null,
 
       React.createElement('div', { className: 'fs-library__right-subnav', role: 'tablist' },
