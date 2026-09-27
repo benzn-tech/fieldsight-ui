@@ -32,10 +32,15 @@ function loadStore(opts) {
   global.localStorage = {
     getItem: (k) => (k in store ? store[k] : null),
     setItem: (k, v) => { store[k] = String(v); },
+    removeItem: (k) => { delete store[k]; },
   };
   const statusCalls = [];
+  /* Signed in, because the bell only exists for somebody signed in -- and the
+     store now keeps each account's jobs apart, so with nobody signed in it
+     (correctly) holds nothing. */
   global.window = {
     FS: {
+      session: { user: { sub: opts.sub || 'sub-default' }, onChange() {} },
       api: {
         org: {
           /* async, like the real one. A reply that throws must come back as a
