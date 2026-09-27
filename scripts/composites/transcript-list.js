@@ -541,6 +541,38 @@
        index: propagation renames other turns too, and the index is not stable. */
     var pendingRef = React.useRef(null);
 
+    /* Whether the voice the last rename asked to store was stored. The embedder takes about
+       a minute and records its answer on the profile; until this existed the panel said
+       "requested" and never said anything again, so a refusal looked like a success. A new
+       rename replaces the token, so an older watch cannot overwrite a newer notice; leaving
+       the view stops it. */
+    var ENROL_POLL_MS = 10000, ENROL_POLL_TRIES = 18;     /* ~3 minutes */
+    var enrolWatchRef = React.useRef(0);
+    React.useEffect(function () {
+      return function () { enrolWatchRef.current = -1; };
+    }, []);
+
+    function watchEnrolment(name, sinceMs) {
+      var org = window.FS.api.org;
+      if (!org || !org.getVoiceprints || enrolWatchRef.current < 0) return;
+      var token = enrolWatchRef.current + 1;
+      enrolWatchRef.current = token;
+      var tries = 0;
+      function tick() {
+        if (enrolWatchRef.current !== token) return;
+        tries += 1;
+        org.getVoiceprints().then(function (r) {
+          if (enrolWatchRef.current !== token) return;
+          var out = sn.enrolmentOutcome(r && r.voiceprints, name, sinceMs);
+          if (out) { setNotice(out.message); return; }
+          if (tries < ENROL_POLL_TRIES) setTimeout(tick, ENROL_POLL_MS);
+        }, function () {
+          if (tries < ENROL_POLL_TRIES) setTimeout(tick, ENROL_POLL_MS);
+        });
+      }
+      setTimeout(tick, ENROL_POLL_MS);
+    }
+
     function scheduleRefetch() {
       var attempt = (pendingRef.current && pendingRef.current.attempt) || 0;
       var delay = REFETCH_BACKOFF_MS[Math.min(attempt, REFETCH_BACKOFF_MS.length - 1)];
@@ -552,6 +584,7 @@
       if (!ref) return;
       var trimmed = String(name || '').trim();
       if (!trimmed) return;
+      var savedAt = Date.now();
       setOpenIndex(null);
       setOptimistic(function (prev) {
         var next = Object.assign({}, prev); next[index] = trimmed; return next;
@@ -594,12 +627,13 @@
            answered while the embedder logged `enrolment refused: window too short`. A
            confident success message here would be the same class of error as a guard that
            logs a warning and lets the request through. */
-        setNotice(res && res.enrolment === 'requested'
-          ? 'Naming… Voice enrolment requested for ' + trimmed
-            + ' — it may still be refused if the audio is too short or holds more than '
-            + 'one voice.'
+        var requested = !!(res && res.enrolment === 'requested');
+        setNotice(requested
+          ? 'Naming… Saving ' + trimmed + '’s voice — this takes about a minute.'
           : 'Naming…');
         scheduleRefetch();
+        /* The answer to "requested" arrives later and says stored or not, and why. */
+        if (requested) watchEnrolment(trimmed, savedAt);
       }).catch(function () {
         setNotice('Could not save that name.');
         setOptimistic({});
