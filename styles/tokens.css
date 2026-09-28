@@ -82,6 +82,7 @@
   --color-warning-700: #B45309;
   --color-warning-800: #92400E;
   --color-warning-900: #78350F;
+  --color-warning-950: #2A1500; /* dark-mode warning surface; used by the [data-theme="dark"] banners */
 
   /* ---- Semantic · Success (Green) -------------------------------------- */
   /* Completed tasks, safe conditions, passed QA                           */
