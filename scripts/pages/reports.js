@@ -140,7 +140,27 @@
     return reportFolder(report.key) === mine;
   }
 
-  /* The archive-level buttons generate your own LATEST period: yesterday, the
+  /* WHICH DATE A GENERATE BUTTON REGENERATES: your own latest report of that
+     type, from the list on this page.
+
+     The panel says "Regenerate your own latest report. It replaces your
+     previous copy". The buttons did something else: they always asked for
+     yesterday (or the last week / month), whether or not there was a report
+     there. A site manager who recorded nothing yesterday pressed Daily and got
+     "Failed: No recordings for that date" -- a refusal the server was right to
+     make, about a date the page never showed them.
+
+     So the button aims at the report it promises to replace, and says its date
+     (see the labels). Only somebody with no report of that type yet falls back
+     to the latest period, which is what these buttons originally meant. */
+  function regenerateTarget(type, rows, caller, now) {
+    var own = (rows || []).filter(function (r) {
+      return r && r.type === type && r.date && canRegenerateReport(caller, r);
+    }).sort(function (a, b) { return String(b.date).localeCompare(String(a.date)); });
+    return own.length ? own[0].date : defaultPeriodEnd(type, now);
+  }
+
+  /* The archive-level buttons' fallback: your LATEST period -- yesterday, the
      last completed week (ending Sunday), the previous month. Local calendar. */
   function defaultPeriodEnd(type, now) {
     var d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -269,10 +289,15 @@
     return String(value == null ? '' : value).replace(/_+/g, ' ').trim();
   }
 
-  function regenerateErrorMessage(res) {
+  function regenerateErrorMessage(res, date) {
     if (!res) return 'Could not start the report.';
     if (res._accessDenied) return res.error || 'You can only regenerate your own reports.';
-    if (res._notFound) return res.error || 'No recordings for that date.';
+    /* The date is named: "that date" left the person to guess which one. */
+    if (res._notFound) {
+      return date
+        ? 'No recordings on ' + date + ', so there is no report to write for that day.'
+        : (res.error || 'No recordings for that date.');
+    }
     if (res.status === 'unavailable') return res.error || 'Regenerate is unavailable here.';
     return null;
   }
@@ -446,11 +471,14 @@
       return function () { cancelled = true; };
     }, [retryCount]);
 
+    /* The date each button will regenerate, on the button itself. */
+    var DOT = ' · ';
+
     function regenerate(type) {
       setReg({ phase: 'submitting', type: type });
-      var date = defaultPeriodEnd(type, new Date());
+      var date = regenerateTarget(type, state.rows, caller, new Date());
       window.FS.api.reports.regenerate({ report_type: type, date: date }).then(function (res) {
-        var problem = regenerateErrorMessage(res);
+        var problem = regenerateErrorMessage(res, date);
         if (problem) { setReg({ phase: 'error', type: type, error: { message: problem } }); return; }
         setReg({ phase: 'done', type: type,
                  message: 'Queued your ' + type + ' report for ' + date + ' — it appears here when ready.' });
@@ -548,21 +576,21 @@
               React.createElement('div', { className: 'fs-reports__regen-title' },
                 'Generate report'),
               React.createElement('div', { className: 'fs-reports__regen-body' },
-                'Regenerate your own latest report. It replaces your previous copy; nobody else\u2019s report is touched.'),
+                'Regenerate your own latest report \u2014 its date is on the button. It replaces your previous copy; nobody else\u2019s report is touched.'),
             ),
             reg.phase === 'closed' ? React.createElement('div', { className: 'fs-reports__regen-actions' },
               React.createElement(Button, {
                 size: 'sm', variant: 'secondary',
                 onClick: function () { regenerate('daily'); },
-              }, 'Daily'),
+              }, 'Daily' + DOT + fmtDate(regenerateTarget('daily', state.rows, caller, new Date()))),
               React.createElement(Button, {
                 size: 'sm', variant: 'secondary',
                 onClick: function () { regenerate('weekly'); },
-              }, 'Weekly'),
+              }, 'Weekly' + DOT + fmtDate(regenerateTarget('weekly', state.rows, caller, new Date()))),
               React.createElement(Button, {
                 size: 'sm', variant: 'secondary',
                 onClick: function () { regenerate('monthly'); },
-              }, 'Monthly'),
+              }, 'Monthly' + DOT + fmtDate(regenerateTarget('monthly', state.rows, caller, new Date()))),
             ) : null,
 
             reg.phase === 'submitting' ? React.createElement('div', {

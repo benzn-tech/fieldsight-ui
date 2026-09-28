@@ -136,3 +136,12 @@ test('generating still takes its version from the server’s own number', () => 
     path.join(__dirname, '..', 'scripts', 'api', 'template-store.js'), 'utf8');
   assert.match(store, /version: t\.current_version/);
 });
+
+test('each row in the list shows the version it is on, right of the title', () => {
+  const page = require('fs').readFileSync(
+    require('path').join(__dirname, '..', 'scripts', 'pages', 'library.js'), 'utf8');
+  const row = page.slice(page.indexOf("className: 'fs-library__row-title' }, tpl.title)"));
+  const next = row.slice(0, row.indexOf("'fs-library__row-meta'"));
+  assert.match(next, /tpl\.current_version > 0 && React\.createElement\('span', \{\s*className: 'fs-library__row-version'/);
+  assert.match(next, /'v' \+ tpl\.current_version/);
+});
