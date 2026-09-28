@@ -178,3 +178,48 @@ test('off the org API, regenerate calls nothing and says why', async () => {
   assert.deepStrictEqual(calls, { org: [], legacy: [] });
   assert.notStrictEqual(res.status, 'queued');
 });
+
+/* ---- the archive-level buttons aim at your latest report ------------------- */
+
+const { regenerateTarget } =
+  lift(['reportFolder', 'canRegenerateReport', 'defaultPeriodEnd', 'regenerateTarget']);
+
+test('THE generate button regenerates your latest report of that type, not yesterday', () => {
+  /* The panel promised "your own latest report ... replaces your previous
+     copy" and always asked for yesterday. A day with no recording answered
+     "No recordings for that date". */
+  const rows = [
+    { key: 'reports/2026-09-23/Ben_UCPK2/daily_report.json', type: 'daily', date: '2026-09-23' },
+    { key: 'reports/2026-09-11/Ben_UCPK2/daily_report.json', type: 'daily', date: '2026-09-11' },
+  ];
+  assert.strictEqual(regenerateTarget('daily', rows, ME, new Date(2026, 8, 28)), '2026-09-23');
+});
+
+test("somebody else's newer report is not yours to aim at", () => {
+  const rows = [
+    { key: 'reports/2026-09-26/Sam_Yu/daily_report.json', type: 'daily', date: '2026-09-26' },
+    { key: 'reports/2026-09-20/Ben_UCPK2/daily_report.json', type: 'daily', date: '2026-09-20' },
+    { key: 'reports/2026-09-25/summary_report.json', type: 'daily', date: '2026-09-25' },
+  ];
+  assert.strictEqual(regenerateTarget('daily', rows, ME, new Date(2026, 8, 28)), '2026-09-20');
+});
+
+test('with no report of that type yet, it falls back to the latest period', () => {
+  const rows = [{ key: 'reports/2026-09-20/Ben_UCPK2/daily_report.json', type: 'daily', date: '2026-09-20' }];
+  const now = new Date(2026, 8, 28);
+  assert.strictEqual(regenerateTarget('weekly', rows, ME, now), defaultPeriodEnd('weekly', now));
+  assert.strictEqual(regenerateTarget('daily', [], ME, now), '2026-09-27');
+});
+
+test('a day with no recordings is named in the refusal', () => {
+  assert.match(regenerateErrorMessage({ _notFound: true }, '2026-09-27'), /No recordings on 2026-09-27/);
+});
+
+test('each button says the date it will regenerate', () => {
+  for (const t of ['daily', 'weekly', 'monthly']) {
+    assert.ok(PAGE.includes("fmtDate(regenerateTarget('" + t + "', state.rows, caller, new Date()))"),
+      t + ' button shows its date');
+  }
+  assert.ok(PAGE.includes('var date = regenerateTarget(type, state.rows, caller, new Date());'),
+    'the request uses the same date the button shows');
+});
