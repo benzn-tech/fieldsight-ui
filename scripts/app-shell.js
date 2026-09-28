@@ -1345,10 +1345,16 @@ function AppShell({ showDevSwitcher = false }) {
     window.FS.Router.navigate(path);
   }
 
+  /* THE SHELL'S COLOURS ARE CSS VARIABLES, NOT FS.tokens VALUES. FS.tokens
+     carries the LIGHT theme's hex codes and nothing else, so reading colours
+     from it pinned every page to light text whatever the theme: in dark mode
+     any text that inherits rather than setting its own colour -- the My Work
+     heading, for one -- came out #111827 on a near-black panel. The variables
+     are redefined under [data-theme="dark"]; the hex codes are not. */
   var shellStyle = {
-    background: window.FS.tokens.surface.app,
+    background: 'var(--surface-app)',
     fontFamily: window.FS.tokens.typography.fontFamily.sans,
-    color: window.FS.tokens.text.primary,
+    color: 'var(--text-primary)',
   };
 
   /* Sprint 3 P-07 — pages may declare a `Provider` slot in the page

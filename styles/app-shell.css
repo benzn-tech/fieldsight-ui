@@ -852,8 +852,8 @@ button:not([class*="fs-"]):focus-visible,
   position: absolute; top: calc(100% + 8px); right: 0;
   width: min(360px, calc(100vw - 32px));
   max-height: min(60vh, 480px); overflow-y: auto;
-  background: var(--color-surface, #fff);
-  border: 1px solid var(--color-border, #e5e7eb);
+  background: var(--surface-panel, #fff);
+  border: 1px solid var(--border-default, #e5e7eb);
   border-radius: 10px;
   box-shadow: 0 8px 28px rgb(0 0 0 / 14%);
   z-index: 60;
@@ -863,7 +863,7 @@ button:not([class*="fs-"]):focus-visible,
 .fs-bell__panel-head {
   display: flex; justify-content: space-between; align-items: baseline;
   gap: 8px; padding: 10px 12px;
-  border-bottom: 1px solid var(--color-border, #e5e7eb);
+  border-bottom: 1px solid var(--border-default, #e5e7eb);
   font-weight: 600;
 }
 .fs-bell__panel-count { font-weight: 400; color: var(--text-secondary, #6b7280); }
@@ -873,7 +873,7 @@ button:not([class*="fs-"]):focus-visible,
 
 .fs-bell__job {
   padding: 10px 12px;
-  border-bottom: 1px solid var(--color-border-subtle, #f3f4f6);
+  border-bottom: 1px solid var(--border-subtle, #f3f4f6);
 }
 .fs-bell__job:last-child { border-bottom: 0; }
 /* A finished report nobody has looked at yet is marked on the row as well as
@@ -899,7 +899,7 @@ button:not([class*="fs-"]):focus-visible,
 
 .fs-bell__spinner {
   width: 12px; height: 12px; flex: none;
-  border: 2px solid var(--color-border, #e5e7eb);
+  border: 2px solid var(--border-default, #e5e7eb);
   border-top-color: var(--color-accent-500, #3b82f6);
   border-radius: 999px;
   animation: fs-bell-spin 0.8s linear infinite;
@@ -910,8 +910,8 @@ button:not([class*="fs-"]):focus-visible,
 }
 
 [data-theme="dark"] .fs-bell__panel {
-  background: var(--color-surface, #111827);
-  border-color: var(--color-border, #374151);
+  background: var(--surface-panel, #111827);
+  border-color: var(--border-default, #374151);
 }
 [data-theme="dark"] .fs-bell__job--unseen { background: rgb(59 130 246 / 12%); }
 

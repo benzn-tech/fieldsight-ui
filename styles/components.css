@@ -774,9 +774,13 @@
 }
 .fs-badge--solid.fs-badge--accent .fs-badge__prefix-dot { background: var(--color-neutral-900); }
 
+/* OUTLINE BADGES HAVE NO BACKGROUND OF THEIR OWN, so their text sits on
+   whatever the page is -- white in light, near-black in dark -- and a palette
+   step (fixed in both themes) is wrong in one of them. They take the themed
+   text tokens. `No due date` (warning-700) read at 3.5:1 on dark before. */
 .fs-badge--outline.fs-badge--accent {
   background: transparent;
-  color: var(--color-accent-700);
+  color: var(--text-accent);
   box-shadow: inset 0 0 0 1px var(--color-accent-300);
 }
 .fs-badge--outline.fs-badge--accent .fs-badge__prefix-dot { background: var(--color-accent-500); }
@@ -796,7 +800,7 @@
 
 .fs-badge--outline.fs-badge--danger {
   background: transparent;
-  color: var(--color-danger-700);
+  color: var(--text-danger);
   box-shadow: inset 0 0 0 1px var(--color-danger-300);
 }
 .fs-badge--outline.fs-badge--danger .fs-badge__prefix-dot { background: var(--color-danger-500); }
@@ -816,7 +820,7 @@
 
 .fs-badge--outline.fs-badge--warning {
   background: transparent;
-  color: var(--color-warning-700);
+  color: var(--text-warning);
   box-shadow: inset 0 0 0 1px var(--color-warning-300);
 }
 .fs-badge--outline.fs-badge--warning .fs-badge__prefix-dot { background: var(--color-warning-500); }
@@ -836,7 +840,7 @@
 
 .fs-badge--outline.fs-badge--success {
   background: transparent;
-  color: var(--color-success-700);
+  color: var(--text-success);
   box-shadow: inset 0 0 0 1px var(--color-success-300);
 }
 .fs-badge--outline.fs-badge--success .fs-badge__prefix-dot { background: var(--color-success-500); }
@@ -856,7 +860,7 @@
 
 .fs-badge--outline.fs-badge--info {
   background: transparent;
-  color: var(--color-info-700);
+  color: var(--text-link);
   box-shadow: inset 0 0 0 1px var(--color-info-300);
 }
 .fs-badge--outline.fs-badge--info .fs-badge__prefix-dot { background: var(--color-info-500); }
@@ -1021,9 +1025,9 @@
 .fs-skeleton {
   background: linear-gradient(
     90deg,
-    var(--surface-subtle, #e2e8f0) 25%,
-    var(--surface-raised, #f1f5f9) 50%,
-    var(--surface-subtle, #e2e8f0) 75%
+    var(--surface-panel-muted, #e2e8f0) 25%,
+    var(--surface-panel-elevated, #f1f5f9) 50%,
+    var(--surface-panel-muted, #e2e8f0) 75%
   );
   background-size: 400% 100%;
   animation: fs-skeleton-shimmer 1.5s ease-in-out infinite;
@@ -1034,16 +1038,16 @@
 @media (prefers-reduced-motion: reduce) {
   .fs-skeleton {
     animation: none;
-    background: var(--surface-subtle, #e2e8f0);
+    background: var(--surface-panel-muted, #e2e8f0);
   }
 }
 
 [data-theme="dark"] .fs-skeleton {
   background: linear-gradient(
     90deg,
-    var(--surface-raised, #1e293b) 25%,
+    var(--surface-panel-elevated, #1e293b) 25%,
     var(--surface-panel, #273549)  50%,
-    var(--surface-raised, #1e293b) 75%
+    var(--surface-panel-elevated, #1e293b) 75%
   );
   background-size: 400% 100%;
   animation: fs-skeleton-shimmer 1.5s ease-in-out infinite;
@@ -1052,7 +1056,7 @@
 @media (prefers-reduced-motion: reduce) {
   [data-theme="dark"] .fs-skeleton {
     animation: none;
-    background: var(--surface-raised, #1e293b);
+    background: var(--surface-panel-elevated, #1e293b);
   }
 }
 

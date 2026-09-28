@@ -82,6 +82,7 @@
   --color-warning-700: #B45309;
   --color-warning-800: #92400E;
   --color-warning-900: #78350F;
+  --color-warning-950: #2A1500; /* dark-mode warning surface; used by the [data-theme="dark"] banners */
 
   /* ---- Semantic · Success (Green) -------------------------------------- */
   /* Completed tasks, safe conditions, passed QA                           */
@@ -374,6 +375,13 @@
      bg); topic cards need a readable neutral instead, paired with an accent
      left-border. Do not repurpose --surface-selected. */
   --surface-topic-selected: var(--color-neutral-100);
+  /* A selected filter chip and its count. Were accent-50 / accent-100 used
+     directly, which are the same pale yellow in both themes. */
+  --surface-accent-subtle:  var(--color-accent-50);
+  --surface-accent-muted:   var(--color-accent-100);
+  /* Text marking the current choice. Brand yellow is legible on dark and not
+     on white (1.6:1), so in light the underline carries the accent. */
+  --text-accent:            var(--color-neutral-900);
   /* T7/G2 — shared "resolved/closed/checked row" sink treatment across
      /safety, /quality, /timeline action items. Neutral gray, NOT a
      status-tone token (see .fs-row--resolved in composites.css — its
@@ -392,7 +400,9 @@
   /* Text */
   --text-primary:       var(--color-neutral-900);
   --text-secondary:     var(--color-neutral-600);
-  --text-tertiary:      var(--color-neutral-500);
+  /* One step darker than neutral-500: on the muted panel (neutral-100) 500 read
+     4.39:1, under the 4.5 small text needs; this is 4.8 there and 5.3 on white. */
+  --text-tertiary:      #656C79;
   /* Sprint 11 A.2 — bumped from -400 (#9CA3AF, 2.85:1 on white) to
      -500 (#6B7280, 4.83:1) to clear WCAG 2.1 AA 4.5:1 for normal
      text. Disabled state is exempt by spec (1.4.3) but axe-core
@@ -701,6 +711,9 @@
   --surface-selected:       rgba(255, 217, 102, 0.15);
   /* T3 — neutral selected tint (see light-mode comment above). */
   --surface-topic-selected: rgba(255, 255, 255, 0.06);
+  --surface-accent-subtle:  rgba(255, 217, 102, 0.12);
+  --surface-accent-muted:   rgba(255, 217, 102, 0.22);
+  --text-accent:            var(--color-accent-500);
   /* T7/G2 — see light-mode comment above. */
   --surface-resolved:       rgba(255, 255, 255, 0.04);
 
