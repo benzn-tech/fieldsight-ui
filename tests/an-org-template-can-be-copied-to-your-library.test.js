@@ -55,3 +55,22 @@ test('the handler reaches the store and opens the copy under Personal', () => {
 test('the handler is in the context the detail panel reads', () => {
   assert.match(SRC, /handleActivate, reload,\s*handleCopy,/);
 });
+
+/* ---- opening a template says it is loading, not that it failed ------------- */
+
+test('while the opened template is being fetched, the panel says Loading, not a fault', () => {
+  /* Every click showed "This template has content (version 1) but it did not
+     come back with this request" for about half a second, then the template:
+     the in-flight fetch and a response missing its content were one state. */
+  assert.match(SRC, /setFetchState\(\{ id: id, status: 'loading' \}\)/);
+  const loading = SRC.indexOf("reason = 'Loading this template…'");
+  const fault = SRC.indexOf('did not come back with this request');
+  assert.ok(loading > 0 && fault > loading, 'the loading branch is checked before the fault');
+  assert.match(SRC.slice(loading - 300, loading), /ctx\.fetchState\.status === 'loading'/);
+});
+
+test('a fetch that fails or comes back empty still reaches the fault message', () => {
+  assert.match(SRC, /setFetchState\(\{ id: id, status: 'empty' \}\)/);
+  assert.match(SRC, /setFetchState\(\{ id: id, status: 'failed' \}\)/);
+  assert.match(SRC, /handleCopy, fetchState,/, 'the state reaches the panel');
+});

@@ -140,6 +140,12 @@
     var selRef    = React.useState(null);
     var sel       = selRef[0]; var setSel = selRef[1];
 
+    /* Where the fetch for the opened template stands: {id, status} with status
+       'loading' | 'empty' | 'failed'. See the effect below for why the panel
+       needs to know. */
+    var fetchRef  = React.useState(null);
+    var fetchState = fetchRef[0]; var setFetchState = fetchRef[1];
+
     /* OPENING A TEMPLATE FETCHES IT.
        Clicking a row selects the row, and a row comes from the LIST, which
        deliberately carries no bodies -- returning every version of every
@@ -164,12 +170,27 @@
       var api = window.FS && window.FS.api && window.FS.api.templates;
       if (!api || !api.get) return undefined;
       var alive = true;
-      api.get(sel.id).then(function (full) {
+      var id = sel.id;
+      /* THE PANEL HAS TO KNOW THE FETCH IS IN FLIGHT. Without this, the half
+         second between the click and the answer looked exactly like a template
+         whose content never came back: "This template has content (version 1)
+         but it did not come back with this request", on every click, then the
+         template. A loading state reported as a fault -- and it made the real
+         fault, when it happens, look like the flicker everybody had learned to
+         ignore. */
+      setFetchState({ id: id, status: 'loading' });
+      api.get(id).then(function (full) {
+        if (!alive) return;
         /* Only when it actually arrived with content. Replacing the selection
            with another empty copy would swap one silent failure for a loop. */
-        if (alive && full && full.versions && full.versions.length) setSel(full);
+        if (full && full.versions && full.versions.length) {
+          setSel(full);
+          setFetchState(null);
+        } else {
+          setFetchState({ id: id, status: 'empty' });
+        }
       }).catch(function () {
-        /* The panel says what it can see; it does not need a second voice. */
+        if (alive) setFetchState({ id: id, status: 'failed' });
       });
       return function () { alive = false; };
     }, [sel && sel.id, sel && sel.versions && sel.versions.length]);
@@ -326,7 +347,7 @@
       value: {
         caller, canManageOrg, tab, setTab, state, sel, setSel, handleDelete,
         uploadFor, setUploadFor, handleUploadComplete, handleActivate, reload,
-        handleCopy,
+        handleCopy, fetchState,
         /* Sprint 10 follow-up — favourites */
         favIds, toggleFavourite,
       },
@@ -1434,6 +1455,11 @@
       if (sel.current_version === 0) {
         /* Genuinely empty: created, no body written yet. */
         reason = 'This template has no sections yet. Add one to get started.';
+      } else if (sel.current_version > 0 && ctx.fetchState
+                 && ctx.fetchState.id === sel.id && ctx.fetchState.status === 'loading') {
+        /* Still on its way: the list row carries no body and the fetch that
+           completes it has not answered yet. Not a fault, and not said as one. */
+        reason = 'Loading this template…';
       } else if (sel.current_version > 0) {
         /* The template HAS content -- the response did not carry it. Naming
            the version is deliberate: it is the evidence that the content
