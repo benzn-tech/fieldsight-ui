@@ -14,9 +14,21 @@
    went to do something else -- the case this exists for.
 
    IT SURVIVES A RELOAD. A job is written to localStorage, and polling resumes
-   on load. This is the right use of localStorage and almost the only one: it
-   is per-viewer, it means nothing to anybody else, and losing it costs a
-   refresh rather than the report, which is safe on S3 either way.
+   on load. Losing it costs a refresh rather than the report, which is safe on
+   S3 either way.
+
+   IT IS KEPT PER ACCOUNT, NOT PER BROWSER. This header used to say localStorage
+   was "per-viewer" and "means nothing to anybody else". It is per BROWSER. On a
+   shared machine -- a site office, a tablet in the cab -- the next person to
+   sign in saw the previous person's reports in their bell: the template name,
+   the date and a Download button. Observed on TEST: reports generated as one
+   company's account were listed for an account in another company.
+
+   So the key carries the signed-in user's `sub`, the cache is dropped the
+   moment the session changes, and nothing is read or written with nobody
+   signed in. The Download was never the leak -- `freshUrl()` asks the server,
+   which answers for whoever is signed in now -- but the listing itself was
+   somebody else's.
 
    THE DOWNLOAD URL IS NEVER STORED. It is presigned with a 15-minute expiry
    (BACKEND-CONTEXT §7). Keeping it would hand somebody a link that answers
@@ -31,6 +43,10 @@
 (function () {
   'use strict';
 
+  /* The prefix. The real key is `KEY + ':' + sub` -- see accountKey(). The bare
+     KEY is what every version before this one wrote to, shared by everyone who
+     used the browser; it is removed on first load, because nothing in it says
+     whose each entry was. Its entries would have expired within a day anyway. */
   var KEY = 'fs.reportJobs.v1';
   var POLL_MS = 15000;
   /* Long enough that a slow generation is not declared dead (the backend's own
@@ -43,15 +59,44 @@
   var KEEP_MS = 24 * 60 * 60 * 1000;
 
   var _jobs = null;
+  var _owner = null;   /* the `sub` that _jobs belongs to */
   var _timer = null;
   var _listeners = [];
 
   /* ── Storage ─────────────────────────────────────────────────────────── */
 
+  /* Whose list this is, or null when nobody is signed in. */
+  function currentSub() {
+    var session = (window.FS || {}).session;
+    var user = session && session.user;
+    return (user && user.sub) || null;
+  }
+
+  function accountKey(sub) {
+    return KEY + ':' + sub;
+  }
+
+  var _legacyCleared = false;
+  function clearLegacy() {
+    if (_legacyCleared) return;
+    _legacyCleared = true;
+    try { localStorage.removeItem(KEY); } catch (_) {}
+  }
+
   function load() {
-    if (_jobs) return _jobs;
+    var sub = currentSub();
+    /* NOBODY SIGNED IN, NOTHING SHOWN. Not the last person's list, and not an
+       empty list cached as if it were somebody's. */
+    if (!sub) {
+      _jobs = null;
+      _owner = null;
+      return [];
+    }
+    if (_jobs && _owner === sub) return _jobs;
+    clearLegacy();
+    _owner = sub;
     try {
-      var raw = localStorage.getItem(KEY);
+      var raw = localStorage.getItem(accountKey(sub));
       var arr = raw ? JSON.parse(raw) : [];
       _jobs = Array.isArray(arr) ? arr : [];
     } catch (_) {
@@ -68,7 +113,11 @@
   }
 
   function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(_jobs || [])); } catch (_) {}
+    /* Written under the account the list was LOADED for, never under whoever
+       happens to be signed in at the moment of writing. A poll that settles
+       after a sign-out must not land in the next person's list. */
+    if (!_owner || !_jobs) return;
+    try { localStorage.setItem(accountKey(_owner), JSON.stringify(_jobs)); } catch (_) {}
   }
 
   function emit() {
@@ -107,6 +156,7 @@
      happens long after the screen that knew it has gone. */
   function track(job) {
     if (!job || !job.requestId) return null;
+    if (!currentSub()) return null;
     var jobs = load();
     if (jobs.some(function (j) { return j.requestId === job.requestId; })) return job.requestId;
     jobs.unshift({
@@ -161,6 +211,11 @@
   }
 
   function settle(job, status, error) {
+    /* No "is this still the current account's job" guard here, and that is
+       deliberate: it was tried and a mutation run showed it could never
+       matter. What stops a poll that settles after a sign-out from landing in
+       the next person's list is save(), which writes the list under the
+       account it was LOADED for. That is the one place it is enforced. */
     job.status = status;
     job.error = error || null;
     job.finishedAt = Date.now();
@@ -254,10 +309,29 @@
     freshUrl: freshUrl,
     /* for tests */
     _pollOnce: pollOnce,
-    _reset: function () { _jobs = null; if (_timer) { clearInterval(_timer); _timer = null; } },
+    _reset: function () { _jobs = null; _owner = null; if (_timer) { clearInterval(_timer); _timer = null; } },
+    _onSessionChange: onSessionChange,
     POLL_MS: POLL_MS,
     GIVE_UP_MS: GIVE_UP_MS,
   };
+
+  /* A DIFFERENT PERSON SIGNS IN, A DIFFERENT LIST. Signing out and back in
+     does not reload the page, so the in-memory list has to be dropped here --
+     otherwise the bell keeps showing the previous account's reports until
+     somebody refreshes, which is exactly the case this change is for. */
+  function onSessionChange() {
+    if (_owner === currentSub()) return;
+    if (_timer) { clearInterval(_timer); _timer = null; }
+    _jobs = null;
+    _owner = null;
+    emit();
+    ensurePolling();
+  }
+
+  var session = (window.FS || {}).session;
+  if (session && typeof session.onChange === 'function') {
+    session.onChange(onSessionChange);
+  }
 
   /* Resume on load: a report started before a refresh is still being written. */
   if (typeof window !== 'undefined') ensurePolling();
