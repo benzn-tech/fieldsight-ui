@@ -154,38 +154,16 @@
     var setShowAll = refAll[1];
     var candidates = showAll ? primary.concat(tail) : primary;
 
-    /* --- consent (spec 2026-09-22) ------------------------------------------
-       A SEPARATE act from naming, and the panel says so in those words.
-
-       Naming propagates a name inside this meeting by comparing audio the company already
-       holds. Consent stores a voice pattern so the person is recognisable in FUTURE
-       meetings — biometric data under the NZ Privacy Act, and the agreement required is
-       the agreement of the person RECORDED, not of the person at the keyboard, who is
-       usually a third person again.
-
-       Three properties, each of which was wrong somewhere before this existed:
-         * unchecked every time the panel opens, and re-cleared whenever the chosen name
-           changes. A box that stays ticked while the name underneath it changes records
-           one person's agreement against another person's voice.
-         * offered only for a name that resolves to ONE directory entry, because the
-           backend requires `consented_by` and cannot be given a string.
-         * when it cannot be offered, it says why — see `consentOffer`. */
+    /* --- voice storage notice (owner decision 2026-09-27) ----------------------
+       Saving a name stores that person's voice pattern in the company's library, on the
+       company's declared basis. The panel TELLS the user this; it does not ask a second
+       question. The earlier "only they can agree" checkbox looked like a gate but was not
+       one -- the voice was stored either way -- and the owner has taken the compliance
+       decision: name and voice go into the library together. */
     var chosen = customMode ? String(custom || '').trim() : (choice || '');
-    var sn = window.FS.speakerNaming;
-    var offer = sn.consentOffer({
-      featureAvailable: !!props.consentAvailable,
-      displayName: chosen,
-      members: props.roster,
-    });
-    var refConsent = React.useState(false);
-    var consent    = refConsent[0];
-    var setConsent = refConsent[1];
-    React.useEffect(function () { setConsent(false); }, [chosen]);
 
     function save() {
-      props.onSave(chosen, (offer.offer && consent)
-        ? { consentGiven: true, consentedBy: offer.id }
-        : null);
+      props.onSave(chosen, null);
     }
 
     var canSave = customMode ? !!String(custom).trim() : !!choice;
@@ -272,35 +250,10 @@
           })
         : null,
 
-      /* The consent block. Rendered only once a name is chosen, because "did this person
-         agree" is not a question that can be asked before there is a person.
-
-         The wording is the deliberate part and is not to be shortened. It has to say WHAT
-         is stored (a voice pattern), WHAT it is for (recognising them in future meetings),
-         and WHOSE agreement is required (the person recorded). "Tick to enrol" would be
-         none of those, and this is the surface the whole of migration 0042's `consented_by`
-         column exists to make meaningful. */
-      (offer.offer && chosen)
-        ? React.createElement('label', {
-            className: 'fs-transcript-list__name-consent',
-          },
-            React.createElement('input', {
-              type: 'checkbox',
-              checked: consent,
-              onChange: function (e) { setConsent(!!e.target.checked); },
-            }),
-            React.createElement('span', null,
-              chosen + ' has agreed that a pattern of their voice may be stored, so they '
-                + 'can be recognised in future meetings. Only they can agree to this — '
-                + 'not you, and not their employer.'),
-          )
-        : null,
-
-      /* Why the box is absent. A person off the roster is something the user can fix; a
-         silence teaches them nothing and reads as the feature being broken. */
-      (!offer.offer && offer.reason && chosen)
+      (props.consentAvailable && chosen)
         ? React.createElement('span', { className: 'fs-transcript-list__name-hint' },
-            offer.reason)
+            'Saving also stores ' + chosen + '’s voice so they can be recognised in '
+              + 'future meetings. This may involve their privacy.')
         : null,
 
       React.createElement('div', { className: 'fs-transcript-list__name-actions' },
@@ -588,6 +541,38 @@
        index: propagation renames other turns too, and the index is not stable. */
     var pendingRef = React.useRef(null);
 
+    /* Whether the voice the last rename asked to store was stored. The embedder takes about
+       a minute and records its answer on the profile; until this existed the panel said
+       "requested" and never said anything again, so a refusal looked like a success. A new
+       rename replaces the token, so an older watch cannot overwrite a newer notice; leaving
+       the view stops it. */
+    var ENROL_POLL_MS = 10000, ENROL_POLL_TRIES = 18;     /* ~3 minutes */
+    var enrolWatchRef = React.useRef(0);
+    React.useEffect(function () {
+      return function () { enrolWatchRef.current = -1; };
+    }, []);
+
+    function watchEnrolment(name, sinceMs) {
+      var org = window.FS.api.org;
+      if (!org || !org.getVoiceprints || enrolWatchRef.current < 0) return;
+      var token = enrolWatchRef.current + 1;
+      enrolWatchRef.current = token;
+      var tries = 0;
+      function tick() {
+        if (enrolWatchRef.current !== token) return;
+        tries += 1;
+        org.getVoiceprints().then(function (r) {
+          if (enrolWatchRef.current !== token) return;
+          var out = sn.enrolmentOutcome(r && r.voiceprints, name, sinceMs);
+          if (out) { setNotice(out.message); return; }
+          if (tries < ENROL_POLL_TRIES) setTimeout(tick, ENROL_POLL_MS);
+        }, function () {
+          if (tries < ENROL_POLL_TRIES) setTimeout(tick, ENROL_POLL_MS);
+        });
+      }
+      setTimeout(tick, ENROL_POLL_MS);
+    }
+
     function scheduleRefetch() {
       var attempt = (pendingRef.current && pendingRef.current.attempt) || 0;
       var delay = REFETCH_BACKOFF_MS[Math.min(attempt, REFETCH_BACKOFF_MS.length - 1)];
@@ -599,6 +584,7 @@
       if (!ref) return;
       var trimmed = String(name || '').trim();
       if (!trimmed) return;
+      var savedAt = Date.now();
       setOpenIndex(null);
       setOptimistic(function (prev) {
         var next = Object.assign({}, prev); next[index] = trimmed; return next;
@@ -606,9 +592,8 @@
       setNotice(null);
       window.FS.api.org.setSpeakerName(ref, sn.correctionBody(seg, {
         user: user, displayName: trimmed,
-        /* Absent unless the panel's consent box was ticked AND the name resolved to one
-           directory entry. `correctionBody` re-checks both rather than trusting this
-           call site: it is the one function every caller goes through. */
+        /* The panel no longer offers a consent box (owner decision 2026-09-27), so this
+           is always false and the voice is stored on the company's declared basis. */
         consentGiven: !!(consent && consent.consentGiven),
         consentedBy: consent && consent.consentedBy,
       })).then(function (res) {
@@ -628,6 +613,10 @@
           return;
         }
         pendingRef.current = { name: trimmed, mode: 'set', attempt: 0 };
+        /* A rename is the moment to ask about this person's other passages; the
+           store decides whether there is anything to ask yet. */
+        var proposals = (window.FS || {}).nameProposals;
+        if (proposals && proposals.afterNaming) proposals.afterNaming(trimmed);
         /* Two effects from one gesture, reported separately — the backend goes to some
            trouble to keep them apart and until now the UI collapsed both into "Naming…".
 
@@ -638,12 +627,13 @@
            answered while the embedder logged `enrolment refused: window too short`. A
            confident success message here would be the same class of error as a guard that
            logs a warning and lets the request through. */
-        setNotice(res && res.enrolment === 'requested'
-          ? 'Naming… Voice enrolment requested for ' + trimmed
-            + ' — it may still be refused if the audio is too short or holds more than '
-            + 'one voice.'
+        var requested = !!(res && res.enrolment === 'requested');
+        setNotice(requested
+          ? 'Naming… Saving ' + trimmed + '’s voice — this takes about a minute.'
           : 'Naming…');
         scheduleRefetch();
+        /* The answer to "requested" arrives later and says stored or not, and why. */
+        if (requested) watchEnrolment(trimmed, savedAt);
       }).catch(function () {
         setNotice('Could not save that name.');
         setOptimistic({});
@@ -995,4 +985,6 @@
 
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.TranscriptList = TranscriptList;
+  /* Exposed for tests/name-panel-voice-notice.test.js; not used by the app. */
+  window.FieldSight.TranscriptList.NamePanel = NamePanel;
 })();

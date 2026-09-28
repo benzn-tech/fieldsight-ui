@@ -491,6 +491,59 @@
 
      Names are deduped and sorted so the label is stable across re-renders — an unstable
      button caption reads as the count changing on its own. */
+  /* Whether the voice a rename asked to store was stored, read off GET /voiceprints.
+
+     Before this the panel said "requested" and never spoke again, so a refusal -- which is
+     common: two voices in the passage, wind, too little speech -- looked exactly like a
+     success. The embedder records every attempt on the profile (`lastAttemptAt/Outcome/
+     Detail`), so the answer exists; nothing was reading it.
+
+     Returns null while there is no answer newer than the save. `sinceMs` is the client's
+     clock at save time; 30 s of slack absorbs clock skew between the browser and the
+     database, and is far shorter than the gap between two renames of one person.
+
+     The wording is for a site manager, not an engineer: what happened, and what to do
+     about it. The backend's own sentences stay out of the UI. */
+  function parseServerTime(s) {
+    if (!s) return NaN;
+    var iso = String(s).replace(' ', 'T');
+    if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)) iso += 'Z';   /* stored as UTC, no zone */
+    return Date.parse(iso);
+  }
+
+  function enrolmentOutcome(voiceprints, displayName, sinceMs) {
+    var name = String(displayName || '').trim().toLowerCase();
+    var after = Number(sinceMs) - 30000;
+    var hits = (voiceprints || []).filter(function (v) {
+      return v && String(v.displayName || '').trim().toLowerCase() === name
+        && parseServerTime(v.lastAttemptAt) >= after
+        && (v.lastAttemptOutcome === 'stored' || v.lastAttemptOutcome === 'refused');
+    }).sort(function (a, b) {
+      return parseServerTime(b.lastAttemptAt) - parseServerTime(a.lastAttemptAt);
+    });
+    if (!hits.length) return null;
+    var who = String(displayName).trim();
+    if (hits[0].lastAttemptOutcome === 'stored') {
+      return { state: 'stored',
+               message: who + '’s voice is saved. They will be recognised in future meetings.' };
+    }
+    var d = String(hits[0].lastAttemptDetail || '').toLowerCase();
+    var why;
+    if (/more than one voice|not hold one voice/.test(d)) {
+      why = 'this passage has more than one voice, or too much noise. Name a passage '
+          + 'where only they are speaking.';
+    } else if (/too little speech|too short/.test(d)) {
+      why = 'this passage is too short. Name a longer passage where only they are speaking.';
+    } else if (/resembles another/.test(d)) {
+      why = 'this passage sounds more like someone already saved. Check the name is right.';
+    } else if (/withdrawn/.test(d)) {
+      why = 'their voice was removed from your company’s voices.';
+    } else {
+      why = 'name a longer passage where only they are speaking, and it will be tried again.';
+    }
+    return { state: 'refused', message: who + '’s voice was not saved: ' + why };
+  }
+
   function confirmedSessions(segments) {
     var bySession = {};
     (segments || []).forEach(function (s) {
@@ -530,6 +583,7 @@
     hintIsAmbiguous: hintIsAmbiguous,
     namesInSession: namesInSession,
     inferredNames: inferredNames,
+    enrolmentOutcome: enrolmentOutcome,
   };
 
   if (typeof window !== 'undefined') {

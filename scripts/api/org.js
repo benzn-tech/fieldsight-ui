@@ -1029,6 +1029,44 @@
     return { voiceprints: (fx().voiceprints || []).slice() };
   }
 
+  /* Voices waiting for somebody to say yes or no.
+     
+     TWO SHAPES FROM ONE ROUTE and the caller picks by passing an id or not. Without one the
+     answer is a count per person and touches no transcript -- the bell polls this from every
+     page, so it has to stay that cheap. With one it carries the words of each passage, which
+     costs a transcript read and happens only when the dialog opens.
+
+     A READ stub serves the day's fixture, never `{people: []}`: an empty list here is the
+     claim that nobody is waiting, which is a different thing from "we are offline". */
+  async function getNameProposals(voiceprintId) {
+    if (orgLive()) {
+      return api.orgRequest('/name-proposals'
+        + (voiceprintId ? '?voiceprint=' + encodeURIComponent(voiceprintId) : ''));
+    }
+    await api.delay();
+    var f = fx().nameProposals || {};
+    if (!voiceprintId) return { people: (f.people || []).slice(), total: f.total || 0 };
+    return { voiceprintId: voiceprintId, proposals: (f.proposals || []).slice() };
+  }
+
+  /* Answer one. `decision` is 'confirmed' or 'rejected' and there is deliberately no third
+     value: closing the dialog is NOT a decision, it leaves the row pending for the bell.
+     A dismissal that consumed candidates would burn, five at a time on a mis-click, the
+     human answers a company's rejection threshold is built from. */
+  async function decideNameProposal(proposalId, decision) {
+    if (decision !== 'confirmed' && decision !== 'rejected') {
+      throw new Error('decision must be confirmed or rejected — closing the dialog is '
+                      + 'neither, and must not call this');
+    }
+    if (orgLive()) {
+      return api.orgRequest('/name-proposals/' + encodeURIComponent(proposalId), {
+        method: 'POST', body: { decision: decision },
+      });
+    }
+    await api.delay();
+    return { proposalId: proposalId, decision: decision, _mock: true };
+  }
+
   /* Honour a withdrawal: the vectors go, the audit row stays, and every turn those vectors
      justified is un-named. NOT the same request as removing a name from one meeting —
      somebody who wants their name off a transcript has not asked for their profile to be
@@ -1102,6 +1140,8 @@
     removeSpeakerName: removeSpeakerName,
     regenerateSession: regenerateSession,
     getVoiceprints: getVoiceprints,
+    getNameProposals: getNameProposals,
+    decideNameProposal: decideNameProposal,
     withdrawVoiceprint: withdrawVoiceprint,
     setVoiceprintBasis: setVoiceprintBasis,
     deleteRecordings: deleteRecordings,
