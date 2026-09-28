@@ -86,3 +86,15 @@ test('the Library read-only note sits on a themed surface', () => {
   const body = rule.slice(0, rule.indexOf('}'));
   assert.match(body, /background:\s*var\(--surface-panel-muted/);
 });
+
+test('the shell takes its colours from the theme, not from the light-only FS.tokens', () => {
+  /* FS.tokens holds the LIGHT theme's hex codes. The shell's inline style read
+     its text colour from there, so every inherited text on every page was
+     #111827 in dark mode too -- the My Work heading measured 1.08:1. */
+  const shell = fs.readFileSync(path.join(ROOT, 'scripts', 'app-shell.js'), 'utf8');
+  const block = shell.slice(shell.indexOf('var shellStyle = {'));
+  const body = block.slice(0, block.indexOf('};'));
+  assert.match(body, /background:\s*'var\(--surface-app\)'/);
+  assert.match(body, /color:\s*'var\(--text-primary\)'/);
+  assert.ok(!/FS\.tokens\.(surface|text|colors)/.test(body), 'no light-only colour in the shell');
+});
