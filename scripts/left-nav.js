@@ -331,7 +331,7 @@ function UserArea({ user, isCollapsed }) {
       React.createElement('div', {
         style: {
           fontSize: '11px',
-          color: 'rgba(255,255,255,0.45)',
+          color: 'rgba(255,255,255,0.5)',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         },
       }, role ? role.label : user.role),
