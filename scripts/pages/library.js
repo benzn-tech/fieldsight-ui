@@ -447,6 +447,15 @@
             React.createElement('div', { className: 'fs-library__row-main' },
               React.createElement('span', { className: 'fs-library__row-title' }, tpl.title),
               tpl.active && React.createElement('span', { className: 'fs-library__active-badge' }, 'Active'),
+              /* WHICH VERSION THIS IS, on the row. A report names the template
+                 and version it was written to; without it here, "is this the
+                 one I edited this morning?" meant opening every template.
+                 Nothing is shown for version 0 -- a template with no body yet
+                 has no version to be on. */
+              tpl.current_version > 0 && React.createElement('span', {
+                className: 'fs-library__row-version',
+                title:     'Version ' + tpl.current_version,
+              }, 'v' + tpl.current_version),
             ),
             React.createElement('div', { className: 'fs-library__row-meta' },
               Badge && React.createElement(Badge, {
