@@ -31,6 +31,7 @@
   var META_KEYS = {
     report_date: 1, report_type: 1, user_name: 1, device: 1, site: 1,
     site_id: 1, role: 1, period: 1, recording_session: 1, weather: 1,
+    weather_findings: 1,
     _report_metadata: 1,
     /* `sections` is the reader's whole shape, not a field inside the report,
        and `meeting_title` is identity. Without them here the fallback below
@@ -204,6 +205,16 @@
     return bits.length ? bits.join(' · ') : null;
   }
 
+  /* WHAT THE WEATHER MEANT FOR THE WORK, as the generator's code decided it
+     (weather_advice: fact -> impact -> advice, fixed wording). Rendered
+     exactly as sent: the lines are the compliance record, and a viewer that
+     reworded them would make the screen and the Word file disagree. */
+  function weatherFindings(report) {
+    var f = report && report.weather_findings;
+    if (!f || !Array.isArray(f.lines)) return [];
+    return f.lines.filter(function (l) { return typeof l === 'string' && l.trim(); });
+  }
+
   /* ABSENT IS A FACT WITH A CAUSE, and the viewer should say which. Every
      production report currently has `weather: null`, and not because the
      weather could not be fetched: the generator reads the site coordinate from
@@ -213,7 +224,7 @@
      nothing at all leaves a reader to conclude the weather was unremarkable. */
   function weatherNote(report) {
     if (!report) return null;
-    if (report.weather) return null;
+    if (report.weather || weatherFindings(report).length) return null;
     return 'Not recorded for this report — the site had no coordinate when it was generated.';
   }
 
@@ -455,6 +466,7 @@
     headerFacts:  headerFacts,
     weatherLine:  weatherLine,
     weatherNote:  weatherNote,
+    weatherFindings: weatherFindings,
     sections:     sections,
     entryLines:   entryLines,
   };
