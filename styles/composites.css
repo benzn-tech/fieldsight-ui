@@ -10578,6 +10578,16 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.fs-library__row-version {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+  padding: 0 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  line-height: 16px;
+}
 .fs-library__row-meta {
   display: flex;
   align-items: center;
