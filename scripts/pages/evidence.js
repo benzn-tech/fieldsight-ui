@@ -353,6 +353,14 @@
                           ? window.FS.api.folderName(x.report.user_name)
                           : null,
             photos:      photosForDate,
+            /* The day's location grouping, carried verbatim for "By place".
+               ABSENT (undefined) means nobody announced a location, which is
+               the ordinary case for a meeting and must stay distinguishable
+               from "he announced a room and no photo fell in it" — the
+               backend is deliberate about sending None rather than []
+               (lambda_org_api.py::_photo_groups). Neither reaches here as a
+               crash: groupByPlace treats both as "no groups". */
+            photo_groups: x.report.photo_groups,
           });
           total += photosForDate.length;
         });
@@ -530,7 +538,35 @@
     var note = refNote[0];
     var setNote = refNote[1];
 
-    var grouped = eg ? eg.groupByTopic(day.photos) : null;
+    /* Both groupings render through ONE block, so they are normalised to a
+       common {key, title, photos} here rather than the render branching
+       twice. The remainder heading is part of the grouping's meaning and
+       travels with it: "No topic" says nobody was talking, "No place named
+       yet" says nobody had said where they were — different facts about the
+       same photo, and one label cannot carry both. */
+    var grouped = null, remainderLabel = null, remainderAria = null;
+    if (eg && props.groupMode === 'place') {
+      var byPlace = eg.groupByPlace(day.photos, day.photo_groups);
+      grouped = {
+        groups: byPlace.groups.map(function (g) {
+          return { key: 'place:' + g.location, title: g.location, photos: g.photos };
+        }),
+        ungrouped: byPlace.ungrouped,
+      };
+      remainderLabel = 'No place named yet';
+      remainderAria  = 'Select every photo with no place named';
+    } else if (eg) {
+      var byTopic = eg.groupByTopic(day.photos);
+      grouped = {
+        groups: byTopic.groups.map(function (g) {
+          return { key: 'topic:' + g.topic_id, title: g.topic_title || 'Untitled topic',
+                   photos: g.photos };
+        }),
+        ungrouped: byTopic.ungrouped,
+      };
+      remainderLabel = 'No topic';
+      remainderAria  = 'Select every photo with no topic';
+    }
     var selectedNames = Object.keys(selected).filter(function (k) { return selected[k]; });
 
     function toggle(filename) {
@@ -619,24 +655,23 @@
 
       note ? React.createElement('div', { className: 'fs-evidence__note' }, note) : null,
 
-      (props.groupMode === 'topic' && grouped)
+      (props.groupMode !== 'day' && grouped)
         ? React.createElement('div', { className: 'fs-evidence__topics' },
             grouped.groups.map(function (g) {
               var names = g.photos.map(function (p) { return p.filename; });
               return React.createElement('div', {
-                key: g.topic_id, className: 'fs-evidence__topic',
+                key: g.key, className: 'fs-evidence__topic',
               },
                 React.createElement('div', { className: 'fs-evidence__topic-header' },
                   React.createElement('label', { className: 'fs-evidence__pick-all' },
                     React.createElement('input', {
                       type: 'checkbox',
                       checked: allOn(names),
-                      'aria-label': 'Select every photo under '
-                        + (g.topic_title || 'this topic'),
+                      'aria-label': 'Select every photo under ' + g.title,
                       onChange: function () { setMany(names, !allOn(names)); },
                     })),
                   React.createElement('span', { className: 'fs-evidence__topic-title' },
-                    g.topic_title || 'Untitled topic'),
+                    g.title),
                   React.createElement('span', { className: 'fs-evidence__topic-count' },
                     names.length),
                 ),
@@ -649,7 +684,11 @@
                is a loop index, so the first topic of every day is 0, a falsy
                check dropped its photos, and the section silently showed three
                of five. A remainder that is invisible is how photos disappear;
-               a remainder that is visible and empty costs nothing. */
+               a remainder that is visible and empty costs nothing.
+
+               Under "By place" the remainder is not an edge case at all: it
+               is the ordinary shape of a meeting, where nobody announces a
+               room. Its heading says so rather than reusing "No topic". */
             grouped.ungrouped.length
               ? React.createElement('div', { className: 'fs-evidence__topic' },
                   React.createElement('div', { className: 'fs-evidence__topic-header' },
@@ -657,14 +696,14 @@
                       React.createElement('input', {
                         type: 'checkbox',
                         checked: allOn(grouped.ungrouped.map(function (p) { return p.filename; })),
-                        'aria-label': 'Select every photo with no topic',
+                        'aria-label': remainderAria,
                         onChange: function () {
                           var n = grouped.ungrouped.map(function (p) { return p.filename; });
                           setMany(n, !allOn(n));
                         },
                       })),
                     React.createElement('span', { className: 'fs-evidence__topic-title' },
-                      'No topic'),
+                      remainderLabel),
                     React.createElement('span', { className: 'fs-evidence__topic-count' },
                       grouped.ungrouped.length),
                   ),
@@ -703,7 +742,11 @@
     return React.createElement('div', null,
       React.createElement('div', { className: 'fs-evidence__group-row' },
         React.createElement('span', { className: 'fs-evidence__group-label' }, 'Group'),
-        [['day', 'By day'], ['topic', 'By topic']].map(function (opt) {
+        /* "By place" is the third question a photo answers. A photo belongs
+           to this day and that place; "by topic" only answers it for the
+           photos taken while somebody happened to be talking, which on prod
+           is 19 of 90 on days that have a report. */
+        [['day', 'By day'], ['topic', 'By topic'], ['place', 'By place']].map(function (opt) {
           var on = groupMode === opt[0];
           return React.createElement('button', {
             key: opt[0], type: 'button',

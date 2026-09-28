@@ -660,10 +660,16 @@
      morningBrief when their folder is among the fanned-out set (falls
      back to the first report's brief otherwise — a merged view has no
      single "my brief" by construction). */
-  function mergeTodayData(entries, ownFolder) {
+  /* NO morningBrief here any more. It used to pick the caller's own folder's
+     brief out of the fan-out, which was the right preference over the wrong
+     source: every entry's brief came from TODAY's report, which is written
+     tomorrow, so the merge chose between empties. The brief is now loaded
+     once, for a finished day, by loadMorningBrief and assigned after this
+     merge — `ownFolder` keeps its other job (nothing here reads it now, but
+     the signature is shared with the admin fan-out call site). */
+  function mergeTodayData(entries, ownFolder) {   // eslint-disable-line no-unused-vars
     var urgent = [], myTasks = [], teamTasks = [], activity = [];
     var onSiteById = {};
-    var brief = null;
     var newestDate = null;
 
     entries.forEach(function (e) {
@@ -675,14 +681,12 @@
       activity  = activity.concat(d.activity || []);
       (d.onSite || []).forEach(function (p) { onSiteById[p.id] = p; });
       if (!newestDate) newestDate = d.date;
-      if (!brief || e.folder === ownFolder) brief = d.morningBrief;
     });
 
     return {
       date:         newestDate,
       site:         null,       /* merged view has no single site */
       site_slug:    null,
-      morningBrief: brief || { generatedAt: '—', bullets: [] },
       urgent:       urgent,
       myTasks:      myTasks,
       teamTasks:    teamTasks,
@@ -866,6 +870,53 @@
          down (both need "every accessible folder" for a multi-project
          caller). */
       var adminFoldersPromise = multiProject ? adminUserFolders() : Promise.resolve([]);
+
+      /* THE MORNING BRIEF IS ABOUT A DAY THAT HAS FINISHED, so it is asked
+         for the most recent day that HAS a report — never for `today`.
+
+         Measured on prod 2026-09-23: `executive_summary` reaches the client
+         only through the nightly S3 document (lambda_org_api.py:6750), and
+         that document is written by cron(0 16 * * ? *) — 04:00 NZ the NEXT
+         day, keyed to the PREVIOUS date. Today's report therefore does not
+         exist while Today is on screen. Asking for `today` returned null
+         every day, for everyone, and §B's `effectiveDate ?` gate then did
+         the opposite of what its comment claims: on a day the caller HAD
+         recorded it mounted the card over an empty <ul>, and on a morning
+         before the first recording — exactly when a brief is read — it hid
+         the card entirely. Verified content exists on the other side of the
+         fix: reports/2026-09-21/Ben_UCPK2/daily_report.json carries four
+         substantive bullets.
+
+         This is NOT the "latest available" page fallback that
+         feat/today-rolling-open-items removed. The rest of the page stays on
+         today; only the brief looks back, because only the brief describes a
+         day that is over. Nothing else reads its date.
+
+         Reuses _fallbackCandidates (report days strictly before today,
+         newest first, hasReport-filtered) so the cost is one /api/dates call
+         GeneratedTodaySection already makes, plus getTimeline for the first
+         candidate that answers — both behind FS.api.cache. The walk itself
+         is firstBriefIn: a LISTED day is a candidate, not a guarantee (seen
+         in the browser — /api/dates said hasReport for a date whose timeline
+         then 404'd), which is the same reason GeneratedTodaySection walks
+         its own candidates instead of trusting the newest.
+
+         The user argument mirrors loadFor exactly: a non-admin sends none
+         (the backend force-scopes to self, and an explicit folder can trip
+         the cross-user 403), an admin sends its own folder — which is the
+         brief mergeTodayData already preferred out of the fan-out. */
+      function loadMorningBrief() {
+        return _fallbackCandidates(today).then(function (days) {
+          return window.FS.api.todayAdapter.firstBriefIn(days, function (day) {
+            return window.FS.api.timeline.getTimeline(
+              multiProject ? { date: day, user: folder } : { date: day });
+          }, folder || null);
+        }).catch(function () {
+          /* The brief is an addition to a page that works without it. A
+             failed probe must not take Today down with it. */
+          return null;
+        });
+      }
 
       /* Today-scoped extras only (§B) — always called for TODAY itself,
          never a fallback date any more (feat/today-rolling-open-items
@@ -1195,12 +1246,13 @@
         });
       }
 
-      Promise.all([loadFor(today), loadRollingOpenItems(), programmePromise])
+      Promise.all([loadFor(today), loadRollingOpenItems(), programmePromise, loadMorningBrief()])
         .then(function (results) {
           if (cancelled) return;
           var todayResult   = results[0];
           var rolling       = results[1] || { myTasks: [], teamTasks: [] };
           var programmeRows = results[2] || [];
+          var morningBrief  = results[3] || null;
 
           if (!todayResult) return;
           if (todayResult.accessDenied) {
@@ -1216,22 +1268,30 @@
             date:         null,
             site:         null,
             site_slug:    null,
-            morningBrief: { generatedAt: '—', bullets: [] },
             urgent:       [],
             onSite:       [],
           };
 
+          /* The brief OVERRIDES whatever today's own report produced for it,
+             which is always nothing (see loadMorningBrief). Assigned last so
+             the override is unconditional in both the ok and not-ok shapes. */
           var data = Object.assign({}, baseData, {
             myTasks:        rolling.myTasks,
             teamTasks:      rolling.teamTasks,
             programmeTasks: programmeRows,
+            morningBrief:   morningBrief,
           });
 
           /* "View daily report" CTA + check-off default only make sense
              when TODAY itself has a report. */
           var effectiveDate = todayResult.ok ? today : null;
 
+          /* A brief counts as content. Without this line the one morning the
+             page exists for — before the day's first recording, nothing else
+             on screen — would still render the empty state and throw the
+             brief away with it. */
           var hasContent = !!effectiveDate
+            || !!morningBrief
             || (data.urgent && data.urgent.length > 0)
             || (data.myTasks && data.myTasks.length > 0)
             || (data.teamTasks && data.teamTasks.length > 0)
@@ -2292,10 +2352,16 @@
           })
         : null,
 
-      /* MORNING BRIEF — §B: today-scoped, only when TODAY itself has a
-         report (effectiveDate truthy). Otherwise simply absent, rather
-         than rendering an empty "Morning Brief" card with no bullets. */
-      effectiveDate ? React.createElement(fs.MorningBriefCard, { brief: data.morningBrief }) : null,
+      /* MORNING BRIEF — mounted on HAVING BULLETS, not on today having a
+         report. The old gate was `effectiveDate` (§B: today-scoped), which
+         its own comment said existed to avoid "an empty Morning Brief card
+         with no bullets" — and produced exactly that, because the bullets
+         came from today's report and today's report is written tomorrow
+         (loadMorningBrief). `data.morningBrief` is now null or real; there
+         is no third state to guard against. */
+      data.morningBrief && data.morningBrief.bullets.length
+        ? React.createElement(fs.MorningBriefCard, { brief: data.morningBrief })
+        : null,
 
       /* Sprint 11 C.2 — Weekly completion KPI tile.
          Hidden when nothing closed/open in the current week (avoids
