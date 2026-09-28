@@ -38,14 +38,17 @@ function runEffect(sel, api) {
   assert.ok(m, 'the hydration effect has moved or been renamed');
   const calls = [];
   const setSel = (v) => calls.push(v);
+  const states = [];
+  const setFetchState = (v) => states.push(v);
+  calls.states = states;
   const window = { FS: { api: { templates: api } } };
   // eslint-disable-next-line no-new-func
   const body = m[0]
     .replace(/^React\.useEffect\(function \(\) \{/, '')
     .replace(/\}, \[sel && sel\.id[^\]]*\]\);$/, '');
   // eslint-disable-next-line no-new-func
-  const fn = new Function('sel', 'setSel', 'window', body);
-  fn(sel, setSel, window);
+  const fn = new Function('sel', 'setSel', 'setFetchState', 'window', body);
+  fn(sel, setSel, setFetchState, window);
   return calls;
 }
 
@@ -114,7 +117,7 @@ test('a response that still has no sections does not replace the selection', asy
   const calls = runEffect(ROW_FROM_LIST, api);
   await Promise.resolve();
   await Promise.resolve();
-  assert.deepStrictEqual(calls, []);
+  assert.strictEqual(calls.length, 0, "setSel was not called");
 });
 
 test('a rejected fetch is swallowed, not thrown at the page', async () => {
@@ -125,4 +128,31 @@ test('a rejected fetch is swallowed, not thrown at the page', async () => {
 
 test('a store with no get at all does not crash the library', () => {
   assert.doesNotThrow(() => runEffect(ROW_FROM_LIST, {}));
+});
+
+
+/* ---- the panel is told the fetch is in flight ------------------------------- */
+
+const tick = () => new Promise((r) => setImmediate(r));
+
+test('the fetch is announced as loading, then cleared when the template arrives', async () => {
+  /* Without this the panel showed "did not come back with this request" for
+     the half second every fetch takes. */
+  const full = { ...ROW_FROM_LIST, versions: [{ version: 2, schema: { sections: [] } }] };
+  const calls = runEffect(ROW_FROM_LIST, apiThatReturns(full));
+  assert.deepStrictEqual(calls.states[0], { id: 't-1', status: 'loading' });
+  await tick();
+  assert.deepStrictEqual(calls.states[calls.states.length - 1], null, 'cleared on arrival');
+});
+
+test('an answer without content is reported as empty, not left as loading', async () => {
+  const calls = runEffect(ROW_FROM_LIST, apiThatReturns({ ...ROW_FROM_LIST, versions: [] }));
+  await tick();
+  assert.deepStrictEqual(calls.states[calls.states.length - 1], { id: 't-1', status: 'empty' });
+});
+
+test('a failed fetch is reported as failed, not left as loading', async () => {
+  const calls = runEffect(ROW_FROM_LIST, { get() { return Promise.reject(new Error('502')); } });
+  await tick();
+  assert.deepStrictEqual(calls.states[calls.states.length - 1], { id: 't-1', status: 'failed' });
 });
