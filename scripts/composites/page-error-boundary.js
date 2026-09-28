@@ -94,7 +94,7 @@
            + 'to go somewhere else.'),
         ReactRef.createElement('pre', {
           style: { margin: 0, padding: '12px', overflowX: 'auto',
-                   background: 'var(--surface-sunken, #f1f5f9)',
+                   background: 'var(--surface-panel-muted, #f1f5f9)',
                    color: 'var(--text-secondary)',
                    font: '12px/1.5 "JetBrains Mono", monospace',
                    borderRadius: '6px' },

@@ -1021,9 +1021,9 @@
 .fs-skeleton {
   background: linear-gradient(
     90deg,
-    var(--surface-subtle, #e2e8f0) 25%,
-    var(--surface-raised, #f1f5f9) 50%,
-    var(--surface-subtle, #e2e8f0) 75%
+    var(--surface-panel-muted, #e2e8f0) 25%,
+    var(--surface-panel-elevated, #f1f5f9) 50%,
+    var(--surface-panel-muted, #e2e8f0) 75%
   );
   background-size: 400% 100%;
   animation: fs-skeleton-shimmer 1.5s ease-in-out infinite;
@@ -1034,16 +1034,16 @@
 @media (prefers-reduced-motion: reduce) {
   .fs-skeleton {
     animation: none;
-    background: var(--surface-subtle, #e2e8f0);
+    background: var(--surface-panel-muted, #e2e8f0);
   }
 }
 
 [data-theme="dark"] .fs-skeleton {
   background: linear-gradient(
     90deg,
-    var(--surface-raised, #1e293b) 25%,
+    var(--surface-panel-elevated, #1e293b) 25%,
     var(--surface-panel, #273549)  50%,
-    var(--surface-raised, #1e293b) 75%
+    var(--surface-panel-elevated, #1e293b) 75%
   );
   background-size: 400% 100%;
   animation: fs-skeleton-shimmer 1.5s ease-in-out infinite;
@@ -1052,7 +1052,7 @@
 @media (prefers-reduced-motion: reduce) {
   [data-theme="dark"] .fs-skeleton {
     animation: none;
-    background: var(--surface-raised, #1e293b);
+    background: var(--surface-panel-elevated, #1e293b);
   }
 }
 
