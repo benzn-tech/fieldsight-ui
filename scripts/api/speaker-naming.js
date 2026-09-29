@@ -527,21 +527,54 @@
       return { state: 'stored',
                message: who + '’s voice is saved. They will be recognised in future meetings.' };
     }
-    var d = String(hits[0].lastAttemptDetail || '').toLowerCase();
-    var why;
+    return { state: 'refused',
+             message: who + '’s voice was not saved: ' + refusalReason(hits[0].lastAttemptDetail) };
+  }
+
+  /* The backend's refusal sentence, in words a site manager can act on. ONE mapping, read
+     by the rename notice and by the Voices page, so the two never explain the same refusal
+     differently. */
+  function refusalReason(detail) {
+    var d = String(detail || '').toLowerCase();
     if (/more than one voice|not hold one voice/.test(d)) {
-      why = 'this passage has more than one voice, or too much noise. Name a passage '
-          + 'where only they are speaking.';
-    } else if (/too little speech|too short/.test(d)) {
-      why = 'this passage is too short. Name a longer passage where only they are speaking.';
-    } else if (/resembles another/.test(d)) {
-      why = 'this passage sounds more like someone already saved. Check the name is right.';
-    } else if (/withdrawn/.test(d)) {
-      why = 'their voice was removed from your company’s voices.';
-    } else {
-      why = 'name a longer passage where only they are speaking, and it will be tried again.';
+      return 'this passage has more than one voice, or too much noise. Name a passage '
+           + 'where only they are speaking.';
     }
-    return { state: 'refused', message: who + '’s voice was not saved: ' + why };
+    if (/too little speech|too short/.test(d)) {
+      return 'this passage is too short. Name a longer passage where only they are speaking.';
+    }
+    if (/resembles another/.test(d)) {
+      return 'this passage sounds more like someone already saved. Check the name is right.';
+    }
+    if (/withdrawn/.test(d)) return 'their voice was removed from your company’s voices.';
+    return 'name a longer passage where only they are speaking, and it will be tried again.';
+  }
+
+  /* One Voices-page row in plain words. The page used to print the database's own
+     vocabulary -- "tentative", "stored", "refused", a backend sentence as a tooltip, and two
+     bare counts headed "Samples" and "Vouched for" -- none of which a customer can act on.
+     Numbers stay only where they mean something to a person: how many passages the voice
+     was learned from. */
+  function voiceRowWords(row) {
+    var r = row || {};
+    var n = Number(r.samples) || 0;
+    var named = Number(r.humanSamples) || 0;
+    var status = r.status === 'withdrawn' ? 'Deleted'
+      : n === 0 ? 'No voice saved yet'
+      : r.status === 'confirmed' ? 'Recognised'
+      : 'Still learning — names are shown with ?';
+    var learned = n === 0 ? '—'
+      : n + (n === 1 ? ' passage' : ' passages')
+        + (named ? ' (' + named + ' named by someone)' : '');
+    var when = r.lastAttemptAt ? String(r.lastAttemptAt).slice(0, 10) : '';
+    var latest = '—', latestTitle = '';
+    if (r.lastAttemptOutcome === 'stored') {
+      latest = 'Voice saved' + (when ? ' · ' + when : '');
+    } else if (r.lastAttemptOutcome === 'refused') {
+      latest = 'Not saved' + (when ? ' · ' + when : '');
+      latestTitle = 'Not saved: ' + refusalReason(r.lastAttemptDetail);
+    }
+    return { status: status, learned: learned, latest: latest, latestTitle: latestTitle };
   }
 
   function confirmedSessions(segments) {
@@ -584,6 +617,8 @@
     namesInSession: namesInSession,
     inferredNames: inferredNames,
     enrolmentOutcome: enrolmentOutcome,
+    refusalReason: refusalReason,
+    voiceRowWords: voiceRowWords,
   };
 
   if (typeof window !== 'undefined') {

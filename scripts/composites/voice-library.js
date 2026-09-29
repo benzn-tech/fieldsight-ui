@@ -152,24 +152,20 @@
         React.createElement('table', { className: 'fs-voices__table' },
         React.createElement('thead', null,
           React.createElement('tr', null,
-            ['Name', 'Samples', 'Vouched for', 'Status', 'Last attempt', ''].map(
+            ['Name', 'Learned from', 'Status', 'Latest', ''].map(
               function (h, i) { return React.createElement('th', { key: i }, h); }))),
         React.createElement('tbody', null,
           state.rows.map(function (r) {
+            var w = window.FS.speakerNaming.voiceRowWords(r);
             return React.createElement('tr', { key: r.id },
               React.createElement('td', null, r.displayName || '(unnamed voice)'),
-              /* Both numbers, always. A profile with zero samples names nobody,
-                 and a profile made only of clustering inference stays tentative
-                 — the row has to show which kind it is. */
-              React.createElement('td', null, String(r.samples != null ? r.samples : 0)),
-              React.createElement('td', null,
-                String(r.humanSamples != null ? r.humanSamples : 0)),
-              React.createElement('td', null, r.status || ''),
-              React.createElement('td', { title: r.lastAttemptDetail || '' },
-                r.lastAttemptOutcome
-                  ? (r.lastAttemptOutcome + (r.lastAttemptAt
-                      ? ' · ' + String(r.lastAttemptAt).slice(0, 10) : ''))
-                  : '—'),
+              /* Plain words, not the database's vocabulary -- see voiceRowWords. A
+                 profile with no voice saved still shows, and says so, because it names
+                 nobody; and "named by someone" keeps a person's assertion visible beside
+                 what the clustering inferred. */
+              React.createElement('td', null, w.learned),
+              React.createElement('td', null, w.status),
+              React.createElement('td', { title: w.latestTitle }, w.latest),
               React.createElement('td', null,
                 React.createElement('button', {
                   type: 'button',
