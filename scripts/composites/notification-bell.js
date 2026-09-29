@@ -133,6 +133,26 @@
       }, 'Check'));
   }
 
+  /* A self-introduction ("Hi, this is Petros from Cassidy") — not the same
+     question as VoiceRow: there is no enrolled voice being matched yet, only a
+     name somebody heard themselves say. One row per suggestion, and the whole
+     object rides here already (list fetched once when the panel opened), so
+     opening the dialog costs no second network round trip. */
+  function IntroRow(props) {
+    var h = React.createElement;
+    var s = props.suggestion;
+    return h('li', { className: 'fs-bell__row' },
+      h('div', { className: 'fs-bell__row-main' },
+        h('span', { className: 'fs-bell__row-title' },
+          'Someone introduced themselves as ', h('b', null, s.heardName || 'Someone')),
+        h('span', { className: 'fs-bell__row-sub' }, 'Save their voice?')),
+      h('button', {
+        type: 'button',
+        className: 'fs-bell__row-action',
+        onClick: function () { props.onOpen(s); },
+      }, 'Check'));
+  }
+
 
   function NotificationBell() {
     var h = React.createElement;
@@ -143,8 +163,11 @@
     var s_jobs = React.useState(jobsApi ? jobsApi.list() : []);
     var jobs = s_jobs[0], setJobs = s_jobs[1];
     var voicesApi = (window.FS || {}).nameProposals;
-    var s_voices = React.useState(voicesApi ? voicesApi.get() : { people: [], total: 0 });
+    var s_voices = React.useState(
+      voicesApi ? voicesApi.get() : { people: [], total: 0, introductions: 0 });
     var voices = s_voices[0], setVoices = s_voices[1];
+    var s_intro = React.useState([]);
+    var suggestions = s_intro[0], setSuggestions = s_intro[1];
 
     React.useEffect(function () {
       if (!jobsApi) return undefined;
@@ -156,6 +179,35 @@
       if (!voicesApi) return undefined;
       return voicesApi.subscribe(function (next) { setVoices(next); });
     }, []);
+
+    /* A colleague can answer one of these from a fresh IntroSuggestionDialog while
+       this panel is closed, or a poll can supersede the badge count — drop it
+       locally rather than waiting for the next 120s refresh to notice. */
+    React.useEffect(function () {
+      function onDecided(e) {
+        var id = e && e.detail && e.detail.id;
+        if (!id) return;
+        setSuggestions(function (prev) { return prev.filter(function (s) { return s.id !== id; }); });
+      }
+      window.addEventListener('fs:name-suggestion-decided', onDecided);
+      return function () { window.removeEventListener('fs:name-suggestion-decided', onDecided); };
+    }, []);
+
+    /* Fetched once, when the panel is opened — same reason as the proposals dialog
+       waiting for a click rather than polling: this is the one shape of the
+       introductions feature that carries the words, and there is no reason to pay
+       for that on every badge refresh. */
+    React.useEffect(function () {
+      if (!open) return undefined;
+      var introductions = (voices && voices.introductions) || 0;
+      if (!introductions) { setSuggestions([]); return undefined; }
+      var org = ((window.FS || {}).api || {}).org;
+      if (!org || !org.getNameSuggestions) return undefined;
+      org.getNameSuggestions().then(function (r) {
+        setSuggestions((r && r.suggestions) || []);
+      }, function () { setSuggestions([]); });
+      return undefined;
+    }, [open]);
 
     /* Close on Escape and on a click elsewhere. A panel that can only be
        closed by pressing the thing that opened it is a panel people leave
@@ -182,9 +234,10 @@
     var unseen = jobsApi ? jobsApi.unseenCount() : 0;
     var busy = jobsApi ? jobsApi.working() : 0;
     var waiting = (voices && voices.total) || 0;
+    var introducing = (voices && voices.introductions) || 0;
     /* One number, because two badges on one bell is a puzzle. The count is what
        is unread OR unanswered; the panel below says which is which. */
-    var count = unseen + waiting;
+    var count = unseen + waiting + introducing;
 
     return h('div', { className: 'fs-bell' },
       h('button', {
@@ -199,6 +252,8 @@
           if (busy) parts.push(busy + ' report' + (busy === 1 ? '' : 's') + ' being written');
           if (unseen) parts.push(unseen + ' finished report' + (unseen === 1 ? '' : 's'));
           if (waiting) parts.push(waiting + ' voice' + (waiting === 1 ? '' : 's') + ' to confirm');
+          if (introducing) parts.push(introducing + ' new voice' + (introducing === 1 ? '' : 's')
+                                      + ' to save');
           return parts.length ? parts.join(', ') : 'Reports and voices to confirm';
         })(),
         'aria-expanded': open ? 'true' : 'false',
@@ -226,6 +281,31 @@
       open
         ? h('div', { className: 'fs-bell__panel', role: 'dialog',
                      'aria-label': 'Reports and voices to confirm' },
+            /* New voices first, above Voices-to-confirm: a self-introduction is a
+               name nobody has ever recorded, while a proposal is a passage that
+               might belong to somebody already known — both wait on the reader,
+               reports wait on the machine, so both sit above Reports. */
+            suggestions.length
+              ? h('div', { className: 'fs-bell__section' },
+                  h('div', { className: 'fs-bell__panel-head' },
+                    h('span', null, 'New voices'),
+                    h('span', { className: 'fs-bell__panel-count' },
+                      suggestions.length + (suggestions.length === 1 ? ' person' : ' people'))),
+                  h('ul', { className: 'fs-bell__list' },
+                    suggestions.map(function (s) {
+                      return h(IntroRow, {
+                        key: s.id,
+                        suggestion: s,
+                        onOpen: function (suggestion) {
+                          setOpen(false);
+                          window.dispatchEvent(new CustomEvent('fs:open-intro-suggestion', {
+                            detail: { suggestion: suggestion },
+                          }));
+                        },
+                      });
+                    })))
+              : null,
+
             /* Voices first: they are waiting on the reader, reports are waiting
                on the machine. */
             waiting
@@ -273,12 +353,13 @@
                     'Reports you generate will appear here while they are being '
                     + 'written, and stay for a day once they are ready.')),
 
-            /* Only when BOTH are empty, and it names the second kind so somebody
+            /* Only when ALL THREE are empty, and it names the kinds so somebody
                who has never seen one knows what would put it here. */
-            (!waiting && !jobs.length)
+            (!waiting && !suggestions.length && !jobs.length)
               ? h('p', { className: 'fs-bell__empty' },
                   'When you name a speaker, passages that may be the same person '
-                  + 'will appear here to confirm.')
+                  + 'will appear here to confirm — and when someone introduces '
+                  + 'themselves on a recording, their name will appear here too.')
               : null)
         : null,
     );

@@ -114,6 +114,7 @@
   <script type="text/babel" src="scripts/composites/modal-overlay.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/notification-bell.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/name-proposals-dialog.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/intro-suggestion-dialog.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/email-preview-modal.js?v=15"></script>
   <script type="text/babel" src="scripts/composites/session-report-modal.js?v=5"></script>
   <script type="text/babel" src="scripts/composites/recording-delete-modal.js?v=1"></script>
@@ -235,6 +236,60 @@
             Open the dialog directly
           </button>
           {Dialog ? <Dialog /> : <em>NameProposalsDialog not loaded</em>}
+        </div>
+      );
+    }
+
+    /* Same self-contained-stub pattern as VoicesShowcase above, so this section
+       can never break because some unrelated api module did. Stubs getMembers
+       so the closest-roster-name prefill can actually be seen ("Petros" ->
+       "Petros Pan"), and getNameSuggestions/decideNameSuggestion so the dialog
+       has something to open and answer. */
+    function IntroSuggestionsShowcase() {
+      React.useState(() => {
+        window.FS = window.FS || {};
+        window.FS.api = window.FS.api || {};
+        window.FS.api.org = window.FS.api.org || {};
+        const example = [
+          { id: 'd-intro-1', heardName: 'Petros', companyName: 'Cassidy',
+            quote: 'Hi, this is Petros from Cassidy, I’m on site today.',
+            date: '2026-09-26', userFolder: 'Ben_UCPK2',
+            sourceFilename: 'ben_ucpk2_2026-09-26_08-14-02_sid90cc_c0000_off0.0_to12.0_srcwav.json',
+            speakerLabel: 'spk_0', startSec: 0.4, endSec: 5.2 },
+        ];
+        if (!window.FS.api.org.getNameSuggestions) {
+          window.FS.api.org.getNameSuggestions = async () => ({ suggestions: example.slice() });
+          window.FS.api.org.decideNameSuggestion = async (id, d) => ({ suggestionId: id, decision: d });
+        }
+        if (!window.FS.api.org.getMembers) {
+          window.FS.api.org.getMembers = async () => ({ members: [
+            { name: 'Petros Pan' }, { name: 'Jarley Trainor' }, { name: 'Sam Yu' },
+          ] });
+        }
+        if (!window.FS.nameProposals) {
+          window.FS.nameProposals = {
+            get: () => ({ people: [], total: 0, introductions: example.length }),
+            subscribe: (fn) => { fn({ people: [], total: 0, introductions: example.length }); return () => {}; },
+            refresh: () => Promise.resolve(),
+          };
+        }
+        return true;
+      });
+      const Bell = window.FieldSight.NotificationBell;
+      const Dialog = window.FieldSight.IntroSuggestionDialog;
+      return (
+        <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+          {Bell ? <Bell /> : <em>NotificationBell not loaded</em>}
+          <button className="fs-btn fs-btn--secondary fs-btn--sm" onClick={() =>
+            window.dispatchEvent(new CustomEvent('fs:open-intro-suggestion',
+              { detail: { suggestion: { id: 'd-intro-1', heardName: 'Petros', companyName: 'Cassidy',
+                quote: 'Hi, this is Petros from Cassidy, I’m on site today.',
+                date: '2026-09-26', userFolder: 'Ben_UCPK2',
+                sourceFilename: 'ben_ucpk2_2026-09-26_08-14-02_sid90cc_c0000_off0.0_to12.0_srcwav.json',
+                startSec: 0.4, endSec: 5.2 } } }))}>
+            Open the dialog directly
+          </button>
+          {Dialog ? <Dialog /> : <em>IntroSuggestionDialog not loaded</em>}
         </div>
       );
     }
@@ -2050,6 +2105,14 @@
           <Section title="Voices to confirm · NotificationBell + NameProposalsDialog">
             <Row label="bell · one person waiting">
               <VoicesShowcase />
+            </Row>
+          </Section>
+
+          {/* New voices (self-introductions). Same reason as the section above —
+              give this composite a showcase from day one. */}
+          <Section title="New voices · NotificationBell + IntroSuggestionDialog">
+            <Row label="bell · one self-introduction waiting">
+              <IntroSuggestionsShowcase />
             </Row>
           </Section>
 
