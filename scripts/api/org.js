@@ -239,6 +239,19 @@
     return { url: null, key: null };   // mock: caller falls back to data-URI preview
   }
 
+  /* One site's weather for one day: {forecast, actual}, each null until the
+     05:30 forecast / the nightly report has written it. What the weather
+     means for the work is already in `lines` -- decided by the pipeline's
+     weather_advice against the day's programme. Nothing here judges it. */
+  async function getSiteWeather(opts) {
+    opts = opts || {};
+    if (orgLive()) {
+      return api.orgRequest('/weather', { params: { site: opts.site, date: opts.date } });
+    }
+    await api.delay();
+    return { site: opts.site, date: opts.date, forecast: null, actual: null };
+  }
+
   async function assetUrl(key) {
     if (orgLive()) return api.orgRequest('/asset-url', { params: { key: key } });
     await api.delay();
@@ -1161,6 +1174,7 @@
     setComplianceResolution: setComplianceResolution,
     getComplianceResolutions: getComplianceResolutions,
     getLiveItems: getLiveItems,
+    getSiteWeather: getSiteWeather,
     getSessions: getSessions,
     getSessionsCached: getSessionsCached,
     getSessionBrief: getSessionBrief,
