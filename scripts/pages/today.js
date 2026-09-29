@@ -2292,6 +2292,11 @@
           })
         : null,
 
+      /* WEATHER TODAY -- the forecast judged against today's programme, for
+         the active site. Before the brief and independent of it: the brief
+         waits for a report, and the forecast is written at 05:30. */
+      fs.TodayWeatherCard ? React.createElement(fs.TodayWeatherCard, null) : null,
+
       /* MORNING BRIEF — §B: today-scoped, only when TODAY itself has a
          report (effectiveDate truthy). Otherwise simply absent, rather
          than rendering an empty "Morning Brief" card with no bullets. */

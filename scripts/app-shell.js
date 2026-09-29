@@ -970,6 +970,11 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
         window.FieldSight.NameProposalsDialog
           ? React.createElement(window.FieldSight.NameProposalsDialog)
           : null,
+        /* Same pattern: mounted once, renders nothing until `fs:open-intro-suggestion`
+           names a self-introduction to decide on. */
+        window.FieldSight.IntroSuggestionDialog
+          ? React.createElement(window.FieldSight.IntroSuggestionDialog)
+          : null,
         React.createElement(WeatherIndicator),
       ),
     ),

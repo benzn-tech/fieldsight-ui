@@ -269,3 +269,32 @@ test('null and odd input do not throw', () => {
   assert.doesNotThrow(function () { vm.reportTitle(null); });
   assert.deepStrictEqual(vm.sections('not a report'), []);
 });
+
+/* ---- weather findings decided by the generator's code (2026-09-29) --------- */
+
+const FINDINGS = {
+  lines: ['Rain in the afternoon (from 14:00 to 17:00, 9 mm). Impact: exterior painting, '
+        + 'concrete pours. Advice: record any lost time against the weather.'],
+  actual: true, weather_day: false, impact_basis: 'general', items: [],
+};
+
+test('the weather findings are shown exactly as the generator wrote them', () => {
+  const r = Object.assign({}, DAILY, { weather: WEATHER, weather_findings: FINDINGS });
+  assert.deepStrictEqual(vm.weatherFindings(r), FINDINGS.lines);
+});
+
+test('findings without the totals still count as weather recorded', () => {
+  const r = Object.assign({}, DAILY, { weather: null, weather_findings: FINDINGS });
+  assert.strictEqual(vm.weatherNote(r), null);
+});
+
+test('a report from before findings existed shows none, and is not broken by it', () => {
+  assert.deepStrictEqual(vm.weatherFindings(DAILY), []);
+  assert.deepStrictEqual(vm.weatherFindings(Object.assign({}, DAILY, { weather_findings: { lines: 'x' } })), []);
+});
+
+test('weather_findings is not rendered a second time as a section of its own', () => {
+  const r = Object.assign({}, DAILY, { weather_findings: FINDINGS });
+  const titles = (vm.sections(r) || []).map((s) => s.title);
+  assert.ok(!titles.some((t) => /weather findings/i.test(t)), titles.join(', '));
+});

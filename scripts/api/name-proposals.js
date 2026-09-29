@@ -35,7 +35,7 @@
      walking pace. */
   var POLL_MS = 120000;
 
-  var state = { people: [], total: 0, loaded: false, error: null };
+  var state = { people: [], total: 0, introductions: 0, loaded: false, error: null };
   var subs = [];
   var timer = null;
   var inflight = null;
@@ -50,6 +50,7 @@
     return {
       people: state.people.slice(),
       total: state.total,
+      introductions: state.introductions,
       loaded: state.loaded,
       error: state.error,
     };
@@ -71,6 +72,12 @@
       var r = await org.getNameProposals();
       state.people = (r && r.people) || [];
       state.total = (r && r.total) || 0;
+      /* `introductions` rides this same countless poll — self-introductions are cheap
+         to count for the same reason `total` is (memory:
+         "ui-api-layer-whitelists-request-body": added as its own field rather than
+         folded into `total`'s arithmetic, so the bell's existing `total` reader is
+         never silently changed underneath it). */
+      state.introductions = (r && r.introductions) || 0;
       state.error = null;
     } catch (e) {
       /* Keep the last good answer and record that this attempt failed. Blanking

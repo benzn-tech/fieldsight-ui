@@ -154,12 +154,31 @@
     ],
   };
 
+  /* Self-introductions waiting to be confirmed or rejected ("Hi, this is Petros from
+     Cassidy"). Same reasoning as NAME_PROPOSALS above: a READ stub serves example data
+     rather than `{suggestions: []}`, which would be the claim that nobody has ever
+     introduced themselves. Field names match the backend response verbatim (plan
+     2026-09-29-self-introduction-name-suggestions.md §Frontend). */
+  var NAME_SUGGESTIONS = [
+    { id: 'nis-example-1', heardName: 'Petros', companyName: 'Cassidy',
+      quote: 'Hi, this is Petros from Cassidy, I’m on site today.',
+      date: '2026-09-26', userFolder: 'Ben_UCPK2', sessionBase: 'sid90cc2026',
+      sourceFilename: 'ben_ucpk2_2026-09-26_08-14-02_sid90cc_c0000_off0.0_to12.0_srcwav.json',
+      speakerLabel: 'spk_0', startSec: 0.4, endSec: 5.2, createdAt: '2026-09-26T08:15:00Z' },
+    { id: 'nis-example-2', heardName: 'Sam Yu', companyName: null,
+      quote: 'Morning — my name is Sam Yu, I’ll be doing the electrical today.',
+      date: '2026-09-25', userFolder: 'James_Lamb', sessionBase: 'sid77aa2026',
+      sourceFilename: 'james_lamb_2026-09-25_07-02-11_sid77aa_c0000_off0.0_to9.5_srcwav.json',
+      speakerLabel: 'spk_1', startSec: 1.0, endSec: 6.8, createdAt: '2026-09-25T07:03:00Z' },
+  ];
+
   window.FieldSight.fixtures.sites = {
     sites:          SITES,
     users:          USERS,
     subcontractors: SUBCONTRACTORS,
     regions:        REGIONS,
     nameProposals:  NAME_PROPOSALS,
+    nameSuggestions: NAME_SUGGESTIONS,
   };
 
 })();

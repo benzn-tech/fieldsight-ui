@@ -1100,3 +1100,31 @@ button:not([class*="fs-"]):focus-visible,
   .fs-npd__spacer { display: none; }
   .fs-npd__actions > .fs-btn { flex: 1 1 auto; }
 }
+
+/* ---- IntroSuggestionDialog -------------------------------------------------
+   Layout only, same tokens and button variants as NameProposalsDialog above —
+   these are the same kind of decision (confirm/reject a spoken name) and
+   should not look like two different products. */
+.fs-isd { display: flex; flex-direction: column; gap: 14px; }
+.fs-isd__lede { margin: 0; color: var(--text-secondary); line-height: 1.5; }
+.fs-isd__note { margin: 0; color: var(--text-danger); font-size: 13px; }
+.fs-isd__saved { margin: 0; color: var(--text-secondary); line-height: 1.5; }
+.fs-isd__meta { display: flex; gap: 10px; align-items: baseline;
+                font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+.fs-isd__date { font-weight: 500; color: var(--text-primary); }
+.fs-isd__len { font-variant-numeric: tabular-nums; }
+.fs-isd__quote { margin: 0 0 10px; color: var(--text-primary); line-height: 1.5;
+                 overflow-wrap: anywhere; }
+.fs-isd__nowords { color: var(--text-secondary); font-style: italic; }
+.fs-isd__label { display: block; margin: 14px 0 4px; font-size: 13px;
+                 font-weight: 500; color: var(--text-secondary); }
+.fs-isd__input { width: 100%; }
+.fs-isd__heard { margin: 4px 0 0; font-size: 12px; color: var(--text-secondary); }
+.fs-isd__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+                    margin-top: 14px; }
+.fs-isd__foot { display: flex; justify-content: flex-end;
+                border-top: 1px solid var(--border-subtle); padding-top: 12px;
+                margin-top: 14px; }
+@media (max-width: 480px) {
+  .fs-isd__actions > .fs-btn { flex: 1 1 auto; }
+}

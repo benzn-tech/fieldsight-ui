@@ -239,6 +239,19 @@
     return { url: null, key: null };   // mock: caller falls back to data-URI preview
   }
 
+  /* One site's weather for one day: {forecast, actual}, each null until the
+     05:30 forecast / the nightly report has written it. What the weather
+     means for the work is already in `lines` -- decided by the pipeline's
+     weather_advice against the day's programme. Nothing here judges it. */
+  async function getSiteWeather(opts) {
+    opts = opts || {};
+    if (orgLive()) {
+      return api.orgRequest('/weather', { params: { site: opts.site, date: opts.date } });
+    }
+    await api.delay();
+    return { site: opts.site, date: opts.date, forecast: null, actual: null };
+  }
+
   async function assetUrl(key) {
     if (orgLive()) return api.orgRequest('/asset-url', { params: { key: key } });
     await api.delay();
@@ -1045,7 +1058,16 @@
     }
     await api.delay();
     var f = fx().nameProposals || {};
-    if (!voiceprintId) return { people: (f.people || []).slice(), total: f.total || 0 };
+    if (!voiceprintId) {
+      return {
+        people: (f.people || []).slice(), total: f.total || 0,
+        /* Mirrors the server's countless branch: the mock badge also carries
+           introductions, off the day's example fixture, so the bell's "New voices"
+           section can be seen and checked locally the same way "Voices to confirm"
+           already is. */
+        introductions: (fx().nameSuggestions || []).length,
+      };
+    }
     return { voiceprintId: voiceprintId, proposals: (f.proposals || []).slice() };
   }
 
@@ -1065,6 +1087,48 @@
     }
     await api.delay();
     return { proposalId: proposalId, decision: decision, _mock: true };
+  }
+
+  /* Somebody said their own name on a recording ("Hi, this is Petros from Cassidy") and the
+     backend queued it as a question, same spirit as name-proposals but for a voice nobody
+     has enrolled yet. ONE shape, unlike `/name-proposals`: every field the dialog needs
+     (heardName, quote, the audio-key ingredients) is already on the row, so there is no
+     second transcript-reading call here.
+
+     A READ stub serves the day's fixture, never `{suggestions: []}` — see getVoiceprints'
+     comment for why an empty list here is a claim, not a neutral default. */
+  async function getNameSuggestions() {
+    if (orgLive()) return api.orgRequest('/name-suggestions');
+    await api.delay();
+    return { suggestions: (fx().nameSuggestions || []).slice() };
+  }
+
+  /* Answer one self-introduction. `decision` is 'confirmed' or 'rejected', same rule as
+     `decideNameProposal` and for the same reason: closing the dialog is not a decision.
+
+     `displayName` lets a person fix what the transcriber misheard before it reaches a
+     biometric store ("Petros Pan" -> "Petrus Pang"); the request body must actually carry
+     `display_name` when one is given, or the edited name is silently dropped and the
+     backend falls back to the misheard `heard_name` (memory:
+     "ui-api-layer-whitelists-request-body" — this layer builds bodies explicitly, so a
+     missing key here is a missing key on the wire, not a framework filter). Blank/absent
+     means "use what was heard", so the key is left off the body entirely rather than sent
+     empty. */
+  async function decideNameSuggestion(suggestionId, decision, displayName) {
+    if (decision !== 'confirmed' && decision !== 'rejected') {
+      throw new Error('decision must be confirmed or rejected — closing the dialog is '
+                      + 'neither, and must not call this');
+    }
+    var body = { decision: decision };
+    var name = displayName != null ? String(displayName).trim() : '';
+    if (name) body.display_name = name;
+    if (orgLive()) {
+      return api.orgRequest('/name-suggestions/' + encodeURIComponent(suggestionId), {
+        method: 'POST', body: body,
+      });
+    }
+    await api.delay();
+    return { suggestionId: suggestionId, decision: decision, _mock: true };
   }
 
   /* Honour a withdrawal: the vectors go, the audit row stays, and every turn those vectors
@@ -1142,6 +1206,8 @@
     getVoiceprints: getVoiceprints,
     getNameProposals: getNameProposals,
     decideNameProposal: decideNameProposal,
+    getNameSuggestions: getNameSuggestions,
+    decideNameSuggestion: decideNameSuggestion,
     withdrawVoiceprint: withdrawVoiceprint,
     setVoiceprintBasis: setVoiceprintBasis,
     deleteRecordings: deleteRecordings,
@@ -1161,6 +1227,7 @@
     setComplianceResolution: setComplianceResolution,
     getComplianceResolutions: getComplianceResolutions,
     getLiveItems: getLiveItems,
+    getSiteWeather: getSiteWeather,
     getSessions: getSessions,
     getSessionsCached: getSessionsCached,
     getSessionBrief: getSessionBrief,

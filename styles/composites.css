@@ -13624,3 +13624,26 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 }
 .fs-ask-web__source:hover,
 .fs-ask-web__source:focus-visible { color: var(--text-primary); }
+
+/* ---- Today: weather for the active site (today-weather-card.js) ---- */
+.fs-today-weather { margin-bottom: 12px; }
+.fs-today-weather__title {
+  font-size: 13px;
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.fs-today-weather__lines {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.fs-today-weather__lines li + li { margin-top: 4px; }
+.fs-today-weather__basis,
+.fs-today-weather__muted {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}

@@ -260,6 +260,7 @@
       });
       var weather = hasWeatherSection ? null : vm.weatherLine(report.weather);
       var note    = hasWeatherSection ? null : vm.weatherNote(report);
+      var findings = hasWeatherSection || !vm.weatherFindings ? [] : vm.weatherFindings(report);
       var subtitle = vm.reportSubtitle ? vm.reportSubtitle(report) : '';
       body = React.createElement('div', { className: 'fs-report-view' },
 
@@ -289,7 +290,16 @@
           React.createElement('h3', { className: 'fs-report-view__h' }, 'Weather'),
           weather
             ? React.createElement('p', { className: 'fs-report-view__para' }, weather)
-            : React.createElement('p', { className: 'fs-report-view__para fs-report-view__para--muted' }, note)),
+            : (findings.length ? null
+                : React.createElement('p', { className: 'fs-report-view__para fs-report-view__para--muted' }, note)),
+          /* What it meant for the work -- decided by the generator's code, one
+             line per finding, shown as sent. */
+          findings.length
+            ? React.createElement('ul', { className: 'fs-report-view__list' },
+                findings.map(function (line, i) {
+                  return React.createElement('li', { key: i }, line);
+                }))
+            : null),
 
         generated.map(function (s) {
           return s.kind === 'raw'
