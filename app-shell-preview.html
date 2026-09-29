@@ -143,6 +143,11 @@
        opens it). Registers on window.FieldSight, so the FS.api reassignment
        in api/index.js cannot wipe it. -->
   <script type="text/babel" src="scripts/composites/name-proposals-dialog.js?v=1"></script>
+  <!-- Self-introduction ("Hi, this is Petros from Cassidy") review dialog.
+       Same load-order constraint as name-proposals-dialog.js above: after
+       modal-overlay.js and notification-bell.js (which opens it), registers on
+       window.FieldSight so it is unaffected by api/index.js's FS.api wipe. -->
+  <script type="text/babel" src="scripts/composites/intro-suggestion-dialog.js?v=1"></script>
   <!-- Sprint 8.1.2 — Safety observation creation modal -->
   <script type="text/babel" src="scripts/composites/safety-create-modal.js?v=5"></script>
   <!-- Sprint 8.1.3 — Quality item creation modal -->
