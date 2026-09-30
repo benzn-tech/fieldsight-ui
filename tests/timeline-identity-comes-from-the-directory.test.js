@@ -252,6 +252,15 @@ test('the header names the person the server returned, not the guessed folder', 
   assert.strictEqual(h.props.user, REAL, 'follow-up calls must use the server\'s folder, not the guess');
 });
 
+test('a success body with only user_name (folder form) leaves the page on that folder, not the guess', async () => {
+  const m = mount({ params: { date: '2026-09-29' },
+    report: goodReport({ user: undefined, user_name: 'Ben_Lin_test2' }) });
+  const tree = await m.rt.settle();
+  const h = header(tree);
+  assert.strictEqual(h.props.user, 'Ben_Lin_test2');
+  assert.strictEqual(h.props.subjectName, 'Ben Lin test2');
+});
+
 test('before the server answers, the header does not name anyone', async () => {
   const m = mount({ params: { date: '2026-09-29' }, orgHangs: true });
   const tree = await m.rt.settle();

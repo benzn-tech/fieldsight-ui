@@ -121,13 +121,17 @@
 
   /* Who the server says this report belongs to, as a folder. `user` is a
      top-level field on the 404 bodies (see the arrival-facts comment on
-     NoReportState) and nested under `raw` in the envelope; a success body is
-     the DailyReport, which names its owner by display name (`user_name`) and
-     may also carry the folder as `user`. Returns null when the response says
+     NoReportState) and nested under `raw` in the envelope. A success body is
+     the daily_report.json document verbatim: no `user` key, but `user_name`
+     holds the FOLDER form (observed on the prod shim), so it goes through
+     folderName like every other reader here -- an underscored value passes
+     through unchanged, a spaced one normalises. Returns null when the response says
      nothing usable -- the caller then keeps whatever it had. */
   function serverSubjectFolder(report) {
     if (!report) return null;
-    var f = report.user || (report.raw && report.raw.user) || null;
+    var f = report.user || (report.raw && report.raw.user)
+      || (report.user_name && window.FS.api.folderName(report.user_name))
+      || null;
     return (typeof f === 'string' && f) ? f : null;
   }
 
@@ -2102,7 +2106,7 @@
     if (resolveSelf && !(state.status === 'ok' && state.report && !state.aggregated)) {
       subjectName = '';
     } else if (resolveSelf) {
-      subjectName = state.report.user_name || (serverFolder ? unfolder(serverFolder) : '');
+      subjectName = unfolder(state.report.user_name || serverFolder || '');
     }
 
     var retryRef   = React.useState(0);
