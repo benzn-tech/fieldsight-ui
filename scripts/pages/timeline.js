@@ -119,19 +119,17 @@
     return { user: selfFolder, selfDefaulted: true, resolveSelf: true };
   }
 
-  /* Who the server says this report belongs to, as a folder. `user` is a
-     top-level field on the 404 bodies (see the arrival-facts comment on
-     NoReportState) and nested under `raw` in the envelope. A success body is
-     the daily_report.json document verbatim: no `user` key, but `user_name`
-     holds the FOLDER form (observed on the prod shim), so it goes through
-     folderName like every other reader here -- an underscored value passes
-     through unchanged, a spaced one normalises. Returns null when the response says
-     nothing usable -- the caller then keeps whatever it had. */
+  /* Who the server says this report belongs to, as a FOLDER, or null. `user` is
+     a top-level field on the 404 bodies (see the arrival-facts comment on
+     NoReportState) and nested under `raw` in the envelope. Nothing else is
+     trusted: `user_name` is a display name on the wire (org-api rewrites it to
+     "Ben Lin" on the way out even where the stored file says Ben_Lin_test2),
+     and turning a display name into a folder is exactly the guess this path
+     exists to stop making -- it lands on an orphaned folder. When the body
+     names no folder the caller keeps the one it already had. */
   function serverSubjectFolder(report) {
     if (!report) return null;
-    var f = report.user || (report.raw && report.raw.user)
-      || (report.user_name && window.FS.api.folderName(report.user_name))
-      || null;
+    var f = report.user || (report.raw && report.raw.user) || null;
     return (typeof f === 'string' && f) ? f : null;
   }
 
