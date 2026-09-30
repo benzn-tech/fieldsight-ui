@@ -114,7 +114,7 @@ function goodReport(over) {
 
 function mount(o) {
   o = o || {};
-  const calls = { org: [], legacy: [] };
+  const calls = { org: [], legacy: [], nav: [], meeting: [] };
   const report = o.report || goodReport();
   const api = {
     useMocks: false,
@@ -138,7 +138,7 @@ function mount(o) {
            getSessionsCached: function () { return Promise.resolve({ sessions: [] }); } },
     programme: { getSuggestions: function () { return Promise.resolve({ suggestions: [] }); } },
     actions: { getActions: function () { return Promise.resolve({ actions: {} }); } },
-    meetings: { getMeetingMinutes: function () { return Promise.resolve({ _notFound: true }); } },
+    meetings: { getMeetingMinutes: function (a) { calls.meeting.push(a); return Promise.resolve({ _notFound: true }); } },
     dates: { getDates: function () { return Promise.resolve({ dates: {} }); } },
   };
   global.document = { addEventListener() {}, removeEventListener() {}, createElement() { return { style: {} }; } };
@@ -150,7 +150,7 @@ function mount(o) {
       can: function () { return true; }, P: function (a, b) { return a + ':' + b; },
       Router: {
         getCurrentRoute: function () { return { params: o.params || {} }; },
-        subscribe: function () { return function () {}; }, navigate: function () {},
+        subscribe: function () { return function () {}; }, navigate: function (u) { calls.nav.push(u); },
       },
     },
     AuthMock: { currentUser: { name: 'Ben Lin', role: o.role || 'pm' } },
@@ -309,4 +309,55 @@ test('the build emits the key, defaulting to true, as the last positional value'
   assert.ok(/legacyReadFallback: %s \};/.test(yml), 'format string lacks the key');
   assert.ok(/"\$\{FS_NAV_DAILY_V2:-false\}" "\$\{FS_LEGACY_READ_FALLBACK:-true\}"\n/.test(yml),
     'the default must be true and sit right after navDailyV2, matching the format string order');
+});
+
+/* ---- 5. the date-less entry point, meeting minutes, the cache comment ------ */
+
+test('a bare /timeline (no date) keeps the own-day implicit across its redirect', async () => {
+  const m = mount({ params: {} });
+  await m.rt.settle();
+  assert.ok(m.calls.nav.length >= 1, 'the bootstrap never redirected');
+  m.calls.nav.forEach((u) => {
+    assert.ok(/^\/timeline\?date=2026-09-29/.test(u), u);
+    assert.ok(!/user=/.test(u), 'the guessed folder was written into the URL: ' + u);
+  });
+});
+
+test('the site-anchored bootstrap redirect keeps the own-day implicit too', async () => {
+  const m = mount({ params: { site: 's1' } });
+  await m.rt.settle();
+  assert.ok(m.calls.nav.length >= 1, 'the site bootstrap never redirected');
+  m.calls.nav.forEach((u) => assert.ok(!/user=/.test(u), u));
+});
+
+test('an explicit ?user= survives the bootstrap redirect', async () => {
+  const m = mount({ params: { user: 'James_Lamb' } });
+  await m.rt.settle();
+  assert.ok(m.calls.nav.some((u) => /&user=James_Lamb/.test(u)), JSON.stringify(m.calls.nav));
+});
+
+test('meeting minutes on the own-day path use the folder the server resolved', async () => {
+  const m = mount({ params: { date: '2026-09-29' } });
+  await m.rt.settle();
+  assert.ok(m.calls.meeting.length >= 1);
+  m.calls.meeting.forEach((c) => assert.strictEqual(c.user, REAL));
+});
+
+test('meeting minutes fall back to the guess when the answer names no folder', async () => {
+  const m = mount({ params: { date: '2026-09-29' }, report: goodReport({ user: undefined, user_name: undefined }) });
+  await m.rt.settle();
+  assert.ok(m.calls.meeting.length >= 1);
+  m.calls.meeting.forEach((c) => assert.strictEqual(c.user, GUESS));
+});
+
+test('meeting minutes for an explicit ?user= still use that user', async () => {
+  const m = mount({ params: { date: '2026-09-29', user: 'James_Lamb' } });
+  await m.rt.settle();
+  m.calls.meeting.forEach((c) => assert.strictEqual(c.user, 'James_Lamb'));
+});
+
+test('the cache-key comment in api/timeline.js says what the key contains', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'scripts/api/timeline.js'), 'utf8');
+  assert.ok(!/includes only \(date, user\)/.test(src), 'stale: the key also carries resolveSelf');
+  assert.ok(/:self/.test(src) && /resolveSelf/.test(src));
 });

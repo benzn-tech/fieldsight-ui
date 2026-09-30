@@ -33,8 +33,9 @@
 
   /* Session-stable read: reports are generated server-side and not edited
      in-app, so a few minutes of staleness is safe — see api/_cache.js.
-     Cache key intentionally includes only (date, user); it's the exact
-     request shape callers pass. */
+     The cache key is (source, date, user) plus a `:self` marker when the
+     caller set resolveSelf: the same (date, user) is a different request to
+     the server with and without it, so it must not share an entry. */
   async function fetchTimeline(opts) {
     if (!window.FS.api.useMocks) {
       /* `params` is what the LEGACY read path has always been sent and still is.

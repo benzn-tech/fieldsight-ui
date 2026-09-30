@@ -2252,7 +2252,12 @@
     React.useEffect(function () {
       if (date) return undefined;
       var cancelled = false;
-      var qsUser = user ? '&user=' + encodeURIComponent(user) : '';
+      /* An implicit own-day stays implicit across this redirect. `user` here is
+         still the display-name guess; writing it into the URL turns "my day"
+         into an explicit ?user=Ben_Lin on the next render, which the server
+         refuses and the legacy fallback then answers with the 403 this
+         resolveSelf path exists to remove. */
+      var qsUser = (user && !resolveSelf) ? '&user=' + encodeURIComponent(user) : '';
       var qsSite = site ? '&site=' + encodeURIComponent(site) : '';
       /* fix/timeline-buttons-and-deadline — the redirects below were
          dropping ?from=today, so Today's "Open timeline" link (bare
@@ -2337,10 +2342,18 @@
       var canFallBackToTeam = selfDefaulted && canSeeOverview(caller, site);
 
       setState({ status: 'loading' });
+      var timelineP = window.FS.api.timeline.getTimeline({ date: date, user: requestUser, resolveSelf: resolveSelf });
       Promise.all([
-        window.FS.api.timeline.getTimeline({ date: date, user: requestUser, resolveSelf: resolveSelf }),
+        timelineP,
         window.FS.api.actions.getActions(date),
-        window.FS.api.meetings.getMeetingMinutes({ date: date, user: requestUser }),
+        /* On the own-day path the folder is only known once the timeline
+           answers, so ask for the minutes after it, with the server's folder;
+           if the answer names none, the guess is what this always sent. */
+        resolveSelf
+          ? timelineP.then(function (r) {
+              return window.FS.api.meetings.getMeetingMinutes({ date: date, user: serverSubjectFolder(r) || requestUser });
+            })
+          : window.FS.api.meetings.getMeetingMinutes({ date: date, user: requestUser }),
       ]).then(function (results) {
         if (cancelled) return;
         var report  = results[0];
