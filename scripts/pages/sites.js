@@ -479,8 +479,9 @@
         }), 'Pick a suggestion to set the coordinates the weather panel uses.'),
         fCoords(form, setForm),
         /* THESE THREE DO NOT PERSIST AGAINST THE REAL BACKEND, and the form
-           said nothing about it. `createOrgSite` sends seven fields and none
-           is one of these; `sites` has had no value, region or completion
+           said nothing about it. `createOrgSite` names its fields explicitly
+           (seven, plus target_company_id when a cross-company caller picks
+           one) and none is one of these; `sites` has had no value, region or completion
            column since 0002_core_relational.sql. Disabled rather than
            deleted: the intent to support them is real and a disabled control
            still says so.
