@@ -124,7 +124,54 @@
     }
   }
 
-  async function createOrgSite(body) {
+  /* Who may name the company a new project belongs to. Mirrors the server's
+     is_cross_company gate, which is platform_admin ONLY: a plain company
+     `admin` (isAdmin is true for both) naming another company is refused 403,
+     so the control is offered to nobody else rather than offered-and-refused.
+     Reads the RAW role, which session-bridge keeps on the profile. */
+  function isCrossCompany(user) {
+    return !!user && user.role === 'platform_admin';
+  }
+
+  /* The company to send, or undefined to send NOTHING. An omitted
+     target_company_id defaults server-side to the caller's own company; a
+     field equal to your own company is a different request, so every case
+     that is not "cross-company caller picked one" is omission. */
+  function companyChoiceFor(user, selectedId) {
+    return isCrossCompany(user) && selectedId ? String(selectedId) : undefined;
+  }
+
+  /* Companies the caller can see, derived from the sites they can see: there
+     is no company-list call in this layer. [{ id, name }], distinct by id;
+     sites whose payload carries no company_id contribute nothing. Never
+     throws and never blocks creation: any failure is [], and the form then
+     behaves as it always did (no field, created in the caller's own company). */
+  async function getSiteCompanies() {
+    try {
+      var res = await getOrgSites();
+      if (!res || res._accessDenied || res._notFound) return [];
+      var seen = {}; var out = [];
+      (res.sites || []).forEach(function (s) {
+        if (!s || !s.company_id || seen[s.company_id]) return;
+        seen[s.company_id] = true;
+        out.push({ id: String(s.company_id), name: s.company_name || String(s.company_id) });
+      });
+      return out.sort(function (a, b) { return a.name.localeCompare(b.name); });
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /* THE REQUEST BODY IS BUILT HERE from an explicit list of fields -- the
+     same whitelist posture as the rest of this layer, so a field a component
+     adds that is not named below never reaches the wire. target_company_id is
+     named, and only when input.targetCompanyId is set. */
+  async function createOrgSite(input) {
+    input = input || {};
+    var body = { name: input.name, location: input.location, client: input.client,
+                 address: input.address, latitude: input.latitude, longitude: input.longitude,
+                 icon_s3_key: input.icon_s3_key };
+    if (input.targetCompanyId) body.target_company_id = input.targetCompanyId;
     if (orgWrite()) return api.orgRequest('/sites', { method: 'POST', body: body });
     await api.delay(400);
     var site = { id: 'mock-' + Date.now().toString(36), name: body.name,
@@ -1213,7 +1260,9 @@
     deleteRecordings: deleteRecordings,
     undeleteRecordings: undeleteRecordings,
     updateProfile: updateProfile,
-    getOrgSites: getOrgSites, createOrgSite: createOrgSite, updateOrgSite: updateOrgSite, geocodeAddress: geocodeAddress,
+    getOrgSites: getOrgSites, getSiteCompanies: getSiteCompanies,
+    isCrossCompany: isCrossCompany, companyChoiceFor: companyChoiceFor,
+    createOrgSite: createOrgSite, updateOrgSite: updateOrgSite, geocodeAddress: geocodeAddress,
     archiveSite: archiveSite, unarchiveSite: unarchiveSite,
     getMembers: getMembers, createMember: createMember, updateMemberRole: updateMemberRole,
     setMemberFolder: setMemberFolder,
