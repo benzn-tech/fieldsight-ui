@@ -254,8 +254,12 @@ test('the header names the person the server returned, not the guessed folder', 
 
 /* Was: a success body with only user_name in FOLDER form ('Ben_Lin_test2') made
    the page adopt that folder (asserted user === 'Ben_Lin_test2'). That pinned
-   the behaviour being removed: the wire carries user_name as a DISPLAY name, so
-   folderName(user_name) produces orphan folders. Now: with no `user` in the
+   the behaviour being removed. user_name is not a reliable folder on the wire:
+   org-api's AURORA path rewrites it to a display name (lambda_org_api.py:7693),
+   so folderName(user_name) produced the orphan `Ben_Lin`. Its S3-verbatim path
+   does still carry the stored folder form -- which is exactly why guessing from
+   this field is wrong: the same key means different things per path, and the
+   client cannot tell which one it got. Now: with no `user` in the
    body the page keeps the folder it already had (the guess, here 'Ben_Lin'),
    whatever user_name looks like, and the header still names the person. */
 test('a success body with only user_name (folder form) does not change the folder', async () => {
