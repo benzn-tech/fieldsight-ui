@@ -460,6 +460,20 @@
     }).then(function () { return get(id); });
   }
 
+  /* The report section modules this company can pick (pipeline
+     report_modules): {key, title, kind, columns?, purpose, hash, source}.
+     The wording is ours and fixed; a section built from one stores
+     {module: {key, hash}} and the server replaces its purpose with the
+     published text on save, so this list is a menu, not the authority.
+     Offline there are none -- the editor then offers custom sections only. */
+  function listModules() {
+    if (!orgLive()) return Promise.resolve({ modules: [], note_max_chars: 200 });
+    return api().orgRequest('/templates/modules').then(function (res) {
+      return { modules: (res && res.modules) || [],
+               note_max_chars: (res && res.note_max_chars) || 200 };
+    });
+  }
+
   function copyToPersonal(id, name) {
     if (!orgLive()) return unavailable('Copying a template');
     return api().orgRequest('/templates/' + encodeURIComponent(id) + '/copy', {
@@ -549,6 +563,7 @@
     listVersions:   listVersions,
     restore:        restore,
     copyToPersonal: copyToPersonal,
+    listModules:    listModules,
     usageStats:     usageStats,
     getFavourites:    getFavourites,
     isFavourite:      isFavourite,
