@@ -153,7 +153,7 @@ function mount(o) {
         subscribe: function () { return function () {}; }, navigate: function (u) { calls.nav.push(u); },
       },
     },
-    AuthMock: { currentUser: { name: 'Ben Lin', role: o.role || 'pm' } },
+    AuthMock: { currentUser: { name: o.callerName || 'Ben Lin', role: o.role || 'pm' } },
     location: { href: 'https://example.test/#/timeline' },
     addEventListener() {}, removeEventListener() {},
   };
@@ -252,13 +252,36 @@ test('the header names the person the server returned, not the guessed folder', 
   assert.strictEqual(h.props.user, REAL, 'follow-up calls must use the server\'s folder, not the guess');
 });
 
-test('a success body with only user_name (folder form) leaves the page on that folder, not the guess', async () => {
+/* Was: a success body with only user_name in FOLDER form ('Ben_Lin_test2') made
+   the page adopt that folder (asserted user === 'Ben_Lin_test2'). That pinned
+   the behaviour being removed. user_name is not a reliable folder on the wire:
+   org-api's AURORA path rewrites it to a display name (lambda_org_api.py:7693),
+   so folderName(user_name) produced the orphan `Ben_Lin`. Its S3-verbatim path
+   does still carry the stored folder form -- which is exactly why guessing from
+   this field is wrong: the same key means different things per path, and the
+   client cannot tell which one it got. Now: with no `user` in the
+   body the page keeps the folder it already had (the guess, here 'Ben_Lin'),
+   whatever user_name looks like, and the header still names the person. */
+test('a success body with only user_name (folder form) does not change the folder', async () => {
   const m = mount({ params: { date: '2026-09-29' },
     report: goodReport({ user: undefined, user_name: 'Ben_Lin_test2' }) });
   const tree = await m.rt.settle();
   const h = header(tree);
-  assert.strictEqual(h.props.user, 'Ben_Lin_test2');
+  assert.strictEqual(h.props.user, GUESS);
   assert.strictEqual(h.props.subjectName, 'Ben Lin test2');
+});
+
+test('a success body with a DISPLAY-name user_name and no user keeps the existing folder, never Ben_Lin', async () => {
+  /* The caller's correct folder is Ben_Lin_test2; the wire says user_name
+     "Ben Lin". Deriving a folder from that would hand every follow-up call the
+     orphan Ben_Lin. */
+  const m = mount({ callerName: 'Ben Lin test2', params: { date: '2026-09-29' },
+    report: goodReport({ user: undefined, user_name: 'Ben Lin' }) });
+  const tree = await m.rt.settle();
+  const h = header(tree);
+  assert.strictEqual(h.props.user, 'Ben_Lin_test2');
+  assert.ok(m.calls.meeting.length >= 1);
+  m.calls.meeting.forEach((c) => assert.strictEqual(c.user, 'Ben_Lin_test2'));
 });
 
 test('before the server answers, the header does not name anyone', async () => {
