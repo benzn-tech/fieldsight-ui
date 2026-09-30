@@ -13647,3 +13647,84 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   font-size: 12px;
   color: var(--text-secondary);
 }
+
+/* ---- Library editor: report section modules (library.js) ---- */
+.fs-library__editor-module-text {
+  flex: 1;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.fs-library__editor-module-tag {
+  display: inline-block;
+  padding: 0 6px;
+  margin-right: 4px;
+  font-size: 11px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-default);
+  color: var(--text-tertiary);
+}
+.fs-library__editor-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fs-library__editor-note-input {
+  flex: 1;
+  font: inherit;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: var(--surface-input);
+  color: var(--text-primary);
+}
+.fs-library__editor-note-count { font-size: 11px; color: var(--text-tertiary); }
+.fs-library__editor-suggest {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fs-library__editor-suggest-btn {
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--text-link);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.fs-library__module-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+.fs-library__module-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+}
+.fs-library__module-option:hover { border-color: var(--color-accent-500); }
+.fs-library__module-option--custom { border-style: dashed; }
+.fs-library__module-option-title { font-size: 13px; font-weight: var(--font-weight-semibold); }
+.fs-library__module-option-text {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
