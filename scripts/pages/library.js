@@ -57,9 +57,14 @@
      under it -- while this editor's own Test render drew photo placeholders for
      it. The server refuses the value now, so leaving it offered here would mean
      a choice that cannot be saved. The other four each make the document do
-     something. */
-  var KIND_LABEL = { narrative: 'Narrative', list: 'List', table: 'Table', kpi: 'KPIs' };
-  var KIND_ICON  = { narrative: '¶', list: '•', table: '⊞', kpi: '◆' };
+     something.
+
+     Checklist: the customer's own questions, answered Yes / No / N/A only
+     where the recording addressed them. The items are the customer's data;
+     the server rebuilds the table in their order and wording and leaves
+     unaddressed items blank. */
+  var KIND_LABEL = { narrative: 'Narrative', list: 'List', table: 'Table', kpi: 'KPIs', checklist: 'Checklist' };
+  var KIND_ICON  = { narrative: '¶', list: '•', table: '⊞', kpi: '◆', checklist: '☑' };
 
   /* ── Helpers ───────────────────────────────────────────────────────── */
 
@@ -645,6 +650,12 @@
            copy of our text, and the next wording update never reaches it. */
         if (s.module) out.module = { key: s.module.key, hash: s.module.hash };
         if ((s.note || '').trim()) out.note = s.note.trim();
+        /* Items are kept line-for-line while typing (so Enter can open a new
+           one) and only tidied here, on the way out. */
+        if (s.kind === 'checklist') {
+          out.items = (s.items || []).map(function (i) { return (i || '').trim(); })
+            .filter(function (i) { return i; });
+        }
         if (s.children && s.children.length) out.children = strip(s.children);
         return out;
       });
@@ -685,6 +696,7 @@
             columns:     s.columns || [],
             module:      s.module || null,
             note:        s.note || '',
+            items:       s.items || [],
             children:    tagKeys(s.children || []),
             _key:        counter.n++,
           };
@@ -837,6 +849,10 @@
       var names = (val || '').split(/[|,]/).map(function (c) { return c.trim(); })
         .filter(function (c) { return c; });
       editAt(p, function (sec) { return Object.assign({}, sec, { columns: names }); });
+    }
+
+    function setItems(p, val) {
+      editAt(p, function (sec) { return Object.assign({}, sec, { items: (val || '').split('\n') }); });
     }
 
     function setAlwaysPresent(p, val) {
@@ -1252,6 +1268,23 @@
             placeholder: 'Item | Assigned | Due',
             maxLength:   200,
           }),
+        ),
+
+        /* One question per line, in the order the form asks them. The model
+           answers only what was said; anything else stays blank on the page. */
+        (sec.kind === 'checklist') && React.createElement('label',
+          { className: 'fs-library__editor-items' },
+          React.createElement('span', null, 'Checklist items — one per line'),
+          React.createElement('textarea', {
+            className:   'fs-library__editor-items-input',
+            value:       (sec.items || []).join('\n'),
+            onChange:    function (e) { setItems(p, e.target.value); },
+            'aria-label': 'Checklist items, one per line',
+            placeholder: 'Is the site fenced and signed?\nAre fire extinguishers provided?',
+            rows:        Math.min(12, Math.max(4, (sec.items || []).length + 1)),
+          }),
+          React.createElement('span', { className: 'fs-library__editor-items-count' },
+            (sec.items || []).filter(function (i) { return (i || '').trim(); }).length + ' / 120 items'),
         ),
 
         /* KEEP THE HEADING, NOT "WRITE SOMETHING ANYWAY". The distinction is
@@ -1982,6 +2015,30 @@
                 cols.map(function (c) {
                   return React.createElement('td', { key: c }, row[c] || '—');
                 }),
+              );
+            }),
+          ),
+        );
+
+      case 'checklist':
+        var items = (sec.items || []).filter(function (i) { return (i || '').trim(); }).slice(0, 3);
+        if (!items.length) items = ['Is the site fenced and signed?'];
+        return React.createElement('table', { className: 'fs-library__render-table' },
+          React.createElement('thead', null,
+            React.createElement('tr', null,
+              ['Item', 'Answer', 'Comment', 'Responsible', 'Due'].map(function (c) {
+                return React.createElement('th', { key: c }, c);
+              }),
+            ),
+          ),
+          React.createElement('tbody', null,
+            items.map(function (it, i) {
+              return React.createElement('tr', { key: i },
+                React.createElement('td', null, it),
+                React.createElement('td', null, i === 0 ? 'Yes' : ''),
+                React.createElement('td', null, ''),
+                React.createElement('td', null, ''),
+                React.createElement('td', null, ''),
               );
             }),
           ),

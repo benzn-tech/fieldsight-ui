@@ -11371,6 +11371,21 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color: var(--text-primary, #111827);
 }
 
+/* A checklist section's items, one per line: the customer's own questions. */
+.fs-library__editor-items {
+  display: flex; flex-direction: column; gap: 4px;
+  width: 100%; padding-left: 26px;
+  font-size: 11px; color: var(--text-secondary, #6b7280);
+}
+.fs-library__editor-items-input {
+  width: 100%; resize: vertical;
+  font: inherit; font-size: 12px; line-height: 1.5; padding: 4px 6px;
+  border: 1px solid var(--border-subtle, #e5e7eb); border-radius: 4px;
+  background: var(--surface-input); color: var(--text-primary, #111827);
+}
+.fs-library__editor-items-input:focus { border-color: var(--border-strong, #9ca3af); outline: none; }
+.fs-library__editor-items-count { align-self: flex-end; font-size: 10px; }
+
 /* The section a failed save is talking about. Pointing at it by number was not
    enough on a nine-section template -- and it was wrong for a sub-section,
    where the number counted within its own parent. */
