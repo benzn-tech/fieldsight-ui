@@ -63,8 +63,15 @@
      where the recording addressed them. The items are the customer's data;
      the server rebuilds the table in their order and wording and leaves
      unaddressed items blank. */
-  var KIND_LABEL = { narrative: 'Narrative', list: 'List', table: 'Table', kpi: 'KPIs', checklist: 'Checklist' };
-  var KIND_ICON  = { narrative: '¶', list: '•', table: '⊞', kpi: '◆', checklist: '☑' };
+  var KIND_LABEL = { narrative: 'Narrative', list: 'List', table: 'Table', kpi: 'KPIs', checklist: 'Checklist',
+                     header: 'Report details', weather: 'Weather' };
+  var KIND_ICON  = { narrative: '¶', list: '•', table: '⊞', kpi: '◆', checklist: '☑',
+                     header: '▤', weather: '☂' };
+  /* Written by FieldSight, not the model (pipeline report_facts): the report's
+     details and the day's measured weather. They come from the module picker
+     only, have no layout to choose and no note to give -- the model never
+     sees them. */
+  var CODE_KINDS = { header: true, weather: true };
 
   /* ── Helpers ───────────────────────────────────────────────────────── */
 
@@ -1196,9 +1203,12 @@
             className:   'fs-library__editor-kind-select',
             value:       sec.kind || 'narrative',
             onChange:    function (e) { setKind(p, e.target.value); },
+            disabled:    !!CODE_KINDS[sec.kind],
             'aria-label': 'How this section is laid out',
-            title:       'How this section is laid out',
-          }, Object.keys(KIND_LABEL).map(function (k) {
+            title:       CODE_KINDS[sec.kind] ? 'Filled in by FieldSight' : 'How this section is laid out',
+          }, Object.keys(KIND_LABEL).filter(function (k) {
+            return !CODE_KINDS[k] || k === sec.kind;
+          }).map(function (k) {
             return React.createElement('option', { key: k, value: k }, KIND_LABEL[k]);
           })),
           /* A MODULE'S WORDING IS OURS AND FIXED (owner, 2026-09-30): shown,
@@ -1222,7 +1232,7 @@
         /* THE ONE THING THE CUSTOMER SAYS ABOUT A MODULE SECTION: a note --
            an empty-state wording, a grouping, a threshold. It goes into the
            prompt under our wording, inside the customer region. */
-        sec.module && React.createElement('label', { className: 'fs-library__editor-note' },
+        sec.module && !CODE_KINDS[sec.kind] && React.createElement('label', { className: 'fs-library__editor-note' },
           React.createElement('span', null, 'Note'),
           React.createElement('input', {
             className:   'fs-library__editor-note-input',
@@ -2018,6 +2028,33 @@
               );
             }),
           ),
+        );
+
+      case 'header':
+        return React.createElement('table', { className: 'fs-library__render-table' },
+          React.createElement('tbody', null,
+            [['Project', 'UC PK'], ['Client', 'Naylor Love'], ['Date', 'Wednesday 23 September 2026'],
+             ['Recorded by', 'Ben Lin']].map(function (r) {
+              return React.createElement('tr', { key: r[0] },
+                React.createElement('th', null, r[0]), React.createElement('td', null, r[1]));
+            }),
+          ),
+        );
+
+      case 'weather':
+        return React.createElement('div', null,
+          React.createElement('table', { className: 'fs-library__render-table' },
+            React.createElement('thead', null, React.createElement('tr', null,
+              ['Sky', 'Rain', 'Temperature', 'Wind'].map(function (c) {
+                return React.createElement('th', { key: c }, c);
+              }))),
+            React.createElement('tbody', null, React.createElement('tr', null,
+              ['Light rain', '6.2 mm', '7-14°C', 'up to 31 km/h'].map(function (c) {
+                return React.createElement('td', { key: c }, c);
+              }))),
+          ),
+          React.createElement('ul', { className: 'fs-library__render-list' },
+            React.createElement('li', null, 'Rain likely this afternoon (from 13:00). Impact: roofing.')),
         );
 
       case 'checklist':
