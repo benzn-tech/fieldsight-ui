@@ -141,11 +141,39 @@
     return isCrossCompany(user) && selectedId ? String(selectedId) : undefined;
   }
 
-  /* Companies the caller can see, derived from the sites they can see: there
-     is no company-list call in this layer. [{ id, name }], distinct by id;
-     sites whose payload carries no company_id contribute nothing. Never
-     throws and never blocks creation: any failure is [], and the form then
-     behaves as it always did (no field, created in the caller's own company). */
+  function byName(a, b) { return a.name.localeCompare(b.name); }
+
+  /* Companies the caller may file a project under. [{ id, name }], sorted by
+     name. Never throws and never blocks creation: every failure is [], and the
+     form then behaves as it always did -- no field, created in the caller's own
+     company.
+
+     THE DIRECTORY FIRST, the sites only as a fallback. `GET /companies` returns
+     every tenant (platform_admin only -- the same gate that alone lets
+     target_company_id be honoured). Deriving the list from the sites you can
+     SEE cannot offer a company that has no site yet, so that path could never
+     create a company's FIRST project. Closing that is the whole point of the
+     route.
+
+     The fallback stays because the two repositories ship separately: a frontend
+     deployed before the route exists gets a 404 here, and must still offer the
+     companies it CAN name rather than losing the control outright. Delete it
+     once /companies is live in every environment. */
+  async function getCompanyChoices() {
+    try {
+      var res = await api.orgRequest('/companies');
+      if (res && !res._accessDenied && !res._notFound && Array.isArray(res.companies)) {
+        return res.companies
+          .filter(function (c) { return c && c.id; })
+          .map(function (c) { return { id: String(c.id), name: c.name || String(c.id) }; })
+          .sort(byName);
+      }
+    } catch (e) { /* fall through to the sites-derived list */ }
+    return getSiteCompanies();
+  }
+
+  /* FALLBACK ONLY -- see getCompanyChoices. Distinct by id; a site whose
+     payload carries no company_id contributes nothing. */
   async function getSiteCompanies() {
     try {
       var res = await getOrgSites();
@@ -156,7 +184,7 @@
         seen[s.company_id] = true;
         out.push({ id: String(s.company_id), name: s.company_name || String(s.company_id) });
       });
-      return out.sort(function (a, b) { return a.name.localeCompare(b.name); });
+      return out.sort(byName);
     } catch (e) {
       return [];
     }
@@ -1292,7 +1320,8 @@
     deleteRecordings: deleteRecordings,
     undeleteRecordings: undeleteRecordings,
     updateProfile: updateProfile,
-    getOrgSites: getOrgSites, getSiteCompanies: getSiteCompanies,
+    getOrgSites: getOrgSites, getCompanyChoices: getCompanyChoices,
+    getSiteCompanies: getSiteCompanies,
     isCrossCompany: isCrossCompany, companyChoiceFor: companyChoiceFor,
     createOrgSite: createOrgSite, updateOrgSite: updateOrgSite, geocodeAddress: geocodeAddress,
     archiveSite: archiveSite, unarchiveSite: unarchiveSite,
