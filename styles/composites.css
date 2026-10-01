@@ -12558,6 +12558,9 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 /* --- after generating ----------------------------------------------------- */
 
 .fs-srm__done-msg { color: var(--text-primary); }
+/* As tall as the footer's Done button and only as wide as its words: the step
+   is a column, which stretched the link across the dialog. */
+.fs-srm__download { align-self: flex-start; }
 
 .fs-srm__preview-photos {
   display: flex; flex-wrap: wrap; gap: 8px;
