@@ -60,6 +60,14 @@
     var busy = refBusy[0], setBusy = refBusy[1];
     var refNote = React.useState(null);
     var note = refNote[0], setNote = refNote[1];
+    /* Per-row result of "Try again": { phase: 'saving' | 'saved' | 'failed', message }.
+       Keyed on the profile so two rows can be retried independently. */
+    var refRetry = React.useState({});
+    var retrying = refRetry[0], setRetrying = refRetry[1];
+    var watchRef = React.useRef(0);
+    React.useEffect(function () {
+      return function () { watchRef.current = -1; };    /* leaving the page stops every poll */
+    }, []);
     var refTick = React.useState(0);
     var tick = refTick[0], setTick = refTick[1];
 
@@ -111,6 +119,75 @@
       });
     }
 
+    function setRowRetry(id, value) {
+      setRetrying(function (prev) {
+        var next = Object.assign({}, prev); next[id] = value; return next;
+      });
+    }
+
+    /* Try again: ask the backend to store the voice from the passage it remembered, then
+       poll the library for the answer exactly as a rename does (transcript-list's
+       watchEnrolment). The 202 only says it was queued -- the result arrives on the
+       profile about a minute later and may be another refusal, so the row says "Saving"
+       until it can say saved or not saved, and why. Never silent either way. */
+    function tryAgain(row) {
+      var sn = window.FS.speakerNaming;
+      var who = row.displayName || 'this voice';
+      var sinceMs = Date.now();
+      setRowRetry(row.id, { phase: 'saving',
+        message: 'Saving ' + who + '’s voice — this takes about a minute.' });
+      org.retryVoiceprint(row.id).then(function (res) {
+        if (res && res._notAvailable) {
+          setRowRetry(row.id, { phase: 'failed', message: 'Not available in this environment.' });
+          return;
+        }
+        if (res && (res._accessDenied || res._notFound)) {
+          setRowRetry(row.id, { phase: 'failed',
+            message: res.error || 'There is nothing to try again for this voice.' });
+          return;
+        }
+        var token = watchRef.current + 1;
+        if (watchRef.current < 0) return;
+        watchRef.current = token;
+        var tries = 0, POLL_MS = 10000, MAX_TRIES = 18;     /* ~3 minutes */
+        function giveUp() {
+          setRowRetry(row.id, { phase: 'failed',
+            message: who + '’s voice has not been saved yet. Check again in a few minutes, '
+              + 'or ' + sn.retryGuidance(who).charAt(0).toLowerCase()
+              + sn.retryGuidance(who).slice(1) });
+        }
+        function tick() {
+          if (watchRef.current !== token) return;
+          tries += 1;
+          org.getVoiceprints().then(function (r) {
+            if (watchRef.current !== token) return;
+            var out = sn.enrolmentOutcome(r && r.voiceprints, who, sinceMs);
+            if (out) {
+              setRowRetry(row.id, { phase: out.state === 'stored' ? 'saved' : 'failed',
+                message: out.message });
+              setTick(function (n) { return n + 1; });
+              return;
+            }
+            if (tries < MAX_TRIES) setTimeout(tick, POLL_MS); else giveUp();
+          }, function () {
+            if (tries < MAX_TRIES) setTimeout(tick, POLL_MS); else giveUp();
+          });
+        }
+        setTimeout(tick, POLL_MS);
+      }).catch(function (err) {
+        setRowRetry(row.id, { phase: 'failed',
+          message: (err && err.status === 409)
+            ? 'There is nothing to try again for ' + who + '. '
+              + window.FS.speakerNaming.retryGuidance(who)
+            : 'Could not try again. Check your connection and press Try again.' });
+      });
+    }
+
+    function openRecording(route) {
+      var router = window.FS && window.FS.Router;
+      if (router && route) router.navigate(route);
+    }
+
     function saveBasis(value) {
       setNote(null);
       org.setVoiceprintBasis(value || null).then(function (res) {
@@ -121,6 +198,41 @@
         }
         setNote('Consent basis saved.');
       }).catch(function () { setNote('Could not save the consent basis.'); });
+    }
+
+    /* Visible, not a tooltip: why the voice was not saved, what to do, and the two ways to
+       do it. A saved voice returns null here and shows nothing extra. After "Try again"
+       the row's own progress / result replaces the buttons while it is working. */
+    function retryBlock(r) {
+      var sn = window.FS.speakerNaming;
+      var st = retrying[r.id];
+      var act = sn.voiceRetryActions(r);
+      if (!act && !(st && st.phase === 'saved')) return null;
+      var kids = [];
+      if (st) {
+        kids.push(React.createElement('div', {
+          key: 'st', role: 'status',
+          className: 'fs-voices__result fs-voices__result--' + st.phase,
+        }, st.message));
+      }
+      if (act && (!st || st.phase === 'failed')) {
+        if (!st) {
+          kids.push(React.createElement('div', { key: 'why', className: 'fs-voices__reason' },
+            act.reason));
+        }
+        kids.push(React.createElement('div', { key: 'how', className: 'fs-voices__reason' },
+          act.guidance));
+        kids.push(React.createElement('div', { key: 'btns', className: 'fs-voices__retry-actions' },
+          act.canRetry ? React.createElement('button', {
+            type: 'button', className: 'fs-voices__retry',
+            onClick: function () { tryAgain(r); },
+          }, act.tryAgainLabel) : null,
+          act.openRoute ? React.createElement('button', {
+            type: 'button', className: 'fs-voices__retry',
+            onClick: function () { openRecording(act.openRoute); },
+          }, act.openLabel) : null));
+      }
+      return React.createElement('div', { className: 'fs-voices__retry-block' }, kids);
     }
 
     function hint(text) {
@@ -165,7 +277,9 @@
                  what the clustering inferred. */
               React.createElement('td', null, w.learned),
               React.createElement('td', null, w.status),
-              React.createElement('td', { title: w.latestTitle }, w.latest),
+              React.createElement('td', { title: w.latestTitle },
+                w.latest,
+                retryBlock(r)),
               React.createElement('td', null,
                 React.createElement('button', {
                   type: 'button',

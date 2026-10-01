@@ -113,9 +113,27 @@
     var daysToLoad    = refDays[0];
     var setDaysToLoad = refDays[1];
 
-    var refTab = React.useState('photos');
+    /* `/evidence?tab=voices` lands straight on Voices (the bell's "Voices not saved"
+       row). The tab is still gated where it is built, so a role that may not see
+       Voices falls back to whatever that gate allows. */
+    function routeTab() {
+      var rt = window.FS && window.FS.Router && window.FS.Router.getCurrentRoute();
+      return (rt && rt.params && rt.params.tab === 'voices') ? 'voices' : null;
+    }
+    var refTab = React.useState(function () { return routeTab() || 'photos'; });
     var activeTab    = refTab[0];
     var setActiveTab = refTab[1];
+    React.useEffect(function () {
+      var router = window.FS && window.FS.Router;
+      if (!router) return undefined;
+      function onRoute(rt) {
+        if (rt && rt.path === '/evidence' && rt.params && rt.params.tab === 'voices') {
+          setActiveTab('voices');
+        }
+      }
+      router.subscribe(onRoute);
+      return function () { router.unsubscribe(onRoute); };
+    }, []);
 
     var refState = React.useState({ status: 'loading' });
     var state    = refState[0];

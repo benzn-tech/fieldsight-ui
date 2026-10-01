@@ -524,11 +524,65 @@
     if (!hits.length) return null;
     var who = String(displayName).trim();
     if (hits[0].lastAttemptOutcome === 'stored') {
-      return { state: 'stored',
+      return { state: 'stored', voiceprintId: hits[0].id,
                message: who + '’s voice is saved. They will be recognised in future meetings.' };
     }
-    return { state: 'refused',
+    return { state: 'refused', voiceprintId: hits[0].id, retry: hits[0].retry || null,
+             guidance: retryGuidance(who),
              message: who + '’s voice was not saved: ' + refusalReason(hits[0].lastAttemptDetail) };
+  }
+
+  /* What to do after a refusal, said once so the Voices page, the rename notice and the
+     self-introduction dialog never give three different instructions. */
+  function retryGuidance(name) {
+    var who = String(name || '').trim() || 'the person';
+    return 'Name another passage where only ' + who + ' is speaking.';
+  }
+
+  /* Where "Open the recording" goes: the timeline for the recording the refused attempt
+     was made on. Same `/timeline?date=&user=` route search and Ask use. Null when the
+     backend did not say which recording. */
+  function timelineRouteForRetry(retry) {
+    if (!retry || !retry.date || !retry.userFolder) return null;
+    return '/timeline?date=' + encodeURIComponent(retry.date)
+      + '&user=' + encodeURIComponent(retry.userFolder);
+  }
+
+  /* The actions a refused Voices-page row offers. Null when the last attempt was not
+     refused, so a saved voice never shows a "Try again". "Try again" needs the backend's
+     `retry` passage; without one the row still explains and points at the recording
+     route only if it can. */
+  function voiceRetryActions(row) {
+    var r = row || {};
+    if (r.lastAttemptOutcome !== 'refused' || r.status === 'withdrawn') return null;
+    var name = String(r.displayName || '').trim();
+    return {
+      reason: (name || 'This voice') + ' was not saved: ' + refusalReason(r.lastAttemptDetail),
+      guidance: retryGuidance(name),
+      canRetry: !!r.retry,
+      tryAgainLabel: 'Try again',
+      openLabel: 'Open the recording',
+      openRoute: timelineRouteForRetry(r.retry),
+    };
+  }
+
+  /* The bell's "Voices not saved" row. Null at zero: a row that says "0 voices" is noise. */
+  function notSavedRowWords(count) {
+    var n = Number(count) || 0;
+    if (n <= 0) return null;
+    return {
+      title: n + (n === 1 ? ' voice' : ' voices') + ' could not be saved — see why',
+      action: 'See why',
+      route: '/evidence?tab=voices',
+    };
+  }
+
+  /* One number for the bell: unread reports + questions waiting + voices to save +
+     voices that failed to save. */
+  function bellBadgeCount(parts) {
+    var p = parts || {};
+    return (Number(p.unseen) || 0) + (Number(p.waiting) || 0)
+      + (Number(p.introductions) || 0) + (Number(p.notSaved) || 0);
   }
 
   /* The backend's refusal sentence, in words a site manager can act on. ONE mapping, read
@@ -594,7 +648,21 @@
     });
   }
 
+  /* The sessions the session OVERVIEW offers "Rewrite the summary with these names" for.
+     Takes the raw GET /transcripts response, so the overview and the transcript read one
+     rule. Empty when naming is not available to this caller (feature absent, or a role that
+     may not name) -- the same gate the transcript applies to its naming controls, so the
+     control is never offered where the rewrite would be refused. */
+  function regenOfferSessions(res, caller, folder) {
+    caller = caller || {};
+    if (!res || !featureAvailable(res)) return [];
+    var callerFolder = caller.folder_name || null;
+    if (!mayName({ role: caller.role, callerFolder: callerFolder, folder: folder })) return [];
+    return confirmedSessions(res.speaker_segments || []);
+  }
+
   var mod = {
+    regenOfferSessions: regenOfferSessions,
     MIN_TURN_SECONDS: MIN_TURN_SECONDS,
     confirmedSessions: confirmedSessions,
     folderToName: folderToName,
@@ -619,6 +687,11 @@
     enrolmentOutcome: enrolmentOutcome,
     refusalReason: refusalReason,
     voiceRowWords: voiceRowWords,
+    retryGuidance: retryGuidance,
+    timelineRouteForRetry: timelineRouteForRetry,
+    voiceRetryActions: voiceRetryActions,
+    notSavedRowWords: notSavedRowWords,
+    bellBadgeCount: bellBadgeCount,
   };
 
   if (typeof window !== 'undefined') {

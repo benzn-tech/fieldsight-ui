@@ -7329,6 +7329,47 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color: var(--text-tertiary);
 }
 
+/* A refused row says why in the page itself and offers the way out. Colours are the
+   semantic tokens, which flip in dark mode. */
+.fs-voices__retry-block {
+  margin-top: var(--space-2);
+  max-width: 44ch;
+}
+
+.fs-voices__reason {
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-1);
+}
+
+.fs-voices__retry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.fs-voices__retry {
+  padding: 4px 10px;
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: var(--surface-app);
+  color: var(--text-primary);
+}
+
+.fs-voices__result {
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.fs-voices__result--saved { color: var(--text-primary); font-weight: var(--font-weight-semibold); }
+.fs-voices__result--failed { color: var(--text-secondary); }
+
 /* ---- Theme radio group ---- */
 
 .fs-settings__radio-group {

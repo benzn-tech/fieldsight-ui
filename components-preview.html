@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="styles/tokens.css?v=1" />
   <link rel="stylesheet" href="styles/app-shell.css?v=4" />
   <link rel="stylesheet" href="styles/components.css?v=7" />
-  <link rel="stylesheet" href="styles/composites.css?v=27" />
+  <link rel="stylesheet" href="styles/composites.css?v=28" />
 
   <style>
     html, body { overflow: auto; height: auto; }
@@ -112,7 +112,11 @@
   <script type="text/babel" src="scripts/composites/tooltip.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/toast.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/modal-overlay.js?v=1"></script>
-  <script type="text/babel" src="scripts/composites/notification-bell.js?v=1"></script>
+  <!-- FS.speakerNaming: plain-words helpers the bell's "Voices not saved" row and the
+       overview's rewrite block read. Pure; needs nothing else loaded. -->
+  <script src="scripts/api/speaker-naming.js?v=14"></script>
+  <script type="text/babel" src="scripts/composites/notification-bell.js?v=3"></script>
+  <script type="text/babel" src="scripts/composites/session-names-regen.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/name-proposals-dialog.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/intro-suggestion-dialog.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/email-preview-modal.js?v=15"></script>
@@ -268,8 +272,8 @@
         }
         if (!window.FS.nameProposals) {
           window.FS.nameProposals = {
-            get: () => ({ people: [], total: 0, introductions: example.length }),
-            subscribe: (fn) => { fn({ people: [], total: 0, introductions: example.length }); return () => {}; },
+            get: () => ({ people: [], total: 0, introductions: example.length, notSaved: 1 }),
+            subscribe: (fn) => { fn({ people: [], total: 0, introductions: example.length, notSaved: 1 }); return () => {}; },
             refresh: () => Promise.resolve(),
           };
         }
@@ -292,6 +296,29 @@
           {Dialog ? <Dialog /> : <em>IntroSuggestionDialog not loaded</em>}
         </div>
       );
+    }
+
+    /* The overview's "Rewrite the summary with these names" block, fed one confirmed
+       name through stubbed transcript + org APIs so it renders without a backend. */
+    function SessionNamesRegenShowcase() {
+      React.useState(() => {
+        window.FS = window.FS || {};
+        window.FS.api = window.FS.api || {};
+        window.FS.api.org = window.FS.api.org || {};
+        window.FS.api.transcripts = window.FS.api.transcripts || { getTranscripts: async () => ({
+          unmatchedNames: 0,
+          speaker_segments: [{ speaker_state: 'confirmed', speaker_name: 'Ben Lin',
+            source_filename: 'ben_2026-09-26_08-14-02_sid' + '90cc'.repeat(8).slice(0, 32) + '_c0000.json' }],
+        }) };
+        window.FS.api.org.setSpeakerName = window.FS.api.org.setSpeakerName || (async () => ({}));
+        window.FS.api.org.regenerateSession = window.FS.api.org.regenerateSession
+          || (async () => ({ namedTurns: 1 }));
+        window.AuthMock = window.AuthMock || { currentUser: { role: 'site_manager', folder_name: 'Ben_UCPK2' } };
+        return true;
+      });
+      const Regen = window.FieldSight.SessionNamesRegen;
+      return Regen ? <Regen date="2026-09-26" user="Ben_UCPK2" start={null} end={null} />
+                   : <em>SessionNamesRegen not loaded</em>;
     }
 
     function Row({ label, children }) {
@@ -2113,6 +2140,9 @@
           <Section title="New voices · NotificationBell + IntroSuggestionDialog">
             <Row label="bell · one self-introduction waiting">
               <IntroSuggestionsShowcase />
+            </Row>
+            <Row label="overview · rewrite the summary with these names">
+              <SessionNamesRegenShowcase />
             </Row>
           </Section>
 
