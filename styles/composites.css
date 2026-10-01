@@ -7481,6 +7481,10 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   font-size: var(--font-size-sm); line-height: 1.45; color: var(--text-secondary);
   overflow-wrap: anywhere;
 }
+.fs-samename__subhead {
+  font-size: var(--font-size-sm); color: var(--text-secondary);
+  font-weight: var(--font-weight-semibold);
+}
 .fs-samename__else { display: flex; flex-direction: column; gap: var(--space-1); }
 .fs-samename__input {
   font: inherit; font-size: var(--font-size-sm); padding: 6px 8px; width: 100%;

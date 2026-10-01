@@ -729,7 +729,30 @@
     if (res._accessDenied && res.status === 401) return 'fail';
     if (res._notFound || res._accessDenied) return 'send';
     if (res.error && !Array.isArray(res.profiles)) return 'fail';
-    return sameNameShouldAsk(res) ? 'ask' : 'send';
+    if (sameNameShouldAsk(res)) return 'ask';
+    // A near spelling is only worth a question when the typed name matched NOBODY. Someone
+    // who typed "Ben Lin" exactly, with a "Ben Linn" also on file, meant Ben Lin.
+    var exact = Array.isArray(res.profiles) && res.profiles.length > 0;
+    return (!exact && sameNameHasSimilar(res)) ? 'suggest' : 'send';
+  }
+
+  /* Near spellings ("Benn Lin" for "Ben Lin"): the backend lists them in `similar`, same
+     shape as `profiles`, and never merges them itself. A missing `similar` (older backend)
+     is simply none. */
+  function sameNameHasSimilar(res) {
+    return !!res && Array.isArray(res.similar)
+      && res.similar.some(function (p) { return p && p.id; });
+  }
+
+  /* "Did you mean Ben Lin?" for one near spelling, a general question for several. */
+  function sameNameSuggestTitle(res) {
+    var opts = sameNameSimilarOptions(res);
+    if (opts.length === 1 && opts[0].name) return 'Did you mean ' + opts[0].name + '?';
+    return 'Did you mean one of these?';
+  }
+
+  function sameNameSuggestKeepLabel(name) {
+    return 'No — save as ‘' + String(name || '').trim() + '’';
   }
 
   function sameNameTitle(name) {
@@ -743,7 +766,16 @@
   /* One row per profile: the same identity lines the Voices page shows, plus when that
      voice was last heard, as the NZ calendar day. */
   function sameNameOptions(res) {
-    var list = (res && Array.isArray(res.profiles)) ? res.profiles : [];
+    return _optionRows(res && res.profiles);
+  }
+
+  /* The same rows for the near-spelling profiles. */
+  function sameNameSimilarOptions(res) {
+    return _optionRows(res && res.similar);
+  }
+
+  function _optionRows(list) {
+    list = Array.isArray(list) ? list : [];
     return list.filter(function (p) { return p && p.id; }).map(function (p) {
       var lines = voiceIdentityLines(p);
       var d = p.lastHeard ? plainDate(p.lastHeard) : '';
@@ -931,6 +963,10 @@
     sameNameTitle: sameNameTitle,
     sameNameElseLabel: sameNameElseLabel,
     sameNameOptions: sameNameOptions,
+    sameNameSimilarOptions: sameNameSimilarOptions,
+    sameNameHasSimilar: sameNameHasSimilar,
+    sameNameSuggestTitle: sameNameSuggestTitle,
+    sameNameSuggestKeepLabel: sameNameSuggestKeepLabel,
     sameNameElseDefault: sameNameElseDefault,
     sameNameElseOutcome: sameNameElseOutcome,
     sameNameChoiceFields: sameNameChoiceFields,
