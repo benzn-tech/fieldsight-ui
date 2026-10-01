@@ -854,6 +854,26 @@
     return Object.assign(base, extra || {});
   }
 
+  /* The day's report photographs and the person's choice of what to leave out
+     (pipeline: GET/PUT /days/{date}/photos/selection; owner, 2026-10-01: 60 at
+     page size, up to 120 shrunk automatically, past 120 the person chooses).
+     A WHITELIST like every write here: only `excluded` travels. Offline there
+     is nothing to choose among, so null -- the dialog then skips the step. */
+  async function getPhotoSelection(opts) {
+    opts = opts || {};
+    if (!sessionReportLive()) return null;
+    return api.orgRequest('/days/' + encodeURIComponent(opts.date) + '/photos/selection',
+      { params: { user: opts.user } });
+  }
+
+  async function putPhotoSelection(opts) {
+    opts = opts || {};
+    if (!sessionReportLive()) return null;
+    return api.orgRequest('/days/' + encodeURIComponent(opts.date) + '/photos/selection',
+      { method: 'PUT', params: { user: opts.user },
+        body: { excluded: (opts.excluded || []).slice() }, retry: false });
+  }
+
   async function getSessionReportPreview(opts) {
     opts = opts || {};
     if (sessionReportLive()) {
@@ -1232,6 +1252,8 @@
     getSessionsCached: getSessionsCached,
     getSessionBrief: getSessionBrief,
     getSessionReportPreview: getSessionReportPreview,
+    getPhotoSelection: getPhotoSelection,
+    putPhotoSelection: putPhotoSelection,
     generateSessionReport: generateSessionReport,
     getSessionReportStatus: getSessionReportStatus,
     getThreadSuggestions: getThreadSuggestions,

@@ -12562,6 +12562,29 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
    is a column, which stretched the link across the dialog. */
 .fs-srm__download { align-self: flex-start; }
 
+/* --- the day's photographs: smaller past 60, chosen past 120 ---------------- */
+
+.fs-srm__photo-note { color: var(--text-secondary); }
+.fs-srm__photos { gap: 12px; }
+.fs-srm__photos-count { font-weight: 600; color: var(--text-primary); }
+.fs-srm__photos-count--over { color: var(--color-danger-600); }
+.fs-srm__photos-group { display: flex; flex-direction: column; gap: 6px; }
+.fs-srm__photos-place { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); }
+.fs-srm__photos-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px;
+}
+.fs-srm__photos-item {
+  display: flex; flex-direction: column; gap: 4px; cursor: pointer;
+  border: 1px solid var(--border-default); border-radius: var(--radius-md);
+  padding: 4px; background: var(--surface-panel);
+}
+.fs-srm__photos-item img {
+  width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 4px;
+  background: var(--surface-panel);
+}
+.fs-srm__photos-item--out { opacity: 0.45; }
+.fs-srm__photos-meta { font-size: 12px; color: var(--text-secondary); }
+
 .fs-srm__preview-photos {
   display: flex; flex-wrap: wrap; gap: 8px;
   margin: 8px 0 0;
