@@ -7369,6 +7369,93 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 
 .fs-voices__result--saved { color: var(--text-primary); font-weight: var(--font-weight-semibold); }
 .fs-voices__result--failed { color: var(--text-secondary); }
+/* Voice identity, same-name notice and the merge chooser. Foregrounds are semantic
+   tokens only (they flip in dark mode); the warning is carried by the border and the
+   words, not by a palette-scale colour. */
+.fs-voices__identity {
+  display: block;
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+  color: var(--text-secondary);
+  margin-top: var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+.fs-voices__notice {
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+  color: var(--text-primary);
+  margin-top: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  border-left: 3px solid var(--text-warning);
+  max-width: 44ch;
+}
+
+.fs-voices__input {
+  font: inherit;
+  font-size: var(--font-size-sm);
+  padding: 6px 8px;
+  width: 100%;
+  max-width: 32ch;
+  color: var(--text-primary);
+  background: var(--surface-input);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+}
+
+.fs-voices__toggle { margin-top: var(--space-3); }
+
+.fs-voices__retry[disabled] { opacity: 0.45; cursor: not-allowed; }
+
+.fs-voices__merge { display: flex; flex-direction: column; gap: var(--space-2); }
+
+.fs-voices__choices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.fs-voices__choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  color: var(--text-primary);
+  background: var(--surface-app);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+}
+
+.fs-voices__choice.is-selected {
+  border-color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--text-primary);
+}
+
+.fs-voices__choice-name { font-weight: var(--font-weight-semibold); }
+
+.fs-voices__tag {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.fs-voices__verdict {
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--text-primary);
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--border-default);
+}
+
+.fs-voices__verdict--warn { border-left-color: var(--text-warning); }
 
 /* ---- Theme radio group ---- */
 
