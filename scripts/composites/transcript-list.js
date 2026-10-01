@@ -296,7 +296,9 @@
   function SameNameChooser(props) {
     var sn = window.FS.speakerNaming;
     var Modal = (window.FieldSight || {}).ModalOverlay;
-    var options = sn.sameNameOptions(props.res);
+    var suggest = props.mode === 'suggest';
+    var options = suggest ? sn.sameNameSimilarOptions(props.res) : sn.sameNameOptions(props.res);
+    var similar = suggest ? [] : sn.sameNameSimilarOptions(props.res);
     var refElse = React.useState(false);
     var elseOpen = refElse[0], setElseOpen = refElse[1];
     var refTyped = React.useState(sn.sameNameElseDefault(props.name));
@@ -312,39 +314,59 @@
       props.onElse(o);
     }
 
+    function optionRow(o) {
+      return React.createElement('li', { key: o.id },
+        React.createElement('button', {
+          type: 'button', className: 'fs-samename__choice', disabled: busy,
+          onClick: function () { props.onPick(o); },
+        },
+          React.createElement('span', { className: 'fs-samename__choice-name' },
+            o.name || props.name),
+          React.createElement('span', { className: 'fs-samename__identity' }, o.detail)));
+    }
+
     var kids = [];
-    kids.push(React.createElement('ul', { key: 'list', className: 'fs-samename__choices' },
-      options.map(function (o) {
-        return React.createElement('li', { key: o.id },
+    if (suggest) {
+      /* Near spelling: pick the existing person, or keep what was typed, as today. */
+      kids.push(React.createElement('ul', { key: 'list', className: 'fs-samename__choices' },
+        options.map(optionRow),
+        React.createElement('li', { key: 'keep' },
           React.createElement('button', {
             type: 'button', className: 'fs-samename__choice', disabled: busy,
-            onClick: function () { props.onPick(o); },
-          },
-            React.createElement('span', { className: 'fs-samename__choice-name' },
-              o.name || props.name),
-            React.createElement('span', { className: 'fs-samename__identity' }, o.detail)));
-      }),
-      React.createElement('li', { key: 'else' },
-        React.createElement('button', {
-          type: 'button',
-          className: 'fs-samename__choice' + (elseOpen ? ' is-selected' : ''),
-          'aria-expanded': elseOpen, disabled: busy,
-          onClick: function () { setElseOpen(true); },
-        }, React.createElement('span', { className: 'fs-samename__choice-name' },
-          sn.sameNameElseLabel(props.name))))));
-    if (elseOpen) {
-      kids.push(React.createElement('div', { key: 'else-box', className: 'fs-samename__else' },
-        React.createElement('input', {
-          type: 'text', className: 'fs-samename__input', value: typed,
-          'aria-label': 'Name for this other person', autoFocus: true, disabled: busy,
-          onChange: function (e) { setTyped(e.target.value); },
-          onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); sendElse(); } },
-        }),
-        React.createElement('div', { className: 'fs-samename__hint' },
-          'Add something that tells them apart, e.g. ' + props.name + ' (Cassidy)'),
-        React.createElement('button', {
-          type: 'button', className: 'fs-samename__btn', disabled: busy, onClick: sendElse,
-        }, busy ? 'Checking…' : 'Save as someone else')));
+            onClick: props.onKeep,
+          }, React.createElement('span', { className: 'fs-samename__choice-name' },
+            sn.sameNameSuggestKeepLabel(props.name))))));
+    } else {
+      kids.push(React.createElement('ul', { key: 'list', className: 'fs-samename__choices' },
+        options.map(optionRow),
+        React.createElement('li', { key: 'else' },
+          React.createElement('button', {
+            type: 'button',
+            className: 'fs-samename__choice' + (elseOpen ? ' is-selected' : ''),
+            'aria-expanded': elseOpen, disabled: busy,
+            onClick: function () { setElseOpen(true); },
+          }, React.createElement('span', { className: 'fs-samename__choice-name' },
+            sn.sameNameElseLabel(props.name))))));
+      if (similar.length) {
+        kids.push(React.createElement('div', { key: 'similar-h',
+          className: 'fs-samename__subhead' }, 'Similar names'));
+        kids.push(React.createElement('ul', { key: 'similar',
+          className: 'fs-samename__choices' }, similar.map(optionRow)));
+      }
+      if (elseOpen) {
+        kids.push(React.createElement('div', { key: 'else-box', className: 'fs-samename__else' },
+          React.createElement('input', {
+            type: 'text', className: 'fs-samename__input', value: typed,
+            'aria-label': 'Name for this other person', autoFocus: true, disabled: busy,
+            onChange: function (e) { setTyped(e.target.value); },
+            onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); sendElse(); } },
+          }),
+          React.createElement('div', { className: 'fs-samename__hint' },
+            'Add something that tells them apart, e.g. ' + props.name + ' (Cassidy)'),
+          React.createElement('button', {
+            type: 'button', className: 'fs-samename__btn', disabled: busy, onClick: sendElse,
+          }, busy ? 'Checking…' : 'Save as someone else')));
+      }
     }
     var err = localErr || props.error;
     if (err) {
@@ -360,7 +382,8 @@
     if (!Modal) return body;
     return React.createElement(Modal, {
       open: true, onClose: props.onCancel, size: 'md',
-      title: sn.sameNameTitle(props.name), closeOnBackdrop: !busy,
+      title: suggest ? sn.sameNameSuggestTitle(props.res) : sn.sameNameTitle(props.name),
+      closeOnBackdrop: !busy,
     }, body);
   }
 
@@ -685,10 +708,10 @@
         var outcome = sn.sameNameCheckOutcome(res);
         if (outcome === 'fail') throw new Error('check failed');
         checkingRef.current = false;
-        if (outcome === 'ask') {
+        if (outcome === 'ask' || outcome === 'suggest') {
           setNotice(null);
           setChooser({ seg: seg, index: index, name: name, consent: consent, res: res,
-                       busy: false, error: null });
+                       mode: outcome, busy: false, error: null });
           return;
         }
         setChooser(null);
@@ -705,6 +728,14 @@
       checkSeq.current += 1;
       setChooser(null);
       sendName(c.seg, c.index, c.name, c.consent, { voiceprintId: opt.id });
+    }
+
+    /* "No - save as 'Benn Lin'": exactly the send that existed before the suggestion. */
+    function chooserKeep() {
+      var c = chooser; if (!c) return;
+      checkSeq.current += 1;
+      setChooser(null);
+      sendName(c.seg, c.index, c.name, c.consent, null);
     }
 
     function chooserElse(outcome) {
@@ -932,9 +963,9 @@
 
       chooser
         ? React.createElement(SameNameChooser, {
-            key: chooser.name, name: chooser.name, res: chooser.res,
+            key: chooser.name, name: chooser.name, res: chooser.res, mode: chooser.mode,
             busy: chooser.busy, error: chooser.error,
-            onPick: chooserPick, onElse: chooserElse, onCancel: chooserCancel,
+            onPick: chooserPick, onKeep: chooserKeep, onElse: chooserElse, onCancel: chooserCancel,
           })
         : null,
 

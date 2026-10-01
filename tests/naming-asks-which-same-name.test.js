@@ -227,3 +227,72 @@ test('a check that does not exist or is not ours does not block naming', () => {
   assert.equal(sn.sameNameCheckOutcome({ profiles: [{ id: 'a' }], wouldUse: null, ask: true }), 'ask');
   assert.equal(sn.sameNameCheckOutcome({ profiles: [], wouldUse: null, ask: false }), 'send');
 });
+
+/* ---- "Did you mean Ben Lin?" (near spellings, spec 2026-10-01-name-normalise-and-did-you-mean) ---- */
+
+const SIM = { id: 's1', displayName: 'Ben Lin', linkedAccount: null, heardOn: ['Ben_UCPK2'],
+  firstNamed: { at: '2026-08-28T01:00:00+00:00', by: 'Ben_UCPK2' }, employer: null,
+  lastHeard: '2026-09-30T23:50:02+00:00' };
+
+test('outcome table: ask wins, similar alone suggests, nothing or no similar field sends', () => {
+  const none = { profiles: [], wouldUse: null, ask: false };
+  assert.equal(sn.sameNameCheckOutcome({ ...none, similar: [SIM] }), 'suggest');
+  assert.equal(sn.sameNameCheckOutcome({ ...ASK, similar: [SIM] }), 'ask');
+  assert.equal(sn.sameNameCheckOutcome({ ...none, similar: [] }), 'send');
+  assert.equal(sn.sameNameCheckOutcome({ ...none, similar: [null, {}] }), 'send');
+  assert.equal(sn.sameNameCheckOutcome({ ...none, similar: 'x' }), 'send');
+  assert.equal(sn.sameNameCheckOutcome(none), 'send');
+  /* Same-name profile the server would reuse, plus a near spelling: still a suggestion. */
+  assert.equal(sn.sameNameCheckOutcome({ profiles: [P1], wouldUse: 'p1', ask: false, similar: [SIM] }), 'suggest');
+  /* Fallback rules are untouched. */
+  assert.equal(sn.sameNameCheckOutcome({ _notFound: true, similar: [SIM] }), 'send');
+  assert.equal(sn.sameNameCheckOutcome({ _accessDenied: true, status: 403, similar: [SIM] }), 'send');
+  assert.equal(sn.sameNameCheckOutcome({ _accessDenied: true, status: 401 }), 'fail');
+});
+
+test('similar options reuse the identity line and NZ last-heard day; titles and labels are plain', () => {
+  const res = { profiles: [], ask: false, similar: [SIM, null, {}] };
+  const rows = sn.sameNameSimilarOptions(res);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, 's1');
+  assert.equal(rows[0].detail,
+    'Not linked to an account · Heard on Ben_UCPK2 · Named 28 Aug by Ben_UCPK2 · last heard 1 Oct');
+  assert.equal(sn.sameNameSuggestTitle(res), 'Did you mean Ben Lin?');
+  assert.equal(sn.sameNameSuggestTitle({ similar: [SIM, { ...SIM, id: 's2', displayName: 'Ben Linn' }] }),
+    'Did you mean one of these?');
+  assert.equal(sn.sameNameSuggestKeepLabel(' Benn Lin '), 'No — save as ‘Benn Lin’');
+  assert.deepEqual(sn.sameNameSimilarOptions({ profiles: [P1] }), []);
+  assert.deepEqual(sn.sameNameSimilarOptions(null), []);
+  /* The which-one list is unaffected by similar. */
+  assert.equal(sn.sameNameOptions({ ...ASK, similar: [SIM] }).length, 2);
+});
+
+test('suggestion wire bodies: a similar profile sends voiceprint_id, "No" sends neither field', async () => {
+  const { org, calls } = loadApi({ reply: {} });
+  const opts = { user: 'Ben_UCPK2', displayName: 'Benn Lin' };
+  const ref = '2026-10-01_sid' + 'a'.repeat(32);
+  const pick = sn.sameNameSimilarOptions({ similar: [SIM] })[0];
+  await org.setSpeakerName(ref, sn.correctionBodyForChoice(SEG, opts, { voiceprintId: pick.id }));
+  await org.setSpeakerName(ref, sn.correctionBodyForChoice(SEG, opts, null));
+  const [w1, w2] = calls.map((c) => JSON.parse(c.body));
+  assert.equal(w1.voiceprint_id, 's1');
+  assert.equal('new_person' in w1, false);
+  assert.equal('voiceprint_id' in w2, false);
+  assert.equal('new_person' in w2, false);
+  assert.equal(w2.display_name, 'Benn Lin');
+});
+
+test('the chooser has a suggest mode: keep sends no choice, cancel sends nothing, ask lists similar', () => {
+  const src = read('scripts', 'composites', 'transcript-list.js');
+  assert.match(src, /outcome === 'ask' \|\| outcome === 'suggest'/);
+  assert.match(src, /mode: outcome/);
+  assert.match(src, /sn\.sameNameSuggestTitle\(props\.res\)/);
+  assert.match(src, /sn\.sameNameSuggestKeepLabel\(props\.name\)/);
+  assert.match(src, /'Similar names'/);
+  const keep = /function chooserKeep\(\) \{[\s\S]*?\n    \}/.exec(src)[0];
+  assert.match(keep, /sendName\(c\.seg, c\.index, c\.name, c\.consent, null\)/);
+  /* Still exactly one place that sends. */
+  assert.equal((src.match(/setSpeakerName\(/g) || []).length, 1);
+  /* One chooser component, not a copy. */
+  assert.equal((src.match(/function SameNameChooser\(/g) || []).length, 1);
+});
