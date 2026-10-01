@@ -12520,6 +12520,8 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 /* --- step 2: template and the fields around it --------------------------- */
 
 .fs-srm__fill { gap: 16px; }
+/* Why the three fields below are disabled when a template is chosen. */
+.fs-srm__template-note { margin: -8px 0 0; color: var(--text-secondary); }
 
 /* --- step 3: how it is delivered ----------------------------------------- */
 
