@@ -1224,6 +1224,39 @@
     return { _notAvailable: true };
   }
 
+  /* Merge two profiles of the same person. The check is a READ and says, in words, whether
+     the two sound alike -- it carries no number. Both ids go in the URL/body untouched;
+     nothing here rebuilds the body, so `into` and `confirm` reach the server as given.
+     The write (merge, rename) refuses offline rather than faking a result. The fetch layer
+     already clears the read-cache after any non-GET. */
+  async function mergeCheck(voiceprintId, intoId) {
+    if (orgLive()) {
+      return api.orgRequest('/voiceprints/' + encodeURIComponent(voiceprintId) + '/merge-check',
+        { params: { into: intoId } });
+    }
+    await api.delay();
+    return { verdict: 'unsure', message: 'These may be the same person — recordings from '
+      + 'different devices can sound different.' };
+  }
+
+  async function mergeVoiceprint(voiceprintId, intoId, confirm) {
+    if (orgWrite()) {
+      return api.orgRequest('/voiceprints/' + encodeURIComponent(voiceprintId) + '/merge',
+        { method: 'POST', body: { into: intoId, confirm: !!confirm }, retry: false });
+    }
+    await api.delay();
+    return { _notAvailable: true };
+  }
+
+  async function renameVoiceprint(voiceprintId, displayName) {
+    if (orgWrite()) {
+      return api.orgRequest('/voiceprints/' + encodeURIComponent(voiceprintId),
+        { method: 'PATCH', body: { displayName: displayName }, retry: false });
+    }
+    await api.delay();
+    return { _notAvailable: true };
+  }
+
   /* Try to store a voice again, from the passage the backend remembered when the last
      attempt was refused (the row's `retry`). 202 with the same body shape as a rename
      (`enrolment`, `propagation`, ...); the result still arrives later on the profile, so
@@ -1316,6 +1349,9 @@
     decideNameSuggestion: decideNameSuggestion,
     withdrawVoiceprint: withdrawVoiceprint,
     retryVoiceprint: retryVoiceprint,
+    mergeCheck: mergeCheck,
+    mergeVoiceprint: mergeVoiceprint,
+    renameVoiceprint: renameVoiceprint,
     setVoiceprintBasis: setVoiceprintBasis,
     deleteRecordings: deleteRecordings,
     undeleteRecordings: undeleteRecordings,
