@@ -242,8 +242,9 @@ test('outcome table: ask wins, similar alone suggests, nothing or no similar fie
   assert.equal(sn.sameNameCheckOutcome({ ...none, similar: [null, {}] }), 'send');
   assert.equal(sn.sameNameCheckOutcome({ ...none, similar: 'x' }), 'send');
   assert.equal(sn.sameNameCheckOutcome(none), 'send');
-  /* Same-name profile the server would reuse, plus a near spelling: still a suggestion. */
-  assert.equal(sn.sameNameCheckOutcome({ profiles: [P1], wouldUse: 'p1', ask: false, similar: [SIM] }), 'suggest');
+  /* Same-name profile the server would reuse, plus a near spelling: the typed name matched
+     somebody exactly, so it is saved without second-guessing. */
+  assert.equal(sn.sameNameCheckOutcome({ profiles: [P1], wouldUse: 'p1', ask: false, similar: [SIM] }), 'send');
   /* Fallback rules are untouched. */
   assert.equal(sn.sameNameCheckOutcome({ _notFound: true, similar: [SIM] }), 'send');
   assert.equal(sn.sameNameCheckOutcome({ _accessDenied: true, status: 403, similar: [SIM] }), 'send');
@@ -295,4 +296,14 @@ test('the chooser has a suggest mode: keep sends no choice, cancel sends nothing
   assert.equal((src.match(/setSpeakerName\(/g) || []).length, 1);
   /* One chooser component, not a copy. */
   assert.equal((src.match(/function SameNameChooser\(/g) || []).length, 1);
+});
+
+test('an exact name match is not second-guessed by a near spelling', () => {
+  const sn = require('../scripts/api/speaker-naming.js');
+  const ben = { id: 'b1', displayName: 'Ben Lin' };
+  const benn = { id: 'b2', displayName: 'Ben Linn' };
+  // Typed "Ben Lin", the lookup will use Ben Lin: just save.
+  assert.equal(sn.sameNameCheckOutcome({ profiles: [ben], wouldUse: 'b1', ask: false, similar: [benn] }), 'send');
+  // Typed "Benn Lin", nobody by that name: suggest.
+  assert.equal(sn.sameNameCheckOutcome({ profiles: [], wouldUse: null, ask: false, similar: [ben] }), 'suggest');
 });
