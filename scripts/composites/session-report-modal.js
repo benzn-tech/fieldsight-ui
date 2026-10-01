@@ -722,7 +722,7 @@
           (result && result.emailed) ? 'Your report has been emailed.' : 'Your report is ready.'),
         (result && result.docUrl)
           ? h('a', {
-              className: 'fs-btn fs-btn--primary', href: result.docUrl,
+              className: 'fs-btn fs-btn--md fs-btn--primary fs-srm__download', href: result.docUrl,
               target: '_blank', rel: 'noopener', download: '',
             }, 'Download report')
           : null);
