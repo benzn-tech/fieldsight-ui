@@ -524,11 +524,65 @@
     if (!hits.length) return null;
     var who = String(displayName).trim();
     if (hits[0].lastAttemptOutcome === 'stored') {
-      return { state: 'stored',
+      return { state: 'stored', voiceprintId: hits[0].id,
                message: who + '’s voice is saved. They will be recognised in future meetings.' };
     }
-    return { state: 'refused',
+    return { state: 'refused', voiceprintId: hits[0].id, retry: hits[0].retry || null,
+             guidance: retryGuidance(who),
              message: who + '’s voice was not saved: ' + refusalReason(hits[0].lastAttemptDetail) };
+  }
+
+  /* What to do after a refusal, said once so the Voices page, the rename notice and the
+     self-introduction dialog never give three different instructions. */
+  function retryGuidance(name) {
+    var who = String(name || '').trim() || 'the person';
+    return 'Name another passage where only ' + who + ' is speaking.';
+  }
+
+  /* Where "Open the recording" goes: the timeline for the recording the refused attempt
+     was made on. Same `/timeline?date=&user=` route search and Ask use. Null when the
+     backend did not say which recording. */
+  function timelineRouteForRetry(retry) {
+    if (!retry || !retry.date || !retry.userFolder) return null;
+    return '/timeline?date=' + encodeURIComponent(retry.date)
+      + '&user=' + encodeURIComponent(retry.userFolder);
+  }
+
+  /* The actions a refused Voices-page row offers. Null when the last attempt was not
+     refused, so a saved voice never shows a "Try again". "Try again" needs the backend's
+     `retry` passage; without one the row still explains and points at the recording
+     route only if it can. */
+  function voiceRetryActions(row) {
+    var r = row || {};
+    if (r.lastAttemptOutcome !== 'refused' || r.status === 'withdrawn') return null;
+    var name = String(r.displayName || '').trim();
+    return {
+      reason: (name || 'This voice') + ' was not saved: ' + refusalReason(r.lastAttemptDetail),
+      guidance: retryGuidance(name),
+      canRetry: !!r.retry,
+      tryAgainLabel: 'Try again',
+      openLabel: 'Open the recording',
+      openRoute: timelineRouteForRetry(r.retry),
+    };
+  }
+
+  /* The bell's "Voices not saved" row. Null at zero: a row that says "0 voices" is noise. */
+  function notSavedRowWords(count) {
+    var n = Number(count) || 0;
+    if (n <= 0) return null;
+    return {
+      title: n + (n === 1 ? ' voice' : ' voices') + ' could not be saved — see why',
+      action: 'See why',
+      route: '/evidence?tab=voices',
+    };
+  }
+
+  /* One number for the bell: unread reports + questions waiting + voices to save +
+     voices that failed to save. */
+  function bellBadgeCount(parts) {
+    var p = parts || {};
+    return (Number(p.unseen) || 0) + (Number(p.waiting) || 0)
+      + (Number(p.introductions) || 0) + (Number(p.notSaved) || 0);
   }
 
   /* The backend's refusal sentence, in words a site manager can act on. ONE mapping, read
@@ -566,7 +620,7 @@
     var learned = n === 0 ? '—'
       : n + (n === 1 ? ' passage' : ' passages')
         + (named ? ' (' + named + ' named by someone)' : '');
-    var when = r.lastAttemptAt ? String(r.lastAttemptAt).slice(0, 10) : '';
+    var when = r.lastAttemptAt ? nzDay(r.lastAttemptAt) : '';
     var latest = '—', latestTitle = '';
     if (r.lastAttemptOutcome === 'stored') {
       latest = 'Voice saved' + (when ? ' · ' + when : '');
@@ -575,6 +629,273 @@
       latestTitle = 'Not saved: ' + refusalReason(r.lastAttemptDetail);
     }
     return { status: status, learned: learned, latest: latest, latestTitle: latestTitle };
+  }
+
+  /* ---- Voices page: telling same-named people apart, merging duplicates ----
+     Customer rule: plain words, and NEVER a similarity number or score. The backend
+     sends a verdict and a sentence; this layer only chooses what to show. Every field
+     added to GET /voiceprints is optional -- an older backend omits them and the row
+     must render nothing for them, never the word "undefined". */
+
+  function nameKey(s) {
+    return String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  function isDeletedVoice(row) {
+    return !!row && (row.status === 'withdrawn' || !!row.mergedInto);
+  }
+
+  /* Live rows first, withdrawn and merged ones apart (shown behind "Show deleted (n)"). */
+  function splitVoiceRows(rows) {
+    var live = [], deleted = [];
+    (rows || []).forEach(function (r) {
+      if (!r) return;
+      (isDeletedVoice(r) ? deleted : live).push(r);
+    });
+    return { live: live, deleted: deleted };
+  }
+
+  /* "Heard on Ben_Lin_test2, Ben_UCPK2" / "Named 30 Sep by Ben_Lin_test2" etc.  Returns
+     [] for a row with none of the new fields. */
+  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  /* The NZ calendar day of a backend timestamp. The backend sends UTC
+     ("2026-09-30T23:50:02+00:00"), and the first ten characters of that are the UTC day --
+     a voice named on the morning of 1 Oct in Auckland read "30 Sep". A bare date
+     (no time part) is already a calendar day and passes through. */
+  function nzDay(s) {
+    var str = String(s || '');
+    if (!/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}.*(Z|[+-]\d{2}:?\d{2})$/.test(str)) {
+      return str.slice(0, 10);
+    }
+    var t = new Date(str.replace(' ', 'T'));
+    if (isNaN(t.getTime())) return str.slice(0, 10);
+    try {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland',
+        year: 'numeric', month: '2-digit', day: '2-digit' }).format(t);
+    } catch (e) {
+      return str.slice(0, 10);
+    }
+  }
+  function plainDate(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(nzDay(s));
+    if (!m) return '';
+    var mon = MONTHS[Number(m[2]) - 1];
+    return mon ? Number(m[3]) + ' ' + mon : '';
+  }
+  function voiceIdentityLines(row) {
+    var r = row || {};
+    var out = [];
+    if (r.linkedAccount && (r.linkedAccount.email || r.linkedAccount.name)) {
+      out.push('Linked to ' + (r.linkedAccount.email || r.linkedAccount.name));
+    } else if (r.linkedAccount === null) {
+      out.push('Not linked to an account');
+    }
+    var heard = (Array.isArray(r.heardOn) ? r.heardOn : []).filter(Boolean);
+    if (heard.length) out.push('Heard on ' + heard.join(', '));
+    var fn = r.firstNamed;
+    if (fn && (fn.at || fn.by)) {
+      var d = plainDate(fn.at);
+      out.push('Named' + (d ? ' ' + d : '') + (fn.by ? ' by ' + fn.by : ''));
+    }
+    if (r.employer) out.push(String(r.employer));
+    return out;
+  }
+
+  /* ---- "Which Ben Lin is this?" (spec 2026-10-01-naming-asks-which-same-name-person) ----
+     GET /voiceprints/same-name answers {profiles, wouldUse, ask}. The backend decides
+     whether to ask; this half only reads the verdict and words the options. Plain words,
+     never a score. */
+
+  /* Ask only when the backend said so AND there is something to choose between. A true
+     `ask` with no profiles would show a chooser whose only option is "someone else", which
+     is the silent-new-person path with an extra click; a missing or malformed answer is
+     NOT a reason to ask (the caller treats a failed call separately, as an error). */
+  function sameNameShouldAsk(res) {
+    return !!res && res.ask === true
+      && Array.isArray(res.profiles) && res.profiles.length > 0;
+  }
+
+  /* What to do with the same-name check's answer: 'ask', 'send' (as before the check
+     existed) or 'fail' (say so, send nothing).
+
+     A 404 means the route does not exist -- an older backend, or speaker identity switched
+     off -- and a 403 means this caller may not run the check; in both the correction
+     endpoint is still the authority and reports its own refusal. Treating them as failures
+     would stop ALL naming wherever this UI runs ahead of its backend. Only an expired
+     sign-in (401) or an error/network failure blocks, because then the answer is unknown,
+     not absent. */
+  function sameNameCheckOutcome(res) {
+    if (!res) return 'fail';
+    if (res._accessDenied && res.status === 401) return 'fail';
+    if (res._notFound || res._accessDenied) return 'send';
+    if (res.error && !Array.isArray(res.profiles)) return 'fail';
+    if (sameNameShouldAsk(res)) return 'ask';
+    // A near spelling is only worth a question when the typed name matched NOBODY. Someone
+    // who typed "Ben Lin" exactly, with a "Ben Linn" also on file, meant Ben Lin.
+    var exact = Array.isArray(res.profiles) && res.profiles.length > 0;
+    return (!exact && sameNameHasSimilar(res)) ? 'suggest' : 'send';
+  }
+
+  /* Near spellings ("Benn Lin" for "Ben Lin"): the backend lists them in `similar`, same
+     shape as `profiles`, and never merges them itself. A missing `similar` (older backend)
+     is simply none. */
+  function sameNameHasSimilar(res) {
+    return !!res && Array.isArray(res.similar)
+      && res.similar.some(function (p) { return p && p.id; });
+  }
+
+  /* "Did you mean Ben Lin?" for one near spelling, a general question for several. */
+  function sameNameSuggestTitle(res) {
+    var opts = sameNameSimilarOptions(res);
+    if (opts.length === 1 && opts[0].name) return 'Did you mean ' + opts[0].name + '?';
+    return 'Did you mean one of these?';
+  }
+
+  function sameNameSuggestKeepLabel(name) {
+    return 'No — save as ‘' + String(name || '').trim() + '’';
+  }
+
+  function sameNameTitle(name) {
+    return 'Which ' + String(name || '').trim() + ' is this?';
+  }
+
+  function sameNameElseLabel(name) {
+    return 'Someone else called ' + String(name || '').trim();
+  }
+
+  /* One row per profile: the same identity lines the Voices page shows, plus when that
+     voice was last heard, as the NZ calendar day. */
+  function sameNameOptions(res) {
+    return _optionRows(res && res.profiles);
+  }
+
+  /* The same rows for the near-spelling profiles. */
+  function sameNameSimilarOptions(res) {
+    return _optionRows(res && res.similar);
+  }
+
+  function _optionRows(list) {
+    list = Array.isArray(list) ? list : [];
+    return list.filter(function (p) { return p && p.id; }).map(function (p) {
+      var lines = voiceIdentityLines(p);
+      var d = p.lastHeard ? plainDate(p.lastHeard) : '';
+      var last = d ? 'last heard ' + d : '';
+      var parts = last ? lines.concat([last]) : lines.slice();
+      return {
+        id: p.id,
+        name: p.displayName || '',
+        identity: lines,
+        lastHeard: last,
+        detail: parts.length ? parts.join(' · ') : 'No details recorded yet',
+      };
+    });
+  }
+
+  /* What the "Someone else" input starts as: the name plus an empty bracket to fill. */
+  function sameNameElseDefault(name) {
+    return String(name || '').trim() + ' ()';
+  }
+
+  /* The name once an empty "()" the user did not fill is dropped. */
+  function _stripEmptyBrackets(s) {
+    return String(s == null ? '' : s).replace(/\s*\(\s*\)\s*$/, '').trim();
+  }
+
+  /* "Someone else" pressed with `typed` in the box, original name `name`.
+       - changed name  -> check again with it (it may collide with somebody else)
+       - unchanged     -> that really is a second person with this name: send new_person
+       - empty / too long -> invalid, nothing happens. */
+  function sameNameElseOutcome(name, typed) {
+    var orig = String(name || '').trim();
+    var cleaned = _stripEmptyBrackets(typed);
+    if (!cleaned) return { action: 'invalid', error: 'Enter a name.' };
+    if (cleaned.length > 80) {
+      return { action: 'invalid', error: 'Keep the name to 80 characters.' };
+    }
+    if (nameKey(cleaned) === nameKey(orig)) {
+      return { action: 'send', name: orig, newPerson: true };
+    }
+    return { action: 'recheck', name: cleaned };
+  }
+
+  /* The wire fields for a choice. The two are mutually exclusive on the backend, so a
+     choice can only ever produce one of them. */
+  function sameNameChoiceFields(choice) {
+    if (choice && choice.voiceprintId) return { voiceprint_id: choice.voiceprintId };
+    if (choice && choice.newPerson === true) return { new_person: true };
+    return {};
+  }
+
+  /* correctionBody plus the choice. No choice = exactly today's body. */
+  function correctionBodyForChoice(seg, opts, choice) {
+    return Object.assign(correctionBody(seg, opts), sameNameChoiceFields(choice));
+  }
+
+  function sameNameCheckFailedWords() {
+    return 'Could not check whether someone with that name is already known, so nothing '
+      + 'was saved. Try again.';
+  }
+
+  /* Live rows that share a display name with another live row. */
+  function sameNameNotice(row, rows) {
+    if (!row || isDeletedVoice(row)) return null;
+    var k = nameKey(row.displayName);
+    if (!k) return null;
+    var n = 0;
+    (rows || []).forEach(function (o) {
+      if (o && !isDeletedVoice(o) && nameKey(o.displayName) === k) n += 1;
+    });
+    return n >= 2
+      ? 'Same name as another voice — check the details, then merge or rename.' : null;
+  }
+
+  /* The merge chooser: every OTHER live row, same-name ones first. */
+  function mergeChoices(row, rows) {
+    var k = nameKey(row && row.displayName);
+    var others = splitVoiceRows(rows).live.filter(function (o) { return o.id !== (row || {}).id; });
+    var same = [], rest = [];
+    others.forEach(function (o) {
+      (k && nameKey(o.displayName) === k ? same : rest).push(o);
+    });
+    return same.concat(rest).map(function (o) {
+      return { id: o.id, name: o.displayName || '(unnamed voice)',
+               sameName: same.indexOf(o) >= 0, identity: voiceIdentityLines(o) };
+    });
+  }
+
+  /* What the dialog shows for a merge-check answer. 'alike' and 'unsure' merge on one
+     press; 'different' (or anything unrecognised -- fail toward asking) is shown as a
+     warning and needs the explicit "it's the same person" press, which sends confirm. */
+  function mergeDialogState(res, targetName) {
+    var r = res || {};
+    var v = r.verdict;
+    var msg = r.message ? String(r.message) : '';
+    if (v === 'alike' || v === 'unsure') {
+      return { verdict: v, warn: false, confirm: false, message: msg,
+               button: 'Merge into ' + targetName };
+    }
+    return { verdict: 'different', warn: true, confirm: true,
+             message: msg || 'These two voices sound different.',
+             button: 'Yes, it’s the same person — merge' };
+  }
+
+  function mergedToast(name) {
+    return 'Merged. ' + name + '’s voice samples are now one profile.';
+  }
+
+  /* Words for a deleted row's status cell. */
+  function deletedVoiceWords(row) {
+    var m = row && row.mergedInto;
+    if (m) return 'Merged into ' + (m.displayName || 'another voice');
+    return 'Deleted';
+  }
+
+  /* 1-80 characters once trimmed, same bound as the server. */
+  function validateDisplayName(s) {
+    var v = String(s == null ? '' : s).trim();
+    if (!v) return { ok: false, value: v, error: 'Enter a name.' };
+    if (v.length > 80) return { ok: false, value: v, error: 'Keep the name to 80 characters.' };
+    return { ok: true, value: v, error: null };
   }
 
   function confirmedSessions(segments) {
@@ -594,7 +915,21 @@
     });
   }
 
+  /* The sessions the session OVERVIEW offers "Rewrite the summary with these names" for.
+     Takes the raw GET /transcripts response, so the overview and the transcript read one
+     rule. Empty when naming is not available to this caller (feature absent, or a role that
+     may not name) -- the same gate the transcript applies to its naming controls, so the
+     control is never offered where the rewrite would be refused. */
+  function regenOfferSessions(res, caller, folder) {
+    caller = caller || {};
+    if (!res || !featureAvailable(res)) return [];
+    var callerFolder = caller.folder_name || null;
+    if (!mayName({ role: caller.role, callerFolder: callerFolder, folder: folder })) return [];
+    return confirmedSessions(res.speaker_segments || []);
+  }
+
   var mod = {
+    regenOfferSessions: regenOfferSessions,
     MIN_TURN_SECONDS: MIN_TURN_SECONDS,
     confirmedSessions: confirmedSessions,
     folderToName: folderToName,
@@ -619,6 +954,35 @@
     enrolmentOutcome: enrolmentOutcome,
     refusalReason: refusalReason,
     voiceRowWords: voiceRowWords,
+    nameKey: nameKey,
+    isDeletedVoice: isDeletedVoice,
+    splitVoiceRows: splitVoiceRows,
+    voiceIdentityLines: voiceIdentityLines,
+    sameNameShouldAsk: sameNameShouldAsk,
+    sameNameCheckOutcome: sameNameCheckOutcome,
+    sameNameTitle: sameNameTitle,
+    sameNameElseLabel: sameNameElseLabel,
+    sameNameOptions: sameNameOptions,
+    sameNameSimilarOptions: sameNameSimilarOptions,
+    sameNameHasSimilar: sameNameHasSimilar,
+    sameNameSuggestTitle: sameNameSuggestTitle,
+    sameNameSuggestKeepLabel: sameNameSuggestKeepLabel,
+    sameNameElseDefault: sameNameElseDefault,
+    sameNameElseOutcome: sameNameElseOutcome,
+    sameNameChoiceFields: sameNameChoiceFields,
+    correctionBodyForChoice: correctionBodyForChoice,
+    sameNameCheckFailedWords: sameNameCheckFailedWords,
+    sameNameNotice: sameNameNotice,
+    mergeChoices: mergeChoices,
+    mergeDialogState: mergeDialogState,
+    mergedToast: mergedToast,
+    deletedVoiceWords: deletedVoiceWords,
+    validateDisplayName: validateDisplayName,
+    retryGuidance: retryGuidance,
+    timelineRouteForRetry: timelineRouteForRetry,
+    voiceRetryActions: voiceRetryActions,
+    notSavedRowWords: notSavedRowWords,
+    bellBadgeCount: bellBadgeCount,
   };
 
   if (typeof window !== 'undefined') {

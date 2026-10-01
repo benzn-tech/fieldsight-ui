@@ -172,6 +172,42 @@
       speakerLabel: 'spk_1', startSec: 1.0, endSec: 6.8, createdAt: '2026-09-25T07:03:00Z' },
   ];
 
+  /* The company's voice library, as GET /api/org/voiceprints returns it. The mock serves
+     this rather than an empty list: `{voiceprints: []}` would claim nobody is enrolled.
+     One row is saved and one has a refused last attempt carrying the `retry` passage the
+     backend remembers, so the "not saved -> try again" path is visible locally. */
+  var VOICEPRINTS = [
+    { id: 'vp-example-1', displayName: 'Jarley Trainor', status: 'confirmed',
+      samples: 4, humanSamples: 2, lastAttemptOutcome: 'stored', lastAttemptDetail: null,
+      lastAttemptAt: '2026-09-27 02:10:00', retry: null,
+      linkedAccount: { name: 'Jarley Trainor', email: 'jarley@example.com' },
+      heardOn: ['Jarley_Trainor'], firstNamed: { at: '2026-09-20', by: 'Jarley_Trainor' },
+      employer: null, mergedInto: null },
+    { id: 'vp-example-2', displayName: 'Ben Lin', status: 'tentative',
+      samples: 0, humanSamples: 0, lastAttemptOutcome: 'refused',
+      lastAttemptDetail: 'this window does not hold one voice',
+      lastAttemptAt: '2026-09-28 00:20:25',
+      retry: { date: '2026-09-26', userFolder: 'Ben_UCPK2',
+               sessionBase: 'sid90cc2026',
+               sourceFilename: 'ben_ucpk2_2026-09-26_08-14-02_sid90cc_c0000_off0.0_to12.0_srcwav.json',
+               startSec: 0.4, endSec: 5.2 },
+      linkedAccount: null, heardOn: ['Ben_UCPK2'],
+      firstNamed: { at: '2026-09-28', by: 'Ben_UCPK2' }, employer: null, mergedInto: null },
+    /* A second live profile with the SAME name, and a merged-away one, so the same-name
+       notice, the merge chooser and 'Show deleted' can be seen locally. */
+    { id: 'vp-example-3', displayName: 'Ben Lin', status: 'tentative',
+      samples: 3, humanSamples: 1, lastAttemptOutcome: 'stored', lastAttemptDetail: null,
+      lastAttemptAt: '2026-09-30 03:00:00', retry: null,
+      linkedAccount: { name: 'Ben Lin', email: 'ben@example.com' },
+      heardOn: ['Ben_Lin_test2', 'Ben_UCPK2'],
+      firstNamed: { at: '2026-09-30', by: 'Ben_Lin_test2' }, employer: null, mergedInto: null },
+    { id: 'vp-example-4', displayName: 'Sam Yu', status: 'withdrawn',
+      samples: 0, humanSamples: 0, lastAttemptOutcome: null, lastAttemptDetail: null,
+      lastAttemptAt: null, retry: null, linkedAccount: null, heardOn: [],
+      firstNamed: null, employer: null,
+      mergedInto: { id: 'vp-example-1', displayName: 'Jarley Trainor' } },
+  ];
+
   window.FieldSight.fixtures.sites = {
     sites:          SITES,
     users:          USERS,
@@ -179,6 +215,7 @@
     regions:        REGIONS,
     nameProposals:  NAME_PROPOSALS,
     nameSuggestions: NAME_SUGGESTIONS,
+    voiceprints:    VOICEPRINTS,
   };
 
 })();

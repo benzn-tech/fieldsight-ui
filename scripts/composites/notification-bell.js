@@ -154,6 +154,22 @@
   }
 
 
+  /* Voices whose save was refused. Not silent: a refusal used to leave nothing anywhere
+     unless the dialog was still open. Opens the Voices page, which says why and offers
+     "Try again". Words come from FS.speakerNaming.notSavedRowWords. */
+  function NotSavedRow(props) {
+    var h = React.createElement;
+    var w = props.words;
+    return h('li', { className: 'fs-bell__row' },
+      h('div', { className: 'fs-bell__row-main' },
+        h('span', { className: 'fs-bell__row-title' }, w.title)),
+      h('button', {
+        type: 'button',
+        className: 'fs-bell__row-action',
+        onClick: props.onOpen,
+      }, w.action));
+  }
+
   function NotificationBell() {
     var h = React.createElement;
     var jobsApi = (window.FS || {}).reportJobs;
@@ -164,7 +180,7 @@
     var jobs = s_jobs[0], setJobs = s_jobs[1];
     var voicesApi = (window.FS || {}).nameProposals;
     var s_voices = React.useState(
-      voicesApi ? voicesApi.get() : { people: [], total: 0, introductions: 0 });
+      voicesApi ? voicesApi.get() : { people: [], total: 0, introductions: 0, notSaved: 0 });
     var voices = s_voices[0], setVoices = s_voices[1];
     var s_intro = React.useState([]);
     var suggestions = s_intro[0], setSuggestions = s_intro[1];
@@ -246,7 +262,13 @@
     var introducing = (voices && voices.introductions) || 0;
     /* One number, because two badges on one bell is a puzzle. The count is what
        is unread OR unanswered; the panel below says which is which. */
-    var count = unseen + waiting + introducing;
+    var notSaved = (voices && voices.notSaved) || 0;
+    var sn = (window.FS || {}).speakerNaming;
+    var notSavedWords = sn && sn.notSavedRowWords ? sn.notSavedRowWords(notSaved) : null;
+    var count = sn && sn.bellBadgeCount
+      ? sn.bellBadgeCount({ unseen: unseen, waiting: waiting, introductions: introducing,
+                            notSaved: notSaved })
+      : unseen + waiting + introducing + notSaved;
     count += photoNotices.length;
 
     return h('div', { className: 'fs-bell' },
@@ -264,6 +286,8 @@
           if (waiting) parts.push(waiting + ' voice' + (waiting === 1 ? '' : 's') + ' to confirm');
           if (introducing) parts.push(introducing + ' new voice' + (introducing === 1 ? '' : 's')
                                       + ' to save');
+          if (notSaved) parts.push(notSaved + ' voice' + (notSaved === 1 ? '' : 's')
+                                   + ' not saved');
           return parts.length ? parts.join(', ') : 'Reports and voices to confirm';
         })(),
         'aria-expanded': open ? 'true' : 'false',
@@ -339,6 +363,23 @@
                     })))
               : null,
 
+            /* A failure the reader has not seen yet sits first of all. */
+            notSavedWords
+              ? h('div', { className: 'fs-bell__section' },
+                  h('div', { className: 'fs-bell__panel-head' },
+                    h('span', null, 'Voices not saved')),
+                  h('ul', { className: 'fs-bell__list' },
+                    h(NotSavedRow, {
+                      words: notSavedWords,
+                      onOpen: function () {
+                        setOpen(false);
+                        if (window.FS && window.FS.Router) {
+                          window.FS.Router.navigate(notSavedWords.route);
+                        }
+                      },
+                    })))
+              : null,
+
             /* Voices first: they are waiting on the reader, reports are waiting
                on the machine. */
             waiting
@@ -388,7 +429,7 @@
 
             /* Only when ALL THREE are empty, and it names the kinds so somebody
                who has never seen one knows what would put it here. */
-            (!waiting && !suggestions.length && !jobs.length)
+            (!waiting && !suggestions.length && !jobs.length && !notSavedWords)
               ? h('p', { className: 'fs-bell__empty' },
                   'When you name a speaker, passages that may be the same person '
                   + 'will appear here to confirm — and when someone introduces '
