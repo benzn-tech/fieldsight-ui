@@ -2849,7 +2849,12 @@
       session:    reportableSession(daySessions, selectedSessionId),
       sessionCount: daySessions.length,
       date:       date,
-      userFolder: _draftUserFolder,
+      /* The folder the SERVER resolved (`user` is replaced by it above), never
+         one guessed from the display name: "Ben Lin" folds to Ben_Lin, which is
+         nobody's day, and the preview answered 404 for Ben_Lin_test2's day
+         (TEST, 2026-10-01). Null on the self-view is right: org-api then
+         reports on the caller's own folder. */
+      userFolder: user || null,
       siteName:   report.site || site || '',
       topics:     visibleTopics,
     });

@@ -57,9 +57,21 @@
      under it -- while this editor's own Test render drew photo placeholders for
      it. The server refuses the value now, so leaving it offered here would mean
      a choice that cannot be saved. The other four each make the document do
-     something. */
-  var KIND_LABEL = { narrative: 'Narrative', list: 'List', table: 'Table', kpi: 'KPIs' };
-  var KIND_ICON  = { narrative: '¶', list: '•', table: '⊞', kpi: '◆' };
+     something.
+
+     Checklist: the customer's own questions, answered Yes / No / N/A only
+     where the recording addressed them. The items are the customer's data;
+     the server rebuilds the table in their order and wording and leaves
+     unaddressed items blank. */
+  var KIND_LABEL = { narrative: 'Narrative', list: 'List', table: 'Table', kpi: 'KPIs', checklist: 'Checklist',
+                     header: 'Report details', weather: 'Weather' };
+  var KIND_ICON  = { narrative: '¶', list: '•', table: '⊞', kpi: '◆', checklist: '☑',
+                     header: '▤', weather: '☂' };
+  /* Written by FieldSight, not the model (pipeline report_facts): the report's
+     details and the day's measured weather. They come from the module picker
+     only, have no layout to choose and no note to give -- the model never
+     sees them. */
+  var CODE_KINDS = { header: true, weather: true };
 
   /* ── Helpers ───────────────────────────────────────────────────────── */
 
@@ -596,6 +608,39 @@
      stops here. `prompt_hint` does not: api/template-store.js maps it to
      `purpose`, which is the sentence report_template.render_prompt writes
      under the heading, and is the only part of a section the model reads. */
+  /* WHICH STANDARD MODULE A CUSTOM SECTION LOOKS LIKE, for the "use the
+     standard module?" offer (owner, 2026-09-30: offer, never convert). A
+     suggestion only, so it may be loose: a meaningful word of the section's
+     title matching a meaningful word of the module's title or key. Generic
+     words ("daily", "notes", "open"...) match nothing on their own, or every
+     "Daily ..." section would be offered Daily Summary. */
+  var MODULE_STOP_WORDS = { daily: 1, notes: 1, note: 1, open: 1, work: 1, report: 1,
+                            section: 1, items: 1, item: 1, key: 1, today: 1, general: 1,
+                            and: 1, the: 1, not: 1 };
+  function titleWords(s) {
+    return String(s || '').toLowerCase().split(/[^a-z]+/).filter(function (w) {
+      return w.length >= 4 && !MODULE_STOP_WORDS[w];
+    });
+  }
+  function suggestModule(title, modules) {
+    var words = titleWords(title);
+    if (!words.length) return null;
+    for (var i = 0; i < (modules || []).length; i++) {
+      var m = modules[i];
+      var mw = titleWords(m.title).concat(titleWords(String(m.key).replace(/_/g, ' ')));
+      for (var j = 0; j < words.length; j++) {
+        for (var k = 0; k < mw.length; k++) {
+          var a = words[j], b = mw[k];
+          if (a === b) return m;
+          /* "decision" / "decisions", "action" / "actions" -- but not "plan"
+             / "plant": a prefix counts only between words of five letters up. */
+          if (a.length >= 5 && b.length >= 5 && (a.indexOf(b) === 0 || b.indexOf(a) === 0)) return m;
+        }
+      }
+    }
+    return null;
+  }
+
   function sectionsToSchema(sections) {
     function strip(arr) {
       return arr.map(function (s) {
@@ -607,6 +652,17 @@
         var out = { title: s.title, kind: s.kind, fields: s.fields,
                     prompt_hint: s.prompt_hint, always_present: !!s.always_present,
                     columns: s.columns || [] };
+        /* module + note belong in this list for the reason above: a module
+           section saved without `module` becomes a custom section carrying a
+           copy of our text, and the next wording update never reaches it. */
+        if (s.module) out.module = { key: s.module.key, hash: s.module.hash };
+        if ((s.note || '').trim()) out.note = s.note.trim();
+        /* Items are kept line-for-line while typing (so Enter can open a new
+           one) and only tidied here, on the way out. */
+        if (s.kind === 'checklist') {
+          out.items = (s.items || []).map(function (i) { return (i || '').trim(); })
+            .filter(function (i) { return i; });
+        }
         if (s.children && s.children.length) out.children = strip(s.children);
         return out;
       });
@@ -645,6 +701,9 @@
             prompt_hint: s.prompt_hint || '',
             always_present: !!s.always_present,
             columns:     s.columns || [],
+            module:      s.module || null,
+            note:        s.note || '',
+            items:       s.items || [],
             children:    tagKeys(s.children || []),
             _key:        counter.n++,
           };
@@ -658,6 +717,21 @@
        parent and pointed at the wrong row. */
     var flagRef     = React.useState(null);
     var flagged     = flagRef[0]; var setFlagged = flagRef[1];
+
+    /* THE MODULE MENU (pipeline report_modules). Fetched once per editor;
+       empty offline, and then only custom sections are offered. */
+    var modRef      = React.useState({ modules: [], note_max_chars: 200 });
+    var modules     = modRef[0]; var setModules = modRef[1];
+    var pickRef     = React.useState(false);
+    var picking     = pickRef[0]; var setPicking = pickRef[1];
+    React.useEffect(function () {
+      var api = window.FS && window.FS.api && window.FS.api.templates;
+      if (!api || !api.listModules) return undefined;
+      var alive = true;
+      api.listModules().then(function (res) { if (alive && res) setModules(res); })
+        .catch(function () { /* no menu: custom sections still work */ });
+      return function () { alive = false; };
+    }, []);
 
     var noteRef     = React.useState('');
     var changeNote  = noteRef[0]; var setChangeNote = noteRef[1];
@@ -784,6 +858,10 @@
       editAt(p, function (sec) { return Object.assign({}, sec, { columns: names }); });
     }
 
+    function setItems(p, val) {
+      editAt(p, function (sec) { return Object.assign({}, sec, { items: (val || '').split('\n') }); });
+    }
+
     function setAlwaysPresent(p, val) {
       editAt(p, function (sec) { return Object.assign({}, sec, { always_present: !!val }); });
     }
@@ -799,6 +877,39 @@
 
     function addSection() {
       setSections(function (prev) { return prev.concat([blankSection()]); });
+      setPicking(false);
+    }
+
+    /* A section from a module: our wording, the module's default format.
+       Title and format stay editable; the wording does not (owner,
+       2026-09-30) -- the server replaces it with the published text on save
+       whatever is sent. */
+    function sectionFromModule(m) {
+      var s = blankSection();
+      return Object.assign(s, {
+        title: m.title, kind: m.kind || 'narrative', prompt_hint: m.purpose,
+        columns: m.columns || [], module: { key: m.key, hash: m.hash }, note: '',
+      });
+    }
+
+    function addModule(m) {
+      setSections(function (prev) { return prev.concat([sectionFromModule(m)]); });
+      setPicking(false);
+    }
+
+    /* An existing custom section switched to the standard module -- only when
+       the person clicks (owner, 2026-09-30: never automatically). Title and
+       format are kept; the wording becomes ours. */
+    function useModule(p, m) {
+      editAt(p, function (sec) {
+        return Object.assign({}, sec, {
+          prompt_hint: m.purpose, module: { key: m.key, hash: m.hash }, note: sec.note || '',
+        });
+      });
+    }
+
+    function setNote(p, val) {
+      editAt(p, function (sec) { return Object.assign({}, sec, { note: val }); });
     }
 
     /* A sub-section, under a top-level one. The nesting cap is one level, the
@@ -1092,20 +1203,63 @@
             className:   'fs-library__editor-kind-select',
             value:       sec.kind || 'narrative',
             onChange:    function (e) { setKind(p, e.target.value); },
+            disabled:    !!CODE_KINDS[sec.kind],
             'aria-label': 'How this section is laid out',
-            title:       'How this section is laid out',
-          }, Object.keys(KIND_LABEL).map(function (k) {
+            title:       CODE_KINDS[sec.kind] ? 'Filled in by FieldSight' : 'How this section is laid out',
+          }, Object.keys(KIND_LABEL).filter(function (k) {
+            return !CODE_KINDS[k] || k === sec.kind;
+          }).map(function (k) {
             return React.createElement('option', { key: k, value: k }, KIND_LABEL[k]);
           })),
-          React.createElement('input', {
-            className:   'fs-library__editor-hint-input',
-            value:       sec.prompt_hint || '',
-            onChange:    function (e) { setHint(p, e.target.value); },
-            'aria-label': 'What goes in this section',
-            placeholder: 'What goes in this section — e.g. "Hazards raised, and whether a control was agreed"',
-            maxLength:   400,
-          }),
+          /* A MODULE'S WORDING IS OURS AND FIXED (owner, 2026-09-30): shown,
+             not editable. The server replaces it with the published text on
+             save whatever is sent, so an input here would be a promise the
+             save does not keep. */
+          sec.module
+            ? React.createElement('p', { className: 'fs-library__editor-module-text' },
+                React.createElement('span', { className: 'fs-library__editor-module-tag' }, 'Standard wording'),
+                ' ', sec.prompt_hint || '')
+            : React.createElement('input', {
+                className:   'fs-library__editor-hint-input',
+                value:       sec.prompt_hint || '',
+                onChange:    function (e) { setHint(p, e.target.value); },
+                'aria-label': 'What goes in this section',
+                placeholder: 'What goes in this section — e.g. "Hazards raised, and whether a control was agreed"',
+                maxLength:   400,
+              }),
         ),
+
+        /* THE ONE THING THE CUSTOMER SAYS ABOUT A MODULE SECTION: a note --
+           an empty-state wording, a grouping, a threshold. It goes into the
+           prompt under our wording, inside the customer region. */
+        sec.module && !CODE_KINDS[sec.kind] && React.createElement('label', { className: 'fs-library__editor-note' },
+          React.createElement('span', null, 'Note'),
+          React.createElement('input', {
+            className:   'fs-library__editor-note-input',
+            value:       sec.note || '',
+            onChange:    function (e) { setNote(p, e.target.value); },
+            'aria-label': 'Note for this section',
+            placeholder: 'Optional — e.g. "If nothing, write NO DATA TODAY" or "Group by subcontractor"',
+            maxLength:   modules.note_max_chars || 200,
+          }),
+          React.createElement('span', { className: 'fs-library__editor-note-count' },
+            (sec.note || '').length + '/' + (modules.note_max_chars || 200)),
+        ),
+
+        /* OFFERED, NEVER APPLIED (owner, 2026-09-30): a custom section that
+           looks like a standard module is offered the switch; its own wording
+           stays until someone clicks. */
+        (function () {
+          if (sec.module) return null;
+          var m = suggestModule(sec.title, modules.modules);
+          if (!m) return null;
+          return React.createElement('div', { className: 'fs-library__editor-suggest' },
+            'This looks like the standard “' + m.title + '” module. ',
+            React.createElement('button', {
+              type: 'button', className: 'fs-library__editor-suggest-btn',
+              onClick: function () { useModule(p, m); },
+            }, 'Use the standard wording'));
+        })(),
 
         /* THE COLUMNS, and only for a table. Asking for "a table" and naming
            no columns was measured on the customer's own daily report: the
@@ -1124,6 +1278,23 @@
             placeholder: 'Item | Assigned | Due',
             maxLength:   200,
           }),
+        ),
+
+        /* One question per line, in the order the form asks them. The model
+           answers only what was said; anything else stays blank on the page. */
+        (sec.kind === 'checklist') && React.createElement('label',
+          { className: 'fs-library__editor-items' },
+          React.createElement('span', null, 'Checklist items — one per line'),
+          React.createElement('textarea', {
+            className:   'fs-library__editor-items-input',
+            value:       (sec.items || []).join('\n'),
+            onChange:    function (e) { setItems(p, e.target.value); },
+            'aria-label': 'Checklist items, one per line',
+            placeholder: 'Is the site fenced and signed?\nAre fire extinguishers provided?',
+            rows:        Math.min(12, Math.max(4, (sec.items || []).length + 1)),
+          }),
+          React.createElement('span', { className: 'fs-library__editor-items-count' },
+            (sec.items || []).filter(function (i) { return (i || '').trim(); }).length + ' / 120 items'),
         ),
 
         /* KEEP THE HEADING, NOT "WRITE SOMETHING ANYWAY". The distinction is
@@ -1177,11 +1348,36 @@
          section is deliberately blank: seeding it with placeholder wording
          would put that wording in the prompt, and the model would write it up
          as an instruction. */
+      /* ADD A SECTION = PICK A MODULE (owner, 2026-09-30), with writing your
+         own as the last choice. With no module menu (offline, or the fetch
+         failed) the button adds a custom section directly, as it always did. */
       React.createElement('button', {
         type:      'button',
         className: 'fs-library__editor-add-btn',
-        onClick:   addSection,
+        onClick:   function () {
+          if ((modules.modules || []).length) setPicking(!picking); else addSection();
+        },
+        'aria-expanded': picking,
       }, '+ Add section'),
+
+      picking && React.createElement('div', { className: 'fs-library__module-picker', role: 'list' },
+        (modules.modules || []).map(function (m) {
+          return React.createElement('button', {
+            key: m.key, type: 'button', role: 'listitem',
+            className: 'fs-library__module-option',
+            onClick: function () { addModule(m); },
+          },
+            React.createElement('span', { className: 'fs-library__module-option-title' }, m.title),
+            React.createElement('span', { className: 'fs-library__module-option-text' }, m.purpose));
+        }),
+        React.createElement('button', {
+          type: 'button', role: 'listitem',
+          className: 'fs-library__module-option fs-library__module-option--custom',
+          onClick: addSection,
+        },
+          React.createElement('span', { className: 'fs-library__module-option-title' }, 'Custom section'),
+          React.createElement('span', { className: 'fs-library__module-option-text' },
+            'Write your own heading and what goes in it.'))),
 
       React.createElement('div', { className: 'fs-library__editor-footer' },
         React.createElement('label', { className: 'fs-library__editor-change-label' }, 'Change note'),
@@ -1829,6 +2025,57 @@
                 cols.map(function (c) {
                   return React.createElement('td', { key: c }, row[c] || '—');
                 }),
+              );
+            }),
+          ),
+        );
+
+      case 'header':
+        return React.createElement('table', { className: 'fs-library__render-table' },
+          React.createElement('tbody', null,
+            [['Project', 'UC PK'], ['Client', 'Naylor Love'], ['Date', 'Wednesday 23 September 2026'],
+             ['Recorded by', 'Ben Lin']].map(function (r) {
+              return React.createElement('tr', { key: r[0] },
+                React.createElement('th', null, r[0]), React.createElement('td', null, r[1]));
+            }),
+          ),
+        );
+
+      case 'weather':
+        return React.createElement('div', null,
+          React.createElement('table', { className: 'fs-library__render-table' },
+            React.createElement('thead', null, React.createElement('tr', null,
+              ['Sky', 'Rain', 'Temperature', 'Wind'].map(function (c) {
+                return React.createElement('th', { key: c }, c);
+              }))),
+            React.createElement('tbody', null, React.createElement('tr', null,
+              ['Light rain', '6.2 mm', '7-14°C', 'up to 31 km/h'].map(function (c) {
+                return React.createElement('td', { key: c }, c);
+              }))),
+          ),
+          React.createElement('ul', { className: 'fs-library__render-list' },
+            React.createElement('li', null, 'Rain likely this afternoon (from 13:00). Impact: roofing.')),
+        );
+
+      case 'checklist':
+        var items = (sec.items || []).filter(function (i) { return (i || '').trim(); }).slice(0, 3);
+        if (!items.length) items = ['Is the site fenced and signed?'];
+        return React.createElement('table', { className: 'fs-library__render-table' },
+          React.createElement('thead', null,
+            React.createElement('tr', null,
+              ['Item', 'Answer', 'Comment', 'Responsible', 'Due'].map(function (c) {
+                return React.createElement('th', { key: c }, c);
+              }),
+            ),
+          ),
+          React.createElement('tbody', null,
+            items.map(function (it, i) {
+              return React.createElement('tr', { key: i },
+                React.createElement('td', null, it),
+                React.createElement('td', null, i === 0 ? 'Yes' : ''),
+                React.createElement('td', null, ''),
+                React.createElement('td', null, ''),
+                React.createElement('td', null, ''),
               );
             }),
           ),

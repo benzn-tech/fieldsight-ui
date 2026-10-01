@@ -150,6 +150,9 @@
        modal-overlay.js and notification-bell.js (which opens it), registers on
        window.FieldSight so it is unaffected by api/index.js's FS.api wipe. -->
   <script type="text/babel" src="scripts/composites/intro-suggestion-dialog.js?v=2"></script>
+  <!-- The bell's photograph choice (fs:open-photo-choice). After modal-overlay.js
+       and session-report-modal.js, whose PhotoChoiceStep it renders. -->
+  <script type="text/babel" src="scripts/composites/photo-choice-dialog.js?v=1"></script>
   <!-- Sprint 8.1.2 — Safety observation creation modal -->
   <script type="text/babel" src="scripts/composites/safety-create-modal.js?v=5"></script>
   <!-- Sprint 8.1.3 — Quality item creation modal -->
@@ -255,6 +258,8 @@
        AFTER api/index.js: that file assigns window.FS.api WHOLESALE, so anything
        registering before it is silently wiped with no error at load. -->
   <script src="scripts/api/name-proposals.js?v=2"></script>
+  <!-- Same constraint: after api/index.js. -->
+  <script src="scripts/api/photo-notice.js?v=1"></script>
   <script src="scripts/api/recording-deletion.js?v=3"></script>
   <script src="scripts/api/audio.js?v=1"></script>
   <script src="scripts/api/video.js?v=1"></script>
@@ -359,7 +364,7 @@
   <!-- Sprint 4.10 — Today-Programme adapter (today's programme tasks for caller) -->
   <script src="scripts/api/today-programme-adapter.js?v=4"></script>
   <!-- Sprint 10 B.0 — Template store (LocalStorage-backed template API) -->
-  <script src="scripts/api/template-store.js?v=2"></script>
+  <script src="scripts/api/template-store.js?v=3"></script>
   <!-- Report generation jobs: owns the polling, survives a reload, feeds the bell.
        Plain script and BEFORE app-shell, which is text/babel and therefore runs
        later -- the bell reads window.FS.reportJobs on first render. -->
@@ -394,7 +399,7 @@
   <!-- Sprint 10 B.2 — Template upload modal composite -->
   <script type="text/babel" src="scripts/composites/template-upload-modal.js?v=2"></script>
   <!-- Sprint 10 B.1+B.3 — /library page (template library + skip-edit preview) -->
-  <script type="text/babel" src="scripts/pages/library.js?v=9"></script>
+  <script type="text/babel" src="scripts/pages/library.js?v=10"></script>
   <!-- Sprint 9 Track A — /insights dashboard (subcontractor + tag analytics) -->
   <script type="text/babel" src="scripts/pages/insights.js?v=5"></script>
   <!-- Sprint 9 Track C — strategic dashboards (Portfolio / Regional / Executive) -->

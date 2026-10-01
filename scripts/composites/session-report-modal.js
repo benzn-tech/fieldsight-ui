@@ -35,7 +35,7 @@
 (function () {
   'use strict';
 
-  var STEPS = ['preview', 'fill', 'review', 'generating', 'done'];
+  var STEPS = ['preview', 'photos', 'fill', 'review', 'generating', 'done'];
 
   // ---- pure helpers (exported for node --test) --------------------------
 
@@ -327,15 +327,22 @@
 
     return h('label', { className: 'fs-field fs-field--md fs-field--full-width fs-srm__template' },
       h('span', { className: 'fs-field__label' }, 'Template'),
-      wrapControl(h('select', {
-        className: 'fs-field__control', value: props.templateId || '',
-        disabled: st.phase === 'loading',
-        onChange: function (e) {
-          var id = e.target.value || null;
-          var row = st.rows.filter(function (t) { return t.id === id; })[0];
-          props.onChoose(id, row && row.version, row && row.title);
-        },
-      }, options)),
+      /* The shared control strips the native arrow (appearance: none), so a bare
+         select read as a text box and people missed that the template can be
+         chosen. Same chevron as FieldSight.Select. */
+      h('div', { className: 'fs-field__control-wrap' },
+        h('select', {
+          className: 'fs-field__control fs-field__control--select', value: props.templateId || '',
+          disabled: st.phase === 'loading',
+          onChange: function (e) {
+            var id = e.target.value || null;
+            var row = st.rows.filter(function (t) { return t.id === id; })[0];
+            props.onChoose(id, row && row.version, row && row.title);
+          },
+        }, options),
+        h('span', { className: 'fs-field__select-chevron', 'aria-hidden': 'true' },
+          window.FieldSight && window.FieldSight.NavIcon
+            ? h(window.FieldSight.NavIcon, { name: 'chevron-down', size: 16 }) : '▾')),
       st.phase === 'error'
         ? h('span', { className: 'fs-field__hint fs-field__hint--error' },
             'Could not load your templates. The standard report is still available.')
@@ -344,6 +351,46 @@
         ? h('span', { className: 'fs-field__hint' },
             'Templates are unavailable here; the standard report is still available.')
         : null);
+  }
+
+  /* Past the limit, the person leaves photographs out -- grouped by where they
+     were taken, ticked = in the report. The choice is kept for the day and the
+     nightly report follows it too. */
+  function PhotoChoiceStep(props) {
+    var h = React.createElement;
+    var sel = props.selection || { photos: [] };
+    var groups = [], byPlace = {};
+    sel.photos.forEach(function (ph) {
+      var key = ph.place || '';
+      if (!byPlace[key]) { byPlace[key] = []; groups.push(key); }
+      byPlace[key].push(ph);
+    });
+    var over = props.included - props.max;
+    return h('div', { className: 'fs-srm__step fs-srm__photos' },
+      h('p', { className: 'fs-srm__photos-count' + (over > 0 ? ' fs-srm__photos-count--over' : '') },
+        props.included + ' of ' + sel.photos.length + ' photographs in the report · at most ' + props.max
+        + (over > 0 ? ' — leave out ' + over + ' more' : '')),
+      h('p', { className: 'fs-srm__hint' },
+        'Untick the ones to leave out. The choice is kept for this day, and the nightly report follows it too.'),
+      props.error ? h('p', { className: 'fs-field__hint fs-field__hint--error' }, props.error) : null,
+      groups.map(function (g) {
+        return h('section', { key: g || '_none', className: 'fs-srm__photos-group' },
+          h('h4', { className: 'fs-srm__photos-place' },
+            (g ? g.replace(/\b\w/g, function (c) { return c.toUpperCase(); }) : 'No place said')
+            + ' (' + byPlace[g].length + ')'),
+          h('div', { className: 'fs-srm__photos-grid' },
+            byPlace[g].map(function (ph) {
+              var on = !props.out[ph.filename];
+              return h('label', { key: ph.filename,
+                className: 'fs-srm__photos-item' + (on ? '' : ' fs-srm__photos-item--out') },
+                h('img', { src: ph.url, alt: ph.filename, loading: 'lazy' }),
+                h('span', { className: 'fs-srm__photos-meta' },
+                  h('input', { type: 'checkbox', checked: on,
+                    'aria-label': (on ? 'Leave out ' : 'Put back ') + ph.filename,
+                    onChange: function () { props.onToggle(ph.filename); } }),
+                  ' ', ph.time || ''));
+            })));
+      }));
   }
 
   function FillStep(props) {
@@ -367,6 +414,11 @@
       return h('label', { className: 'fs-field fs-field--md fs-field--full-width' },
         h('span', { className: 'fs-field__label' }, label), wrapControl(node));
     }
+    /* Attendees, weather and sign-off feed the STANDARD report only. A template
+       report is written from the recording and its own sections (weather by
+       code), and never reads them -- so with a template chosen they are
+       disabled with the reason, not left looking like they matter. */
+    var templated = !!form.templateId;
     return h('div', { className: 'fs-srm__step fs-srm__fill' },
       /* First, because it is the choice the rest of the report follows from --
          and because someone who came here to use a particular format should
@@ -379,16 +431,22 @@
         type: 'text', className: 'fs-field__control', value: form.title || '',
         onChange: function (e) { setTitle(e.target.value); },
       })),
+      templated ? h('p', { className: 'fs-field__hint fs-srm__template-note' },
+        'Attendees, weather and sign-off below are used by the standard report only. '
+        + 'A template report takes them from the recording and the template’s own sections.') : null,
       field('Attendees (one per line)', h('textarea', {
         className: 'fs-field__control fs-field__control--textarea', rows: 3, value: attText,
+        disabled: templated,
         onChange: function (e) { onAtt(e.target.value); },
       })),
       field('Weather', h('input', {
         type: 'text', className: 'fs-field__control', value: fields.weather || '',
+        disabled: templated,
         onChange: function (e) { setField('weather', e.target.value); },
       })),
       field('Sign-off', h('input', {
         type: 'text', className: 'fs-field__control', value: fields.sign_off || '',
+        disabled: templated,
         onChange: function (e) { setField('sign_off', e.target.value); },
       })));
   }
@@ -448,6 +506,13 @@
     /* Only for the bell's label -- the request carries the id and version. */
     var s_tname = React.useState(null);
     var chosenTemplateName = s_tname[0], setChosenTemplateName = s_tname[1];
+    /* The day's photographs and what the person leaves out of its reports
+       (owner, 2026-10-01: 60 at page size, up to 120 shrunk automatically,
+       past 120 the person chooses -- before generating, not after). */
+    var s_psel = React.useState(null); var photoSel = s_psel[0], setPhotoSel = s_psel[1];
+    var s_pex = React.useState({}); var photoOut = s_pex[0], setPhotoOut = s_pex[1];
+    var s_perr = React.useState(null); var photoErr = s_perr[0], setPhotoErr = s_perr[1];
+    var s_psav = React.useState(false); var photoSaving = s_psav[0], setPhotoSaving = s_psav[1];
 
     function sid() { return props.session ? props.session.session_id : null; }
 
@@ -455,6 +520,42 @@
       return props.scope === 'day'
         ? { scope: 'day', date: props.date, user: props.userFolder }
         : { sessionId: sid(), date: props.date, user: props.userFolder };
+    }
+
+    React.useEffect(function () {
+      if (!props.open || props.scope !== 'day' || !org.getPhotoSelection) return undefined;
+      var alive = true;
+      setPhotoSel(null); setPhotoOut({}); setPhotoErr(null);
+      Promise.resolve(org.getPhotoSelection({ date: props.date, user: props.userFolder }))
+        .then(function (res) {
+          if (!alive || !res || !Array.isArray(res.photos)) return;
+          setPhotoSel(res);
+          var out = {};
+          res.photos.forEach(function (ph) { if (ph.excluded) out[ph.filename] = true; });
+          setPhotoOut(out);
+        }).catch(function () { /* no choice offered: the reports take their fair share */ });
+      return function () { alive = false; };
+    }, [props.open]);
+
+    var photoTotal = photoSel ? photoSel.photos.length : 0;
+    var photoIn = photoTotal - Object.keys(photoOut).filter(function (k) { return photoOut[k]; }).length;
+    var photoMax = photoSel ? photoSel.limits.max : 0;
+    var mustChoose = !!(photoSel && photoTotal > photoMax);
+
+    function savePhotoChoice(next) {
+      setPhotoErr(null); setPhotoSaving(true);
+      var excluded = Object.keys(photoOut).filter(function (k) { return photoOut[k]; });
+      Promise.resolve(org.putPhotoSelection({ date: props.date, user: props.userFolder, excluded: excluded }))
+        .then(function (res) {
+          setPhotoSaving(false);
+          if (!res || res.error || res._accessDenied) {
+            setPhotoErr((res && res.error) || 'Could not save the choice of photographs.');
+            return;
+          }
+          next();
+        }).catch(function () {
+          setPhotoSaving(false); setPhotoErr('Could not save the choice of photographs.');
+        });
     }
 
     // Reset the wizard whenever it (re)opens.
@@ -623,6 +724,15 @@
           h('h3', { className: 'fs-srm__preview-title' },
             preview.title || (props.scope === 'day' ? 'Day report' : 'Session report')),
           h('p', { className: 'fs-srm__preview-meta' }, [preview.siteName, preview.date].filter(Boolean).join(' · ')),
+          photoSel && photoIn > photoSel.limits.pageSize && !mustChoose
+            ? h('p', { className: 'fs-srm__hint fs-srm__photo-note' },
+                photoIn + ' photographs: they go into the report at a smaller size so all of them fit.')
+            : null,
+          mustChoose
+            ? h('p', { className: 'fs-srm__hint fs-srm__photo-note' },
+                photoTotal + ' photographs: a report holds ' + photoMax
+                + '. Next, choose which to leave out.')
+            : null,
           (preview.participants && preview.participants.length)
             ? h('p', { className: 'fs-srm__preview-attendees' }, 'Attendees: ' + preview.participants.join(', ')) : null,
           choosable ? h('div', { className: 'fs-srm__window' },
@@ -661,6 +771,13 @@
                 photoStrip(t.related_photos));
             })));
       }
+    } else if (step === 'photos') {
+      body = h(PhotoChoiceStep, {
+        selection: photoSel, out: photoOut, max: photoMax, included: photoIn, error: photoErr,
+        onToggle: function (name) {
+          setPhotoOut(function (o) { var n = Object.assign({}, o); n[name] = !o[name]; return n; });
+        },
+      });
     } else if (step === 'fill') {
       body = h(FillStep, {
         form: form, setForm: setForm,
@@ -704,7 +821,7 @@
           (result && result.emailed) ? 'Your report has been emailed.' : 'Your report is ready.'),
         (result && result.docUrl)
           ? h('a', {
-              className: 'fs-btn fs-btn--primary', href: result.docUrl,
+              className: 'fs-btn fs-btn--md fs-btn--primary fs-srm__download', href: result.docUrl,
               target: '_blank', rel: 'noopener', download: '',
             }, 'Download report')
           : null);
@@ -723,9 +840,19 @@
 
     var footer;
     if (step === 'preview') footer = h('footer', { className: 'fs-srm__footer' },
-      btn('Cancel', props.onClose), btn('Next', function () { setStep('fill'); }, 'primary'));
+      btn('Cancel', props.onClose),
+      btn('Next', function () { setStep(mustChoose ? 'photos' : 'fill'); }, 'primary'));
+    else if (step === 'photos') footer = h('footer', { className: 'fs-srm__footer' },
+      btn('Back', function () { setStep('preview'); }),
+      h('button', {
+        type: 'button', className: 'fs-btn fs-btn--md fs-btn--primary',
+        disabled: photoIn > photoMax || photoSaving,
+        title: photoIn > photoMax ? 'Leave out ' + (photoIn - photoMax) + ' more' : undefined,
+        onClick: function () { savePhotoChoice(function () { setStep('fill'); }); },
+      }, photoSaving ? 'Saving…' : 'Next'));
     else if (step === 'fill') footer = h('footer', { className: 'fs-srm__footer' },
-      btn('Back', function () { setStep('preview'); }), btn('Next', function () { setStep('review'); }, 'primary'));
+      btn('Back', function () { setStep(mustChoose ? 'photos' : 'preview'); }),
+      btn('Next', function () { setStep('review'); }, 'primary'));
     else if (step === 'review') footer = h('footer', { className: 'fs-srm__footer' },
       btn('Back', function () { setStep('fill'); }),
       h('button', {
@@ -755,6 +882,8 @@
 
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.SessionReportModal = SessionReportModal;
+  /* Shared with the bell's PhotoChoiceDialog: one way of choosing. */
+  window.FieldSight.PhotoChoiceStep = PhotoChoiceStep;
 
   // Pure-helper export for node --test (browser ignores this).
   if (typeof module !== 'undefined' && module.exports) {

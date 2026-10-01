@@ -11547,6 +11547,21 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color: var(--text-primary, #111827);
 }
 
+/* A checklist section's items, one per line: the customer's own questions. */
+.fs-library__editor-items {
+  display: flex; flex-direction: column; gap: 4px;
+  width: 100%; padding-left: 26px;
+  font-size: 11px; color: var(--text-secondary, #6b7280);
+}
+.fs-library__editor-items-input {
+  width: 100%; resize: vertical;
+  font: inherit; font-size: 12px; line-height: 1.5; padding: 4px 6px;
+  border: 1px solid var(--border-subtle, #e5e7eb); border-radius: 4px;
+  background: var(--surface-input); color: var(--text-primary, #111827);
+}
+.fs-library__editor-items-input:focus { border-color: var(--border-strong, #9ca3af); outline: none; }
+.fs-library__editor-items-count { align-self: flex-end; font-size: 10px; }
+
 /* The section a failed save is talking about. Pointing at it by number was not
    enough on a nine-section template -- and it was wrong for a sub-section,
    where the number counted within its own parent. */
@@ -12681,6 +12696,8 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 /* --- step 2: template and the fields around it --------------------------- */
 
 .fs-srm__fill { gap: 16px; }
+/* Why the three fields below are disabled when a template is chosen. */
+.fs-srm__template-note { margin: -8px 0 0; color: var(--text-secondary); }
 
 /* --- step 3: how it is delivered ----------------------------------------- */
 
@@ -12717,6 +12734,32 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 /* --- after generating ----------------------------------------------------- */
 
 .fs-srm__done-msg { color: var(--text-primary); }
+/* As tall as the footer's Done button and only as wide as its words: the step
+   is a column, which stretched the link across the dialog. */
+.fs-srm__download { align-self: flex-start; }
+
+/* --- the day's photographs: smaller past 60, chosen past 120 ---------------- */
+
+.fs-srm__photo-note { color: var(--text-secondary); }
+.fs-srm__photos { gap: 12px; }
+.fs-srm__photos-count { font-weight: 600; color: var(--text-primary); }
+.fs-srm__photos-count--over { color: var(--color-danger-600); }
+.fs-srm__photos-group { display: flex; flex-direction: column; gap: 6px; }
+.fs-srm__photos-place { margin: 4px 0 0; font-size: 13px; color: var(--text-secondary); }
+.fs-srm__photos-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px;
+}
+.fs-srm__photos-item {
+  display: flex; flex-direction: column; gap: 4px; cursor: pointer;
+  border: 1px solid var(--border-default); border-radius: var(--radius-md);
+  padding: 4px; background: var(--surface-panel);
+}
+.fs-srm__photos-item img {
+  width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 4px;
+  background: var(--surface-panel);
+}
+.fs-srm__photos-item--out { opacity: 0.45; }
+.fs-srm__photos-meta { font-size: 12px; color: var(--text-secondary); }
 
 .fs-srm__preview-photos {
   display: flex; flex-wrap: wrap; gap: 8px;
@@ -13822,4 +13865,85 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   margin: 6px 0 0;
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+/* ---- Library editor: report section modules (library.js) ---- */
+.fs-library__editor-module-text {
+  flex: 1;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.fs-library__editor-module-tag {
+  display: inline-block;
+  padding: 0 6px;
+  margin-right: 4px;
+  font-size: 11px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-default);
+  color: var(--text-tertiary);
+}
+.fs-library__editor-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fs-library__editor-note-input {
+  flex: 1;
+  font: inherit;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-default);
+  background: var(--surface-input);
+  color: var(--text-primary);
+}
+.fs-library__editor-note-count { font-size: 11px; color: var(--text-tertiary); }
+.fs-library__editor-suggest {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fs-library__editor-suggest-btn {
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--text-link);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.fs-library__module-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+.fs-library__module-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+}
+.fs-library__module-option:hover { border-color: var(--color-accent-500); }
+.fs-library__module-option--custom { border-style: dashed; }
+.fs-library__module-option-title { font-size: 13px; font-weight: var(--font-weight-semibold); }
+.fs-library__module-option-text {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
