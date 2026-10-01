@@ -50,6 +50,121 @@
     return !!(sn && sn.roleMayName((user || {}).role));
   }
 
+  /* "Same person as…": pick the other profile, read the backend's plain-words verdict,
+     then merge. Nothing here ever shows a score -- only the sentence the server chose.
+     A failed merge keeps the dialog open and says why; it never closes silently. */
+  function MergeDialog(props) {
+    var org = window.FS.api.org;
+    var sn = window.FS.speakerNaming;
+    var Modal = (window.FieldSight || {}).ModalOverlay;
+    var row = props.row;
+    var choices = sn.mergeChoices(row, props.rows);
+    var refTarget = React.useState(null);
+    var target = refTarget[0], setTarget = refTarget[1];
+    var refCheck = React.useState(null);      /* { phase: 'checking'|'ready'|'error', dlg, message } */
+    var check = refCheck[0], setCheck = refCheck[1];
+    var refSave = React.useState({ busy: false, error: null });
+    var save = refSave[0], setSave = refSave[1];
+    var seq = React.useRef(0);
+
+    function choose(c) {
+      var my = ++seq.current;
+      setTarget(c);
+      setSave({ busy: false, error: null });
+      setCheck({ phase: 'checking' });
+      org.mergeCheck(row.id, c.id).then(function (res) {
+        if (seq.current !== my) return;
+        if (res && (res._notFound || res._accessDenied)) {
+          setCheck({ phase: 'error', message: res.error || 'Could not compare these two voices.' });
+          return;
+        }
+        setCheck({ phase: 'ready', dlg: sn.mergeDialogState(res, c.name) });
+      }).catch(function (err) {
+        if (seq.current !== my) return;
+        setCheck({ phase: 'error',
+          message: (err && err.message) || 'Could not compare these two voices.' });
+      });
+    }
+
+    function doMerge() {
+      if (!target || !check || check.phase !== 'ready') return;
+      setSave({ busy: true, error: null });
+      org.mergeVoiceprint(row.id, target.id, check.dlg.confirm).then(function (res) {
+        if (res && res._notAvailable) {
+          setSave({ busy: false, error: 'Not available in this environment.' });
+          return;
+        }
+        if (res && (res._accessDenied || res._notFound)) {
+          setSave({ busy: false, error: res.error || 'You do not have permission to do that.' });
+          return;
+        }
+        props.onMerged(target.name);
+      }).catch(function (err) {
+        if (err && err.status === 409) {
+          /* The server judged the pair different and wanted confirmation: show its
+             message and the confirm button rather than a bare failure. */
+          var b = err.body || {};
+          setCheck({ phase: 'ready', dlg: sn.mergeDialogState(
+            { verdict: 'different', message: b.message || b.error || err.message }, target.name) });
+          setSave({ busy: false, error: null });
+          return;
+        }
+        setSave({ busy: false, error: (err && err.message) || 'Could not merge these voices.' });
+      });
+    }
+
+    var kids = [];
+    kids.push(React.createElement('div', { key: 'intro', className: 'fs-voices__hint' },
+      'Choose the voice that is the same person as ' + (row.displayName || 'this voice')
+      + '. Their voice samples become one profile.'));
+    kids.push(React.createElement('ul', { key: 'list', className: 'fs-voices__choices' },
+      choices.length ? choices.map(function (c) {
+        return React.createElement('li', { key: c.id },
+          React.createElement('button', {
+            type: 'button',
+            className: 'fs-voices__choice' + (target && target.id === c.id ? ' is-selected' : ''),
+            'aria-pressed': !!(target && target.id === c.id),
+            onClick: function () { choose(c); },
+          },
+            React.createElement('span', { className: 'fs-voices__choice-name' }, c.name),
+            c.sameName ? React.createElement('span', { className: 'fs-voices__tag' }, 'Same name') : null,
+            c.identity.length ? React.createElement('span', { className: 'fs-voices__identity' },
+              c.identity.join(' · ')) : null));
+      }) : React.createElement('li', { className: 'fs-voices__hint' },
+        'There is no other voice to merge with.')));
+    if (check && check.phase === 'checking') {
+      kids.push(React.createElement('div', { key: 'chk', role: 'status', className: 'fs-voices__hint' },
+        'Comparing…'));
+    }
+    if (check && check.phase === 'error') {
+      kids.push(React.createElement('div', { key: 'cerr', role: 'alert',
+        className: 'fs-voices__verdict fs-voices__verdict--warn' }, check.message));
+    }
+    if (check && check.phase === 'ready') {
+      kids.push(React.createElement('div', { key: 'v', role: 'status',
+        className: 'fs-voices__verdict' + (check.dlg.warn ? ' fs-voices__verdict--warn' : '') },
+        check.dlg.message));
+    }
+    if (save.error) {
+      kids.push(React.createElement('div', { key: 'serr', role: 'alert',
+        className: 'fs-voices__verdict fs-voices__verdict--warn' }, save.error));
+    }
+    kids.push(React.createElement('div', { key: 'btns', className: 'fs-voices__retry-actions' },
+      (check && check.phase === 'ready') ? React.createElement('button', {
+        type: 'button', className: 'fs-voices__retry', disabled: save.busy, onClick: doMerge,
+      }, save.busy ? 'Merging…' : check.dlg.button) : null,
+      React.createElement('button', {
+        type: 'button', className: 'fs-voices__retry', disabled: save.busy, onClick: props.onClose,
+      }, 'Cancel')));
+
+    var body = React.createElement('div', { className: 'fs-voices__merge' }, kids);
+    if (!Modal) return body;
+    return React.createElement(Modal, {
+      open: true, onClose: props.onClose, size: 'md',
+      title: 'Same person as…', closeOnBackdrop: !save.busy,
+    }, body);
+  }
+
   function VoiceLibrary() {
     var org = window.FS && window.FS.api && window.FS.api.org;
     var user = (window.AuthMock && window.AuthMock.currentUser) || {};
@@ -64,6 +179,12 @@
        Keyed on the profile so two rows can be retried independently. */
     var refRetry = React.useState({});
     var retrying = refRetry[0], setRetrying = refRetry[1];
+    var refShowDel = React.useState(false);
+    var showDeleted = refShowDel[0], setShowDeleted = refShowDel[1];
+    var refMerge = React.useState(null);        /* the row being merged away */
+    var mergeRow = refMerge[0], setMergeRow = refMerge[1];
+    var refRename = React.useState(null);       /* { id, draft, error, busy } */
+    var renaming = refRename[0], setRenaming = refRename[1];
     var watchRef = React.useRef(0);
     React.useEffect(function () {
       return function () { watchRef.current = -1; };    /* leaving the page stops every poll */
@@ -183,6 +304,39 @@
       });
     }
 
+    function saveRename() {
+      var sn = window.FS.speakerNaming;
+      var v = sn.validateDisplayName(renaming.draft);
+      if (!v.ok) { setRenaming(Object.assign({}, renaming, { error: v.error })); return; }
+      setRenaming(Object.assign({}, renaming, { busy: true, error: null }));
+      org.renameVoiceprint(renaming.id, v.value).then(function (res) {
+        if (res && res._notAvailable) {
+          setRenaming(Object.assign({}, renaming, { busy: false,
+            error: 'Not available in this environment.' }));
+          return;
+        }
+        if (res && (res._accessDenied || res._notFound)) {
+          setRenaming(Object.assign({}, renaming, { busy: false,
+            error: res.error || 'You do not have permission to do that.' }));
+          return;
+        }
+        setRenaming(null);
+        setNote('Renamed to ' + v.value + '.');
+        setTick(function (n) { return n + 1; });
+      }).catch(function (err) {
+        setRenaming(Object.assign({}, renaming, { busy: false,
+          error: (err && err.message) || 'Could not rename that voice.' }));
+      });
+    }
+
+    function merged(name) {
+      setMergeRow(null);
+      var msg = window.FS.speakerNaming.mergedToast(name);
+      if (window.FS.toast && window.FS.toast.show) window.FS.toast.show({ message: msg, tone: 'success' });
+      else setNote(msg);
+      setTick(function (n) { return n + 1; });
+    }
+
     function openRecording(route) {
       var router = window.FS && window.FS.Router;
       if (router && route) router.navigate(route);
@@ -260,35 +414,98 @@
       /* Wrapped so the table scrolls sideways instead of overflowing its
          container. The narrow target here is real — 320x427dp — and a table
          that overflows there does it silently. */
-      body = React.createElement('div', { className: 'fs-voices__table-wrap' },
-        React.createElement('table', { className: 'fs-voices__table' },
-        React.createElement('thead', null,
-          React.createElement('tr', null,
-            ['Name', 'Learned from', 'Status', 'Latest', ''].map(
-              function (h, i) { return React.createElement('th', { key: i }, h); }))),
-        React.createElement('tbody', null,
-          state.rows.map(function (r) {
-            var w = window.FS.speakerNaming.voiceRowWords(r);
-            return React.createElement('tr', { key: r.id },
-              React.createElement('td', null, r.displayName || '(unnamed voice)'),
-              /* Plain words, not the database's vocabulary -- see voiceRowWords. A
-                 profile with no voice saved still shows, and says so, because it names
-                 nobody; and "named by someone" keeps a person's assertion visible beside
-                 what the clustering inferred. */
-              React.createElement('td', null, w.learned),
-              React.createElement('td', null, w.status),
-              React.createElement('td', { title: w.latestTitle },
-                w.latest,
-                retryBlock(r)),
-              React.createElement('td', null,
-                React.createElement('button', {
-                  type: 'button',
-                  className: 'fs-voices__delete',
-                  disabled: busy === r.id || r.status === 'withdrawn',
-                  onClick: function () { withdraw(r); },
-                }, r.status === 'withdrawn' ? 'Deleted'
-                  : busy === r.id ? 'Deleting…' : 'Delete')));
-          }))));
+      var sn2 = window.FS.speakerNaming;
+      var split = sn2.splitVoiceRows(state.rows);
+      var canEdit = mayManage(user);
+
+      /* The name cell: the name, then who this voice is (account, folders, who named it)
+         so two people called the same thing can be told apart, then the actions. */
+      var nameCell = function (r, dead) {
+        var kids = [];
+        if (renaming && renaming.id === r.id) {
+          kids.push(React.createElement('input', {
+            key: 'in', type: 'text', className: 'fs-voices__input', value: renaming.draft,
+            'aria-label': 'New name for ' + (r.displayName || 'this voice'),
+            disabled: renaming.busy, autoFocus: true,
+            onChange: function (e) { setRenaming(Object.assign({}, renaming,
+              { draft: e.target.value, error: null })); },
+            onKeyDown: function (e) {
+              if (e.key === 'Enter') saveRename();
+              if (e.key === 'Escape') setRenaming(null);
+            },
+          }));
+          kids.push(React.createElement('div', { key: 'h', className: 'fs-voices__reason' },
+            'Add something that tells people apart, e.g. Ben Lin (Cassidy)'));
+          if (renaming.error) kids.push(React.createElement('div', { key: 'e', role: 'alert',
+            className: 'fs-voices__verdict fs-voices__verdict--warn' }, renaming.error));
+          kids.push(React.createElement('div', { key: 'b', className: 'fs-voices__retry-actions' },
+            React.createElement('button', { type: 'button', className: 'fs-voices__retry',
+              disabled: renaming.busy, onClick: saveRename }, renaming.busy ? 'Saving…' : 'Save name'),
+            React.createElement('button', { type: 'button', className: 'fs-voices__retry',
+              disabled: renaming.busy, onClick: function () { setRenaming(null); } }, 'Cancel')));
+          return kids;
+        }
+        kids.push(React.createElement('div', { key: 'n' }, r.displayName || '(unnamed voice)'));
+        var idl = sn2.voiceIdentityLines(r);
+        if (idl.length) kids.push(React.createElement('div', { key: 'id', className: 'fs-voices__identity' },
+          idl.join(' · ')));
+        var dup = dead ? null : sn2.sameNameNotice(r, state.rows);
+        if (dup) kids.push(React.createElement('div', { key: 'dup', className: 'fs-voices__notice' }, dup));
+        if (canEdit && !dead) {
+          kids.push(React.createElement('div', { key: 'act', className: 'fs-voices__retry-actions' },
+            React.createElement('button', { type: 'button', className: 'fs-voices__retry',
+              onClick: function () { setMergeRow(r); } }, 'Same person as…'),
+            React.createElement('button', { type: 'button', className: 'fs-voices__retry',
+              onClick: function () { setRenaming({ id: r.id, draft: r.displayName || '',
+                error: null, busy: false }); } }, 'Rename')));
+        }
+        return kids;
+      };
+
+      var renderRow = function (r, dead) {
+        var w = sn2.voiceRowWords(r);
+        return React.createElement('tr', { key: r.id },
+          React.createElement('td', null, nameCell(r, dead)),
+          /* Plain words, not the database's vocabulary -- see voiceRowWords. A
+             profile with no voice saved still shows, and says so, because it names
+             nobody; and "named by someone" keeps a person's assertion visible beside
+             what the clustering inferred. */
+          React.createElement('td', null, w.learned),
+          React.createElement('td', null, dead ? sn2.deletedVoiceWords(r) : w.status),
+          React.createElement('td', { title: w.latestTitle },
+            w.latest,
+            dead ? null : retryBlock(r)),
+          React.createElement('td', null,
+            React.createElement('button', {
+              type: 'button',
+              className: 'fs-voices__delete',
+              disabled: busy === r.id || dead,
+              onClick: function () { withdraw(r); },
+            }, dead ? (r.mergedInto ? 'Merged' : 'Deleted')
+              : busy === r.id ? 'Deleting…' : 'Delete')));
+      };
+
+      /* Wrapped so the table scrolls sideways instead of overflowing its
+         container. The narrow target here is real — 320x427dp — and a table
+         that overflows there does it silently. */
+      body = React.createElement(React.Fragment, null,
+        React.createElement('div', { className: 'fs-voices__table-wrap' },
+          React.createElement('table', { className: 'fs-voices__table' },
+            React.createElement('thead', null,
+              React.createElement('tr', null,
+                ['Name', 'Learned from', 'Status', 'Latest', ''].map(
+                  function (h, i) { return React.createElement('th', { key: i }, h); }))),
+            React.createElement('tbody', null,
+              split.live.map(function (r) { return renderRow(r, false); }),
+              (showDeleted ? split.deleted : []).map(function (r) { return renderRow(r, true); })))),
+        split.deleted.length ? React.createElement('button', {
+          type: 'button', className: 'fs-voices__retry fs-voices__toggle',
+          'aria-expanded': showDeleted,
+          onClick: function () { setShowDeleted(!showDeleted); },
+        }, showDeleted ? 'Hide deleted' : 'Show deleted (' + split.deleted.length + ')') : null,
+        mergeRow ? React.createElement(MergeDialog, {
+          row: mergeRow, rows: state.rows, onClose: function () { setMergeRow(null); },
+          onMerged: merged }) : null);
     }
 
     return React.createElement('div', { className: 'fs-voices' },

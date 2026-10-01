@@ -631,6 +631,120 @@
     return { status: status, learned: learned, latest: latest, latestTitle: latestTitle };
   }
 
+  /* ---- Voices page: telling same-named people apart, merging duplicates ----
+     Customer rule: plain words, and NEVER a similarity number or score. The backend
+     sends a verdict and a sentence; this layer only chooses what to show. Every field
+     added to GET /voiceprints is optional -- an older backend omits them and the row
+     must render nothing for them, never the word "undefined". */
+
+  function nameKey(s) {
+    return String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  function isDeletedVoice(row) {
+    return !!row && (row.status === 'withdrawn' || !!row.mergedInto);
+  }
+
+  /* Live rows first, withdrawn and merged ones apart (shown behind "Show deleted (n)"). */
+  function splitVoiceRows(rows) {
+    var live = [], deleted = [];
+    (rows || []).forEach(function (r) {
+      if (!r) return;
+      (isDeletedVoice(r) ? deleted : live).push(r);
+    });
+    return { live: live, deleted: deleted };
+  }
+
+  /* "Heard on Ben_Lin_test2, Ben_UCPK2" / "Named 30 Sep by Ben_Lin_test2" etc.  Returns
+     [] for a row with none of the new fields. */
+  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function plainDate(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || ''));
+    if (!m) return '';
+    var mon = MONTHS[Number(m[2]) - 1];
+    return mon ? Number(m[3]) + ' ' + mon : '';
+  }
+  function voiceIdentityLines(row) {
+    var r = row || {};
+    var out = [];
+    if (r.linkedAccount && (r.linkedAccount.email || r.linkedAccount.name)) {
+      out.push('Linked to ' + (r.linkedAccount.email || r.linkedAccount.name));
+    } else if (r.linkedAccount === null) {
+      out.push('Not linked to an account');
+    }
+    var heard = (Array.isArray(r.heardOn) ? r.heardOn : []).filter(Boolean);
+    if (heard.length) out.push('Heard on ' + heard.join(', '));
+    var fn = r.firstNamed;
+    if (fn && (fn.at || fn.by)) {
+      var d = plainDate(fn.at);
+      out.push('Named' + (d ? ' ' + d : '') + (fn.by ? ' by ' + fn.by : ''));
+    }
+    if (r.employer) out.push(String(r.employer));
+    return out;
+  }
+
+  /* Live rows that share a display name with another live row. */
+  function sameNameNotice(row, rows) {
+    if (!row || isDeletedVoice(row)) return null;
+    var k = nameKey(row.displayName);
+    if (!k) return null;
+    var n = 0;
+    (rows || []).forEach(function (o) {
+      if (o && !isDeletedVoice(o) && nameKey(o.displayName) === k) n += 1;
+    });
+    return n >= 2
+      ? 'Same name as another voice — check the details, then merge or rename.' : null;
+  }
+
+  /* The merge chooser: every OTHER live row, same-name ones first. */
+  function mergeChoices(row, rows) {
+    var k = nameKey(row && row.displayName);
+    var others = splitVoiceRows(rows).live.filter(function (o) { return o.id !== (row || {}).id; });
+    var same = [], rest = [];
+    others.forEach(function (o) {
+      (k && nameKey(o.displayName) === k ? same : rest).push(o);
+    });
+    return same.concat(rest).map(function (o) {
+      return { id: o.id, name: o.displayName || '(unnamed voice)',
+               sameName: same.indexOf(o) >= 0, identity: voiceIdentityLines(o) };
+    });
+  }
+
+  /* What the dialog shows for a merge-check answer. 'alike' and 'unsure' merge on one
+     press; 'different' (or anything unrecognised -- fail toward asking) is shown as a
+     warning and needs the explicit "it's the same person" press, which sends confirm. */
+  function mergeDialogState(res, targetName) {
+    var r = res || {};
+    var v = r.verdict;
+    var msg = r.message ? String(r.message) : '';
+    if (v === 'alike' || v === 'unsure') {
+      return { verdict: v, warn: false, confirm: false, message: msg,
+               button: 'Merge into ' + targetName };
+    }
+    return { verdict: 'different', warn: true, confirm: true,
+             message: msg || 'These two voices sound different.',
+             button: 'Yes, it’s the same person — merge' };
+  }
+
+  function mergedToast(name) {
+    return 'Merged. ' + name + '’s voice samples are now one profile.';
+  }
+
+  /* Words for a deleted row's status cell. */
+  function deletedVoiceWords(row) {
+    var m = row && row.mergedInto;
+    if (m) return 'Merged into ' + (m.displayName || 'another voice');
+    return 'Deleted';
+  }
+
+  /* 1-80 characters once trimmed, same bound as the server. */
+  function validateDisplayName(s) {
+    var v = String(s == null ? '' : s).trim();
+    if (!v) return { ok: false, value: v, error: 'Enter a name.' };
+    if (v.length > 80) return { ok: false, value: v, error: 'Keep the name to 80 characters.' };
+    return { ok: true, value: v, error: null };
+  }
+
   function confirmedSessions(segments) {
     var bySession = {};
     (segments || []).forEach(function (s) {
@@ -687,6 +801,16 @@
     enrolmentOutcome: enrolmentOutcome,
     refusalReason: refusalReason,
     voiceRowWords: voiceRowWords,
+    nameKey: nameKey,
+    isDeletedVoice: isDeletedVoice,
+    splitVoiceRows: splitVoiceRows,
+    voiceIdentityLines: voiceIdentityLines,
+    sameNameNotice: sameNameNotice,
+    mergeChoices: mergeChoices,
+    mergeDialogState: mergeDialogState,
+    mergedToast: mergedToast,
+    deletedVoiceWords: deletedVoiceWords,
+    validateDisplayName: validateDisplayName,
     retryGuidance: retryGuidance,
     timelineRouteForRetry: timelineRouteForRetry,
     voiceRetryActions: voiceRetryActions,
