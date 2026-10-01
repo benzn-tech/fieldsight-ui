@@ -10800,6 +10800,13 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   flex-direction: column;
   gap: 16px;
 }
+/* THE COLUMN SCROLLS; ITS PARTS DO NOT SHRINK. A fixed-height flex column
+   shrinks its children when they overflow, and the one with overflow:hidden
+   (Test render) has no content floor, so it took all of it: once the editor
+   grew modules, notes and checklist items, Test render was squeezed to
+   nothing (owner, 2026-10-02; measured 365px -> 128px with a 700px editor,
+   less as the editor grows). */
+.fs-library__right > * { flex-shrink: 0; }
 .fs-library__right--empty {
   align-items: center;
   justify-content: center;
