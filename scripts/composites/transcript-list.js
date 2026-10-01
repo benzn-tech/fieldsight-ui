@@ -290,6 +290,80 @@
     );
   }
 
+  /* "Which Ben Lin is this?" -- shown when the backend says more than one person (or one
+     the server would NOT reuse) already carries the typed name. Same dialog shape as the
+     Voices page's MergeDialog. Cancel sends nothing; the caller keeps the panel open. */
+  function SameNameChooser(props) {
+    var sn = window.FS.speakerNaming;
+    var Modal = (window.FieldSight || {}).ModalOverlay;
+    var options = sn.sameNameOptions(props.res);
+    var refElse = React.useState(false);
+    var elseOpen = refElse[0], setElseOpen = refElse[1];
+    var refTyped = React.useState(sn.sameNameElseDefault(props.name));
+    var typed = refTyped[0], setTyped = refTyped[1];
+    var refErr = React.useState(null);
+    var localErr = refErr[0], setLocalErr = refErr[1];
+    var busy = !!props.busy;
+
+    function sendElse() {
+      var o = sn.sameNameElseOutcome(props.name, typed);
+      if (o.action === 'invalid') { setLocalErr(o.error); return; }
+      setLocalErr(null);
+      props.onElse(o);
+    }
+
+    var kids = [];
+    kids.push(React.createElement('ul', { key: 'list', className: 'fs-samename__choices' },
+      options.map(function (o) {
+        return React.createElement('li', { key: o.id },
+          React.createElement('button', {
+            type: 'button', className: 'fs-samename__choice', disabled: busy,
+            onClick: function () { props.onPick(o); },
+          },
+            React.createElement('span', { className: 'fs-samename__choice-name' },
+              o.name || props.name),
+            React.createElement('span', { className: 'fs-samename__identity' }, o.detail)));
+      }),
+      React.createElement('li', { key: 'else' },
+        React.createElement('button', {
+          type: 'button',
+          className: 'fs-samename__choice' + (elseOpen ? ' is-selected' : ''),
+          'aria-expanded': elseOpen, disabled: busy,
+          onClick: function () { setElseOpen(true); },
+        }, React.createElement('span', { className: 'fs-samename__choice-name' },
+          sn.sameNameElseLabel(props.name))))));
+    if (elseOpen) {
+      kids.push(React.createElement('div', { key: 'else-box', className: 'fs-samename__else' },
+        React.createElement('input', {
+          type: 'text', className: 'fs-samename__input', value: typed,
+          'aria-label': 'Name for this other person', autoFocus: true, disabled: busy,
+          onChange: function (e) { setTyped(e.target.value); },
+          onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); sendElse(); } },
+        }),
+        React.createElement('div', { className: 'fs-samename__hint' },
+          'Add something that tells them apart, e.g. ' + props.name + ' (Cassidy)'),
+        React.createElement('button', {
+          type: 'button', className: 'fs-samename__btn', disabled: busy, onClick: sendElse,
+        }, busy ? 'Checking…' : 'Save as someone else')));
+    }
+    var err = localErr || props.error;
+    if (err) {
+      kids.push(React.createElement('div', { key: 'err', role: 'alert',
+        className: 'fs-samename__error' }, err));
+    }
+    kids.push(React.createElement('div', { key: 'btns', className: 'fs-samename__actions' },
+      React.createElement('button', {
+        type: 'button', className: 'fs-samename__btn', disabled: busy, onClick: props.onCancel,
+      }, 'Cancel')));
+
+    var body = React.createElement('div', { className: 'fs-samename' }, kids);
+    if (!Modal) return body;
+    return React.createElement(Modal, {
+      open: true, onClose: props.onCancel, size: 'md',
+      title: sn.sameNameTitle(props.name), closeOnBackdrop: !busy,
+    }, body);
+  }
+
   function TranscriptList(props) {
     var refState = React.useState({ status: 'loading', segments: [] });
     var state    = refState[0];
@@ -320,6 +394,14 @@
     var refNotice = React.useState(null);
     var notice    = refNotice[0];
     var setNotice = refNotice[1];
+
+    /* The same-name chooser: { seg, index, name, consent, res, busy, error } or null. */
+    var refChooser = React.useState(null);
+    var chooser    = refChooser[0];
+    var setChooser = refChooser[1];
+    /* Only the newest check may act, and a second Save while one is in flight is ignored. */
+    var checkSeq = React.useRef(0);
+    var checkingRef = React.useRef(false);
 
     var windowRef = React.useRef('');
 
@@ -575,24 +657,94 @@
       setTimeout(function () { setReloadTick(function (n) { return n + 1; }); }, delay);
     }
 
+    /* Save pressed in the panel: ask whether somebody with this name is already known BEFORE
+       sending. A failed check sends nothing and says so -- never a silent fallback to the
+       old send, because that is exactly how a second "Ben Lin" got made unasked. */
     function submitName(seg, index, name, consent) {
       var ref = sn.sessionRefForSegment(seg);
       if (!ref) return;
       var trimmed = String(name || '').trim();
       if (!trimmed) return;
+      if (checkingRef.current) return;
+      var org = window.FS.api.org;
+      if (!org || !org.sameNameVoices) { sendName(seg, index, trimmed, consent, null); return; }
+      checkingRef.current = true;
+      var my = ++checkSeq.current;
+      setNotice('Checking the name…');
+      runCheck(seg, index, trimmed, consent, my, function (err) {
+        setNotice(err);
+      });
+    }
+
+    /* Shared by Save and by the chooser's "someone else with a new name". */
+    function runCheck(seg, index, name, consent, my, onFail) {
+      window.FS.api.org.sameNameVoices(name, user).then(function (res) {
+        if (checkSeq.current !== my) return;
+        if (!res || res._accessDenied || res._notFound) throw new Error('check refused');
+        checkingRef.current = false;
+        if (sn.sameNameShouldAsk(res)) {
+          setNotice(null);
+          setChooser({ seg: seg, index: index, name: name, consent: consent, res: res,
+                       busy: false, error: null });
+          return;
+        }
+        setChooser(null);
+        sendName(seg, index, name, consent, null);
+      }).catch(function () {
+        if (checkSeq.current !== my) return;
+        checkingRef.current = false;
+        onFail(sn.sameNameCheckFailedWords());
+      });
+    }
+
+    function chooserPick(opt) {
+      var c = chooser; if (!c) return;
+      checkSeq.current += 1;
+      setChooser(null);
+      sendName(c.seg, c.index, c.name, c.consent, { voiceprintId: opt.id });
+    }
+
+    function chooserElse(outcome) {
+      var c = chooser; if (!c) return;
+      if (outcome.action === 'send') {
+        checkSeq.current += 1;
+        setChooser(null);
+        sendName(c.seg, c.index, outcome.name, c.consent, { newPerson: true });
+        return;
+      }
+      /* A changed name is a different question: check it afresh, and it may ask again. */
+      if (checkingRef.current) return;
+      checkingRef.current = true;
+      var my = ++checkSeq.current;
+      setChooser(Object.assign({}, c, { busy: true, error: null }));
+      runCheck(c.seg, c.index, outcome.name, c.consent, my, function (err) {
+        setChooser(Object.assign({}, c, { busy: false, error: err }));
+      });
+    }
+
+    function chooserCancel() {
+      checkSeq.current += 1;
+      checkingRef.current = false;
+      setChooser(null);
+      setNotice(null);
+    }
+
+    function sendName(seg, index, trimmed, consent, choice) {
+      var ref = sn.sessionRefForSegment(seg);
+      if (!ref) return;
       var savedAt = Date.now();
       setOpenIndex(null);
       setOptimistic(function (prev) {
         var next = Object.assign({}, prev); next[index] = trimmed; return next;
       });
       setNotice(null);
-      window.FS.api.org.setSpeakerName(ref, sn.correctionBody(seg, {
+      window.FS.api.org.setSpeakerName(ref, sn.correctionBodyForChoice(seg, {
         user: user, displayName: trimmed,
         /* The panel no longer offers a consent box (owner decision 2026-09-27), so this
            is always false and the voice is stored on the company's declared basis. */
         consentGiven: !!(consent && consent.consentGiven),
         consentedBy: consent && consent.consentedBy,
-      })).then(function (res) {
+      }, choice)).then(function (res) {
         if (res && res._notAvailable) {
           setNotice('Naming is not available in this environment.');
           setOptimistic({});
@@ -773,6 +925,14 @@
 
       notice
         ? React.createElement('div', { className: 'fs-transcript-list__notice' }, notice)
+        : null,
+
+      chooser
+        ? React.createElement(SameNameChooser, {
+            key: chooser.name, name: chooser.name, res: chooser.res,
+            busy: chooser.busy, error: chooser.error,
+            onPick: chooserPick, onElse: chooserElse, onCancel: chooserCancel,
+          })
         : null,
 
       /* The rewrite-the-summary control lives in the session OVERVIEW
