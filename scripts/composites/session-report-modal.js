@@ -327,15 +327,22 @@
 
     return h('label', { className: 'fs-field fs-field--md fs-field--full-width fs-srm__template' },
       h('span', { className: 'fs-field__label' }, 'Template'),
-      wrapControl(h('select', {
-        className: 'fs-field__control', value: props.templateId || '',
-        disabled: st.phase === 'loading',
-        onChange: function (e) {
-          var id = e.target.value || null;
-          var row = st.rows.filter(function (t) { return t.id === id; })[0];
-          props.onChoose(id, row && row.version, row && row.title);
-        },
-      }, options)),
+      /* The shared control strips the native arrow (appearance: none), so a bare
+         select read as a text box and people missed that the template can be
+         chosen. Same chevron as FieldSight.Select. */
+      h('div', { className: 'fs-field__control-wrap' },
+        h('select', {
+          className: 'fs-field__control fs-field__control--select', value: props.templateId || '',
+          disabled: st.phase === 'loading',
+          onChange: function (e) {
+            var id = e.target.value || null;
+            var row = st.rows.filter(function (t) { return t.id === id; })[0];
+            props.onChoose(id, row && row.version, row && row.title);
+          },
+        }, options),
+        h('span', { className: 'fs-field__select-chevron', 'aria-hidden': 'true' },
+          window.FieldSight && window.FieldSight.NavIcon
+            ? h(window.FieldSight.NavIcon, { name: 'chevron-down', size: 16 }) : '▾')),
       st.phase === 'error'
         ? h('span', { className: 'fs-field__hint fs-field__hint--error' },
             'Could not load your templates. The standard report is still available.')
@@ -367,6 +374,11 @@
       return h('label', { className: 'fs-field fs-field--md fs-field--full-width' },
         h('span', { className: 'fs-field__label' }, label), wrapControl(node));
     }
+    /* Attendees, weather and sign-off feed the STANDARD report only. A template
+       report is written from the recording and its own sections (weather by
+       code), and never reads them -- so with a template chosen they are
+       disabled with the reason, not left looking like they matter. */
+    var templated = !!form.templateId;
     return h('div', { className: 'fs-srm__step fs-srm__fill' },
       /* First, because it is the choice the rest of the report follows from --
          and because someone who came here to use a particular format should
@@ -379,16 +391,22 @@
         type: 'text', className: 'fs-field__control', value: form.title || '',
         onChange: function (e) { setTitle(e.target.value); },
       })),
+      templated ? h('p', { className: 'fs-field__hint fs-srm__template-note' },
+        'Attendees, weather and sign-off below are used by the standard report only. '
+        + 'A template report takes them from the recording and the template’s own sections.') : null,
       field('Attendees (one per line)', h('textarea', {
         className: 'fs-field__control fs-field__control--textarea', rows: 3, value: attText,
+        disabled: templated,
         onChange: function (e) { onAtt(e.target.value); },
       })),
       field('Weather', h('input', {
         type: 'text', className: 'fs-field__control', value: fields.weather || '',
+        disabled: templated,
         onChange: function (e) { setField('weather', e.target.value); },
       })),
       field('Sign-off', h('input', {
         type: 'text', className: 'fs-field__control', value: fields.sign_off || '',
+        disabled: templated,
         onChange: function (e) { setField('sign_off', e.target.value); },
       })));
   }
