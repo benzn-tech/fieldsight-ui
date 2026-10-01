@@ -934,6 +934,13 @@
      page size, up to 120 shrunk automatically, past 120 the person chooses).
      A WHITELIST like every write here: only `excluded` travels. Offline there
      is nothing to choose among, so null -- the dialog then skips the step. */
+  /* The bell's photograph notice: the CALLER's own folder only, decided on the
+     server. Offline: nothing to tell. */
+  async function getPhotoNotice() {
+    if (!sessionReportLive()) return { notices: [] };
+    return api.orgRequest('/photos/notice');
+  }
+
   async function getPhotoSelection(opts) {
     opts = opts || {};
     if (!sessionReportLive()) return null;
@@ -1413,6 +1420,7 @@
     getSessionsCached: getSessionsCached,
     getSessionBrief: getSessionBrief,
     getSessionReportPreview: getSessionReportPreview,
+    getPhotoNotice: getPhotoNotice,
     getPhotoSelection: getPhotoSelection,
     putPhotoSelection: putPhotoSelection,
     generateSessionReport: generateSessionReport,

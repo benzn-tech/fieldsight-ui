@@ -184,6 +184,15 @@
     var voices = s_voices[0], setVoices = s_voices[1];
     var s_intro = React.useState([]);
     var suggestions = s_intro[0], setSuggestions = s_intro[1];
+    /* The photographer's own day crossing a photo line (FS.photoNotice; owner,
+       2026-10-01). Only the person who took them is told -- the server decides. */
+    var photoApi = (window.FS || {}).photoNotice;
+    var s_pn = React.useState(photoApi ? photoApi.get().notices : []);
+    var photoNotices = s_pn[0], setPhotoNotices = s_pn[1];
+    React.useEffect(function () {
+      if (!photoApi) return undefined;
+      return photoApi.subscribe(function (next) { setPhotoNotices(next.notices || []); });
+    }, []);
 
     React.useEffect(function () {
       if (!jobsApi) return undefined;
@@ -260,6 +269,7 @@
       ? sn.bellBadgeCount({ unseen: unseen, waiting: waiting, introductions: introducing,
                             notSaved: notSaved })
       : unseen + waiting + introducing + notSaved;
+    count += photoNotices.length;
 
     return h('div', { className: 'fs-bell' },
       h('button', {
@@ -327,6 +337,29 @@
                           }));
                         },
                       });
+                    })))
+              : null,
+
+            /* The day's photographs: a heads-up past 50, a choice past 120. */
+            photoNotices.length
+              ? h('div', { className: 'fs-bell__section' },
+                  h('div', { className: 'fs-bell__panel-head' }, h('span', null, 'Photographs')),
+                  h('ul', { className: 'fs-bell__list' },
+                    photoNotices.map(function (n) {
+                      return h('li', { key: n.date + n.level, className: 'fs-bell__row' },
+                        h('div', { className: 'fs-bell__row-main' },
+                          h('span', { className: 'fs-bell__row-title' }, photoApi.words(n))),
+                        n.level === 'choose'
+                          ? h('button', {
+                              type: 'button', className: 'fs-bell__row-action',
+                              onClick: function () {
+                                setOpen(false);
+                                window.dispatchEvent(new CustomEvent('fs:open-photo-choice', {
+                                  detail: { date: n.date, folder: n.folder },
+                                }));
+                              },
+                            }, 'Choose')
+                          : null);
                     })))
               : null,
 

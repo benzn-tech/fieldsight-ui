@@ -975,6 +975,10 @@ function MiddleColumn({ route, width, onWidthChange, onSelect, selectedItem, ful
         window.FieldSight.IntroSuggestionDialog
           ? React.createElement(window.FieldSight.IntroSuggestionDialog)
           : null,
+        /* Same pattern: renders nothing until `fs:open-photo-choice` names a day. */
+        window.FieldSight.PhotoChoiceDialog
+          ? React.createElement(window.FieldSight.PhotoChoiceDialog)
+          : null,
         React.createElement(WeatherIndicator),
       ),
     ),
