@@ -882,6 +882,8 @@
 
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.SessionReportModal = SessionReportModal;
+  /* Shared with the bell's PhotoChoiceDialog: one way of choosing. */
+  window.FieldSight.PhotoChoiceStep = PhotoChoiceStep;
 
   // Pure-helper export for node --test (browser ignores this).
   if (typeof module !== 'undefined' && module.exports) {
