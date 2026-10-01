@@ -730,7 +730,10 @@
     if (res._notFound || res._accessDenied) return 'send';
     if (res.error && !Array.isArray(res.profiles)) return 'fail';
     if (sameNameShouldAsk(res)) return 'ask';
-    return sameNameHasSimilar(res) ? 'suggest' : 'send';
+    // A near spelling is only worth a question when the typed name matched NOBODY. Someone
+    // who typed "Ben Lin" exactly, with a "Ben Linn" also on file, meant Ben Lin.
+    var exact = Array.isArray(res.profiles) && res.profiles.length > 0;
+    return (!exact && sameNameHasSimilar(res)) ? 'suggest' : 'send';
   }
 
   /* Near spellings ("Benn Lin" for "Ben Lin"): the backend lists them in `similar`, same
