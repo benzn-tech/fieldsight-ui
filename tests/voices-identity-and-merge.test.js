@@ -235,3 +235,13 @@ test('the new styles use semantic tokens as foregrounds, none from a palette sca
   assert.doesNotMatch(block, /--color-(primary|accent|success|danger|warning|info|neutral)-\d/);
   assert.match(block, /\.fs-voices__choice/);
 });
+
+test('named date is the NZ calendar day, not the UTC one', () => {
+  // 23:50 UTC on 30 Sep is the morning of 1 Oct in Auckland.
+  assert.deepEqual(
+    sn.voiceIdentityLines({ firstNamed: { at: '2026-09-30T23:50:02.638300+00:00', by: 'Ben Lin' } }),
+    ['Named 1 Oct by Ben Lin']);
+  // A bare date is already a calendar day.
+  assert.deepEqual(sn.voiceIdentityLines({ firstNamed: { at: '2026-09-30', by: 'X' } }),
+    ['Named 30 Sep by X']);
+});

@@ -620,7 +620,7 @@
     var learned = n === 0 ? '—'
       : n + (n === 1 ? ' passage' : ' passages')
         + (named ? ' (' + named + ' named by someone)' : '');
-    var when = r.lastAttemptAt ? String(r.lastAttemptAt).slice(0, 10) : '';
+    var when = r.lastAttemptAt ? nzDay(r.lastAttemptAt) : '';
     var latest = '—', latestTitle = '';
     if (r.lastAttemptOutcome === 'stored') {
       latest = 'Voice saved' + (when ? ' · ' + when : '');
@@ -658,8 +658,26 @@
   /* "Heard on Ben_Lin_test2, Ben_UCPK2" / "Named 30 Sep by Ben_Lin_test2" etc.  Returns
      [] for a row with none of the new fields. */
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  /* The NZ calendar day of a backend timestamp. The backend sends UTC
+     ("2026-09-30T23:50:02+00:00"), and the first ten characters of that are the UTC day --
+     a voice named on the morning of 1 Oct in Auckland read "30 Sep". A bare date
+     (no time part) is already a calendar day and passes through. */
+  function nzDay(s) {
+    var str = String(s || '');
+    if (!/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}.*(Z|[+-]\d{2}:?\d{2})$/.test(str)) {
+      return str.slice(0, 10);
+    }
+    var t = new Date(str.replace(' ', 'T'));
+    if (isNaN(t.getTime())) return str.slice(0, 10);
+    try {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland',
+        year: 'numeric', month: '2-digit', day: '2-digit' }).format(t);
+    } catch (e) {
+      return str.slice(0, 10);
+    }
+  }
   function plainDate(s) {
-    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s || ''));
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(nzDay(s));
     if (!m) return '';
     var mon = MONTHS[Number(m[2]) - 1];
     return mon ? Number(m[3]) + ' ' + mon : '';
