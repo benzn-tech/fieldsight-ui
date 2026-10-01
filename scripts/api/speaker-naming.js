@@ -715,6 +715,23 @@
       && Array.isArray(res.profiles) && res.profiles.length > 0;
   }
 
+  /* What to do with the same-name check's answer: 'ask', 'send' (as before the check
+     existed) or 'fail' (say so, send nothing).
+
+     A 404 means the route does not exist -- an older backend, or speaker identity switched
+     off -- and a 403 means this caller may not run the check; in both the correction
+     endpoint is still the authority and reports its own refusal. Treating them as failures
+     would stop ALL naming wherever this UI runs ahead of its backend. Only an expired
+     sign-in (401) or an error/network failure blocks, because then the answer is unknown,
+     not absent. */
+  function sameNameCheckOutcome(res) {
+    if (!res) return 'fail';
+    if (res._accessDenied && res.status === 401) return 'fail';
+    if (res._notFound || res._accessDenied) return 'send';
+    if (res.error && !Array.isArray(res.profiles)) return 'fail';
+    return sameNameShouldAsk(res) ? 'ask' : 'send';
+  }
+
   function sameNameTitle(name) {
     return 'Which ' + String(name || '').trim() + ' is this?';
   }
@@ -910,6 +927,7 @@
     splitVoiceRows: splitVoiceRows,
     voiceIdentityLines: voiceIdentityLines,
     sameNameShouldAsk: sameNameShouldAsk,
+    sameNameCheckOutcome: sameNameCheckOutcome,
     sameNameTitle: sameNameTitle,
     sameNameElseLabel: sameNameElseLabel,
     sameNameOptions: sameNameOptions,

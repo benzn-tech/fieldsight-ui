@@ -198,7 +198,8 @@ test('a failing check call rejects (the panel turns that into an error and sends
 test('the naming panel checks first, sends the choice, and never falls back silently', () => {
   const src = read('scripts', 'composites', 'transcript-list.js');
   assert.match(src, /sameNameVoices\(name, user\)/);
-  assert.match(src, /sn\.sameNameShouldAsk\(res\)/);
+  assert.match(src, /sn\.sameNameCheckOutcome\(res\)/);
+  assert.match(src, /outcome === 'fail'\) throw/);
   assert.match(src, /sn\.correctionBodyForChoice\(seg, \{/);
   assert.match(src, /\{ voiceprintId: opt\.id \}/);
   assert.match(src, /\{ newPerson: true \}/);
@@ -212,4 +213,17 @@ test('the naming panel checks first, sends the choice, and never falls back sile
   /* The failure branch does not send. */
   const failBranch = /\.catch\(function \(\) \{\s*if \(checkSeq[\s\S]*?onFail\(.*\);/.exec(src)[0];
   assert.doesNotMatch(failBranch, /sendName/);
+});
+
+test('a check that does not exist or is not ours does not block naming', () => {
+  const sn = require('../scripts/api/speaker-naming.js');
+  // Older backend / identity off: the route is absent. Naming must still work.
+  assert.equal(sn.sameNameCheckOutcome({ _notFound: true, status: 404 }), 'send');
+  assert.equal(sn.sameNameCheckOutcome({ _accessDenied: true, status: 403, error: 'x' }), 'send');
+  // Unknown answer: block and say so.
+  assert.equal(sn.sameNameCheckOutcome({ _accessDenied: true, status: 401 }), 'fail');
+  assert.equal(sn.sameNameCheckOutcome(null), 'fail');
+  assert.equal(sn.sameNameCheckOutcome({ error: 'boom', status: 500 }), 'fail');
+  assert.equal(sn.sameNameCheckOutcome({ profiles: [{ id: 'a' }], wouldUse: null, ask: true }), 'ask');
+  assert.equal(sn.sameNameCheckOutcome({ profiles: [], wouldUse: null, ask: false }), 'send');
 });

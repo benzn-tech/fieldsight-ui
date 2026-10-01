@@ -659,7 +659,9 @@
 
     /* Save pressed in the panel: ask whether somebody with this name is already known BEFORE
        sending. A failed check sends nothing and says so -- never a silent fallback to the
-       old send, because that is exactly how a second "Ben Lin" got made unasked. */
+       old send, because that is exactly how a second "Ben Lin" got made unasked. A check
+       that does not EXIST (404, older backend) or is not ours to run (403) is not a failure:
+       see `sameNameCheckOutcome`. */
     function submitName(seg, index, name, consent) {
       var ref = sn.sessionRefForSegment(seg);
       if (!ref) return;
@@ -680,9 +682,10 @@
     function runCheck(seg, index, name, consent, my, onFail) {
       window.FS.api.org.sameNameVoices(name, user).then(function (res) {
         if (checkSeq.current !== my) return;
-        if (!res || res._accessDenied || res._notFound) throw new Error('check refused');
+        var outcome = sn.sameNameCheckOutcome(res);
+        if (outcome === 'fail') throw new Error('check failed');
         checkingRef.current = false;
-        if (sn.sameNameShouldAsk(res)) {
+        if (outcome === 'ask') {
           setNotice(null);
           setChooser({ seg: seg, index: index, name: name, consent: consent, res: res,
                        busy: false, error: null });
