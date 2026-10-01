@@ -402,9 +402,9 @@
     var mayPickCompany = !!(orgApi && orgApi.isCrossCompany && orgApi.isCrossCompany(callerUser));
     var refCompanies = React.useState([]); var companies = refCompanies[0], setCompanies = refCompanies[1];
     React.useEffect(function () {
-      if (!mayPickCompany || !orgLive() || !orgApi.getSiteCompanies) return;
+      if (!mayPickCompany || !orgLive() || !orgApi.getCompanyChoices) return;
       var alive = true;
-      orgApi.getSiteCompanies().then(function (list) { if (alive) setCompanies(list || []); })
+      orgApi.getCompanyChoices().then(function (list) { if (alive) setCompanies(list || []); })
         .catch(function () {});
       return function () { alive = false; };
     }, [mayPickCompany]);
