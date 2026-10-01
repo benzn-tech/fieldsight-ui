@@ -172,6 +172,24 @@
       speakerLabel: 'spk_1', startSec: 1.0, endSec: 6.8, createdAt: '2026-09-25T07:03:00Z' },
   ];
 
+  /* The company's voice library, as GET /api/org/voiceprints returns it. The mock serves
+     this rather than an empty list: `{voiceprints: []}` would claim nobody is enrolled.
+     One row is saved and one has a refused last attempt carrying the `retry` passage the
+     backend remembers, so the "not saved -> try again" path is visible locally. */
+  var VOICEPRINTS = [
+    { id: 'vp-example-1', displayName: 'Jarley Trainor', status: 'confirmed',
+      samples: 4, humanSamples: 2, lastAttemptOutcome: 'stored', lastAttemptDetail: null,
+      lastAttemptAt: '2026-09-27 02:10:00', retry: null },
+    { id: 'vp-example-2', displayName: 'Ben Lin', status: 'tentative',
+      samples: 0, humanSamples: 0, lastAttemptOutcome: 'refused',
+      lastAttemptDetail: 'this window does not hold one voice',
+      lastAttemptAt: '2026-09-28 00:20:25',
+      retry: { date: '2026-09-26', userFolder: 'Ben_UCPK2',
+               sessionBase: 'sid90cc2026',
+               sourceFilename: 'ben_ucpk2_2026-09-26_08-14-02_sid90cc_c0000_off0.0_to12.0_srcwav.json',
+               startSec: 0.4, endSec: 5.2 } },
+  ];
+
   window.FieldSight.fixtures.sites = {
     sites:          SITES,
     users:          USERS,
@@ -179,6 +197,7 @@
     regions:        REGIONS,
     nameProposals:  NAME_PROPOSALS,
     nameSuggestions: NAME_SUGGESTIONS,
+    voiceprints:    VOICEPRINTS,
   };
 
 })();

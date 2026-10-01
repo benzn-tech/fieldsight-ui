@@ -35,7 +35,7 @@
      walking pace. */
   var POLL_MS = 120000;
 
-  var state = { people: [], total: 0, introductions: 0, loaded: false, error: null };
+  var state = { people: [], total: 0, introductions: 0, notSaved: 0, loaded: false, error: null };
   var subs = [];
   var timer = null;
   var inflight = null;
@@ -51,6 +51,7 @@
       people: state.people.slice(),
       total: state.total,
       introductions: state.introductions,
+      notSaved: state.notSaved,
       loaded: state.loaded,
       error: state.error,
     };
@@ -78,6 +79,9 @@
          folded into `total`'s arithmetic, so the bell's existing `total` reader is
          never silently changed underneath it). */
       state.introductions = (r && r.introductions) || 0;
+      /* `notSaved` — voices whose last save attempt was refused. Its own field for the same
+         reason as `introductions`: `total`'s readers must not change underneath them. */
+      state.notSaved = (r && r.notSaved) || 0;
       state.error = null;
     } catch (e) {
       /* Keep the last good answer and record that this attempt failed. Blanking
