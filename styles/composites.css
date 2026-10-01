@@ -7457,6 +7457,50 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 
 .fs-voices__verdict--warn { border-left-color: var(--text-warning); }
 
+/* ---- Same-name chooser ("Which Ben Lin is this?") ----
+   Semantic tokens only, so both themes read. */
+.fs-samename { display: flex; flex-direction: column; gap: var(--space-2); }
+.fs-samename__choices {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: var(--space-2);
+}
+.fs-samename__choice {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  width: 100%; text-align: left;
+  padding: var(--space-2) var(--space-3);
+  font: inherit; font-size: var(--font-size-sm); cursor: pointer;
+  color: var(--text-primary); background: var(--surface-app);
+  border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+}
+.fs-samename__choice.is-selected {
+  border-color: var(--text-primary); box-shadow: inset 0 0 0 1px var(--text-primary);
+}
+.fs-samename__choice:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+.fs-samename__choice-name { font-weight: var(--font-weight-semibold); }
+.fs-samename__identity {
+  font-size: var(--font-size-sm); line-height: 1.45; color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.fs-samename__else { display: flex; flex-direction: column; gap: var(--space-1); }
+.fs-samename__input {
+  font: inherit; font-size: var(--font-size-sm); padding: 6px 8px; width: 100%;
+  color: var(--text-primary); background: var(--surface-input);
+  border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+}
+.fs-samename__hint { font-size: var(--font-size-sm); color: var(--text-secondary); }
+.fs-samename__error {
+  font-size: var(--font-size-sm); line-height: 1.5; color: var(--text-primary);
+  padding: var(--space-2) var(--space-3); border-left: 3px solid var(--text-warning);
+}
+.fs-samename__actions { display: flex; gap: var(--space-2); }
+.fs-samename__btn {
+  font: inherit; font-size: var(--font-size-sm); cursor: pointer;
+  padding: var(--space-1) var(--space-3); align-self: flex-start;
+  color: var(--text-primary); background: var(--surface-app);
+  border: 1px solid var(--border-default); border-radius: var(--radius-sm);
+}
+.fs-samename__choice[disabled], .fs-samename__btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+
 /* ---- Theme radio group ---- */
 
 .fs-settings__radio-group {

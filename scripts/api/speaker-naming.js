@@ -701,6 +701,92 @@
     return out;
   }
 
+  /* ---- "Which Ben Lin is this?" (spec 2026-10-01-naming-asks-which-same-name-person) ----
+     GET /voiceprints/same-name answers {profiles, wouldUse, ask}. The backend decides
+     whether to ask; this half only reads the verdict and words the options. Plain words,
+     never a score. */
+
+  /* Ask only when the backend said so AND there is something to choose between. A true
+     `ask` with no profiles would show a chooser whose only option is "someone else", which
+     is the silent-new-person path with an extra click; a missing or malformed answer is
+     NOT a reason to ask (the caller treats a failed call separately, as an error). */
+  function sameNameShouldAsk(res) {
+    return !!res && res.ask === true
+      && Array.isArray(res.profiles) && res.profiles.length > 0;
+  }
+
+  function sameNameTitle(name) {
+    return 'Which ' + String(name || '').trim() + ' is this?';
+  }
+
+  function sameNameElseLabel(name) {
+    return 'Someone else called ' + String(name || '').trim();
+  }
+
+  /* One row per profile: the same identity lines the Voices page shows, plus when that
+     voice was last heard, as the NZ calendar day. */
+  function sameNameOptions(res) {
+    var list = (res && Array.isArray(res.profiles)) ? res.profiles : [];
+    return list.filter(function (p) { return p && p.id; }).map(function (p) {
+      var lines = voiceIdentityLines(p);
+      var d = p.lastHeard ? plainDate(p.lastHeard) : '';
+      var last = d ? 'last heard ' + d : '';
+      var parts = last ? lines.concat([last]) : lines.slice();
+      return {
+        id: p.id,
+        name: p.displayName || '',
+        identity: lines,
+        lastHeard: last,
+        detail: parts.length ? parts.join(' · ') : 'No details recorded yet',
+      };
+    });
+  }
+
+  /* What the "Someone else" input starts as: the name plus an empty bracket to fill. */
+  function sameNameElseDefault(name) {
+    return String(name || '').trim() + ' ()';
+  }
+
+  /* The name once an empty "()" the user did not fill is dropped. */
+  function _stripEmptyBrackets(s) {
+    return String(s == null ? '' : s).replace(/\s*\(\s*\)\s*$/, '').trim();
+  }
+
+  /* "Someone else" pressed with `typed` in the box, original name `name`.
+       - changed name  -> check again with it (it may collide with somebody else)
+       - unchanged     -> that really is a second person with this name: send new_person
+       - empty / too long -> invalid, nothing happens. */
+  function sameNameElseOutcome(name, typed) {
+    var orig = String(name || '').trim();
+    var cleaned = _stripEmptyBrackets(typed);
+    if (!cleaned) return { action: 'invalid', error: 'Enter a name.' };
+    if (cleaned.length > 80) {
+      return { action: 'invalid', error: 'Keep the name to 80 characters.' };
+    }
+    if (nameKey(cleaned) === nameKey(orig)) {
+      return { action: 'send', name: orig, newPerson: true };
+    }
+    return { action: 'recheck', name: cleaned };
+  }
+
+  /* The wire fields for a choice. The two are mutually exclusive on the backend, so a
+     choice can only ever produce one of them. */
+  function sameNameChoiceFields(choice) {
+    if (choice && choice.voiceprintId) return { voiceprint_id: choice.voiceprintId };
+    if (choice && choice.newPerson === true) return { new_person: true };
+    return {};
+  }
+
+  /* correctionBody plus the choice. No choice = exactly today's body. */
+  function correctionBodyForChoice(seg, opts, choice) {
+    return Object.assign(correctionBody(seg, opts), sameNameChoiceFields(choice));
+  }
+
+  function sameNameCheckFailedWords() {
+    return 'Could not check whether someone with that name is already known, so nothing '
+      + 'was saved. Try again.';
+  }
+
   /* Live rows that share a display name with another live row. */
   function sameNameNotice(row, rows) {
     if (!row || isDeletedVoice(row)) return null;
@@ -823,6 +909,15 @@
     isDeletedVoice: isDeletedVoice,
     splitVoiceRows: splitVoiceRows,
     voiceIdentityLines: voiceIdentityLines,
+    sameNameShouldAsk: sameNameShouldAsk,
+    sameNameTitle: sameNameTitle,
+    sameNameElseLabel: sameNameElseLabel,
+    sameNameOptions: sameNameOptions,
+    sameNameElseDefault: sameNameElseDefault,
+    sameNameElseOutcome: sameNameElseOutcome,
+    sameNameChoiceFields: sameNameChoiceFields,
+    correctionBodyForChoice: correctionBodyForChoice,
+    sameNameCheckFailedWords: sameNameCheckFailedWords,
     sameNameNotice: sameNameNotice,
     mergeChoices: mergeChoices,
     mergeDialogState: mergeDialogState,

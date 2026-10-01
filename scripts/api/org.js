@@ -1164,6 +1164,20 @@
       + 'different devices can sound different.' };
   }
 
+  /* Who already has this name? A READ: asked before a correction is sent, so the panel can
+     ask "which Ben Lin?" rather than the server quietly making a second one. Offline there
+     is nothing to compare against, and the answer "no, don't ask" must not block naming --
+     a read stub serves data, it does not refuse. The caller treats a FAILED call as an
+     error and sends nothing; only this stub's answer is allowed to mean "go ahead". */
+  async function sameNameVoices(name, userFolder) {
+    if (orgLive()) {
+      return api.orgRequest('/voiceprints/same-name',
+        { params: { name: name, user: userFolder } });
+    }
+    await api.delay();
+    return { profiles: [], wouldUse: null, ask: false };
+  }
+
   async function mergeVoiceprint(voiceprintId, intoId, confirm) {
     if (orgWrite()) {
       return api.orgRequest('/voiceprints/' + encodeURIComponent(voiceprintId) + '/merge',
@@ -1275,6 +1289,7 @@
     withdrawVoiceprint: withdrawVoiceprint,
     retryVoiceprint: retryVoiceprint,
     mergeCheck: mergeCheck,
+    sameNameVoices: sameNameVoices,
     mergeVoiceprint: mergeVoiceprint,
     renameVoiceprint: renameVoiceprint,
     setVoiceprintBasis: setVoiceprintBasis,
