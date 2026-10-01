@@ -1066,6 +1066,11 @@
            section can be seen and checked locally the same way "Voices to confirm"
            already is. */
         introductions: (fx().nameSuggestions || []).length,
+        /* Voices whose last save attempt was refused -- the bell's "Voices not saved".
+           Derived from the same fixture the Voices page reads so the two agree. */
+        notSaved: (fx().voiceprints || []).filter(function (v) {
+          return v && v.lastAttemptOutcome === 'refused' && v.status !== 'withdrawn';
+        }).length,
       };
     }
     return { voiceprintId: voiceprintId, proposals: (f.proposals || []).slice() };
@@ -1144,6 +1149,79 @@
     return { _notAvailable: true };
   }
 
+  /* Merge two profiles of the same person. The check is a READ and says, in words, whether
+     the two sound alike -- it carries no number. Both ids go in the URL/body untouched;
+     nothing here rebuilds the body, so `into` and `confirm` reach the server as given.
+     The write (merge, rename) refuses offline rather than faking a result. The fetch layer
+     already clears the read-cache after any non-GET. */
+  async function mergeCheck(voiceprintId, intoId) {
+    if (orgLive()) {
+      return api.orgRequest('/voiceprints/' + encodeURIComponent(voiceprintId) + '/merge-check',
+        { params: { into: intoId } });
+    }
+    await api.delay();
+    return { verdict: 'unsure', message: 'These may be the same person — recordings from '
+      + 'different devices can sound different.' };
+  }
+
+  /* Who already has this name? A READ: asked before a correction is sent, so the panel can
+     ask "which Ben Lin?" rather than the server quietly making a second one. Offline there
+     is nothing to compare against, and the answer "no, don't ask" must not block naming --
+     a read stub serves data, it does not refuse. The caller treats a FAILED call as an
+     error and sends nothing; only this stub's answer is allowed to mean "go ahead". */
+  async function sameNameVoices(name, userFolder) {
+    if (orgLive()) {
+      return api.orgRequest('/voiceprints/same-name',
+        { params: { name: name, user: userFolder } });
+    }
+    await api.delay();
+    return { profiles: [], wouldUse: null, ask: false };
+  }
+
+  async function mergeVoiceprint(voiceprintId, intoId, confirm) {
+    if (orgWrite()) {
+      return api.orgRequest('/voiceprints/' + encodeURIComponent(voiceprintId) + '/merge',
+        { method: 'POST', body: { into: intoId, confirm: !!confirm }, retry: false });
+    }
+    await api.delay();
+    return { _notAvailable: true };
+  }
+
+  async function renameVoiceprint(voiceprintId, displayName) {
+    if (orgWrite()) {
+      return api.orgRequest('/voiceprints/' + encodeURIComponent(voiceprintId),
+        { method: 'PATCH', body: { displayName: displayName }, retry: false });
+    }
+    await api.delay();
+    return { _notAvailable: true };
+  }
+
+  /* Try to store a voice again, from the passage the backend remembered when the last
+     attempt was refused (the row's `retry`). 202 with the same body shape as a rename
+     (`enrolment`, `propagation`, ...); the result still arrives later on the profile, so
+     the caller polls getVoiceprints exactly as after a rename. 409 = nothing to retry,
+     404 = identity is off. Never retried by the fetch layer: it is a write.
+
+     The mock answers 202-shaped and then lets the fixture row flip to saved, so the
+     whole "Saving ... -> voice is saved" path can be seen locally. */
+  async function retryVoiceprint(voiceprintId) {
+    if (orgWrite()) {
+      return api.orgRequest('/voiceprints/' + encodeURIComponent(voiceprintId) + '/retry',
+        { method: 'POST', body: {}, retry: false });
+    }
+    await api.delay();
+    var row = (fx().voiceprints || []).filter(function (v) { return v.id === voiceprintId; })[0];
+    if (!row || !row.retry) return { _notFound: true, error: 'Nothing to try again.' };
+    setTimeout(function () {
+      row.lastAttemptOutcome = 'stored';
+      row.lastAttemptDetail = null;
+      row.lastAttemptAt = new Date().toISOString();
+      row.samples = (Number(row.samples) || 0) + 1;
+      row.retry = null;
+    }, 3000);
+    return { enrolment: 'requested', propagation: { requested: true } };
+  }
+
   /* On what grounds this company may hold voices at all: notice | attestation | confirmed,
      or null for "not settled", which is the strict fallback and today the common case.
 
@@ -1209,6 +1287,11 @@
     getNameSuggestions: getNameSuggestions,
     decideNameSuggestion: decideNameSuggestion,
     withdrawVoiceprint: withdrawVoiceprint,
+    retryVoiceprint: retryVoiceprint,
+    mergeCheck: mergeCheck,
+    sameNameVoices: sameNameVoices,
+    mergeVoiceprint: mergeVoiceprint,
+    renameVoiceprint: renameVoiceprint,
     setVoiceprintBasis: setVoiceprintBasis,
     deleteRecordings: deleteRecordings,
     undeleteRecordings: undeleteRecordings,

@@ -290,6 +290,103 @@
     );
   }
 
+  /* "Which Ben Lin is this?" -- shown when the backend says more than one person (or one
+     the server would NOT reuse) already carries the typed name. Same dialog shape as the
+     Voices page's MergeDialog. Cancel sends nothing; the caller keeps the panel open. */
+  function SameNameChooser(props) {
+    var sn = window.FS.speakerNaming;
+    var Modal = (window.FieldSight || {}).ModalOverlay;
+    var suggest = props.mode === 'suggest';
+    var options = suggest ? sn.sameNameSimilarOptions(props.res) : sn.sameNameOptions(props.res);
+    var similar = suggest ? [] : sn.sameNameSimilarOptions(props.res);
+    var refElse = React.useState(false);
+    var elseOpen = refElse[0], setElseOpen = refElse[1];
+    var refTyped = React.useState(sn.sameNameElseDefault(props.name));
+    var typed = refTyped[0], setTyped = refTyped[1];
+    var refErr = React.useState(null);
+    var localErr = refErr[0], setLocalErr = refErr[1];
+    var busy = !!props.busy;
+
+    function sendElse() {
+      var o = sn.sameNameElseOutcome(props.name, typed);
+      if (o.action === 'invalid') { setLocalErr(o.error); return; }
+      setLocalErr(null);
+      props.onElse(o);
+    }
+
+    function optionRow(o) {
+      return React.createElement('li', { key: o.id },
+        React.createElement('button', {
+          type: 'button', className: 'fs-samename__choice', disabled: busy,
+          onClick: function () { props.onPick(o); },
+        },
+          React.createElement('span', { className: 'fs-samename__choice-name' },
+            o.name || props.name),
+          React.createElement('span', { className: 'fs-samename__identity' }, o.detail)));
+    }
+
+    var kids = [];
+    if (suggest) {
+      /* Near spelling: pick the existing person, or keep what was typed, as today. */
+      kids.push(React.createElement('ul', { key: 'list', className: 'fs-samename__choices' },
+        options.map(optionRow),
+        React.createElement('li', { key: 'keep' },
+          React.createElement('button', {
+            type: 'button', className: 'fs-samename__choice', disabled: busy,
+            onClick: props.onKeep,
+          }, React.createElement('span', { className: 'fs-samename__choice-name' },
+            sn.sameNameSuggestKeepLabel(props.name))))));
+    } else {
+      kids.push(React.createElement('ul', { key: 'list', className: 'fs-samename__choices' },
+        options.map(optionRow),
+        React.createElement('li', { key: 'else' },
+          React.createElement('button', {
+            type: 'button',
+            className: 'fs-samename__choice' + (elseOpen ? ' is-selected' : ''),
+            'aria-expanded': elseOpen, disabled: busy,
+            onClick: function () { setElseOpen(true); },
+          }, React.createElement('span', { className: 'fs-samename__choice-name' },
+            sn.sameNameElseLabel(props.name))))));
+      if (similar.length) {
+        kids.push(React.createElement('div', { key: 'similar-h',
+          className: 'fs-samename__subhead' }, 'Similar names'));
+        kids.push(React.createElement('ul', { key: 'similar',
+          className: 'fs-samename__choices' }, similar.map(optionRow)));
+      }
+      if (elseOpen) {
+        kids.push(React.createElement('div', { key: 'else-box', className: 'fs-samename__else' },
+          React.createElement('input', {
+            type: 'text', className: 'fs-samename__input', value: typed,
+            'aria-label': 'Name for this other person', autoFocus: true, disabled: busy,
+            onChange: function (e) { setTyped(e.target.value); },
+            onKeyDown: function (e) { if (e.key === 'Enter') { e.preventDefault(); sendElse(); } },
+          }),
+          React.createElement('div', { className: 'fs-samename__hint' },
+            'Add something that tells them apart, e.g. ' + props.name + ' (Cassidy)'),
+          React.createElement('button', {
+            type: 'button', className: 'fs-samename__btn', disabled: busy, onClick: sendElse,
+          }, busy ? 'Checking…' : 'Save as someone else')));
+      }
+    }
+    var err = localErr || props.error;
+    if (err) {
+      kids.push(React.createElement('div', { key: 'err', role: 'alert',
+        className: 'fs-samename__error' }, err));
+    }
+    kids.push(React.createElement('div', { key: 'btns', className: 'fs-samename__actions' },
+      React.createElement('button', {
+        type: 'button', className: 'fs-samename__btn', disabled: busy, onClick: props.onCancel,
+      }, 'Cancel')));
+
+    var body = React.createElement('div', { className: 'fs-samename' }, kids);
+    if (!Modal) return body;
+    return React.createElement(Modal, {
+      open: true, onClose: props.onCancel, size: 'md',
+      title: suggest ? sn.sameNameSuggestTitle(props.res) : sn.sameNameTitle(props.name),
+      closeOnBackdrop: !busy,
+    }, body);
+  }
+
   function TranscriptList(props) {
     var refState = React.useState({ status: 'loading', segments: [] });
     var state    = refState[0];
@@ -321,6 +418,14 @@
     var notice    = refNotice[0];
     var setNotice = refNotice[1];
 
+    /* The same-name chooser: { seg, index, name, consent, res, busy, error } or null. */
+    var refChooser = React.useState(null);
+    var chooser    = refChooser[0];
+    var setChooser = refChooser[1];
+    /* Only the newest check may act, and a second Save while one is in flight is ignored. */
+    var checkSeq = React.useRef(0);
+    var checkingRef = React.useRef(false);
+
     var windowRef = React.useRef('');
 
     /* The org's own member list, used to turn "a name was said in this
@@ -343,13 +448,6 @@
     var refRoster = React.useState([]);
     var roster    = refRoster[0];
     var setRoster = refRoster[1];
-
-    /* Per-session state for the "rewrite the summary" control. Keyed on the session rather
-       than a single flag, because a day's view can hold several meetings and asking for
-       one must not disable the others. */
-    var refRegen = React.useState({});
-    var regen    = refRegen[0];
-    var setRegen = refRegen[1];
 
     React.useEffect(function () {
       var cancelled = false;
@@ -413,6 +511,9 @@
             pendingRef.current = null;
             setOptimistic({});
             setNotice(null);
+            /* The session Overview offers the rewrite-the-summary control from the
+               same segments; tell it they changed (session-names-regen.js). */
+            window.dispatchEvent(new CustomEvent('fs:speaker-names-changed'));
           } else if (p.attempt < REFETCH_BACKOFF_MS.length) {
             p.attempt += 1;
             scheduleRefetch();
@@ -579,24 +680,105 @@
       setTimeout(function () { setReloadTick(function (n) { return n + 1; }); }, delay);
     }
 
+    /* Save pressed in the panel: ask whether somebody with this name is already known BEFORE
+       sending. A failed check sends nothing and says so -- never a silent fallback to the
+       old send, because that is exactly how a second "Ben Lin" got made unasked. A check
+       that does not EXIST (404, older backend) or is not ours to run (403) is not a failure:
+       see `sameNameCheckOutcome`. */
     function submitName(seg, index, name, consent) {
       var ref = sn.sessionRefForSegment(seg);
       if (!ref) return;
       var trimmed = String(name || '').trim();
       if (!trimmed) return;
+      if (checkingRef.current) return;
+      var org = window.FS.api.org;
+      if (!org || !org.sameNameVoices) { sendName(seg, index, trimmed, consent, null); return; }
+      checkingRef.current = true;
+      var my = ++checkSeq.current;
+      setNotice('Checking the name…');
+      runCheck(seg, index, trimmed, consent, my, function (err) {
+        setNotice(err);
+      });
+    }
+
+    /* Shared by Save and by the chooser's "someone else with a new name". */
+    function runCheck(seg, index, name, consent, my, onFail) {
+      window.FS.api.org.sameNameVoices(name, user).then(function (res) {
+        if (checkSeq.current !== my) return;
+        var outcome = sn.sameNameCheckOutcome(res);
+        if (outcome === 'fail') throw new Error('check failed');
+        checkingRef.current = false;
+        if (outcome === 'ask' || outcome === 'suggest') {
+          setNotice(null);
+          setChooser({ seg: seg, index: index, name: name, consent: consent, res: res,
+                       mode: outcome, busy: false, error: null });
+          return;
+        }
+        setChooser(null);
+        sendName(seg, index, name, consent, null);
+      }).catch(function () {
+        if (checkSeq.current !== my) return;
+        checkingRef.current = false;
+        onFail(sn.sameNameCheckFailedWords());
+      });
+    }
+
+    function chooserPick(opt) {
+      var c = chooser; if (!c) return;
+      checkSeq.current += 1;
+      setChooser(null);
+      sendName(c.seg, c.index, c.name, c.consent, { voiceprintId: opt.id });
+    }
+
+    /* "No - save as 'Benn Lin'": exactly the send that existed before the suggestion. */
+    function chooserKeep() {
+      var c = chooser; if (!c) return;
+      checkSeq.current += 1;
+      setChooser(null);
+      sendName(c.seg, c.index, c.name, c.consent, null);
+    }
+
+    function chooserElse(outcome) {
+      var c = chooser; if (!c) return;
+      if (outcome.action === 'send') {
+        checkSeq.current += 1;
+        setChooser(null);
+        sendName(c.seg, c.index, outcome.name, c.consent, { newPerson: true });
+        return;
+      }
+      /* A changed name is a different question: check it afresh, and it may ask again. */
+      if (checkingRef.current) return;
+      checkingRef.current = true;
+      var my = ++checkSeq.current;
+      setChooser(Object.assign({}, c, { busy: true, error: null }));
+      runCheck(c.seg, c.index, outcome.name, c.consent, my, function (err) {
+        setChooser(Object.assign({}, c, { busy: false, error: err }));
+      });
+    }
+
+    function chooserCancel() {
+      checkSeq.current += 1;
+      checkingRef.current = false;
+      setChooser(null);
+      setNotice(null);
+    }
+
+    function sendName(seg, index, trimmed, consent, choice) {
+      var ref = sn.sessionRefForSegment(seg);
+      if (!ref) return;
       var savedAt = Date.now();
       setOpenIndex(null);
       setOptimistic(function (prev) {
         var next = Object.assign({}, prev); next[index] = trimmed; return next;
       });
       setNotice(null);
-      window.FS.api.org.setSpeakerName(ref, sn.correctionBody(seg, {
+      window.FS.api.org.setSpeakerName(ref, sn.correctionBodyForChoice(seg, {
         user: user, displayName: trimmed,
         /* The panel no longer offers a consent box (owner decision 2026-09-27), so this
            is always false and the voice is stored on the company's declared basis. */
         consentGiven: !!(consent && consent.consentGiven),
         consentedBy: consent && consent.consentedBy,
-      })).then(function (res) {
+      }, choice)).then(function (res) {
         if (res && res._notAvailable) {
           setNotice('Naming is not available in this environment.');
           setOptimistic({});
@@ -638,55 +820,6 @@
         setNotice('Could not save that name.');
         setOptimistic({});
       });
-    }
-
-    /* Ask the backend to redo the extraction with the confirmed names.
-
-       No optimistic anything and no re-fetch: the extraction runs on another Lambda
-       through a thinking-mode round trip, and the documents it rewrites are not on this
-       screen. Saying "asked for" and stopping is the honest report — a spinner that
-       resolved to nothing visible would be worse than a sentence. */
-    function regenerateSession(s) {
-      var org = window.FS.api.org;
-      if (!org || !org.regenerateSession) return;
-      setRegen(function (prev) {
-        var next = Object.assign({}, prev);
-        next[s.sessionBase] = { state: 'busy' };
-        return next;
-      });
-      function settle(state, message) {
-        setRegen(function (prev) {
-          var next = Object.assign({}, prev);
-          next[s.sessionBase] = { state: state, message: message };
-          return next;
-        });
-      }
-      org.regenerateSession(s.sessionBase, { date: date, user: user })
-        .then(function (res) {
-          if (res && res._notAvailable) {
-            settle(null, 'Rewriting is not available in this environment.');
-            return;
-          }
-          if (res && (res._accessDenied || res._notFound)) {
-            settle(null, res.error || 'You do not have permission to rewrite this summary.');
-            return;
-          }
-          /* `namedTurns`, not the status code. Regenerating with ZERO confirmed names
-             re-runs the same prompt for the same answer and costs a model call — the
-             backend returns the count so the caller can say so rather than let somebody
-             watch nothing change for the second time. */
-          if (res && res.namedTurns === 0) {
-            settle(null, 'No confirmed names reached the backend, so nothing would change. '
-              + 'Nothing was rewritten.');
-            return;
-          }
-          settle('done', 'Asked for. The summary, action items and draft email are '
-            + 'rewritten in the background — usually a few minutes. Reload the report to '
-            + 'see them.');
-        })
-        .catch(function () {
-          settle(null, 'Could not ask for a rewrite.');
-        });
     }
 
     function removeName(seg, name) {
@@ -828,48 +961,16 @@
         ? React.createElement('div', { className: 'fs-transcript-list__notice' }, notice)
         : null,
 
-      /* Renaming a speaker does NOT change Overview, Action Items or the draft email, and
-         until now nothing on screen said so — the user renamed somebody, looked at the
-         summary, saw `spk_0` still there, and reasonably concluded the rename had failed.
-         (It had not: `turn_name_overlay` has exactly one call site, the transcript.)
+      chooser
+        ? React.createElement(SameNameChooser, {
+            key: chooser.name, name: chooser.name, res: chooser.res, mode: chooser.mode,
+            busy: chooser.busy, error: chooser.error,
+            onPick: chooserPick, onKeep: chooserKeep, onElse: chooserElse, onCancel: chooserCancel,
+          })
+        : null,
 
-         This does not rewrite those documents. It re-runs the extraction with the
-         confirmed names so the MODEL reasons about them — which is the only sound option,
-         because nothing records which speaker an extracted name came from and a
-         find-and-replace would reassign a task from one Jesse to a different Jesse.
-
-         One control per SESSION, because a day's view can hold several meetings and the
-         route takes one at a time. */
-      (namingOn ? sn.confirmedSessions(state.segments) : []).map(function (s) {
-        var st = regen[s.sessionBase] || {};
-        return React.createElement('div', {
-          key: 'regen-' + s.sessionBase,
-          className: 'fs-transcript-list__regen',
-        },
-          React.createElement('span', null,
-            s.names.join(', ')
-              + (s.names.length === 1 ? ' is named' : ' are named')
-              + ' in this meeting’s transcript. The summary, action items and draft email '
-              + 'still use whatever names were heard out loud.'),
-          React.createElement('button', {
-            type: 'button',
-            className: 'fs-transcript-list__regen-button',
-            /* Disabled once requested, not merely after it finishes: the extraction is a
-               paid model call on another Lambda and a second click is a second one. */
-            disabled: !!st.state,
-            onClick: function () { regenerateSession(s); },
-            /* "Asked for", not "Done". The 202 says the request was queued; the extraction
-               itself runs elsewhere and may take minutes. A button that reads Done the
-               instant the request returns is claiming an outcome nobody has observed. */
-          }, st.state === 'busy' ? 'Asking…'
-            : st.state === 'done' ? 'Asked for'
-            : 'Rewrite the summary with these names'),
-          st.message
-            ? React.createElement('span', {
-                className: 'fs-transcript-list__name-hint',
-              }, st.message)
-            : null);
-      }),
+      /* The rewrite-the-summary control lives in the session OVERVIEW
+         (composites/session-names-regen.js), next to the summary it is about. */
 
       /* Say that some of these names were not heard, they were assumed. A `?` on a chip
          tells you a name is unconfirmed; it does not tell you the rule behind it, and a

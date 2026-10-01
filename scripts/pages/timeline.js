@@ -4610,10 +4610,16 @@
       };
     } else {
       bodyByTab = {
-        overview:   React.createElement(OverviewTab, {
-          topic: topic, date: sel.date, actionState: refActions[0], userFolder: ownerFolder,
-          isOwnReport: isOwnReport, siteId: sel.site_id || null,
-        }),
+        /* "Rewrite the summary with these names" sits with the summary it is about, not in
+           the Transcript tab (moved 2026-10-01). Renders nothing unless this window holds
+           a confirmed name and the caller may name speakers. */
+        overview:   React.createElement(React.Fragment, null,
+          fs.SessionNamesRegen
+            ? React.createElement(fs.SessionNamesRegen, mediaProps) : null,
+          React.createElement(OverviewTab, {
+            topic: topic, date: sel.date, actionState: refActions[0], userFolder: ownerFolder,
+            isOwnReport: isOwnReport, siteId: sel.site_id || null,
+          })),
         transcript: TranscriptList ? React.createElement(TranscriptList,
           Object.assign({}, mediaProps, {
             participants:  topic.participants || [],

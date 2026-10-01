@@ -220,19 +220,60 @@
       var token = enrolWatchRef.current + 1;
       enrolWatchRef.current = token;
       var tries = 0, POLL_MS = 10000, MAX_TRIES = 18;   /* ~3 minutes */
+      /* Out of patience is still an answer: never leave "Saving..." on screen forever. */
+      function giveUp() {
+        if (enrolWatchRef.current !== token) return;
+        setSaved({ message: who + '’s voice has not been saved yet. Check the Voices page '
+                            + 'in a few minutes.', state: 'refused', who: who });
+      }
       function tick() {
         if (enrolWatchRef.current !== token) return;
         tries += 1;
         org.getVoiceprints().then(function (r) {
           if (enrolWatchRef.current !== token) return;
           var out = sn.enrolmentOutcome(r && r.voiceprints, who, sinceMs);
-          if (out) { setSaved({ message: out.message }); return; }
-          if (tries < MAX_TRIES) setTimeout(tick, POLL_MS);
+          if (out) {
+            /* Same plain words as a rename and the Voices page. On a refusal, also the
+               guidance and (when the backend kept the passage) a "Try again". */
+            setSaved({ message: out.message, state: out.state,
+                       guidance: out.state === 'refused' ? out.guidance : null,
+                       voiceprintId: out.voiceprintId, retry: out.retry, who: who });
+            /* The dialog may have been closed by now. The bell's "Voices not saved" row is
+               the backend's count, so ask for it now rather than at the next 2-minute poll. */
+            var store = (window.FS || {}).nameProposals;
+            if (store && store.refresh) store.refresh();
+            return;
+          }
+          if (tries < MAX_TRIES) setTimeout(tick, POLL_MS); else giveUp();
         }, function () {
-          if (tries < MAX_TRIES) setTimeout(tick, POLL_MS);
+          if (tries < MAX_TRIES) setTimeout(tick, POLL_MS); else giveUp();
         });
       }
       setTimeout(tick, POLL_MS);
+    }
+
+    /* "Try again" after a refusal: the backend re-runs the enrolment from the passage it
+       remembered; the answer is polled exactly as after "Save as". */
+    function tryAgain() {
+      var org = ((window.FS || {}).api || {}).org;
+      if (!saved || !saved.voiceprintId || !org || !org.retryVoiceprint) return;
+      var who = saved.who;
+      var sinceMs = Date.now();
+      setSaved({ message: 'Saving ' + who + '’s voice — this takes about a minute.',
+                 state: 'saving' });
+      org.retryVoiceprint(saved.voiceprintId).then(function (res) {
+        if (res && (res._accessDenied || res._notFound || res.error)) {
+          setSaved({ message: res.error || 'There is nothing to try again for ' + who + '.',
+                     state: 'refused', guidance: window.FS.speakerNaming.retryGuidance(who) });
+          return;
+        }
+        watchEnrolment(who, sinceMs);
+      }, function () {
+        setSaved({ message: 'Could not try again. Check your connection and press Try again.',
+                   state: 'refused', who: who, voiceprintId: saved.voiceprintId,
+                   retry: saved.retry,
+                   guidance: window.FS.speakerNaming.retryGuidance(who) });
+      });
     }
 
     function decide(decision) {
@@ -287,7 +328,16 @@
         note ? h('p', { className: 'fs-isd__note', role: 'status' }, note) : null,
 
         saved
-          ? h('p', { className: 'fs-isd__saved', role: 'status' }, saved.message)
+          ? h('div', null,
+              h('p', { className: 'fs-isd__saved', role: 'status' }, saved.message),
+              saved.guidance
+                ? h('p', { className: 'fs-isd__note' }, saved.guidance) : null,
+              (saved.state === 'refused' && saved.voiceprintId && saved.retry)
+                ? h('button', {
+                    type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm',
+                    onClick: tryAgain,
+                  }, 'Try again')
+                : null)
           : h('div', null,
               h('div', { className: 'fs-isd__meta' },
                 h('span', { className: 'fs-isd__date' }, fmtDate(suggestion.date)),
