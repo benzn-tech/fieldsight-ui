@@ -100,12 +100,37 @@
      team view to be sent to, so no marker is needed. */
   function resolveTimelineScope(caller, params, selfFolder) {
     var p = params || {};
+    /* resolveSelf is a THIRD thing, separate from `user`: "the caller's own day,
+       and the server -- not this page -- says which folder that is". It is not
+       `user: null`, which already means the team view. `user` still carries the
+       page's best guess for its own rendering decisions and for the legacy
+       fallback; only the aurora request drops it (api/timeline.js).
+
+       Why the guess cannot be trusted: selfFolder is derived from the display
+       name, and display names are not unique (two accounts can both be
+       "Ben Lin", whose real folders are Ben_Lin_admin / Ben_Lin_test2 --
+       "Ben_Lin" belongs to nobody). The directory in Aurora is the identity
+       source; org-api reads the caller's own folder from it. */
     if (caller && caller.role === 'worker') {
-      return { user: selfFolder, selfDefaulted: false };
+      return { user: selfFolder, selfDefaulted: false, resolveSelf: true };
     }
-    if (p.user) return { user: p.user, selfDefaulted: false };
-    if (p.view === 'team') return { user: null, selfDefaulted: false };
-    return { user: selfFolder, selfDefaulted: true };
+    if (p.user) return { user: p.user, selfDefaulted: false, resolveSelf: false };
+    if (p.view === 'team') return { user: null, selfDefaulted: false, resolveSelf: false };
+    return { user: selfFolder, selfDefaulted: true, resolveSelf: true };
+  }
+
+  /* Who the server says this report belongs to, as a FOLDER, or null. `user` is
+     a top-level field on the 404 bodies (see the arrival-facts comment on
+     NoReportState) and nested under `raw` in the envelope. Nothing else is
+     trusted: `user_name` is a display name on the wire (org-api rewrites it to
+     "Ben Lin" on the way out even where the stored file says Ben_Lin_test2),
+     and turning a display name into a folder is exactly the guess this path
+     exists to stop making -- it lands on an orphaned folder. When the body
+     names no folder the caller keeps the one it already had. */
+  function serverSubjectFolder(report) {
+    if (!report) return null;
+    var f = report.user || (report.raw && report.raw.user) || null;
+    return (typeof f === 'string' && f) ? f : null;
   }
 
   /* ---------- life-conversation separation: optimistic overrides --------- */
@@ -749,7 +774,11 @@
 
     var subtitleParts = [];
     if (date) subtitleParts.push(formatDateLabel(date));
-    if (user) subtitleParts.push(unfolder(user));
+    /* subjectName is the SERVER's name for whose day this is; when it is given
+       it wins over anything derived from the page's folder guess. */
+    if (props.subjectName !== undefined) {
+      if (props.subjectName) subtitleParts.push(props.subjectName);
+    } else if (user) subtitleParts.push(unfolder(user));
     if (report && report.site) subtitleParts.push(report.site);
 
     /* Sprint 4.5 — when the URL carries `from=today`, the user arrived
@@ -836,7 +865,7 @@
                been, so "back" would be a lie; on someone else's it is
                genuinely where you came from. Derived from the folder rather
                than a new prop so the control stays self-contained. */
-            (user === callerFolder())
+            (props.own || user === callerFolder())
               ? (site ? 'View everyone on this site →' : 'View the team →')
               : (site ? '← All people on this site' : '← Back to overview'))
         : null,
@@ -2000,6 +2029,11 @@
     var _scope        = resolveTimelineScope(caller, params, callerFolder());
     user              = _scope.user;
     var selfDefaulted = _scope.selfDefaulted;
+    var resolveSelf   = _scope.resolveSelf;
+    /* What the REQUEST carries. `user` below may be replaced by the server's
+       answer once it lands; the request must not follow it, or the answer
+       would change the request key and refetch the same thing. */
+    var requestUser   = user;
 
     /* Switching projects resets the active person — a user picked for
        one site rarely maps onto another. Persists the choice via the
@@ -2056,6 +2090,22 @@
     var refState = React.useState({ status: 'loading' });
     var state    = refState[0];
     var setState = refState[1];
+
+    /* Own-day, resolved by the server. The page asked for "my day" without
+       naming a folder, so the folder it guessed (`user`, from the display name)
+       is not evidence of anything -- the answer is. Once the report is in, the
+       subject (folder for the calls that follow, name for the header) comes
+       from the response; before it lands there is no subject to show, and
+       showing the guess is how the wrong person got named. */
+    var serverFolder = (resolveSelf && state.status === 'ok' && state.report)
+      ? serverSubjectFolder(state.report) : null;
+    if (serverFolder) user = serverFolder;
+    var subjectName;                       /* undefined = derive from `user` as before */
+    if (resolveSelf && !(state.status === 'ok' && state.report && !state.aggregated)) {
+      subjectName = '';
+    } else if (resolveSelf) {
+      subjectName = unfolder(state.report.user_name || serverFolder || '');
+    }
 
     var retryRef   = React.useState(0);
     var retryCount = retryRef[0];
@@ -2200,7 +2250,12 @@
     React.useEffect(function () {
       if (date) return undefined;
       var cancelled = false;
-      var qsUser = user ? '&user=' + encodeURIComponent(user) : '';
+      /* An implicit own-day stays implicit across this redirect. `user` here is
+         still the display-name guess; writing it into the URL turns "my day"
+         into an explicit ?user=Ben_Lin on the next render, which the server
+         refuses and the legacy fallback then answers with the 403 this
+         resolveSelf path exists to remove. */
+      var qsUser = (user && !resolveSelf) ? '&user=' + encodeURIComponent(user) : '';
       var qsSite = site ? '&site=' + encodeURIComponent(site) : '';
       /* fix/timeline-buttons-and-deadline — the redirects below were
          dropping ?from=today, so Today's "Open timeline" link (bare
@@ -2238,7 +2293,7 @@
         return function () { cancelled = true; };
       }
 
-      window.FS.api.timeline.getTimeline({ date: today, user: user })
+      window.FS.api.timeline.getTimeline({ date: today, user: requestUser, resolveSelf: resolveSelf })
         .then(function (r) {
           if (cancelled) return null;
           if (r && !r._notFound && !r._accessDenied) return today;
@@ -2285,10 +2340,18 @@
       var canFallBackToTeam = selfDefaulted && canSeeOverview(caller, site);
 
       setState({ status: 'loading' });
+      var timelineP = window.FS.api.timeline.getTimeline({ date: date, user: requestUser, resolveSelf: resolveSelf });
       Promise.all([
-        window.FS.api.timeline.getTimeline({ date: date, user: user }),
+        timelineP,
         window.FS.api.actions.getActions(date),
-        window.FS.api.meetings.getMeetingMinutes({ date: date, user: user }),
+        /* On the own-day path the folder is only known once the timeline
+           answers, so ask for the minutes after it, with the server's folder;
+           if the answer names none, the guess is what this always sent. */
+        resolveSelf
+          ? timelineP.then(function (r) {
+              return window.FS.api.meetings.getMeetingMinutes({ date: date, user: serverSubjectFolder(r) || requestUser });
+            })
+          : window.FS.api.meetings.getMeetingMinutes({ date: date, user: requestUser }),
       ]).then(function (results) {
         if (cancelled) return;
         var report  = results[0];
@@ -2304,7 +2367,11 @@
           setState({
             status:  'access_denied',
             message: report.error,
-            scope:   user ? unfolder(user) + "'s daily report" : "this report",
+            /* resolveSelf: `user` is a guess from the display name, and the
+               server refused it or its own lookup -- naming the guess is what
+               put a stranger's name on someone's own denied page. */
+            scope:   resolveSelf ? 'your daily report'
+                     : (user ? unfolder(user) + "'s daily report" : "this report"),
           });
           return;
         }
@@ -2351,7 +2418,7 @@
         setState({ status: 'error', error: { code: (err && err.status) || 0, message: (err && err.message) || 'Could not load report', retryable: true }, retry: function () { setRetry(function (n) { return n + 1; }); } });
       });
       return function () { cancelled = true; };
-    }, [date, user, retryCount]);
+    }, [date, requestUser, retryCount]);
 
     /* life-conversation separation — a redaction / revert / keep-as-work in
        the right-detail refetches the report so the visible/removed partition
@@ -2537,7 +2604,7 @@
       },
         React.createElement(PageHeader, {
           date: date, user: user,
-          site: site,
+          site: site, subjectName: subjectName, own: resolveSelf,
         }),
         React.createElement('div', { className: 'fs-timeline-page__loading' },
           'Loading report…'),
@@ -2549,7 +2616,7 @@
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: user,
-          site: site,
+          site: site, subjectName: subjectName, own: resolveSelf,
         }),
         ErrorBanner
           ? React.createElement(ErrorBanner, {
@@ -2569,7 +2636,7 @@
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: user,
-          site: site,
+          site: site, subjectName: subjectName, own: resolveSelf,
         }),
         AccessDenied
           ? React.createElement(AccessDenied, {
@@ -2651,7 +2718,7 @@
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: user,
-          site: site,
+          site: site, subjectName: subjectName, own: resolveSelf,
         }),
         React.createElement(NoReportState, {
           message: (report && report.message) || ('No report for ' + unfolder(user || '') + ' on ' + date),
@@ -2684,7 +2751,7 @@
     var hasContentEditPerm = !!(window.FS && window.FS.can && window.FS.P
         && window.FS.can(caller, window.FS.P('content', 'edit')));
     var ownerFolder = user || (report && report.user_name && window.FS.api.folderName(report.user_name)) || null;
-    var isOwnReport = !!(ownerFolder && caller && caller.name
+    var isOwnReport = resolveSelf || !!(ownerFolder && caller && caller.name
         && window.FS.api.folderName(caller.name) === ownerFolder);
     var canEditContent = hasContentEditPerm || isOwnReport;
 
@@ -2716,7 +2783,7 @@
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: user, report: report || meeting,
-          site: site,
+          site: site, subjectName: subjectName, own: resolveSelf,
         }),
         React.createElement(ViewToggle),
 
@@ -2865,7 +2932,7 @@
     },
       React.createElement(PageHeader, {
         date: date, user: user, report: report,
-        site: site,
+        site: site, subjectName: subjectName, own: resolveSelf,
       }),
       React.createElement(ViewToggle),
       React.createElement(ReportKpis, {
@@ -4788,6 +4855,7 @@
       canSeeOverview: canSeeOverview,
       isAdminLike: isAdminLike,
       resolveTimelineScope: resolveTimelineScope,
+      serverSubjectFolder: serverSubjectFolder,
       reconcileTopicOverrides: reconcileTopicOverrides,
       diffWords: diffWords,
       formatEditTime: formatEditTime,

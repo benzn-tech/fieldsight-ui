@@ -33,14 +33,24 @@
 
   /* Session-stable read: reports are generated server-side and not edited
      in-app, so a few minutes of staleness is safe — see api/_cache.js.
-     Cache key intentionally includes only (date, user); it's the exact
-     request shape callers pass. */
+     The cache key is (source, date, user) plus a `:self` marker when the
+     caller set resolveSelf: the same (date, user) is a different request to
+     the server with and without it, so it must not share an entry. */
   async function fetchTimeline(opts) {
     if (!window.FS.api.useMocks) {
+      /* `params` is what the LEGACY read path has always been sent and still is.
+         The aurora request is built separately: when `opts.resolveSelf` is set
+         the caller is asking for THEIR OWN day and does not know their folder
+         (the page can only guess one from the display name, and two accounts can
+         share a display name -- `Ben_Lin` belongs to nobody in the directory).
+         Omitting `user` makes org-api read the caller's own folder from Aurora
+         and answer with a distinct error if there is none. `user: null` is not
+         used for this: on the page it already means "the team view". */
       var params = { date: opts.date, user: opts.user };
       if (timelineSource() === 'aurora') {
+        var auroraParams = opts.resolveSelf ? { date: opts.date } : params;
         try {
-          var r = await window.FS.api.orgRequest('/timeline', { params: params });
+          var r = await window.FS.api.orgRequest('/timeline', { params: auroraParams });
           /* _accessDenied → ACL divergence (shim v1 is stricter than prod for
              site_manager/pm, plan D10): fall through to the report path rather
              than blanking the page. _notFound is authoritative (the shim
@@ -128,7 +138,10 @@
 
   function getTimeline(opts) {
     opts = opts || {};
-    var key = 'tl:' + timelineSource() + ':' + opts.date + ':' + (opts.user || '');
+    /* resolveSelf is part of the key: the same (date, user) can be asked for
+       with and without it, and they are different requests to the server. */
+    var key = 'tl:' + timelineSource() + ':' + opts.date + ':' + (opts.user || '')
+      + (opts.resolveSelf ? ':self' : '');
     return window.FS.api.cache.cached(key, undefined, function () {
       return fetchTimeline(opts);
     });

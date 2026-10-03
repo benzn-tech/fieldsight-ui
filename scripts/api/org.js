@@ -124,7 +124,135 @@
     }
   }
 
-  async function createOrgSite(body) {
+  /* Who may name the company a new project belongs to. Mirrors the server's
+     is_cross_company gate, which is platform_admin ONLY: a plain company
+     `admin` (isAdmin is true for both) naming another company is refused 403,
+     so the control is offered to nobody else rather than offered-and-refused.
+     Reads the RAW role, which session-bridge keeps on the profile. */
+  function isCrossCompany(user) {
+    return !!user && user.role === 'platform_admin';
+  }
+
+  /* The company to send, or undefined to send NOTHING. An omitted
+     target_company_id defaults server-side to the caller's own company; a
+     field equal to your own company is a different request, so every case
+     that is not "cross-company caller picked one" is omission. */
+  function companyChoiceFor(user, selectedId) {
+    return isCrossCompany(user) && selectedId ? String(selectedId) : undefined;
+  }
+
+  function byName(a, b) { return a.name.localeCompare(b.name); }
+
+  /* [{ id, name }] from a directory payload: rows without an id dropped, a
+     nameless row shown by its id, sorted by name. Shared by the picker and
+     the management list so the two can never disagree about a company. */
+  function normaliseCompanies(rows) {
+    return (rows || [])
+      .filter(function (c) { return c && c.id; })
+      .map(function (c) { return { id: String(c.id), name: c.name || String(c.id) }; })
+      .sort(byName);
+  }
+
+  /* Companies the caller may file a project under. [{ id, name }], sorted by
+     name. Never throws and never blocks creation: every failure is [], and the
+     form then behaves as it always did -- no field, created in the caller's own
+     company.
+
+     THE DIRECTORY FIRST, the sites only as a fallback. `GET /companies` returns
+     every tenant (platform_admin only -- the same gate that alone lets
+     target_company_id be honoured). Deriving the list from the sites you can
+     SEE cannot offer a company that has no site yet, so that path could never
+     create a company's FIRST project. Closing that is the whole point of the
+     route.
+
+     The fallback stays because the two repositories ship separately: a frontend
+     deployed before the route exists gets a 404 here, and must still offer the
+     companies it CAN name rather than losing the control outright. Delete it
+     once /companies is live in every environment. */
+  async function getCompanyChoices() {
+    try {
+      var res = await api.orgRequest('/companies');
+      if (res && !res._accessDenied && !res._notFound && Array.isArray(res.companies)) {
+        return normaliseCompanies(res.companies);
+      }
+    } catch (e) { /* fall through to the sites-derived list */ }
+    return getSiteCompanies();
+  }
+
+  /* The directory, for Manage companies. platform_admin only (GET /companies
+     answers everyone else 403). No fallback to the sites-derived list, unlike
+     getCompanyChoices: a management screen that silently showed a partial list
+     would let someone conclude a company does not exist. [] on any failure. */
+  async function listCompanies() {
+    try {
+      var res = await api.orgRequest('/companies');
+      if (!res || res._accessDenied || res._notFound || !Array.isArray(res.companies)) return [];
+      return normaliseCompanies(res.companies);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /* Company writes. Bodies are built from NAMED fields. A 409 -- the name is
+     another tenant's -- resolves to { conflict: true, existing, error } rather
+     than throwing, because it is an answer the caller acts on, not a failure.
+     Everything else behaves exactly as orgRequest does. */
+  async function _companyWrite(path, method, body) {
+    if (!orgWrite()) throw new Error('company management needs the live backend');
+    try {
+      return await api.orgRequest(path, { method: method, body: body });
+    } catch (e) {
+      if (e && e.status === 409) {
+        return { conflict: true, error: (e.body && e.body.error) || e.message,
+                 existing: (e.body && e.body.existing) || null };
+      }
+      throw e;
+    }
+  }
+
+  async function createCompany(input) {
+    input = input || {};
+    var body = { name: input.name };
+    if (input.industry) body.industry = input.industry;
+    return _companyWrite('/companies', 'POST', body);
+  }
+
+  async function renameCompany(id, input) {
+    input = input || {};
+    var body = {};
+    if (input.name !== undefined) body.name = input.name;
+    if (input.industry !== undefined) body.industry = input.industry;
+    return _companyWrite('/companies/' + encodeURIComponent(id), 'PATCH', body);
+  }
+
+  /* FALLBACK ONLY -- see getCompanyChoices. Distinct by id; a site whose
+     payload carries no company_id contributes nothing. */
+  async function getSiteCompanies() {
+    try {
+      var res = await getOrgSites();
+      if (!res || res._accessDenied || res._notFound) return [];
+      var seen = {}; var out = [];
+      (res.sites || []).forEach(function (s) {
+        if (!s || !s.company_id || seen[s.company_id]) return;
+        seen[s.company_id] = true;
+        out.push({ id: String(s.company_id), name: s.company_name || String(s.company_id) });
+      });
+      return out.sort(byName);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /* THE REQUEST BODY IS BUILT HERE from an explicit list of fields -- the
+     same whitelist posture as the rest of this layer, so a field a component
+     adds that is not named below never reaches the wire. target_company_id is
+     named, and only when input.targetCompanyId is set. */
+  async function createOrgSite(input) {
+    input = input || {};
+    var body = { name: input.name, location: input.location, client: input.client,
+                 address: input.address, latitude: input.latitude, longitude: input.longitude,
+                 icon_s3_key: input.icon_s3_key };
+    if (input.targetCompanyId) body.target_company_id = input.targetCompanyId;
     if (orgWrite()) return api.orgRequest('/sites', { method: 'POST', body: body });
     await api.delay(400);
     var site = { id: 'mock-' + Date.now().toString(36), name: body.name,
@@ -1323,7 +1451,11 @@
     deleteRecordings: deleteRecordings,
     undeleteRecordings: undeleteRecordings,
     updateProfile: updateProfile,
-    getOrgSites: getOrgSites, createOrgSite: createOrgSite, updateOrgSite: updateOrgSite, geocodeAddress: geocodeAddress,
+    getOrgSites: getOrgSites, getCompanyChoices: getCompanyChoices,
+    listCompanies: listCompanies, createCompany: createCompany, renameCompany: renameCompany,
+    getSiteCompanies: getSiteCompanies,
+    isCrossCompany: isCrossCompany, companyChoiceFor: companyChoiceFor,
+    createOrgSite: createOrgSite, updateOrgSite: updateOrgSite, geocodeAddress: geocodeAddress,
     archiveSite: archiveSite, unarchiveSite: unarchiveSite,
     getMembers: getMembers, createMember: createMember, updateMemberRole: updateMemberRole,
     setMemberFolder: setMemberFolder,
