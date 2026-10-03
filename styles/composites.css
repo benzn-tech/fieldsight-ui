@@ -7222,6 +7222,16 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   border-bottom: none;
 }
 
+/* Settings › Glossary: what was heard, what it is written as, and Undo. */
+.fs-settings__glossary { width: 100%; border-collapse: collapse; font-size: 13px; }
+.fs-settings__glossary th {
+  text-align: left; font-weight: 600; color: var(--text-secondary);
+  padding: 6px 8px; border-bottom: 1px solid var(--border-default);
+}
+.fs-settings__glossary td {
+  padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); color: var(--text-primary);
+}
+
 .fs-settings__section-title {
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-semibold);

@@ -51,7 +51,15 @@
     { key: 'profile',       label: 'Profile' },
     { key: 'security',      label: 'Security' },
     { key: 'notifications', label: 'Notifications' },
+    { key: 'glossary',      label: 'Glossary', roles: ['admin', 'gm', 'platform_admin'] },
   ];
+
+  /* Tabs this person may see. The server refuses the glossary to anyone else
+     anyway; this keeps a tab that would only say "forbidden" out of sight. */
+  function visibleTabs() {
+    var u = (window.AuthMock && window.AuthMock.currentUser) || {};
+    return TABS.filter(function (t) { return !t.roles || t.roles.indexOf(u.role) >= 0; });
+  }
 
   var TIME_FORMATS = [{ v: '24h', l: '24-hour (14:30)' }, { v: '12h', l: '12-hour (2:30 PM)' }];
   var DATE_FORMATS = [{ v: 'DD/MM/YYYY', l: 'DD/MM/YYYY' }, { v: 'MM/DD/YYYY', l: 'MM/DD/YYYY' }, { v: 'YYYY-MM-DD', l: 'YYYY-MM-DD' }];
@@ -217,7 +225,7 @@
   /* ---------- Tab strip ------------------------------------------------- */
   function TabStrip(ctx) {
     return React.createElement('div', { className: 'fs-settings__tabs', role: 'tablist', 'aria-label': 'Settings sections' },
-      TABS.map(function (t) {
+      visibleTabs().map(function (t) {
         var active = ctx.tab === t.key;
         return React.createElement('button', {
           key: t.key, type: 'button', role: 'tab', 'aria-selected': active,
@@ -418,6 +426,60 @@
     );
   }
 
+  /* ---------- Glossary tab (admin/gm) ----------------------------------- */
+  /* The company's glossary: names corrected by hand are learned by themselves
+     (pipeline #1018) and applied to reports. Every entry is listed here, and
+     can be undone, because one applies across its whole site. */
+  function GlossaryTab() {
+    var h = React.createElement;
+    var s_rows = React.useState(null); var rows = s_rows[0], setRows = s_rows[1];
+    var s_err = React.useState(null); var err = s_err[0], setErr = s_err[1];
+    var s_busy = React.useState(null); var busy = s_busy[0], setBusy = s_busy[1];
+    var api = ((window.FS || {}).api || {}).actions || {};
+
+    function load() {
+      if (!api.listAliases) { setRows([]); return; }
+      Promise.resolve(api.listAliases()).then(function (r) {
+        if (!r || r.error || r._accessDenied) { setErr((r && r.error) || 'Could not load the glossary.'); setRows([]); return; }
+        setRows(r.aliases || []);
+      }, function () { setErr('Could not load the glossary.'); setRows([]); });
+    }
+    React.useEffect(load, []);
+
+    function undo(a) {
+      setBusy(a.id); setErr(null);
+      Promise.resolve(api.retireAlias(a.id)).then(function (r) {
+        setBusy(null);
+        if (!r || r.error) { setErr((r && r.error) || 'Could not undo the entry.'); return; }
+        setRows(function (cur) { return (cur || []).filter(function (x) { return x.id !== a.id; }); });
+      }, function () { setBusy(null); setErr('Could not undo the entry.'); });
+    }
+
+    return h('section', { className: 'fs-settings__section' },
+      h('div', { className: 'fs-settings__section-desc' },
+        'Names corrected by hand are learned here and used in reports. Undo an entry if it is wrong.'),
+      err ? h('p', { className: 'fs-field__hint fs-field__hint--error' }, err) : null,
+      rows === null ? h('p', { className: 'fs-settings__section-desc' }, 'Loading…')
+        : rows.length === 0 ? h('p', { className: 'fs-settings__section-desc' }, 'No entries yet.')
+        : h('table', { className: 'fs-settings__glossary' },
+            h('thead', null, h('tr', null,
+              ['Heard as', 'Written as', 'Project', 'From', ''].map(function (c, i) {
+                return h('th', { key: i }, c);
+              }))),
+            h('tbody', null, rows.map(function (a) {
+              return h('tr', { key: a.id },
+                h('td', null, a.wrong_term),
+                h('td', null, a.right_term),
+                h('td', null, a.site_name || 'All projects'),
+                h('td', null, (a.source === 'learned' ? 'Learned from ' : 'Added by ')
+                  + (a.created_by_name || 'someone')),
+                h('td', null, h('button', {
+                  type: 'button', className: 'fs-btn fs-btn--sm fs-btn--secondary',
+                  disabled: busy === a.id, onClick: function () { undo(a); },
+                }, busy === a.id ? 'Undoing…' : 'Undo')));
+            }))));
+  }
+
   /* ---------- Notifications tab ----------------------------------------- */
   function NotificationsTab(props) {
     var ctx = props.ctx;
@@ -459,6 +521,7 @@
     if (ctx.tab === 'profile') body = React.createElement(ProfileTab, { ctx: ctx });
     else if (ctx.tab === 'security') body = React.createElement(SecurityTab, { ctx: ctx });
     else if (ctx.tab === 'notifications') body = React.createElement(NotificationsTab, { ctx: ctx });
+    else if (ctx.tab === 'glossary') body = React.createElement(GlossaryTab, null);
     else body = React.createElement(PreferencesTab, { ctx: ctx });
 
     return React.createElement('div', { className: 'fs-settings' },
