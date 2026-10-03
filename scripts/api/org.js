@@ -143,6 +143,16 @@
 
   function byName(a, b) { return a.name.localeCompare(b.name); }
 
+  /* [{ id, name }] from a directory payload: rows without an id dropped, a
+     nameless row shown by its id, sorted by name. Shared by the picker and
+     the management list so the two can never disagree about a company. */
+  function normaliseCompanies(rows) {
+    return (rows || [])
+      .filter(function (c) { return c && c.id; })
+      .map(function (c) { return { id: String(c.id), name: c.name || String(c.id) }; })
+      .sort(byName);
+  }
+
   /* Companies the caller may file a project under. [{ id, name }], sorted by
      name. Never throws and never blocks creation: every failure is [], and the
      form then behaves as it always did -- no field, created in the caller's own
@@ -163,13 +173,56 @@
     try {
       var res = await api.orgRequest('/companies');
       if (res && !res._accessDenied && !res._notFound && Array.isArray(res.companies)) {
-        return res.companies
-          .filter(function (c) { return c && c.id; })
-          .map(function (c) { return { id: String(c.id), name: c.name || String(c.id) }; })
-          .sort(byName);
+        return normaliseCompanies(res.companies);
       }
     } catch (e) { /* fall through to the sites-derived list */ }
     return getSiteCompanies();
+  }
+
+  /* The directory, for Manage companies. platform_admin only (GET /companies
+     answers everyone else 403). No fallback to the sites-derived list, unlike
+     getCompanyChoices: a management screen that silently showed a partial list
+     would let someone conclude a company does not exist. [] on any failure. */
+  async function listCompanies() {
+    try {
+      var res = await api.orgRequest('/companies');
+      if (!res || res._accessDenied || res._notFound || !Array.isArray(res.companies)) return [];
+      return normaliseCompanies(res.companies);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /* Company writes. Bodies are built from NAMED fields. A 409 -- the name is
+     another tenant's -- resolves to { conflict: true, existing, error } rather
+     than throwing, because it is an answer the caller acts on, not a failure.
+     Everything else behaves exactly as orgRequest does. */
+  async function _companyWrite(path, method, body) {
+    if (!orgWrite()) throw new Error('company management needs the live backend');
+    try {
+      return await api.orgRequest(path, { method: method, body: body });
+    } catch (e) {
+      if (e && e.status === 409) {
+        return { conflict: true, error: (e.body && e.body.error) || e.message,
+                 existing: (e.body && e.body.existing) || null };
+      }
+      throw e;
+    }
+  }
+
+  async function createCompany(input) {
+    input = input || {};
+    var body = { name: input.name };
+    if (input.industry) body.industry = input.industry;
+    return _companyWrite('/companies', 'POST', body);
+  }
+
+  async function renameCompany(id, input) {
+    input = input || {};
+    var body = {};
+    if (input.name !== undefined) body.name = input.name;
+    if (input.industry !== undefined) body.industry = input.industry;
+    return _companyWrite('/companies/' + encodeURIComponent(id), 'PATCH', body);
   }
 
   /* FALLBACK ONLY -- see getCompanyChoices. Distinct by id; a site whose
@@ -1399,6 +1452,7 @@
     undeleteRecordings: undeleteRecordings,
     updateProfile: updateProfile,
     getOrgSites: getOrgSites, getCompanyChoices: getCompanyChoices,
+    listCompanies: listCompanies, createCompany: createCompany, renameCompany: renameCompany,
     getSiteCompanies: getSiteCompanies,
     isCrossCompany: isCrossCompany, companyChoiceFor: companyChoiceFor,
     createOrgSite: createOrgSite, updateOrgSite: updateOrgSite, geocodeAddress: geocodeAddress,
