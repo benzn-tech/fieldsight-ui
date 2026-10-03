@@ -551,6 +551,26 @@
 
   /* editable-content-correction — confirm a glossary candidate into a scoped
      name_aliases row (site_manager+ enforced server-side). */
+  /* The company's glossary, for the Settings › Glossary list (admin/gm), and
+     undoing one entry. Entries are learned from people's own corrections
+     (pipeline #1018, owner 2026-10-02); this is where they are seen and undone. */
+  async function listAliases() {
+    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
+      return window.FS.api.orgRequest('/aliases');
+    }
+    await window.FS.api.delay(60);
+    return { aliases: [] };
+  }
+
+  async function retireAlias(id) {
+    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
+      return window.FS.api.orgRequest('/aliases/' + encodeURIComponent(id),
+        { method: 'DELETE', retry: false });
+    }
+    await window.FS.api.delay(60);
+    return { retired: id };
+  }
+
   async function confirmAlias(body) {
     if (!window.FS.api.useMocks && !window.FS.api.writeMocks) {
       return window.FS.api.orgRequest('/aliases', { method: 'POST', body: body || {} });
@@ -689,6 +709,8 @@
     getContentHistory: getContentHistory,
     settleSave:      settleSave,
     confirmAlias:    confirmAlias,
+    listAliases: listAliases,
+    retireAlias: retireAlias,
     createRedaction: createRedaction,
     revertRedaction: revertRedaction,
     submitClassificationFeedback: submitClassificationFeedback,

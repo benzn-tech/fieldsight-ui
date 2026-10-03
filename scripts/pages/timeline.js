@@ -3809,6 +3809,16 @@
                                   tone: 'error', duration: 5000 });
           return;
         }
+        /* THE GLOSSARY LEARNS BY ITSELF (owner, 2026-10-02): a misheard name
+           fixed here is kept by the server (res.learned) -- no confirm prompt.
+           Said once, quietly; Settings › Glossary lists and undoes it. */
+        if (res && res.learned && res.learned.length && window.FS && window.FS.toast) {
+          window.FS.toast.show({
+            message: 'Added to glossary: ' + res.learned.map(function (l) {
+              return l.wrong_term + ' → ' + l.right_term;
+            }).join(', '),
+            tone: 'info', duration: 4000 });
+        }
         if (props.showGlossaryConfirm && res.candidates && res.candidates.length) {
           setCandidates(res.candidates);
           /* content-propagate (item #3) — a sibling offer to GlossaryConfirm,
@@ -3862,7 +3872,9 @@
           icon: 'x', size: 'sm', variant: 'ghost', disabled: busy,
           ariaLabel: 'Cancel', onClick: cancel,
         }) : null),
-      candidates.length > 0 ? React.createElement(GlossaryConfirm, {
+      /* Hidden (owner, 2026-10-02): the glossary learns from the correction
+         itself; the confirm prompt is gone. The component stays for now. */
+      false && candidates.length > 0 ? React.createElement(GlossaryConfirm, {
         candidates: candidates,
         onConfirmed: function (term) {
           setCandidates(function (cur) { return cur.filter(function (c) { return c !== term; }); });
