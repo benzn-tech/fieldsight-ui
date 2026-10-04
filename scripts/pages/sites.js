@@ -389,11 +389,25 @@
        reachable directly via useContext — simpler than prop-drilling
        setSiteIcon down through onCreated. */
     var ctx = React.useContext(SitesContext);
-    var refForm = React.useState({ name: '', location: '', region: 'south-island', client: '', project_value_nzd: '', planned_completion: '', address: '', latitude: null, longitude: null });
+    var refForm = React.useState({ name: '', location: '', region: 'south-island', client: '', project_value_nzd: '', planned_completion: '', address: '', latitude: null, longitude: null, company_id: props.initialCompanyId || '' });
     var form = refForm[0], setForm = refForm[1];
     var refBusy = React.useState(false); var busy = refBusy[0], setBusy = refBusy[1];
     var iconRef = React.useRef(null);
     var Avatar = window.FieldSight && window.FieldSight.Avatar;
+    /* Owning company: offered only to a cross-company caller (platform_admin),
+       matching the server gate. A failed lookup leaves the list empty, which
+       hides the control and keeps today's behaviour. */
+    var orgApi = window.FS.api.org;
+    var callerUser = (window.AuthMock && window.AuthMock.currentUser) || {};
+    var mayPickCompany = !!(orgApi && orgApi.isCrossCompany && orgApi.isCrossCompany(callerUser));
+    var refCompanies = React.useState([]); var companies = refCompanies[0], setCompanies = refCompanies[1];
+    React.useEffect(function () {
+      if (!mayPickCompany || !orgLive() || !orgApi.getCompanyChoices) return;
+      var alive = true;
+      orgApi.getCompanyChoices().then(function (list) { if (alive) setCompanies(list || []); })
+        .catch(function () {});
+      return function () { alive = false; };
+    }, [mayPickCompany]);
     /* Live backend -> the three fields below are dropped on submit. */
     var unsaved = orgLive();
     function set(k, v) { setForm(function (f) { var n = Object.assign({}, f); n[k] = v; return n; }); }
@@ -415,7 +429,8 @@
       setBusy(true);
       var live = orgLive();
       var creating = live
-        ? window.FS.api.org.createOrgSite({ name: form.name, location: form.location, client: form.client, address: form.address || undefined, latitude: form.latitude, longitude: form.longitude, icon_s3_key: form._iconKey || undefined })
+        ? window.FS.api.org.createOrgSite({ name: form.name, location: form.location, client: form.client, address: form.address || undefined, latitude: form.latitude, longitude: form.longitude, icon_s3_key: form._iconKey || undefined,
+            targetCompanyId: orgApi.companyChoiceFor(callerUser, form.company_id) })
         : window.FS.api.sites.createSite(form);
       creating.then(function (site) {
         setBusy(false);
@@ -441,6 +456,12 @@
     return React.createElement(Modal, { open: true, size: 'md', title: 'New project', onClose: props.onClose },
       React.createElement('div', { className: 'fs-settings__pw-form' },
         fFieldRow('Project name *', fText(form.name, function (v) { set('name', v); })),
+        (mayPickCompany && companies.length > 0)
+          ? fFieldRow('Company',
+              fSelect(form.company_id || '', [{ v: '', l: 'My own company' }].concat(companies.map(function (c) { return { v: c.id, l: c.name }; })),
+                function (v) { set('company_id', v); }),
+              'Which company this project belongs to.')
+          : null,
         fFieldRow('Project icon', React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
           Avatar ? React.createElement(Avatar, { name: form.name || 'Project', src: form.icon || undefined, size: 'md', shape: 'square' }) : null,
           React.createElement('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', ref: iconRef, onChange: onPickIcon, style: { display: 'none' } }),
@@ -458,8 +479,9 @@
         }), 'Pick a suggestion to set the coordinates the weather panel uses.'),
         fCoords(form, setForm),
         /* THESE THREE DO NOT PERSIST AGAINST THE REAL BACKEND, and the form
-           said nothing about it. `createOrgSite` sends seven fields and none
-           is one of these; `sites` has had no value, region or completion
+           said nothing about it. `createOrgSite` names its fields explicitly
+           (seven, plus target_company_id when a cross-company caller picks
+           one) and none is one of these; `sites` has had no value, region or completion
            column since 0002_core_relational.sql. Disabled rather than
            deleted: the intent to support them is real and a disabled control
            still says so.
@@ -484,6 +506,106 @@
         )
       )
     );
+  }
+
+  /* ---------- NewCompanyModal (company management, spec 2026-10-03) ------ */
+  /* platform_admin only -- the caller gates rendering. A taken name is an
+     answer, not a failure: offer the company that exists, because whoever
+     typed the name wanted somewhere to put a project. */
+  function NewCompanyModal(props) {
+    var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
+    var orgApi = window.FS.api.org;
+    var refName = React.useState(''); var name = refName[0], setName = refName[1];
+    var refBusy = React.useState(false); var busy = refBusy[0], setBusy = refBusy[1];
+    var refTaken = React.useState(null); var taken = refTaken[0], setTaken = refTaken[1];
+    function fail() {
+      setBusy(false);
+      if (window.FS.toast) window.FS.toast.show({ message: 'Could not create company', tone: 'error' });
+    }
+    function submit() {
+      if (!name.trim() || busy) return;
+      setBusy(true); setTaken(null);
+      orgApi.createCompany({ name: name }).then(function (res) {
+        if (res && res.conflict) { setBusy(false); setTaken(res.existing || { id: null, name: name.trim() }); return; }
+        if (!res || !res.company) { fail(); return; }
+        setBusy(false);
+        if (window.FS.toast) window.FS.toast.show({ message: 'Company "' + res.company.name + '" created', tone: 'success' });
+        props.onCreated(res.company);
+      }).catch(fail);
+    }
+    if (!Modal) return null;
+    return React.createElement(Modal, { open: true, size: 'md', title: 'New company', onClose: props.onClose },
+      React.createElement('div', { className: 'fs-settings__pw-form' },
+        fFieldRow('Company name *', fText(name, function (v) { setName(v); setTaken(null); })),
+        taken ? React.createElement('div', { className: 'fs-settings__field-hint', role: 'alert' },
+          'A company called "' + taken.name + '" already exists. ',
+          taken.id ? React.createElement('button', {
+            type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm',
+            onClick: function () { props.onUseExisting(taken); },
+          }, 'Create a project in ' + taken.name) : null) : null,
+        React.createElement('div', { className: 'fs-settings__actions' },
+          React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: props.onClose }, 'Cancel'),
+          React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--md', disabled: busy || !name.trim(), onClick: submit }, busy ? 'Creating…' : 'Create company'))));
+  }
+
+  /* ---------- ManageCompaniesModal --------------------------------------- */
+  /* Every tenant from the directory, renamed in place. No client-side name
+     check: the server excludes the company itself, so a case-only change of
+     its own name must reach it. */
+  function ManageCompaniesModal(props) {
+    var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
+    var orgApi = window.FS.api.org;
+    var refRows = React.useState(null); var rows = refRows[0], setRows = refRows[1];
+    var refEdit = React.useState(null); var editing = refEdit[0], setEditing = refEdit[1];
+    var refDraft = React.useState(''); var draft = refDraft[0], setDraft = refDraft[1];
+    var refMsg = React.useState(null); var msg = refMsg[0], setMsg = refMsg[1];
+    var refBusy = React.useState(false); var busy = refBusy[0], setBusy = refBusy[1];
+    function load() {
+      return orgApi.listCompanies().then(function (list) { setRows(list || []); });
+    }
+    React.useEffect(function () { load(); }, []);
+    function save(row) {
+      if (!draft.trim() || busy) return;
+      setBusy(true); setMsg(null);
+      orgApi.renameCompany(row.id, { name: draft }).then(function (res) {
+        setBusy(false);
+        if (res && res.conflict) {
+          setMsg('A company called "' + ((res.existing && res.existing.name) || draft.trim()) + '" already exists.');
+          return;
+        }
+        if (!res || !res.company) { setMsg('Could not rename the company.'); return; }
+        setEditing(null);
+        if (window.FS.toast) window.FS.toast.show({ message: 'Renamed to "' + res.company.name + '"', tone: 'success' });
+        load();
+      }).catch(function () { setBusy(false); setMsg('Could not rename the company.'); });
+    }
+    if (!Modal) return null;
+    var body;
+    if (rows === null) {
+      body = React.createElement('div', { className: 'fs-settings__field-hint' }, 'Loading…');
+    } else if (rows.length === 0) {
+      body = React.createElement('div', { className: 'fs-settings__field-hint' }, 'No companies could be loaded.');
+    } else {
+      body = rows.map(function (row) {
+        var isEditing = editing === row.id;
+        return React.createElement('div', { key: row.id, className: 'fs-settings__field-row' },
+          isEditing
+            ? fText(draft, function (v) { setDraft(v); setMsg(null); })
+            : React.createElement('span', null, row.name),
+          isEditing
+            ? React.createElement('span', null,
+                React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--sm', disabled: busy || !draft.trim(), onClick: function () { save(row); } }, busy ? 'Saving…' : 'Save'),
+                ' ',
+                React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm', onClick: function () { setEditing(null); setMsg(null); } }, 'Cancel'))
+            : React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm', onClick: function () { setEditing(row.id); setDraft(row.name); setMsg(null); } }, 'Rename'));
+      });
+    }
+    return React.createElement(Modal, { open: true, size: 'md', title: 'Companies', onClose: props.onClose },
+      React.createElement('div', { className: 'fs-settings__pw-form' },
+        body,
+        msg ? React.createElement('div', { className: 'fs-settings__field-hint', role: 'alert' }, msg) : null,
+        React.createElement('div', { className: 'fs-settings__actions' },
+          React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: props.onClose }, 'Close'))));
   }
 
   /* ---------- EditProjectModal (admin edit an existing project) -------- */
@@ -547,6 +669,12 @@
     var ctx = React.useContext(SitesContext);
     var nmRef = React.useState(false);
     var newOpen = nmRef[0], setNewOpen = nmRef[1];
+    var ncRef = React.useState(false);
+    var newCompanyOpen = ncRef[0], setNewCompanyOpen = ncRef[1];
+    var mcRef = React.useState(false);
+    var manageOpen = mcRef[0], setManageOpen = mcRef[1];
+    var pcRef = React.useState(null);           /* company preselected for New project */
+    var projectCompanyId = pcRef[0], setProjectCompanyId = pcRef[1];
     if (!ctx) {
       console.warn('[SitesMiddleColumn] SitesContext missing — was the page Provider mounted?');
       return null;
@@ -594,6 +722,11 @@
     /* Mirrors the backend create_org_site gate (admin/gm/platform_admin).
        Not user:manage — project_manager holds that too and every submit 403'd. */
     var canCreate = ctx.caller && (ctx.caller.isAdmin || ctx.caller.role === 'gm');
+    /* Company management is platform_admin only -- the backend gate is
+       is_cross_company, which a company admin does not pass, so isAdmin is
+       not the signal. Live mode only: there are no companies in the fixtures. */
+    var orgApi = window.FS.api.org;
+    var mayManageCompanies = !!(orgApi && orgApi.isCrossCompany && orgApi.isCrossCompany(ctx.caller)) && orgLive();
     /* batch 2c Task 5 — toggle is live-only (mock fixtures carry no
        archived dimension) and gated the same as the archive action itself. */
     var canToggleArchived = orgLive() && !!(window.FS && window.FS.can && window.FS.can(ctx.caller, 'user:manage'));
@@ -613,15 +746,30 @@
           type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm',
           onClick: function () { ctx.setShowArchived(!ctx.showArchived); },
         }, ctx.showArchived ? 'Hide archived' : 'Show archived') : null,
+        mayManageCompanies ? React.createElement('button', {
+          type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm',
+          onClick: function () { setManageOpen(true); },
+        }, 'Manage companies') : null,
+        mayManageCompanies ? React.createElement('button', {
+          type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm',
+          onClick: function () { setNewCompanyOpen(true); },
+        }, '+ New company') : null,
         canCreate ? React.createElement('button', {
           type: 'button', className: 'fs-btn fs-btn--primary fs-btn--sm',
-          onClick: function () { setNewOpen(true); },
+          onClick: function () { setProjectCompanyId(null); setNewOpen(true); },
         }, '+ New project') : null,
       ),
     );
     var modal = newOpen ? React.createElement(NewProjectModal, {
+      initialCompanyId: projectCompanyId,
       onClose:   function () { setNewOpen(false); },
       onCreated: function (site) { ctx.addSite(site); },
+    }) : newCompanyOpen ? React.createElement(NewCompanyModal, {
+      onClose:       function () { setNewCompanyOpen(false); },
+      onCreated:     function (co) { setNewCompanyOpen(false); setProjectCompanyId(co.id); setNewOpen(true); },
+      onUseExisting: function (co) { setNewCompanyOpen(false); setProjectCompanyId(co.id); setNewOpen(true); },
+    }) : manageOpen ? React.createElement(ManageCompaniesModal, {
+      onClose: function () { setManageOpen(false); },
     }) : null;
 
     if (sites.length === 0) {
