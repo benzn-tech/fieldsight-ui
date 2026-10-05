@@ -106,11 +106,18 @@
       /* Everyone else: the union of the members of the sites they can see,
          de-duplicated by identity (a person on two sites is one user). */
       var sitesRes = await getSites();
-      var lists = await Promise.all(sitesRes.sites.map(function (s) {
+      /* One site refusing or failing must not blank the roster: skip it and
+         use the rest. Only when EVERY site fails is that a failure (a caller
+         with zero sites has simply nobody to list). */
+      var firstErr = null;
+      var settled = await Promise.all(sitesRes.sites.map(function (s) {
         return window.FS.api.org.getSiteMembers(s.site_id).then(function (r) {
           return rejectIfRefused(r, 'getUsers');
-        });
+        }).then(function (r) { return { ok: true, r: r }; },
+                function (e) { firstErr = firstErr || e; return { ok: false }; });
       }));
+      var lists = settled.filter(function (x) { return x.ok; }).map(function (x) { return x.r; });
+      if (sitesRes.sites.length > 0 && lists.length === 0) throw firstErr;
       var seen = {}, out = [];
       lists.forEach(function (r) {
         ((r && r.users) || []).forEach(function (u) {

@@ -91,6 +91,33 @@ test('getUsers as site_manager never touches /members: sites, then each site mem
   assert.deepStrictEqual(legacyCalls, []);
 });
 
+test('getUsers as site_manager: one refused site is skipped, the other still supplies the roster', async () => {
+  role = 'site_manager';
+  reply = function (p) {
+    if (p === '/sites/' + SITE_A + '/members') return { _accessDenied: true, status: 403, error: 'no' };
+    return directory(p);
+  };
+  const api = load();
+  const res = await api.sites.getUsers();
+  assert.deepStrictEqual(res.users.map(function (u) { return u.device_id; }).sort(), ['s2', 's3']);
+  reply = function (p) {
+    if (p === '/sites/' + SITE_A + '/members') return new Error('boom');
+    return directory(p);
+  };
+  assert.deepStrictEqual((await api.sites.getUsers()).users.map(function (u) { return u.device_id; }).sort(), ['s2', 's3']);
+});
+
+test('getUsers as site_manager: every site refused rejects; zero sites resolves empty', async () => {
+  role = 'site_manager';
+  reply = function (p) {
+    return p === '/sites' ? SITES : { _accessDenied: true, status: 403, error: 'no' };
+  };
+  const api = load();
+  await assert.rejects(api.sites.getUsers(), /failed \(403\)/);
+  reply = function (p) { return p === '/sites' ? { sites: [] } : new Error('unexpected ' + p); };
+  assert.deepStrictEqual(await api.sites.getUsers(), { users: [] });
+});
+
 test('getSiteUsers takes a UUID as-is', async () => {
   role = 'admin'; reply = directory;
   const api = load();
@@ -164,6 +191,10 @@ test('wiring-only: sites.js makes no legacy read request and no legacy fallback'
   const src = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'api', 'sites.js'), 'utf8');
   const code = src.replace(/\/\*[\s\S]*?\*\//g, '');
   assert.ok(!/legacyReadFallback/.test(code));
-  assert.ok(!/request\('\/site-users'/.test(code));
-  assert.ok(!/request\('\/users'\)|request\('\/sites'\)/.test(code));
+  /* Any request('/sites|/users|/site-users...') is a legacy call, whatever
+     follows the path. The out-of-scope writers (createSite, createUser,
+     updateUserRole) are excluded by FUNCTION scope: only their own bodies are
+     blanked out, so a read added anywhere else is still caught. */
+  const reads = code.replace(/async function (createSite|createUser|updateUserRole)[\s\S]*?\r?\n  \}\r?\n/g, '');
+  assert.deepStrictEqual(reads.match(/request\(\s*['"`]\/(sites|users|site-users)/g), null);
 });
