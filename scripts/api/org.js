@@ -1040,6 +1040,22 @@
       { params: { user: opts.user } });
   }
 
+  /* Checklist reports the pipeline made on its own from spoken checks
+     (checklist_reports), with their status, and the checks no checklist
+     matched. Day: anyone who may see that day. Recent: the caller's own,
+     for the bell. Offline: none. */
+  async function getDayChecklistReports(opts) {
+    opts = opts || {};
+    if (!sessionReportLive()) return { reports: [], unmatched: [] };
+    return api.orgRequest('/days/' + encodeURIComponent(opts.date) + '/checklist-reports',
+      { params: { user: opts.user } });
+  }
+
+  async function getRecentChecklistReports() {
+    if (!sessionReportLive()) return { reports: [], unmatched: [] };
+    return api.orgRequest('/checklist-reports/recent');
+  }
+
   async function getSessionReportPreview(opts) {
     opts = opts || {};
     if (sessionReportLive()) {
@@ -1512,6 +1528,8 @@
     getLiveItems: getLiveItems,
     getSiteWeather: getSiteWeather,
     getDayInspections: getDayInspections,
+    getDayChecklistReports: getDayChecklistReports,
+    getRecentChecklistReports: getRecentChecklistReports,
     getTraceDay: getTraceDay,
     getTraceFunnel: getTraceFunnel,
     getSessions: getSessions,
