@@ -17,11 +17,10 @@
 
    Right detail:
      • Action detail (text, owner, deadline, priority, source topic)
-     • Audit history (checked_by, checked_at)
      • Mark complete CTA — wires through FS.api.actions.resolveActionItem
        (feat/checkoff-org-api: the AUTHORISED PATCH /api/org/action-items/
-       {id} when the row carries a durable actionItemId, else the legacy
-       toggle; reuses Sprint 2.4 P-04 optimistic flow; on success removes
+       {id}; a row with no durable actionItemId is read-only, no button;
+       reuses Sprint 2.4 P-04 optimistic flow; on success removes
        the row from the page snapshot via TasksContext.removeRow, on a
        refusal keeps the panel open and toasts the server's reason)
 
@@ -55,33 +54,16 @@
     return p[2] + ' ' + months[p[1] - 1] + ' ' + p[0];
   }
 
-  function fmtTimestamp(iso) {
-    if (!iso) return '';
-    var d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
-  }
-
   /* Overdue check resolves the free-text deadline against the report's own
      date via the shared resolveDeadline helper (today-adapter.js) — the
      same helper Today + Timeline use for absolute due dates. Unparseable
      deadlines (absolute: null) never count as overdue. */
-  /* feat/checkoff-org-api — done-ness is the UNION of the two stores a row
-     carries: the authoritative Aurora column (`row.status`, threaded raw by
-     tasks-aggregator.js) and the legacy DynamoDB overlay boolean
-     (`row.audit.checked`). This page previously read ONLY the overlay for
-     bucketing, badges and the check-off affordance while its own Status
-     editor wrote ONLY the column — so a task set to Done in the editor
-     stayed in the Open bucket with an "Open" badge and a live check-off
-     circle, and the two could contradict each other on screen. The union is
-     the same rule already shipped in today.js's keep() and
-     action-item-row.js's isColumnDone, and it is what makes the move to the
-     authorised PATCH non-regressive: ~119 action-item check-offs still live
-     only in DynamoDB (their Aurora rows are status='open', the NOT NULL
-     DEFAULT), and they keep reading as Done. */
+  /* Done-ness is the task's own action_items.status (`row.status`, threaded
+     raw by tasks-aggregator.js) and nothing else. The legacy DynamoDB tick
+     overlay no longer exists, so there is no second store to union with. */
   function isRowDone(row) {
     if (!row) return false;
-    return window.FS.api.actions.isActionResolved(row.status, row.audit && row.audit.checked);
+    return window.FS.api.actions.isActionResolved(row.status);
   }
 
   function isOverdue(row, today) {
@@ -493,8 +475,8 @@
        check-off path the single-row circle (below, via TaskCard's
        checkable prop) and TasksRightDetail's Mark complete button both
        use — now FS.api.actions.resolveActionItem (feat/checkoff-org-api:
-       the authorised PATCH /api/org/action-items/{id} when the row carries
-       a durable actionItemId, else the legacy DynamoDB toggle).
+       the authorised PATCH /api/org/action-items/{id}; a row without a
+       durable actionItemId is never selectable).
        Mirrors today.js's bulkResolveLeftover
        / safety.js's bulkMarkResolved: each selected row carries its OWN
        date/topic_id/action_index (rows span many dates/owners — no
@@ -520,9 +502,8 @@
           return api.actions.resolveActionItem({
             /* feat/checkoff-org-api — the durable action_items.id the
                aggregator already stamps on every row (tasks-aggregator.js
-               `actionItemId: a.id || null`); its presence is what routes
-               this write to the AUTHORISED PATCH instead of the legacy
-               unauthenticated toggle. */
+               `actionItemId: a.id || null`); the AUTHORISED PATCH needs it,
+               and a row without one is refused. */
             actionItemId: row.actionItemId,
             date:         row.date,
             topic_id:     row.topic_id,
@@ -535,7 +516,7 @@
                in practice; kept as `row.folder || row.user_folder` to
                mirror Today's exact owner-folder fallback expression,
                in case a future caller ever hands this a Today-shaped
-               row (which DOES carry `.folder`). Legacy-leg only. */
+               row (which DOES carry `.folder`). Identifies the bus event. */
             user_folder:  row.folder || row.user_folder,
           }).then(function (env) {
             if (env && env.ok) return { ok: true, row: row };
@@ -615,13 +596,14 @@
               'Action items assigned across reports — yours, your team’s, by status'),
           ),
           /* feat/editable-tasks-ui — "+ New task" entry point, primary
-             home for CreateTaskModal (see file header note there). Always
-             available on /tasks (the tasks hub) — no role gate, unlike
+             home for CreateTaskModal (see file header note there). Shown
+             only in mock mode: no backend creates a standalone task, so in
+             live mode there is no entry point. Otherwise available on /tasks (the tasks hub) — no role gate, unlike
              /quality's "+ Log Item" (quality:manage-gated): task creation
              has no equivalent domain-manager permission in roles.js today,
              and gating it incorrectly is worse than not gating it, per the
              brief this shipped under. */
-          CreateTaskModal
+          CreateTaskModal && (window.FS.api.useMocks || window.FS.api.writeMocks)
             ? React.createElement('button', {
                 type:      'button',
                 className: 'fs-tasks__new-task-btn',
@@ -707,12 +689,9 @@
                 actionIndex: row.action_index,
                 /* feat/checkoff-org-api — the durable action_items.id
                    (tasks-aggregator.js `actionItemId: a.id || null`). It
-                   was NEVER threaded onto this task object, so TaskCard's
-                   check-off circle on /tasks always fell through to the
-                   legacy unauthenticated toggle even for rows that had a
-                   perfectly good id — the /today card has passed it since
-                   feat/editable-tasks-ui. Threading it is what actually
-                   moves this page's check-off onto the authorised PATCH. */
+                   check-off circle on /tasks needs it for the authorised
+                   PATCH, and TaskCard drops the circle for a row without
+                   one. */
                 actionItemId: row.actionItemId,
                 title:       row.action,
                 assignee:    row.responsible || '—',
@@ -726,7 +705,7 @@
                 /* feat/editable-tasks-ui — the report OWNER's folder
                    (feat/user-dim-audit-key, Task 6), read by
                    task-card.js's checkable path as `task.folder` and
-                   sent as `user_folder` on its toggleAction call. `row`
+                   sent as `user_folder` on its check-off call. `row`
                    has no `.folder` field of its own (tasks-aggregator.js
                    stamps it as `user_folder`) — `row.folder ||
                    row.user_folder` mirrors the exact owner-folder
@@ -768,10 +747,11 @@
                    ctx.removeRow — mirrors TasksRightDetail's
                    onMarkComplete. A refusal (403) never reaches
                    onCheckedOff: TaskCard aborts the animation and toasts.
-                   feat/checkoff-org-api — "Done" is now the union of the
-                   Aurora column and the legacy overlay (isRowDone), so a
-                   row completed through the Status editor no longer keeps
-                   showing a live check-off circle. */
+                   "Done" is the row's own status (isRowDone), so a row
+                   completed through the Status editor no longer keeps
+                   showing a live check-off circle. A row with no durable
+                   actionItemId has nothing to write to: task-card.js drops
+                   the circle for it (read-only). */
                 checkable:     !rowDone,
                 date:          row.date,
                 onCheckedOff:  function (t) { if (ctx.removeRow) ctx.removeRow(t.id); },
@@ -1043,11 +1023,11 @@
     }) : (row.priority ? row.priority.charAt(0).toUpperCase() + row.priority.slice(1) : 'Medium');
 
     function onMarkComplete() {
-      if (busy || isRowDone(row)) return;
+      if (busy || isRowDone(row) || !row.actionItemId) return;
       setBusy(true);
       /* feat/checkoff-org-api — same routed, always-resolving call as the
-         list circle and the bulk bar. user_folder feeds the legacy leg
-         only; actionItemId is what routes to the authorised PATCH. */
+         list circle and the bulk bar. actionItemId is what the authorised
+         PATCH needs; user_folder identifies the bus event. */
       window.FS.api.actions.resolveActionItem({
         actionItemId: row.actionItemId,
         date:         row.date,
@@ -1085,9 +1065,8 @@
     }
 
     var statusBadge;
-    /* feat/checkoff-org-api — union of the Aurora column and the legacy
-       overlay, so this badge can no longer contradict the Status editor
-       three rows below it (which writes/reads the column). */
+    /* The row's own status column, so this badge cannot contradict the
+       Status editor three rows below it (which writes/reads the column). */
     if (isRowDone(row)) {
       statusBadge = React.createElement(Badge, { tone: 'success', size: 'sm', prefixDot: true }, 'Done');
     } else if (overdue) {
@@ -1149,15 +1128,6 @@
             actionItemHistoryProps(row) && window.FieldSight.ContentHistoryPanel
               ? React.createElement(window.FieldSight.ContentHistoryPanel, actionItemHistoryProps(row))
               : null,
-
-            /* Sprint 11 C.3 — Cross-day history drawer.
-               Pulls every audit entry (any date) for the same logical
-               action (matched by topic_id + action_index) so the drawer
-               can show "this action was opened 3 May, closed 5 May, re-
-               opened 6 May…". Q-S11-3 default: role-aware visibility —
-               admin/gm see all check events; regular users see only
-               their own resolutions. */
-            React.createElement(ActionHistoryPanel, { row: row }),
           )
         : React.createElement(React.Fragment, null,
 
@@ -1201,7 +1171,7 @@
 
             /* Actions */
             React.createElement('div', { className: 'fs-tasks-detail__actions' },
-              !isRowDone(row)
+              !isRowDone(row) && row.actionItemId
                 ? React.createElement(Button, {
                     size: 'sm', leftIcon: 'check',
                     onClick: onMarkComplete, disabled: busy,
@@ -1222,93 +1192,6 @@
         props.label),
       React.createElement('div', { className: 'fs-tasks-detail__row-value' },
         props.value),
-    );
-  }
-
-  /* ─── Sprint 11 C.3 · ActionHistoryPanel ───────────────────────────── */
-
-  function ActionHistoryPanel(props) {
-    var row = props.row;
-    /* User-dim audit key (plan §1.3) — match either the composite key
-       (row.user_folder present) or the bare legacy key, so records written
-       before the migration still surface in history. */
-    var bareKey = row.topic_id + '_' + row.action_index;
-    var compositeKey = row.user_folder ? (row.user_folder + '|' + bareKey) : bareKey;
-
-    var dataRef = React.useState({ status: 'loading' });
-    var data    = dataRef[0]; var setData = dataRef[1];
-
-    React.useEffect(function () {
-      var cancelled = false;
-      /* Fan-out covers the whole 3-month dates window so we catch
-         re-opens / re-closes from earlier dates too. */
-      var today = window.FS.api.todayNZDT();
-      var from  = window.FS.api.addDaysISO(today, -90);
-      window.FS.api.tasks.getCrossDayAudit({
-        from: from, to: today,
-      }).then(function (res) {
-        if (cancelled) return;
-        if (!res || res._accessDenied) {
-          setData({ status: 'hidden' });
-          return;
-        }
-        var entries = (res.entries || []).filter(function (e) {
-          return e.topic_action_key === compositeKey || e.topic_action_key === bareKey;
-        });
-
-        /* Q-S11-3 — admin/gm see all events; regular users see only
-           their own resolutions. */
-        var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
-        var isAdminLike = caller.role === 'admin' || caller.role === 'gm'
-          || caller.role === 'director' || caller.isAdmin;
-        if (!isAdminLike) {
-          entries = entries.filter(function (e) {
-            return !e.checked_by || e.checked_by === caller.name;
-          });
-        }
-        /* Newest first. */
-        entries.sort(function (a, b) {
-          return a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
-        });
-        setData({ status: 'ok', entries: entries });
-      }).catch(function () {
-        if (!cancelled) setData({ status: 'hidden' });
-      });
-      return function () { cancelled = true; };
-    }, [bareKey, compositeKey]);
-
-    if (data.status !== 'ok') return null;
-
-    var anyChecked = data.entries.some(function (e) { return e.checked; });
-
-    return React.createElement('div', { className: 'fs-tasks-detail__history' },
-      React.createElement('div', { className: 'fs-tasks-detail__history-label' },
-        'History · ' + data.entries.length + ' event' + (data.entries.length === 1 ? '' : 's')),
-      data.entries.length === 0 || !anyChecked
-        ? React.createElement('div', { className: 'fs-tasks-detail__history-empty' },
-            'No check-off events recorded yet.')
-        : React.createElement('ol', { className: 'fs-tasks-detail__history-list' },
-            data.entries.map(function (e) {
-              return React.createElement('li', {
-                key:       e.action_id,
-                className: 'fs-tasks-detail__history-event'
-                           + (e.checked ? ' fs-tasks-detail__history-event--checked' : ''),
-              },
-                React.createElement('span', { className: 'fs-tasks-detail__history-marker' },
-                  e.checked ? '✓' : '○'),
-                React.createElement('div', { className: 'fs-tasks-detail__history-meta' },
-                  React.createElement('span', { className: 'fs-tasks-detail__history-date' },
-                    fmtDate(e.date)),
-                  e.checked
-                    ? React.createElement('span', { className: 'fs-tasks-detail__history-by' },
-                        'by ' + (e.checked_by || '—')
-                          + (fmtTimestamp(e.checked_at) ? ' · ' + fmtTimestamp(e.checked_at) : ''))
-                    : React.createElement('span', { className: 'fs-tasks-detail__history-by' },
-                        'opened (no resolution recorded yet)'),
-                ),
-              );
-            }),
-          ),
     );
   }
 

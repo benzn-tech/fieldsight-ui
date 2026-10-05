@@ -7,7 +7,6 @@ global.window = {
   FieldSight: {},
   FS: { api: {
     folderName: (n) => String(n || '').replace(/ /g, '_'),
-    actions: { lookupAction: () => undefined },
   } },
 };
 global.React = {};
