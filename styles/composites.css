@@ -13876,6 +13876,11 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   font-size: 13px;
   line-height: 1.5;
 }
+.fs-today-weather__facts {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+.fs-today-weather__facts li + li { margin-top: 2px; }
 .fs-today-weather__lines li + li { margin-top: 4px; }
 .fs-today-weather__basis,
 .fs-today-weather__muted {
