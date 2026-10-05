@@ -30,6 +30,18 @@
     return 'No programme for this site — trades weather affects in general.';
   }
 
+  /* The day's numbers ("Light drizzle", "Temperature range: ...", "Rainfall:
+     ...", "Max wind speed: ..."), worded by the pipeline (weather.summary_lines)
+     so Today and the report say them the same way. [] on a forecast written
+     before 2026-10-05, which carried the advice only. */
+  function summaryLines(forecast) {
+    return forecast && Array.isArray(forecast.summary) ? forecast.summary : [];
+  }
+
+  function adviceLines(forecast) {
+    return forecast && Array.isArray(forecast.lines) ? forecast.lines : [];
+  }
+
   function TodayWeatherCard(props) {
     var Card = window.FieldSight.Card;
     var ctx = window.FS && window.FS.siteContext;
@@ -66,15 +78,20 @@
     } else if (state.status === 'error') {
       body = React.createElement('p', { className: 'fs-today-weather__muted' },
         'Could not load today’s weather.');
-    } else if (!state.forecast || !Array.isArray(state.forecast.lines) || !state.forecast.lines.length) {
+    } else if (!summaryLines(state.forecast).length && !adviceLines(state.forecast).length) {
       /* Absent is said, not hidden: a site with no forecast is either before
          05:30 or has no location set, and a missing card reads as fine weather. */
       body = React.createElement('p', { className: 'fs-today-weather__muted' },
         'No forecast for this site yet — it is written at 5:30 each morning for sites with a location.');
     } else {
+      var facts = summaryLines(state.forecast);
       body = React.createElement(React.Fragment, null,
+        facts.length ? React.createElement('ul', { className: 'fs-today-weather__facts' },
+          facts.map(function (line, i) {
+            return React.createElement('li', { key: i }, line);
+          })) : null,
         React.createElement('ul', { className: 'fs-today-weather__lines' },
-          state.forecast.lines.map(function (line, i) {
+          adviceLines(state.forecast).map(function (line, i) {
             return React.createElement('li', { key: i }, line);
           })),
         React.createElement('p', { className: 'fs-today-weather__basis' }, basisNote(state.forecast)));
@@ -89,6 +106,6 @@
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.TodayWeatherCard = TodayWeatherCard;
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { basisNote: basisNote };
+    module.exports = { basisNote: basisNote, summaryLines: summaryLines };
   }
 })();
