@@ -23,10 +23,10 @@ const ORG = read('scripts', 'api', 'org.js');
 const HTML = read('app-shell-preview.html');
 
 global.window = { FieldSight: {} };
-const { basisNote } = require('../scripts/composites/today-weather-card.js');
+const { basisNote, summaryLines } = require('../scripts/composites/today-weather-card.js');
 
 test('THE card shows the lines as sent and decides nothing itself', () => {
-  assert.match(CARD, /state\.forecast\.lines\.map\(function \(line, i\)/);
+  assert.match(CARD, /adviceLines\(state\.forecast\)\.map\(function \(line, i\)/);
   for (const judged of ['prob', 'mm', 'gust', 'threshold', 'probability_word']) {
     assert.ok(!new RegExp('forecast\.items|\b' + judged + '\b').test(CARD.replace(/\/\*[\s\S]*?\*\//g, '')),
       'the card must not read ' + judged + ' -- judgement belongs to weather_advice');
@@ -58,4 +58,15 @@ test('it asks org-api for one site and one day', () => {
 
 test('the page loads the card', () => {
   assert.match(HTML, /scripts\/composites\/today-weather-card\.js\?v=\d+/);
+});
+
+test('the numbers for the day are shown as sent, above the advice (owner, 2026-10-05)', () => {
+  const summary = ['Light drizzle', 'Temperature range: 11.8°C – 18.4°C',
+    'Rainfall: 0.3mm', 'Max wind speed: 16.2 km/h'];
+  assert.deepStrictEqual(summaryLines({ summary: summary, lines: [] }), summary);
+  assert.deepStrictEqual(summaryLines({ lines: ['x'] }), [], 'an older forecast has none');
+  const facts = CARD.indexOf("className: 'fs-today-weather__facts'");
+  assert.ok(facts > 0 && facts < CARD.indexOf("className: 'fs-today-weather__lines'"),
+    'the numbers render, above the advice');
+  assert.match(CARD, /var facts = summaryLines\(state\.forecast\);/);
 });
