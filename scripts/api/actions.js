@@ -169,13 +169,27 @@
     };
   }
 
+  /* Every tick the server accepted this page-session, by report date, in
+     the same key shape the pages' maps use. The bus only reaches components
+     that are mounted when it fires; a pane opened afterwards (right detail,
+     another date and back) seeds its map from here so a just-ticked task
+     does not render from the stale report payload and invite a second PATCH.
+     Cleared by a reload, when the payload itself is fresh. */
+  var ticksByDate = {};
+  function ticksFor(date) {
+    return Object.assign({}, ticksByDate[date] || {});
+  }
+
   /* Broadcast server truth so sibling rows keyed on the same
      (date, user_folder, topic_id, action_index) sync — a Timeline row and a
      Today card showing the same item must not drift apart. */
   function emitCheckoff(opts, checked, res) {
     var bus = window.FS && window.FS.actionsBus;
-    if (!bus) return;
     var who = normaliseCheckoff(res);
+    (ticksByDate[opts.date] = ticksByDate[opts.date] || {})[
+      actionKey(opts.user_folder, opts.topic_id, opts.action_index)] =
+      { checked: checked, checked_by: who.checked_by, checked_at: who.checked_at };
+    if (!bus) return;
     bus.emit({
       date:         opts.date,
       topic_id:     opts.topic_id,
@@ -445,6 +459,7 @@
     resolveActionItem:  resolveActionItem,
     isActionResolved:   isActionResolved,
     itemState:          itemState,
+    ticksFor:           ticksFor,
     orgCheckoffLive:    orgCheckoffLive,
     /* Exposed so other read paths (not just the bus emit above) can remap
        an org-shaped row onto the same checked_by/checked_at pair without
@@ -479,6 +494,7 @@
       resolveActionItem: resolveActionItem,
       isActionResolved:  isActionResolved,
       itemState:         itemState,
+      ticksFor:          ticksFor,
       normaliseCheckoff: normaliseCheckoff,
       propagateLive:            propagateLive,
       previewTopicCorrection:   previewTopicCorrection,

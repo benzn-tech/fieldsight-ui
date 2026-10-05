@@ -1466,6 +1466,10 @@
     var actionsMap    = refActionsState[0];
     var setActionsMap = refActionsState[1];
 
+    React.useEffect(function () {
+      setActionsMap(window.FS.api.actions.ticksFor(props.date));
+    }, [props.date]);
+
     /* fix/action-checkoff-sync (Bug 1) — mirrors TimelineMiddleColumn's
        bus subscription (~line 800) so a toggle made anywhere (this
        view's own TopicCards, the right-detail OverviewTab, or a tick
@@ -2394,7 +2398,7 @@
         setState({
           status:  'ok',
           report:  report,
-          actions: {},
+          actions: window.FS.api.actions.ticksFor(date),
           meeting: meeting,
         });
         /* Retire any optimistic redaction/revert patch the server has now
@@ -4560,6 +4564,13 @@
 
     var refActions = React.useState({});
     var setActions = refActions[1];
+
+    /* Seed with ticks already accepted this session (the bus only reaches
+       panes that were mounted when it fired). */
+    React.useEffect(function () {
+      if (!sel || !sel.date) return;
+      setActions(window.FS.api.actions.ticksFor(sel.date));
+    }, [sel && sel.date]);
 
     var sel = props.selectedItem;
     var isMeeting = sel && sel.kind === 'meeting_topic';

@@ -54,13 +54,6 @@
     return p[2] + ' ' + months[p[1] - 1] + ' ' + p[0];
   }
 
-  function fmtTimestamp(iso) {
-    if (!iso) return '';
-    var d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
-  }
-
   /* Overdue check resolves the free-text deadline against the report's own
      date via the shared resolveDeadline helper (today-adapter.js) — the
      same helper Today + Timeline use for absolute due dates. Unparseable
@@ -603,13 +596,14 @@
               'Action items assigned across reports — yours, your team’s, by status'),
           ),
           /* feat/editable-tasks-ui — "+ New task" entry point, primary
-             home for CreateTaskModal (see file header note there). Always
-             available on /tasks (the tasks hub) — no role gate, unlike
+             home for CreateTaskModal (see file header note there). Shown
+             only in mock mode: no backend creates a standalone task, so in
+             live mode there is no entry point. Otherwise available on /tasks (the tasks hub) — no role gate, unlike
              /quality's "+ Log Item" (quality:manage-gated): task creation
              has no equivalent domain-manager permission in roles.js today,
              and gating it incorrectly is worse than not gating it, per the
              brief this shipped under. */
-          CreateTaskModal
+          CreateTaskModal && (window.FS.api.useMocks || window.FS.api.writeMocks)
             ? React.createElement('button', {
                 type:      'button',
                 className: 'fs-tasks__new-task-btn',

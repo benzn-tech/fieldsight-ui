@@ -204,7 +204,12 @@ test('no script requests /actions or /actions/toggle', () => {
   const offenders = [];
   walk(path.join(ROOT, 'scripts'), []).forEach((f) => {
     const code = codeOf(f);
-    if (/request\(\s*['"`]\/actions/.test(code)) offenders.push(path.relative(ROOT, f));
+    /* request('/actions..'), fetch(...'/actions'), base + '/actions', or a
+       template ending in /actions: any quoted path that IS the retired
+       route, whatever calls it. */
+    if (/['"`]\/actions(['"`\/?]|\$\{)/.test(code) || /fetch\([^)]*\/actions/.test(code)) {
+      offenders.push(path.relative(ROOT, f));
+    }
   });
   assert.deepStrictEqual(offenders, []);
 });
@@ -335,4 +340,46 @@ test('resolveActionItem refuses an id-less item with a reason and writes nowhere
   assert.strictEqual(env.ok, false);
   assert.strictEqual(env.reason, 'no_id');
   assert.strictEqual(orgCalls.length, 0);
+});
+
+/* ---- 4. a tick survives into a pane mounted after it ---------------------- */
+
+test('a tick accepted earlier is what a LATER-mounted pane renders (no stale open row, no second PATCH)', async () => {
+  orgCalls.length = 0; busEvents.length = 0;
+  orgResult = { id: 'ai-open', status: 'done', updated_by_name: 'Jane Doe', updated_at: 't1' };
+  const env = await A.resolveActionItem({ actionItemId: 'ai-open', date: REPORT_DATE, topic_id: 0,
+    action_index: 1, user_folder: 'Jane_Doe', checked: true });
+  assert.strictEqual(env.ok, true);
+
+  /* The right pane mounts now: it seeds from ticksFor(date), exactly what
+     timeline.js does, then derives the row from itemState. */
+  const staleItem = REPORT.topics[0].action_items[1];   // payload still says open
+  assert.strictEqual(staleItem.status, 'open');
+  const seeded = A.ticksFor(REPORT_DATE);
+  const st = A.itemState(staleItem, A.lookupAction(seeded, 'Jane_Doe', 0, 1));
+  assert.strictEqual(st.checked, true);
+  assert.strictEqual(st.checked_by, 'Jane Doe');
+
+  const Row = loadRow();
+  const el = Row(Object.assign({ action: staleItem, initialChecked: st.checked }, ROW_PROPS));
+  assert.strictEqual(findInput(el).props.checked, true, 'renders done');
+
+  /* An untick is remembered too, and another date is unaffected. */
+  orgResult = { id: 'ai-open', status: 'open', updated_by_name: 'Jane Doe', updated_at: 't2' };
+  await A.resolveActionItem({ actionItemId: 'ai-open', date: REPORT_DATE, topic_id: 0,
+    action_index: 1, user_folder: 'Jane_Doe', checked: false });
+  assert.strictEqual(A.lookupAction(A.ticksFor(REPORT_DATE), 'Jane_Doe', 0, 1).checked, false);
+  assert.deepStrictEqual(A.ticksFor('2000-01-01'), {});
+});
+
+test('timeline.js seeds its three tick maps from ticksFor', () => {
+  const src = codeOf(path.join(ROOT, 'scripts', 'pages', 'timeline.js'));
+  assert.ok((src.match(/actions\.ticksFor\(/g) || []).length >= 3);
+});
+
+/* ---- 5. live mode has no "+ New task" entry point ------------------------- */
+
+test('the /tasks "+ New task" button is only rendered in mock mode', () => {
+  const src = codeOf(path.join(ROOT, 'scripts', 'pages', 'tasks.js'));
+  assert.match(src, /CreateTaskModal && \(window\.FS\.api\.useMocks \|\| window\.FS\.api\.writeMocks\)/);
 });

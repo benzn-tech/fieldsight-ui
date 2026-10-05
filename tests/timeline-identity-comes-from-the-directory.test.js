@@ -137,7 +137,7 @@ function mount(o) {
     org: { getOrgSites: function () { return Promise.resolve({ sites: [] }); },
            getSessionsCached: function () { return Promise.resolve({ sessions: [] }); } },
     programme: { getSuggestions: function () { return Promise.resolve({ suggestions: [] }); } },
-    actions: { getActions: function () { return Promise.resolve({ actions: {} }); } },
+    actions: { ticksFor: function () { return {}; } },
     meetings: { getMeetingMinutes: function (a) { calls.meeting.push(a); return Promise.resolve({ _notFound: true }); } },
     dates: { getDates: function () { return Promise.resolve({ dates: {} }); } },
   };
