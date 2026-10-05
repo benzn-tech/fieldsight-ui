@@ -100,14 +100,10 @@
      Falls back to the fixtures read on any /api/users error. Mirrors
      compliance-aggregator.js's adminUserFolders(). */
   async function adminUserFolders() {
-    try {
-      var usersRes = await window.FS.api.sites.getUsers();
-      return ((usersRes && usersRes.users) || []).map(deriveFolder).filter(Boolean);
-    } catch (e) {
-      return ((window.FieldSight && window.FieldSight.fixtures
-          && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [])
-          .map(deriveFolder).filter(Boolean);
-    }
+    /* No fixture fallback: a failed directory read propagates (mock-mode
+       getUsers() returns the fixtures itself and never throws). */
+    var usersRes = await window.FS.api.sites.getUsers();
+    return ((usersRes && usersRes.users) || []).map(deriveFolder).filter(Boolean);
   }
 
   /* feat/editable-tasks-ui — org SITE UUID map (org.getOrgSites()'s site_id,

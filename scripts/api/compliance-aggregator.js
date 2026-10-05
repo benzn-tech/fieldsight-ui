@@ -194,14 +194,11 @@
      the fixtures read on any /api/users error, keeping the previous
      degraded behaviour instead of an empty fan-out. */
   async function adminUserFolders() {
-    try {
-      var res = await window.FS.api.sites.getUsers();
-      return ((res && res.users) || []).map(deriveFolder).filter(Boolean);
-    } catch (e) {
-      var fx = (window.FieldSight && window.FieldSight.fixtures
-        && window.FieldSight.fixtures.sites) || {};
-      return (fx.users || []).map(deriveFolder).filter(Boolean);
-    }
+    /* No fixture fallback: in live mode a failed directory read must reach
+       the page as an error, not turn into a fan-out over made-up people.
+       (Mock-mode getUsers() already returns the fixtures and never throws.) */
+    var res = await window.FS.api.sites.getUsers();
+    return ((res && res.users) || []).map(deriveFolder).filter(Boolean);
   }
   function isAdminCaller() {
     var c = (window.AuthMock && window.AuthMock.currentUser) || {};

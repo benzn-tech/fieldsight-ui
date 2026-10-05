@@ -71,6 +71,24 @@
     var fixtures = (window.FieldSight && window.FieldSight.fixtures && window.FieldSight.fixtures.sites) || { users: [] };
     var allUsers = fixtures.users || [];
 
+    /* LIVE: people come from the org directory only — never from the fixture
+       roster (which would show made-up users to a real company). A failed
+       read rejects. Mock mode keeps the fixture logic below untouched. */
+    if (!window.FS.api.useMocks) {
+      if (caller.role === 'worker') {
+        return caller.name ? [{ name: caller.name,
+          folder_name: window.FS.api.folderName(caller.name) }] : [];
+      }
+      var liveRes = site
+        ? await window.FS.api.sites.getSiteUsers(site)
+        : await window.FS.api.sites.getUsers();
+      return (((liveRes && liveRes.users) || [])).map(function (u) {
+        return u.folder_name ? u : Object.assign({}, u, {
+          folder_name: (u.name || '').replace(/ /g, '_'),
+        });
+      });
+    }
+
     if (site && caller.role !== 'worker') {
       try {
         var su = await window.FS.api.sites.getSiteUsers(site);

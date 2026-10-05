@@ -596,14 +596,10 @@
      tasks-aggregator.js:adminUserFolders() / compliance-aggregator.js:
      adminUserFolders() — same source, same fallback, intentional parity. */
   async function adminUserFolders() {
-    try {
-      var usersRes = await window.FS.api.sites.getUsers();
-      return ((usersRes && usersRes.users) || []).map(deriveFolderFromUser).filter(Boolean);
-    } catch (e) {
-      return ((window.FieldSight && window.FieldSight.fixtures
-          && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [])
-          .map(deriveFolderFromUser).filter(Boolean);
-    }
+    /* No fixture fallback: a failed directory read propagates (mock-mode
+       getUsers() returns the fixtures itself and never throws). */
+    var usersRes = await window.FS.api.sites.getUsers();
+    return ((usersRes && usersRes.users) || []).map(deriveFolderFromUser).filter(Boolean);
   }
 
   /* report.site is a DISPLAY NAME only ('SB1108 Ellesmere College') — no

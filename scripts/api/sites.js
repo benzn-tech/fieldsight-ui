@@ -1,9 +1,9 @@
 /* ==========================================================================
    FieldSight API · Sites & Users — BACKEND-CONTEXT §4.2
    --------------------------------------------------------------------------
-   GET /api/sites                       → { sites, role, display_name }
-   GET /api/site-users?site=<site_id>   → { users, site }
-   GET /api/users                       → { users }
+   LIVE: org directory (GET /sites, /members, /sites/{id}/members) — never the
+   legacy gateway. MOCK: fixtures. Shapes: { sites, role, display_name } /
+   { users, site } / { users }.
    ========================================================================== */
 
 (function () {
@@ -13,8 +13,63 @@
     return (window.FieldSight && window.FieldSight.fixtures) || {};
   }
 
+  /* LIVE reads come from the org directory (Aurora, company-scoped) and from
+     nowhere else. The legacy gateway served these from a frozen, company-blind
+     mapping file, so there is deliberately NO fallback to it: when the
+     directory is unreachable (or the org kill switch is off) the call REJECTS,
+     and consumers must show the failure rather than substitute fixtures. Mock
+     mode (useMocks) is unchanged. */
+  function orgReady() {
+    return !!(window.FS.api.orgBaseUrl && window.FS.api.org);
+  }
+
+  function requireOrg(what) {
+    if (!orgReady()) throw new Error(what + ': the org directory is not configured');
+  }
+
+  /* orgRequest resolves 401/403/404 as flag objects instead of throwing; a
+     directory READ that was refused is a failure here, not an empty list. */
+  function rejectIfRefused(res, what) {
+    if (res && (res._accessDenied || res._notFound)) {
+      var err = new Error(what + ' failed (' + (res.status || (res._accessDenied ? 403 : 404)) + ')');
+      err.status = res.status;
+      err.response = res;
+      throw err;
+    }
+    return res;
+  }
+
+  /* /members answers 403 for everyone below admin/gm/platform_admin, so the
+     caller's role picks the route up front -- the 403 is never the normal
+     path. Role comes from the session profile (session-bridge keeps the RAW
+     role there; isAdmin is true for admin/platform_admin). */
+  function canListAllMembers() {
+    var c = (window.AuthMock && window.AuthMock.currentUser) || {};
+    return c.role === 'admin' || c.role === 'gm' || c.role === 'platform_admin' || !!c.isAdmin;
+  }
+
+  var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  /* The org directory is keyed by UUID; a legacy/report-side slug is resolved
+     through the directory's own site list (rows carry both site_id and slug).
+     A value that matches nothing is passed through unchanged so the server,
+     not the client, decides it does not exist. */
+  async function resolveOrgSiteId(site) {
+    if (!site || UUID_RE.test(String(site))) return site;
+    var res = rejectIfRefused(await window.FS.api.org.getOrgSites(), 'getSites');
+    var hit = ((res && res.sites) || []).filter(function (s) {
+      return s.slug === site || s.site_id === site;
+    })[0];
+    return hit ? hit.site_id : site;
+  }
+
   async function getSites() {
-    if (!window.FS.api.useMocks) return window.FS.api.request('/sites');
+    if (!window.FS.api.useMocks) {
+      requireOrg('getSites');
+      var res = rejectIfRefused(await window.FS.api.org.getOrgSites(), 'getSites');
+      var u0 = (window.AuthMock && window.AuthMock.currentUser) || {};
+      return { sites: res.sites || [], role: u0.role || null, display_name: u0.name || null };
+    }
     await window.FS.api.delay();
     var f  = fixtures().sites || { sites: [], users: [] };
     var u  = (window.AuthMock && window.AuthMock.currentUser) || {};
@@ -26,22 +81,13 @@
   }
 
   async function getSiteUsers(site) {
-    /* Phase 2 (Aurora read consolidation): the org backend knows Aurora-only
-       sites that legacy /site-users (user_mapping-based) does not — that gap
-       was the "USERS ON SITE empty" bug. When org is live, read members from
-       Aurora; only fall back to legacy on an ACL divergence AND when the D5
-       legacyReadFallback flag is still on (so the legacy read path can be
-       retired by flipping the flag). Task 4 adds legacyReadFallback; until
-       then the `&&` short-circuits on undefined -> no fallback, fail-closed
-       to Aurora. */
-    if (!window.FS.api.useMocks && window.FS.api.orgBaseUrl && window.FS.api.org) {
-      var res = await window.FS.api.org.getSiteMembers(site);
-      if (res && res._accessDenied && window.FS.api.legacyReadFallback) {
-        return window.FS.api.request('/site-users', { params: { site: site } });
-      }
-      return res;
+    if (!window.FS.api.useMocks) {
+      requireOrg('getSiteUsers');
+      var id = await resolveOrgSiteId(site);
+      /* An access-denied result is returned as-is (callers render it); it is
+         never retried against the legacy gateway. */
+      return window.FS.api.org.getSiteMembers(id);
     }
-    if (!window.FS.api.useMocks) return window.FS.api.request('/site-users', { params: { site: site } });
     await window.FS.api.delay();
     var f = fixtures().sites || { users: [] };
     var users = f.users.filter(function (u) {
@@ -51,7 +97,31 @@
   }
 
   async function getUsers() {
-    if (!window.FS.api.useMocks) return window.FS.api.request('/users');
+    if (!window.FS.api.useMocks) {
+      requireOrg('getUsers');
+      if (canListAllMembers()) {
+        var m = rejectIfRefused(await window.FS.api.org.getMembers(), 'getUsers');
+        return { users: m.members || [] };
+      }
+      /* Everyone else: the union of the members of the sites they can see,
+         de-duplicated by identity (a person on two sites is one user). */
+      var sitesRes = await getSites();
+      var lists = await Promise.all(sitesRes.sites.map(function (s) {
+        return window.FS.api.org.getSiteMembers(s.site_id).then(function (r) {
+          return rejectIfRefused(r, 'getUsers');
+        });
+      }));
+      var seen = {}, out = [];
+      lists.forEach(function (r) {
+        ((r && r.users) || []).forEach(function (u) {
+          var key = u.device_id || u.email || u.name;
+          if (!key || seen[key]) return;
+          seen[key] = true;
+          out.push(u);
+        });
+      });
+      return { users: out };
+    }
     await window.FS.api.delay();
     var f = fixtures().sites || { users: [] };
     return { users: f.users.slice() };   /* copy — see getSites note */
