@@ -50,7 +50,7 @@ test('a check reads as its name and its window', () => {
 
 test('the dialog lists the day\'s checks and one click picks checklist, topics and window', () => {
   assert.match(MODAL, /org\.getDayInspections\(\{ date: props\.date, user: props\.userFolder \}\)/);
-  assert.match(MODAL, /function useCheck\(c\) \{[\s\S]{0,400}setChecked\(windowChecked\(pTopics, from, to\)\)[\s\S]{0,200}setCheckWin\(\{ from: c\.start_at, to: c\.end_at/);
+  assert.match(MODAL, /function useCheck\(c\) \{[\s\S]{0,400}setChecked\(stretchesChecked\(pTopics, segs\)\)[\s\S]{0,200}setCheckWin\(\{ from: c\.start_at, to: c\.end_at/);
   assert.match(MODAL, /applyTemplateChoice\(f, row\.id, row\.version\)/);
   assert.match(MODAL, /window: checkWin,/);
   assert.match(MODAL, /'No checklist template matches this check'/);
@@ -59,4 +59,24 @@ test('the dialog lists the day\'s checks and one click picks checklist, topics a
 test('choosing the window by hand forgets the check', () => {
   assert.match(MODAL, /btn\('Select this window', function \(\) \{ setCheckWin\(null\);/);
   assert.match(MODAL, /btn\('Select all', function \(\) \{ setCheckWin\(null\);/);
+});
+
+
+test('THE an interrupted check sends its stretches and ticks only their topics', () => {
+  const segs = [{ from: '11:02:03', to: '11:02:21' }, { from: '11:08:41', to: '11:10:21' }];
+  const p = m.buildGeneratePayload(Object.assign({}, BASE,
+    { window: { from: '11:02:03', to: '11:10:21', segments: segs } }));
+  assert.deepStrictEqual(p.segments, segs);
+  assert.strictEqual(m.checkLabel({ name: 'pre-pour', start_at: '11:02:03', end_at: '11:10:21', segments: segs }),
+    'pre-pour · 11:02–11:02, 11:08–11:10');
+  const topics = [{ topic_row_id: 'a', time_range: '11:01 – 11:02' },
+                  { topic_row_id: 's', time_range: '11:05 – 11:06' },
+                  { topic_row_id: 'b', time_range: '11:09 – 11:09' }];
+  assert.deepStrictEqual(m.stretchesChecked(topics, segs), { a: true, s: false, b: true });
+  assert.match(ORG, /if \(Array\.isArray\(opts\.segments\) && opts\.segments\.length > 1\) \{\n\s+body\.segments = /);
+});
+
+test('a check with no stretches is its whole window', () => {
+  assert.deepStrictEqual(m.checkSegments({ start_at: '10:59:09', end_at: '11:02:14' }),
+    [{ from: '10:59:09', to: '11:02:14' }]);
 });
