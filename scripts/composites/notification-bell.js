@@ -193,6 +193,15 @@
       if (!photoApi) return undefined;
       return photoApi.subscribe(function (next) { setPhotoNotices(next.notices || []); });
     }, []);
+    /* Checklists that filled themselves from a spoken check, and checks no
+       checklist matched (FS.checklistReports; owner, 2026-10-06). */
+    var checksApi = (window.FS || {}).checklistReports;
+    var s_ck = React.useState(checksApi ? checksApi.get() : { reports: [], unmatched: [], unseen: 0, seen: {} });
+    var checks = s_ck[0], setChecks = s_ck[1];
+    React.useEffect(function () {
+      if (!checksApi) return undefined;
+      return checksApi.subscribe(function (next) { setChecks(next); });
+    }, []);
 
     React.useEffect(function () {
       if (!jobsApi) return undefined;
@@ -270,6 +279,7 @@
                             notSaved: notSaved })
       : unseen + waiting + introducing + notSaved;
     count += photoNotices.length;
+    count += (checks && checks.unseen) || 0;
 
     return h('div', { className: 'fs-bell' },
       h('button', {
@@ -337,6 +347,34 @@
                           }));
                         },
                       });
+                    })))
+              : null,
+
+            /* Checklists filled in from a spoken check, newest first. */
+            (checks.reports.length || checks.unmatched.length)
+              ? h('div', { className: 'fs-bell__section' },
+                  h('div', { className: 'fs-bell__panel-head' }, h('span', null, 'Checklists')),
+                  h('ul', { className: 'fs-bell__list' },
+                    checks.reports.map(function (r) {
+                      return h('li', { key: r.id, className: 'fs-bell__row' },
+                        h('div', { className: 'fs-bell__row-main' },
+                          h('span', { className: 'fs-bell__row-title' }, checksApi.words(r))),
+                        r.status === 'done'
+                          ? h('button', {
+                              type: 'button', className: 'fs-bell__row-action',
+                              onClick: function () { checksApi.download(r, checks.folder); },
+                            }, checks.seen && checks.seen[r.id] ? 'Download again' : 'Download')
+                          : null);
+                    }),
+                    checks.unmatched.map(function (u) {
+                      var key = checksApi.unmatchedKey(u);
+                      return h('li', { key: key, className: 'fs-bell__row' },
+                        h('div', { className: 'fs-bell__row-main' },
+                          h('span', { className: 'fs-bell__row-title' }, checksApi.unmatchedWords(u))),
+                        h('button', {
+                          type: 'button', className: 'fs-bell__row-action',
+                          onClick: function () { checksApi.markSeen(key); },
+                        }, 'Dismiss'));
                     })))
               : null,
 
