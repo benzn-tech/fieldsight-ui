@@ -724,6 +724,8 @@
     var modules     = modRef[0]; var setModules = modRef[1];
     var pickRef     = React.useState(false);
     var picking     = pickRef[0]; var setPicking = pickRef[1];
+    var queryRef    = React.useState('');
+    var query       = queryRef[0]; var setQuery = queryRef[1];
     React.useEffect(function () {
       var api = window.FS && window.FS.api && window.FS.api.templates;
       if (!api || !api.listModules) return undefined;
@@ -895,7 +897,15 @@
     function addModule(m) {
       setSections(function (prev) { return prev.concat([sectionFromModule(m)]); });
       setPicking(false);
+      setQuery('');
     }
+
+    /* The menu, narrowed by the search box: typo-tolerant ("safty" finds
+       Safety), title matches first (window.FieldSight.fuzzySearch). */
+    var fuzzy = window.FieldSight && window.FieldSight.fuzzySearch;
+    var shownModules = fuzzy
+      ? fuzzy(modules.modules || [], query, function (m) { return [m.title, m.purpose, m.key]; })
+      : (modules.modules || []);
 
     /* An existing custom section switched to the standard module -- only when
        the person clicks (owner, 2026-09-30: never automatically). Title and
@@ -1361,7 +1371,26 @@
       }, '+ Add section'),
 
       picking && React.createElement('div', { className: 'fs-library__module-picker', role: 'list' },
-        (modules.modules || []).map(function (m) {
+        React.createElement('input', {
+          type: 'search', autoFocus: true,
+          className: 'fs-library__module-search',
+          placeholder: 'Search sections, e.g. safety',
+          'aria-label': 'Search sections',
+          value: query,
+          onChange: function (e) { setQuery(e.target.value); },
+          onKeyDown: function (e) {
+            if (e.key === 'Enter' && query && shownModules.length) {
+              e.preventDefault();
+              addModule(shownModules[0]);
+            } else if (e.key === 'Escape') {
+              setPicking(false);
+              setQuery('');
+            }
+          },
+        }),
+        query && !shownModules.length && React.createElement('p', { className: 'fs-library__module-empty' },
+          'No standard section matches “' + query + '”. Write a custom one below.'),
+        shownModules.map(function (m) {
           return React.createElement('button', {
             key: m.key, type: 'button', role: 'listitem',
             className: 'fs-library__module-option',
