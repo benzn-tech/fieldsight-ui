@@ -53,7 +53,7 @@ global.document = { addEventListener() {}, removeEventListener() {} };
 require('../scripts/composites/task-card.js');
 const TaskCard = window.FieldSight.TaskCard;
 
-const TASK = { id: 't1', title: 'Pour concrete', topic_id: 'tp1', actionIndex: 0, date: '2026-04-29' };
+const TASK = { id: 't1', title: 'Pour concrete', topic_id: 'tp1', actionIndex: 0, date: '2026-04-29', actionItemId: 'ai-1' };
 
 function render(props) {
   return TaskCard(Object.assign({ task: TASK }, props));
@@ -125,6 +125,23 @@ test('a row with no round button is never hijacked by batch mode', () => {
   el.props.onClick({});
   assert.deepStrictEqual(opened, ['t1']);
   assert.deepStrictEqual(batched, []);
+});
+
+test('a task with no durable actionItemId has no round button, so batch mode never hijacks its row', () => {
+  /* The legacy toggle was the only writer for an id-less item and it is gone:
+     even a caller that asks for checkable gets a read-only card. */
+  const opened = [];
+  const batched = [];
+  const el = TaskCard({
+    task: Object.assign({}, TASK, { actionItemId: null }),
+    checkable: true, batchMode: true,
+    onSelect: (t) => opened.push(t.id),
+    onBatchToggle: (t) => batched.push(t.id),
+  });
+  el.props.onClick({});
+  assert.deepStrictEqual(opened, ['t1'], 'the row keeps opening its detail');
+  assert.deepStrictEqual(batched, []);
+  assert.ok(!/fs-task-card--batch/.test(el.props.className));
 });
 
 test('batch mode with no onBatchToggle wired falls back to opening', () => {

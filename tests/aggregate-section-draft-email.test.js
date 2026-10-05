@@ -25,23 +25,20 @@ const test = require('node:test');
 const assert = require('node:assert');
 
 global.window = global.window || {};
+global.window.FS = global.window.FS || { api: {} };
 global.React = global.React || {};
 
 const { buildSessionEmailDraft } = require('../scripts/pages/timeline.js');
+require('../scripts/api/actions.js');   // the REAL lookupAction + itemState
+const A = global.window.FS.api.actions;
 
-/* The real lookupAction, so the key shape is asserted rather than assumed. */
-function lookupAction(map, user_folder, topic_id, action_index) {
-  if (!map) return undefined;
-  const bare = topic_id + '_' + action_index;
-  return (user_folder ? map[user_folder + '|' + bare] : undefined) || map[bare];
-}
-
-/* Mirrors the isDone the aggregate section now passes. */
+/* Mirrors the isDone the aggregate section passes, built from the real
+   helpers so the key shape and the rule are asserted rather than assumed.
+   actionsMap holds ONLY ticks announced on the bus this session; otherwise
+   the item's own status column decides. */
 function sectionIsDone(actionsMap, sectionUser) {
   return function (a, topicId, idx) {
-    if (a && a.status) return a.status === 'done';
-    const st = lookupAction(actionsMap, sectionUser, topicId, idx);
-    return !!(st && st.checked);
+    return A.itemState(a, A.lookupAction(actionsMap, sectionUser, topicId, idx)).checked;
   };
 }
 
@@ -110,7 +107,17 @@ test('check-offs are read under the SECTION folder, not the viewing caller', () 
     "another person's check-off must not suppress this person's item");
 });
 
-test('the Aurora status column wins over the overlay', () => {
+test('the status column decides when nothing was ticked this session', () => {
+  const withStatus = topics();
+  withStatus[0].action_items[0].status = 'done';
+  const draft = buildSessionEmailDraft({
+    topics: withStatus, session: null, siteName: 'UC PK', date: '2026-07-31',
+    isDone: sectionIsDone({}, 'Ben_UCPK2'),
+  });
+  assert.doesNotMatch(decodeURIComponent(draft.url), /Order replacement door/);
+});
+
+test('an untick made this session beats a stale done status in the page payload', () => {
   const withStatus = topics();
   withStatus[0].action_items[0].status = 'done';
   const map = { 'Ben_UCPK2|0_0': { checked: false } };
@@ -118,7 +125,7 @@ test('the Aurora status column wins over the overlay', () => {
     topics: withStatus, session: null, siteName: 'UC PK', date: '2026-07-31',
     isDone: sectionIsDone(map, 'Ben_UCPK2'),
   });
-  assert.doesNotMatch(decodeURIComponent(draft.url), /Order replacement door/);
+  assert.match(decodeURIComponent(draft.url), /Order replacement door/);
 });
 
 /* ---- privacy re-assertion ------------------------------------------------ */

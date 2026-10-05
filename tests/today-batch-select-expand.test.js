@@ -39,7 +39,7 @@ const { isBatchEligibleTask, groupByProject } = require('../scripts/pages/today.
 
 test('isBatchEligibleTask: true when topic_id, actionIndex and date are all present', () => {
   assert.strictEqual(isBatchEligibleTask({
-    id: 'a', topic_id: 't1', actionIndex: 0, date: '2026-07-20',
+    id: 'a', topic_id: 't1', actionIndex: 0, date: '2026-07-20', actionItemId: 'ai-1',
   }), true);
 });
 
@@ -47,8 +47,19 @@ test('isBatchEligibleTask: actionIndex 0 is a valid index, not falsy-missing', (
   // `!= null` (not a truthiness check) is required here — actionIndex 0
   // is the first action item in a topic and must count as present.
   assert.strictEqual(isBatchEligibleTask({
-    id: 'a', topic_id: 't1', actionIndex: 0, date: '2026-07-20',
+    id: 'a', topic_id: 't1', actionIndex: 0, date: '2026-07-20', actionItemId: 'ai-1',
   }), true);
+});
+
+test('isBatchEligibleTask: false when the task has no durable actionItemId (read-only, no check button)', () => {
+  // The legacy toggle was the only writer for an id-less item; it is gone,
+  // so there is nothing a check button could do.
+  assert.strictEqual(isBatchEligibleTask({
+    id: 'a', topic_id: 't1', actionIndex: 0, date: '2026-07-20',
+  }), false);
+  assert.strictEqual(isBatchEligibleTask({
+    id: 'a', topic_id: 't1', actionIndex: 0, date: '2026-07-20', actionItemId: null,
+  }), false);
 });
 
 test('isBatchEligibleTask: false when topic_id is missing', () => {
@@ -98,12 +109,12 @@ test('batchEligibleItems merge order: Mine groups, then Team groups (feat/leftov
     return groupByProject(list).reduce(function (acc, g) { return acc.concat(g.rows); }, []);
   }
   const myVisible = [
-    { id: 'm1', site_slug: 'siteB', topic_id: 't', actionIndex: 0, date: 'd', ageDays: 3 },
-    { id: 'm2', site_slug: 'siteA', topic_id: 't', actionIndex: 1, date: 'd', ageDays: 5 },
-    { id: 'm-aged', site_slug: 'siteC', topic_id: 't', actionIndex: 2, date: 'd', ageDays: 200 }, // aged, inline, still eligible
+    { id: 'm1', site_slug: 'siteB', topic_id: 't', actionIndex: 0, date: 'd', actionItemId: 'ai', ageDays: 3 },
+    { id: 'm2', site_slug: 'siteA', topic_id: 't', actionIndex: 1, date: 'd', actionItemId: 'ai', ageDays: 5 },
+    { id: 'm-aged', site_slug: 'siteC', topic_id: 't', actionIndex: 2, date: 'd', actionItemId: 'ai', ageDays: 200 }, // aged, inline, still eligible
   ];
   const teamVisible = [
-    { id: 'tm1', site_slug: 'siteA', topic_id: 't', actionIndex: 0, date: 'd', ageDays: 10 },
+    { id: 'tm1', site_slug: 'siteA', topic_id: 't', actionIndex: 0, date: 'd', actionItemId: 'ai', ageDays: 10 },
   ];
 
   const merged = flatten(myVisible).concat(flatten(teamVisible))
@@ -119,7 +130,7 @@ test('batchEligibleItems merge: a non-eligible row (no date) is dropped from the
     return groupByProject(list).reduce(function (acc, g) { return acc.concat(g.rows); }, []);
   }
   const myVisible = [
-    { id: 'm1', site_slug: 'siteA', topic_id: 't', actionIndex: 0, date: 'd' },
+    { id: 'm1', site_slug: 'siteA', topic_id: 't', actionIndex: 0, date: 'd', actionItemId: 'ai' },
     { id: 'm2', site_slug: 'siteA' },   // no topic_id/actionIndex/date — not batch-eligible
   ];
   const merged = flatten(myVisible).filter(isBatchEligibleTask);

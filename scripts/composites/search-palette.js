@@ -66,6 +66,10 @@
       var results = await Promise.all([
         window.FS.api.sites.getSites()
           .catch(function () { return { sites: [] }; }),
+        /* Org site rows carry no embedded `users` (the legacy list did), so the
+           people index comes from the directory itself. */
+        window.FS.api.sites.getUsers()
+          .catch(function () { return { users: [] }; }),
         window.FS.api.tasks.getActionsResolvedRange({ from: from, to: today })
           .catch(function () { return { rows: [] }; }),
         window.FS.api.compliance.getSafetyRange({ from: from, to: today })
@@ -73,11 +77,14 @@
       ]);
 
       _cache.sites  = (results[0] && results[0].sites) || [];
-      _cache.tasks  = (results[1] && results[1].rows)  || [];
-      _cache.safety = (results[2] && results[2].rows)  || [];
+      _cache.tasks  = (results[2] && results[2].rows)  || [];
+      _cache.safety = (results[3] && results[3].rows)  || [];
 
-      /* Derive unique users from sites */
+      /* Unique users: the directory's people, plus any embedded on a site row */
       var usersMap = {};
+      ((results[1] && results[1].users) || []).forEach(function (u) {
+        if (u.name && !usersMap[u.name]) usersMap[u.name] = u;
+      });
       _cache.sites.forEach(function (site) {
         (site.users || []).forEach(function (u) {
           if (u.name && !usersMap[u.name]) usersMap[u.name] = u;

@@ -642,6 +642,12 @@ action:      'Reinspect tie-downs every 2h until 18:00.',
      source_s3_key. The shape mirrors a real session_base
      ('Benl1_2026-04-29_07-00-00') because the picker and the ?session=
      deep link both carry it around as an opaque id. */
+  var MOCK_DONE = {
+    '2026-04-29': {
+      '0_0': { by: 'Jack Gibson',    at: '2026-04-29T07:42:00Z' },
+      '2_1': { by: 'Jarley Trainor', at: '2026-04-29T01:18:42Z' },
+    },
+  };
   Object.keys(window.FieldSight.fixtures.reports).forEach(function (date) {
     var byUser = window.FieldSight.fixtures.reports[date];
     Object.keys(byUser).forEach(function (folder) {
@@ -656,7 +662,16 @@ action:      'Reinspect tie-downs every 2h until 18:00.',
           if (!t.session_kind) t.session_kind = 'extraction';
         }
         /* spec §8.1 — version = 1 + content_edits rows; mocks default to 1. */
-        (t.action_items || []).forEach(function (a) { if (a.version == null) a.version = 1; });
+        (t.action_items || []).forEach(function (a, idx) {
+          if (a.version == null) a.version = 1;
+          /* Done-ness is the task's own status column. These two were the
+             demo's only ticks back when a separate overlay fixture held
+             them; they live on the items themselves now. */
+          var done = (MOCK_DONE[date] || {})[t.topic_id + '_' + idx];
+          if (done && a.status == null) {
+            a.status = 'done'; a.updated_by_name = done.by; a.updated_at = done.at;
+          }
+        });
       });
     });
   });

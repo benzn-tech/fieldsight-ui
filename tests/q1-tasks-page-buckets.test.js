@@ -18,9 +18,8 @@
  * computeBuckets' second param is now a `viewer` object ({ name,
  * folderName }), not a bare name string.
  *
- * feat/checkoff-org-api — done-ness is now the UNION of the authoritative
- * Aurora column (row.status) and the legacy DynamoDB overlay
- * (row.audit.checked), via the shared FS.api.actions.isActionResolved. Load
+ * Done-ness is the task's own status column (row.status === 'done'), via the
+ * shared FS.api.actions.isActionResolved. The legacy overlay is gone. Load
  * the REAL actions.js module (same posture as mine-team.js above) so these
  * tests exercise it rather than a fake.
  */
@@ -56,7 +55,6 @@ const { computeBuckets } = require('../scripts/pages/tasks.js');
 function row(overrides) {
   return Object.assign({
     id: 'r', responsible: 'Jane Doe', date: '2026-07-10', deadline: null,
-    audit: { checked: false },
   }, overrides);
 }
 
@@ -84,7 +82,7 @@ test('computeBuckets: missing/other work_class counts as work in open/overdue (n
 
 test('computeBuckets: done rows are unaffected by work_class (non_work still counts as done once checked)', () => {
   var rows = [
-    row({ id: 'personal-done', work_class: 'non_work', audit: { checked: true } }),
+    row({ id: 'personal-done', work_class: 'non_work', status: 'done' }),
   ];
   var b = computeBuckets(rows, { name: 'Jane Doe' }, '2026-07-10');
   assert.deepStrictEqual(b.done.map((r) => r.id), ['personal-done']);
