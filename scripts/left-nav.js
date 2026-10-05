@@ -23,6 +23,7 @@ const NAV_ICONS = {
   sites:      'map-pin',
   team:       'users',
   settings:   'settings',
+  trace:      'list-tree',
 };
 
 const NAV_SECTIONS = [
@@ -62,7 +63,7 @@ const NAV_SECTIONS = [
   {
     key: 'MANAGEMENT',
     label: 'Management',
-    items: ['sites', 'team'],
+    items: ['sites', 'team', 'trace'],
   },
   {
     key: 'STRATEGIC',
