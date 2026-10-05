@@ -4565,6 +4565,10 @@
     var refActions = React.useState({});
     var setActions = refActions[1];
 
+    /* Declared BEFORE the effects whose dependency arrays read it: a `var`
+       below them hoists as undefined, freezing those deps at [undefined]. */
+    var sel = props.selectedItem;
+
     /* Seed with ticks already accepted this session (the bus only reaches
        panes that were mounted when it fired). */
     React.useEffect(function () {
@@ -4572,7 +4576,6 @@
       setActions(window.FS.api.actions.ticksFor(sel.date));
     }, [sel && sel.date]);
 
-    var sel = props.selectedItem;
     var isMeeting = sel && sel.kind === 'meeting_topic';
     var isDaily   = sel && sel.kind === 'topic';
 

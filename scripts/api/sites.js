@@ -63,6 +63,17 @@
     return hit ? hit.site_id : site;
   }
 
+  /* The backend stores an observation's `site_slug` verbatim and lists by the
+     caller's allowed slugs, so a UUID sent in that field makes the row
+     invisible. Map a site value (org UUID or slug) to the row's own `slug`;
+     a value matching no row (or a row without a slug) is returned unchanged. */
+  function slugForSite(rows, value) {
+    var hit = (rows || []).filter(function (s) {
+      return s && (s.site_id === value || s.slug === value);
+    })[0];
+    return (hit && hit.slug) || value;
+  }
+
   async function getSites() {
     if (!window.FS.api.useMocks) {
       requireOrg('getSites');
@@ -202,6 +213,7 @@
 
   window.FS.api.sites = {
     getSites:       getSites,
+    slugForSite:    slugForSite,
     getSiteUsers:   getSiteUsers,
     getUsers:       getUsers,
     createSite:     createSite,

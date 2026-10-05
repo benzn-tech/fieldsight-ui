@@ -383,3 +383,97 @@ test('the /tasks "+ New task" button is only rendered in mock mode', () => {
   const src = codeOf(path.join(ROOT, 'scripts', 'pages', 'tasks.js'));
   assert.match(src, /CreateTaskModal && \(window\.FS\.api\.useMocks \|\| window\.FS\.api\.writeMocks\)/);
 });
+
+/* ---- 6. session tick cache never outlives a status change ------------------ */
+
+test('a status change through updateAction drops the remembered tick for that task', async () => {
+  orgResult = { id: 'ai-x', status: 'done', updated_by_name: 'Jane Doe', updated_at: 't1' };
+  await A.resolveActionItem({ actionItemId: 'ai-x', date: '2026-08-01', topic_id: 3,
+    action_index: 0, user_folder: 'Jane_Doe', checked: true });
+  assert.strictEqual(A.lookupAction(A.ticksFor('2026-08-01'), 'Jane_Doe', 3, 0).checked, true);
+
+  /* The Status editor on Today/Tasks writes straight through updateAction. */
+  orgResult = { id: 'ai-x', status: 'open' };
+  await A.updateAction('ai-x', { status: 'open' });
+  assert.strictEqual(A.lookupAction(A.ticksFor('2026-08-01'), 'Jane_Doe', 3, 0), undefined,
+    'the stale tick is gone, so the fresh payload decides');
+
+  /* A refused change, or a non-status edit, leaves it alone. */
+  orgResult = { id: 'ai-x', status: 'done', updated_at: 't2' };
+  await A.resolveActionItem({ actionItemId: 'ai-x', date: '2026-08-01', topic_id: 3,
+    action_index: 0, user_folder: 'Jane_Doe', checked: true });
+  orgResult = { _accessDenied: true, status: 403, error: 'no' };
+  await A.updateAction('ai-x', { status: 'open' });
+  orgResult = { id: 'ai-x', priority: 'high' };
+  await A.updateAction('ai-x', { priority: 'high' });
+  assert.strictEqual(A.lookupAction(A.ticksFor('2026-08-01'), 'Jane_Doe', 3, 0).checked, true);
+});
+
+/* ---- 7. right pane: `sel` is declared before the effects that read it ------ */
+
+test('timeline.js TimelineRightDetail declares `sel` above its seeding effect', () => {
+  const src = codeOf(path.join(ROOT, 'scripts', 'pages', 'timeline.js'));
+  const decl = src.indexOf('var sel = props.selectedItem;\n', src.indexOf('Declared BEFORE') > -1 ? 0 : 0);
+  const raw = fs.readFileSync(path.join(ROOT, 'scripts', 'pages', 'timeline.js'), 'utf8');
+  const seed = raw.indexOf('setActions(window.FS.api.actions.ticksFor(sel.date))');
+  const declAt = raw.lastIndexOf('var sel = props.selectedItem;', seed);
+  assert.ok(seed > 0 && declAt > 0 && declAt < seed,
+    'a var declared below the effect hoists as undefined and freezes its dependency array');
+});
+
+/* ---- 8. observations are created under the site's SLUG, never its UUID ----- */
+
+const SITE_ROWS = [{ site_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', slug: 'sb1108-ellesmere', name: 'SB1108' },
+                   { site_id: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee', name: 'No slug row' }];
+
+test('slugForSite maps a UUID (or a slug) to the row slug and leaves unknowns alone', () => {
+  const slugFor = global.window.FS.api.sites && global.window.FS.api.sites.slugForSite
+    || (require('../scripts/api/sites.js'), global.window.FS.api.sites.slugForSite);
+  assert.strictEqual(slugFor(SITE_ROWS, SITE_ROWS[0].site_id), 'sb1108-ellesmere');
+  assert.strictEqual(slugFor(SITE_ROWS, 'sb1108-ellesmere'), 'sb1108-ellesmere');
+  assert.strictEqual(slugFor(SITE_ROWS, 'nope'), 'nope');
+  assert.strictEqual(slugFor(SITE_ROWS, SITE_ROWS[1].site_id), SITE_ROWS[1].site_id, 'no slug on the row: unchanged');
+  assert.strictEqual(slugFor(null, 'x'), 'x');
+});
+
+['quality', 'safety'].forEach((kind) => {
+  test(kind + '-create-modal submits the site\'s slug as site_slug, not its UUID', async () => {
+    require('../scripts/api/sites.js');
+    const submitted = [];
+    const api = global.window.FS.api;
+    api.org = Object.assign({}, api.org, {
+      createObservation: function (body) { submitted.push(body); return Promise.resolve({ id: 'o1', author_name: 'J' }); },
+    });
+    api.todayNZDT = function () { return '2026-08-01'; };
+    /* Hooks stub: the sites list state is the only array state; the form
+       state is the only object with an `observation` key. */
+    global.React = {
+      createElement: function (type, props) {
+        return { type, props: props || {}, children: Array.prototype.slice.call(arguments, 2) };
+      },
+      Fragment: 'Fragment',
+      useState: function (v) {
+        if (Array.isArray(v)) v = SITE_ROWS;
+        if (v && typeof v === 'object' && 'observation' in v) v = Object.assign({}, v, { observation: 'Loose board' });
+        return [v, function () {}];
+      },
+      useEffect: function () {}, useRef: function (v) { return { current: v }; },
+    };
+    global.window.FieldSight = {};
+    const file = '../scripts/composites/' + kind + '-create-modal.js';
+    delete require.cache[require.resolve(file)];
+    require(file);
+    const Modal = global.window.FieldSight[kind === 'quality' ? 'QualityCreateModal' : 'SafetyCreateModal'];
+    const el = Modal({ open: true, siteId: SITE_ROWS[0].site_id, onClose() {}, onSuccess() {} });
+    (function find(n) {
+      if (!n || typeof n !== 'object') return null;
+      if (n.type === 'form') { n._f = true; found = n; return n; }
+      (n.children || []).concat(n.props && n.props.children ? [].concat(n.props.children) : []).forEach(find);
+    })(el);
+    await found.props.onSubmit({ preventDefault() {} });
+    assert.strictEqual(submitted.length, 1);
+    assert.strictEqual(submitted[0].site_slug, 'sb1108-ellesmere');
+    assert.notStrictEqual(submitted[0].site_slug, SITE_ROWS[0].site_id);
+  });
+});
+var found;

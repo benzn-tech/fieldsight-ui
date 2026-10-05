@@ -109,6 +109,19 @@
     return Object.assign({ id: actionItemId }, patch || {});
   }
 
+  /* A status change made through ANY route (the Status editor on Today/Tasks
+     goes straight to updateAction) makes this session's remembered tick for
+     that task obsolete: the server now says something else, and the tick
+     cache would otherwise win over the fresh payload. */
+  var _updateActionRaw = updateAction;
+  updateAction = async function (actionItemId, patch) {
+    var res = await _updateActionRaw(actionItemId, patch);
+    if (patch && patch.status !== undefined && res && !res._accessDenied && !res._notFound) {
+      dropTicksFor(actionItemId);
+    }
+    return res;
+  };
+
   /* ======================================================================
      ONE authorised check-off entry point
      ----------------------------------------------------------------------
@@ -176,6 +189,13 @@
      does not render from the stale report payload and invite a second PATCH.
      Cleared by a reload, when the payload itself is fresh. */
   var ticksByDate = {};
+  function dropTicksFor(actionItemId) {
+    Object.keys(ticksByDate).forEach(function (d) {
+      Object.keys(ticksByDate[d]).forEach(function (k) {
+        if (ticksByDate[d][k].actionItemId === actionItemId) delete ticksByDate[d][k];
+      });
+    });
+  }
   function ticksFor(date) {
     return Object.assign({}, ticksByDate[date] || {});
   }
@@ -188,7 +208,8 @@
     var who = normaliseCheckoff(res);
     (ticksByDate[opts.date] = ticksByDate[opts.date] || {})[
       actionKey(opts.user_folder, opts.topic_id, opts.action_index)] =
-      { checked: checked, checked_by: who.checked_by, checked_at: who.checked_at };
+      { checked: checked, checked_by: who.checked_by, checked_at: who.checked_at,
+        actionItemId: opts.actionItemId || null };
     if (!bus) return;
     bus.emit({
       date:         opts.date,
