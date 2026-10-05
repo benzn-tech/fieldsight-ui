@@ -411,8 +411,8 @@
 
   /* An action item's "done" signal. The authoritative source is the
      action_items.status column (feat/editable-tasks-ui). Default here is
-     column-only (status === 'done'); the render site injects a richer
-     predicate that also honours the legacy DynamoDB check-off boolean. */
+     column-only (status === 'done'); the render site injects a predicate
+     that also honours a tick made earlier in the same session. */
   function defaultActionDone(a) {
     return !!(a && a.status === 'done');
   }
@@ -1453,26 +1453,18 @@
 
     /* fix/action-checkoff-sync (Bug 1) — this view renders ONE date
        (props.date) fanned out across every user on the site, so a
-       single getActions(date) call covers every section's TopicCards.
+       single map covers every section's TopicCards.
        user-dimension audit key plan (docs/superpowers/plans/2026-07-13-
        user-dimension-audit-key.md, Task 5) — the audit key NOW carries
        the section owner's folder (see the TopicCard mount + bus
        subscription below), so two sections' topic 0 / action 0 on the
        same date no longer collide. Mirrors TimelineMiddleColumn's own
-       actions fetch (~line 743) so checked state actually shows here
-       instead of the hardcoded {} this view used to pass down. */
+       actions map (~line 743). It holds ONLY ticks announced on the bus this
+       session; everything else reads each item's own status column (see
+       FS.api.actions.itemState), so it starts empty. */
     var refActionsState = React.useState({});
     var actionsMap    = refActionsState[0];
     var setActionsMap = refActionsState[1];
-
-    React.useEffect(function () {
-      var cancelled = false;
-      window.FS.api.actions.getActions(props.date).then(function (res) {
-        if (cancelled) return;
-        setActionsMap((res && res.actions) || {});
-      });
-      return function () { cancelled = true; };
-    }, [props.date]);
 
     /* fix/action-checkoff-sync (Bug 1) — mirrors TimelineMiddleColumn's
        bus subscription (~line 800) so a toggle made anywhere (this
@@ -1724,16 +1716,14 @@
                 /* No `deepLink` prop (owner's ruling — the hand-off must
                    never carry our internal app URL); see the note in
                    buildSessionEmailDraft(). */
-                /* Mirrors the single-person view's _isActionDone: the Aurora
-                   status column wins when present, else the check-off overlay.
-                   Keyed on THIS section's folder — the audit key carries a user
-                   dimension (#23), so passing the caller's folder here would
-                   read another person's check-offs. */
+                /* Mirrors the single-person view's _isActionDone: the item's own
+                   status column, unless a tick made in this session says
+                   otherwise. Keyed on THIS section's folder — the key carries
+                   a user dimension (#23), so passing the caller's folder here
+                   would read another person's ticks. */
                 isDone: function (a, topicId, idx) {
-                  if (a && a.status) return a.status === 'done';
-                  var st = window.FS.api.actions.lookupAction(
-                    actionsMap, sectionUser, topicId, idx);
-                  return !!(st && st.checked);
+                  return window.FS.api.actions.itemState(a,
+                    window.FS.api.actions.lookupAction(actionsMap, sectionUser, topicId, idx)).checked;
                 },
               }),
               React.createElement('button', {
@@ -2343,7 +2333,6 @@
       var timelineP = window.FS.api.timeline.getTimeline({ date: date, user: requestUser, resolveSelf: resolveSelf });
       Promise.all([
         timelineP,
-        window.FS.api.actions.getActions(date),
         /* On the own-day path the folder is only known once the timeline
            answers, so ask for the minutes after it, with the server's folder;
            if the answer names none, the guess is what this always sent. */
@@ -2355,8 +2344,7 @@
       ]).then(function (results) {
         if (cancelled) return;
         var report  = results[0];
-        var actions = results[1].actions || {};
-        var meeting = results[2];
+        var meeting = results[1];
 
         /* P-12 — page-level access-denied. If the daily-report endpoint
            rejected this caller (§8.4: non-admin querying another user),
@@ -2406,7 +2394,7 @@
         setState({
           status:  'ok',
           report:  report,
-          actions: actions,
+          actions: {},
           meeting: meeting,
         });
         /* Retire any optimistic redaction/revert patch the server has now
@@ -2875,16 +2863,15 @@
        "Draft email" control. When a specific session is selected the draft is
        that meeting; "All day" (null) drafts the whole day's outstanding items,
        labelled as such. The report owner's folder feeds the same done-check
-       (status column, else legacy DynamoDB check-off) the topic cards use, so
+       (status column, unless ticked in this session) the topic cards use, so
        an item ticked here counts as done and is left out of the draft. */
     var _selectedSession = selectedSessionId
       ? (daySessions.filter(function (s) { return s.session_id === selectedSessionId; })[0] || null)
       : null;
     var _draftUserFolder = report.user_name ? window.FS.api.folderName(report.user_name) : null;
     function _isActionDone(a, topicId, idx) {
-      if (a && a.status) return a.status === 'done';
-      var st = window.FS.api.actions.lookupAction(actionState, _draftUserFolder, topicId, idx);
-      return !!(st && st.checked);
+      return window.FS.api.actions.itemState(a,
+        window.FS.api.actions.lookupAction(actionState, _draftUserFolder, topicId, idx)).checked;
     }
     /* Belt-and-suspenders: the draft builder re-asserts redacted/non_work
        exclusion itself, but pass the ALREADY-visible (non-removed) topics so a
@@ -4249,8 +4236,9 @@
                side of the checked/unchecked split (Array.sort is stable
                in evergreen browsers). */
             actions.map(function (a, idx) {
-              var state = window.FS.api.actions.lookupAction(props.actionState, props.userFolder, topic.topic_id, idx) || {};
-              return { a: a, idx: idx, state: state, checked: !!state.checked };
+              var state = window.FS.api.actions.itemState(a,
+                window.FS.api.actions.lookupAction(props.actionState, props.userFolder, topic.topic_id, idx));
+              return { a: a, idx: idx, state: state, checked: state.checked };
             }).sort(function (x, y) {
               if (x.checked === y.checked) return 0;
               return x.checked ? 1 : -1;
@@ -4576,17 +4564,6 @@
     var sel = props.selectedItem;
     var isMeeting = sel && sel.kind === 'meeting_topic';
     var isDaily   = sel && sel.kind === 'topic';
-
-    /* Load actions audit state once per (date) — only relevant for
-       daily-report topics; meeting actions are read-only. */
-    React.useEffect(function () {
-      if (!isDaily || !sel || !sel.date) return;
-      var cancelled = false;
-      window.FS.api.actions.getActions(sel.date).then(function (res) {
-        if (!cancelled) setActions(res.actions || {});
-      });
-      return function () { cancelled = true; };
-    }, [isDaily, sel && sel.date]);
 
     /* Sprint 6.7.1 — same bus subscription as MiddleColumn but for
        this right-detail's action map. Keeps the OverviewTab's

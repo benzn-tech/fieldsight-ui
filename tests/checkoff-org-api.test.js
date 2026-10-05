@@ -8,11 +8,15 @@
  * ACL is "admin/gm, THIS site's pm/site_manager, or the assignee only"
  * (404 cross-company, 403 out-of-reach site).
  *
- * Covers the two helpers scripts/api/actions.js exports for this:
+ * The legacy gateway has since been retired from this client (see
+ * tests/done-ness-comes-from-the-task.test.js): the PATCH is now the ONLY
+ * check-off writer and done-ness is the task's own status.
+ *
+ * Covers the helpers scripts/api/actions.js exports for this:
  *   orgCheckoffLive()   — the aurora + org-write kill switch
- *   resolveActionItem() — the routing + always-resolving envelope
- *   isActionResolved()  — the read-time UNION of the two done-ness stores
- * plus tasks.js's isRowDone(), which is that union applied to a Tasks row.
+ *   resolveActionItem() — the single writer + always-resolving envelope
+ *   isActionResolved()  — done-ness is the status column and nothing else
+ * plus tasks.js's isRowDone(), which is that rule applied to a Tasks row.
  *
  * actions.js is a browser IIFE that only registers onto window.FS.api at load,
  * so a minimal window stub is enough to require it under Node (same posture as
@@ -41,13 +45,15 @@ function resetEnv(overrides) {
         /* orgRequest is what updateAction rides. */
         orgRequest:     function (path, opts) {
           calls.org.push({ path: path, method: opts.method, body: opts.body });
+          if (orgRejects) return Promise.reject(Object.assign(new Error('boom'), { status: 500 }));
           return Promise.resolve(orgResponse);
         },
-        /* request() is what toggleAction rides (the legacy gateway). */
+        /* request() was the legacy gateway. Nothing may call it any more:
+           it is a tripwire — every test that cares asserts calls.legacy is
+           empty. */
         request:        function (path, opts) {
-          calls.legacy.push({ path: path, body: opts.body });
-          if (legacyRejects) return Promise.reject(Object.assign(new Error('boom'), { status: 500 }));
-          return Promise.resolve({ message: 'Updated', checked: opts.body.checked });
+          calls.legacy.push({ path: path, body: opts && opts.body });
+          return Promise.resolve({});
         },
       }, overrides || {}),
       /* actions.js reads these off window.FS, not off window. */
@@ -61,7 +67,7 @@ function resetEnv(overrides) {
 }
 
 let orgResponse = null;
-let legacyRejects = false;
+let orgRejects = false;
 
 const ITEM = {
   actionItemId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
@@ -104,25 +110,38 @@ test('resolveActionItem checks off through PATCH /org/action-items/{id} with sta
   }]);
 });
 
-test('resolveActionItem falls back to the legacy toggle when the item has no durable id', async () => {
+test('an item with no durable id is REFUSED, not routed to some other writer', async () => {
   const m = resetEnv();
   const env = await m.resolveActionItem(Object.assign({}, ITEM, { actionItemId: null, checked: true }));
 
-  assert.strictEqual(env.ok, true);
-  assert.strictEqual(env.path, 'legacy');
-  assert.strictEqual(calls.org.length, 0);
-  assert.strictEqual(calls.legacy.length, 1);
-  assert.strictEqual(calls.legacy[0].path, '/actions/toggle');
-  assert.strictEqual(calls.legacy[0].body.user_folder, 'David_Barillaro',
-    'user_folder is the report OWNER folder, never the caller');
+  assert.strictEqual(env.ok, false);
+  assert.strictEqual(env.reason, 'no_id');
+  assert.strictEqual(calls.org.length, 0, 'nothing to PATCH');
+  assert.strictEqual(calls.legacy.length, 0, 'the legacy toggle is gone');
+  assert.strictEqual(calls.bus.length, 0, 'a refusal must not broadcast as server truth');
+  assert.ok(env.message, 'the user is told why');
 });
 
-test('resolveActionItem falls back to the legacy toggle when the aurora gate is off', async () => {
+test('with the org write unreachable the check-off is refused, not faked and not sent to the gateway', async () => {
   const m = resetEnv({ timelineSource: 'report' });
   const env = await m.resolveActionItem(Object.assign({ checked: true }, ITEM));
 
-  assert.strictEqual(env.path, 'legacy');
+  assert.strictEqual(env.ok, false);
+  assert.strictEqual(env.reason, 'unavailable');
   assert.strictEqual(calls.org.length, 0);
+  assert.strictEqual(calls.legacy.length, 0);
+  assert.strictEqual(calls.bus.length, 0);
+});
+
+test('mock mode still demos a tick: in-memory merge, no network, bus announces it', async () => {
+  const m = resetEnv({ useMocks: true, writeMocks: true });
+  const env = await m.resolveActionItem(Object.assign({ checked: true }, ITEM));
+
+  assert.strictEqual(env.ok, true);
+  assert.strictEqual(calls.org.length, 0);
+  assert.strictEqual(calls.legacy.length, 0);
+  assert.strictEqual(calls.bus.length, 1);
+  assert.strictEqual(calls.bus[0].checked, true);
 });
 
 /* ---- resolveActionItem: refusals are never swallowed --------------------- */
@@ -152,54 +171,40 @@ test('a 404 from the org write RESOLVES as ok:false / not_found', async () => {
   assert.strictEqual(calls.bus.length, 0);
 });
 
-test('a thrown 5xx on the legacy leg RESOLVES as ok:false rather than rejecting', async () => {
+test('a thrown 5xx from the org write RESOLVES as ok:false rather than rejecting', async () => {
   const m = resetEnv();
-  legacyRejects = true;
+  orgRejects = true;
   try {
-    const env = await m.resolveActionItem(
-      Object.assign({}, ITEM, { actionItemId: null, checked: true }));
+    const env = await m.resolveActionItem(Object.assign({ checked: true }, ITEM));
     assert.strictEqual(env.ok, false);
     assert.strictEqual(env.reason, 'error');
     assert.strictEqual(env.status, 500);
+    assert.strictEqual(calls.bus.length, 0);
   } finally {
-    legacyRejects = false;
+    orgRejects = false;
   }
 });
 
-/* ---- resolveActionItem: uncheck clears the legacy overlay too ------------- */
+/* ---- resolveActionItem: there is no overlay to write or clear ------------ */
 
-test('unchecking writes status open AND clears the legacy DynamoDB overlay', async () => {
+test('unchecking writes status open and touches nothing else', async () => {
   const m = resetEnv();
   orgResponse = { id: ITEM.actionItemId, status: 'open' };
 
   const env = await m.resolveActionItem(Object.assign({ checked: false }, ITEM));
 
   assert.strictEqual(env.ok, true);
-  assert.deepStrictEqual(calls.org[0].body, { status: 'open' });
-  assert.strictEqual(calls.legacy.length, 1,
-    'without this the overlay still reads checked:true and the item re-checks itself on reload');
-  assert.strictEqual(calls.legacy[0].body.checked, false);
+  assert.deepStrictEqual(calls.org.map(function (c) { return c.body; }), [{ status: 'open' }]);
+  assert.strictEqual(calls.legacy.length, 0, 'no overlay to clear any more');
 });
 
-test('checking off does NOT write the legacy overlay (the whole point of the move)', async () => {
+test('checking off does not touch the legacy gateway', async () => {
   const m = resetEnv();
   orgResponse = { id: ITEM.actionItemId, status: 'done' };
 
   await m.resolveActionItem(Object.assign({ checked: true }, ITEM));
 
   assert.strictEqual(calls.legacy.length, 0);
-});
-
-test('an overlay-clear failure does not turn a successful uncheck into a failure', async () => {
-  const m = resetEnv();
-  orgResponse = { id: ITEM.actionItemId, status: 'open' };
-  legacyRejects = true;
-  try {
-    const env = await m.resolveActionItem(Object.assign({ checked: false }, ITEM));
-    assert.strictEqual(env.ok, true, 'the authoritative write already succeeded');
-  } finally {
-    legacyRejects = false;
-  }
 });
 
 /* ---- resolveActionItem: bus broadcast ------------------------------------ */
@@ -282,28 +287,28 @@ test('normaliseCheckoff tolerates a missing/undefined response without throwing'
   assert.deepStrictEqual(m.normaliseCheckoff({}), { checked_by: null, checked_at: null });
 });
 
-/* ---- isActionResolved: the read-time union ------------------------------- */
+/* ---- isActionResolved: the status column and nothing else ---------------- */
 
-test('isActionResolved is the UNION of the Aurora column and the legacy overlay', () => {
+test('isActionResolved is true for status done and for nothing else', () => {
   const m = resetEnv();
-  assert.strictEqual(m.isActionResolved('done', false), true,  'column alone (checked off post-migration)');
-  assert.strictEqual(m.isActionResolved('open', true),  true,  'overlay alone — the ~119 pre-existing prod check-offs');
-  assert.strictEqual(m.isActionResolved('done', true),  true);
-  assert.strictEqual(m.isActionResolved('open', false), false);
+  assert.strictEqual(m.isActionResolved('done'), true);
+  assert.strictEqual(m.isActionResolved('open'), false);
+  assert.strictEqual(m.isActionResolved('in_progress'), false,
+    'only "done" counts — in_progress/blocked are still open');
+  assert.strictEqual(m.isActionResolved('blocked'), false);
 });
 
 test('isActionResolved treats a missing column status as not-done (never a crash)', () => {
   const m = resetEnv();
-  assert.strictEqual(m.isActionResolved(null, false), false);
-  assert.strictEqual(m.isActionResolved(undefined, undefined), false);
-  assert.strictEqual(m.isActionResolved(null, true), true);
-  assert.strictEqual(m.isActionResolved('in_progress', false), false,
-    'only "done" counts — in_progress/blocked are still open');
+  assert.strictEqual(m.isActionResolved(null), false);
+  assert.strictEqual(m.isActionResolved(undefined), false);
+  /* A second argument (the old overlay boolean) is ignored, not honoured. */
+  assert.strictEqual(m.isActionResolved('open', true), false);
 });
 
-/* ---- tasks.js isRowDone: the same union applied to a Tasks row ------------ */
+/* ---- tasks.js isRowDone: the same rule applied to a Tasks row ------------- */
 
-test('tasks.js isRowDone unions the column and the overlay (the two used to contradict)', () => {
+test('tasks.js isRowDone reads the status column only (an overlay boolean on the row is ignored)', () => {
   resetEnv();
   /* tasks.js needs the same page-level stubs its own bucket test uses. */
   global.window.FS.api.resolveDeadline = function (d) { return { absolute: null, display: d || '—' }; };
@@ -321,8 +326,8 @@ test('tasks.js isRowDone unions the column and the overlay (the two used to cont
 
   assert.strictEqual(isRowDone({ status: 'done', audit: { checked: false } }), true,
     'set Done in the Status editor — used to stay in the Open bucket with a live check-off circle');
-  assert.strictEqual(isRowDone({ status: 'open', audit: { checked: true } }), true,
-    'pre-existing DynamoDB check-off — must NOT regress to Open when writes move to Aurora');
+  assert.strictEqual(isRowDone({ status: 'open', audit: { checked: true } }), false,
+    'a tick the task itself does not carry is not a tick');
   assert.strictEqual(isRowDone({ status: 'open', audit: { checked: false } }), false);
   assert.strictEqual(isRowDone(null), false);
   assert.strictEqual(isRowDone({ status: null }), false, 'a row with no audit slice must not throw');

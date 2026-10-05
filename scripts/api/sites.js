@@ -138,9 +138,20 @@
     return String(s || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 40);
   }
 
-  /* Mock create/update mutations (Phase B). In mock mode they mutate the
-     in-memory fixtures (session-scoped — reset on reload) and return the new
-     object; live mode POST/PATCHes the real API. */
+  /* Mock create/update mutations (Phase B). They mutate the in-memory
+     fixtures (session-scoped — reset on reload) and return the new object.
+     They have callers (pages/sites.js and pages/team.js use them when the org
+     API is not live), so they stay — but only as MOCK writers: the legacy
+     gateway POST /sites, POST /users and PATCH /users/{id} they used to fall
+     through to are gone. Outside mock mode the real writers are
+     org.createOrgSite / createMember / updateMemberRole; reaching here means
+     the org API is off, and the honest answer is a refusal that the callers'
+     .catch turns into a toast. */
+  function legacyWriteGone() {
+    return Promise.reject(new Error('This change is not available right now.'));
+  }
+  function mockWrites() { return window.FS.api.useMocks || window.FS.api.writeMocks; }
+
   async function createSite(input) {
     var site = {
       site_id:            (slugify(input.name) || 'site') + '-' + Date.now().toString(36),
@@ -153,7 +164,7 @@
       icon:               input.icon || null,
       user_count:         0,
     };
-    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) return window.FS.api.request('/sites', { method: 'POST', body: site });
+    if (!mockWrites()) return legacyWriteGone();
     await window.FS.api.delay(400);
     var f = fixtures().sites; if (f && f.sites) f.sites.unshift(site);
     return site;
@@ -171,14 +182,14 @@
       managed_sites: [],
       avatarUrl:    input.avatarUrl || null,
     };
-    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) return window.FS.api.request('/users', { method: 'POST', body: user });
+    if (!mockWrites()) return legacyWriteGone();
     await window.FS.api.delay(400);
     var f = fixtures().sites; if (f && f.users) f.users.unshift(user);
     return user;
   }
 
   async function updateUserRole(deviceId, role) {
-    if (!window.FS.api.useMocks && !window.FS.api.writeMocks) return window.FS.api.request('/users/' + deviceId, { method: 'PATCH', body: { role: role } });
+    if (!mockWrites()) return legacyWriteGone();
     await window.FS.api.delay(300);
     var f = fixtures().sites;
     if (f && f.users) {

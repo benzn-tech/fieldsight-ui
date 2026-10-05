@@ -4,24 +4,17 @@
    One row in a topic's action_items list. Renders:
      [checkbox] action text · responsible · deadline · priority pill
 
-   The checkbox state is keyed by `${userFolder}|${topic_id}_${action_index}`
-   (bare `${topic_id}_${action_index}` when userFolder is falsy — legacy
-   fallback; BACKEND-CONTEXT §4.10 / §8.8, user-dimension audit key plan
-   §1.3). On change we do an OPTIMISTIC update: flip local state
-   immediately, fire FS.api.actions.resolveActionItem, and revert (with a
-   toast carrying the server's own reason) if it comes back not-ok.
+   Done-ness is the task's own action_items.status (the parent passes it as
+   `initialChecked`, derived by FS.api.actions.itemState). On change we do an
+   OPTIMISTIC update: flip local state immediately, fire
+   FS.api.actions.resolveActionItem, and revert (with a toast carrying the
+   server's own reason — including a 403) if it comes back not-ok.
 
-   feat/checkoff-org-api — resolveActionItem routes the write to the
-   AUTHORISED PATCH /api/org/action-items/{id} (ACL: admin/gm, THIS site's
-   pm/site_manager, or the assignee) whenever the item carries a durable
-   action_items.id and the aurora gate is on, and only falls back to the
-   legacy UNAUTHENTICATED POST /api/actions/toggle otherwise. The composite
-   key above therefore describes the FALLBACK/read overlay, not the primary
-   write path any more.
-
-   Note BUG §8.8: topic_ids may shift if the report is regenerated, which
-   can "move" a checkmark. Accepted risk for now; hard audit goes through
-   the actions history endpoint.
+   resolveActionItem writes through the AUTHORISED PATCH
+   /api/org/action-items/{id} (ACL: admin/gm, THIS site's pm/site_manager, or
+   the assignee). An item with no durable action_items.id has nothing to
+   write to, so its checkbox renders disabled (read-only) — the legacy
+   unauthenticated toggle that used to cover it is gone.
 
    Props:
      date          'YYYY-MM-DD'
@@ -29,22 +22,19 @@
      actionIndex   number
      userFolder    string (optional) — report OWNER's folder (never the
                    caller/current user). Threads into the bus identity key
-                   and toggleAction's user_folder so same-day, same-index
-                   actions from different report owners don't collide.
-                   Missing/falsy → legacy bare-key behaviour (tolerated;
-                   see docs/superpowers/plans/2026-07-13-user-dimension-audit-key.md).
+                   so same-day, same-index actions from different report
+                   owners don't collide.
      action        { action, responsible, deadline, priority, status,
                    updated_by_name, updated_at } — the last two are
                    fix/closed-by-display's Aurora-column fallback (see
                    resolveCloser below); may be absent on older payloads.
-     initialChecked  boolean
-     checkedBy     string (optional) — DynamoDB-overlay closer name, shown
-                   as caption when checked. Fed by timeline.js from the
-                   ~119 historical (pre-org-write) check-offs; a check-off
-                   made today has NO overlay entry (feat/checkoff-org-api
-                   never writes it on check), so this is absent for those
-                   and resolveCloser falls back to action.updated_by_name.
-     checkedAt     ISO   (optional) — overlay counterpart to checkedBy.
+     initialChecked  boolean (optional) — the parent's derived done-ness
+                   (FS.api.actions.itemState). When omitted the row reads
+                   action.status itself.
+     checkedBy     string (optional) — closer name for the caption, as the
+                   parent derived it (a tick made this session, else
+                   action.updated_by_name).
+     checkedAt     ISO   (optional) — counterpart to checkedBy.
      onToggled     ({ checked }) => void  — optional listener
      withHistory   boolean (optional) — host opts in to the History disclosure
                    (spec 2026-09-15 §2; Timeline OverviewTab only). Needs
@@ -63,15 +53,19 @@
 
   var PRIORITY_TONE = { high: 'danger', medium: 'warning', low: 'info' };
 
-  /* feat/editable-tasks-ui follow-up (F3) — true when the authoritative
-     action_items.status column (stamped onto props.action as `.status`
-     by the Aurora /timeline read shim, render_report_shape) says this
-     item is done. Used to widen the checkbox's checked state beyond the
-     legacy DynamoDB overlay (props.initialChecked) so a task completed
-     on Today (column write, overlay never touched) still shows checked
-     here. */
+  /* True when the authoritative action_items.status column (stamped onto
+     props.action as `.status` by the Aurora /timeline read shim,
+     render_report_shape) says this item is done. */
   function isColumnDone(props) {
     return !!(props.action && props.action.status === 'done');
+  }
+
+  /* The checkbox's checked state: the parent's derived value when it gave
+     one (it already folds in a tick made this session, including an
+     explicit untick that the stale status column would contradict), else
+     the item's own status column. */
+  function initialCheckedOf(props) {
+    return props.initialChecked !== undefined ? !!props.initialChecked : isColumnDone(props);
   }
 
   /* Task 11 (spec 2026-09-15 §2) — pure gate for the History disclosure.
@@ -81,14 +75,13 @@
     return !!(props && props.withHistory && props.action && props.action.id);
   }
 
-  /* fix/closed-by-display — who/when this row was closed, preferring the
-     DynamoDB overlay (props.checkedBy/checkedAt — the ~119 historical
-     check-offs that live ONLY there) and falling back to the Aurora
-     column (action.updated_by_name/updated_at — where every check-off
-     made through the org PATCH path lands, since that path never touches
-     the overlay). The two sources are taken as a WHOLE pair, never mixed
-     field-by-field, so a name from one source is never paired with a
-     timestamp from the other.
+  /* fix/closed-by-display — who/when this row was closed, preferring what
+     the parent passed (props.checkedBy/checkedAt — a tick made this
+     session) and falling back to the Aurora column
+     (action.updated_by_name/updated_at — where every check-off made
+     through the org PATCH path lands). The two sources are taken as a
+     WHOLE pair, never mixed field-by-field, so a name from one source is
+     never paired with a timestamp from the other.
      action.updated_by_name may be null even when the row IS closed — an
      unprovisioned/nameless Cognito account resolves to no display name
      server-side. That's still a real closer, so the fallback triggers
@@ -151,11 +144,10 @@
     var actionIndex   = props.actionIndex;
     var userFolder    = props.userFolder;  /* report OWNER's folder — never the caller */
     var action        = props.action || {};
-    /* fix/closed-by-display — overlay-first, Aurora-column fallback; see
-       resolveCloser's header note. */
+    /* fix/closed-by-display — see resolveCloser's header note. */
     var closer        = resolveCloser(props, action);
 
-    var ref = React.useState(!!props.initialChecked || isColumnDone(props));
+    var ref = React.useState(initialCheckedOf(props));
     var checked    = ref[0];
     var setChecked = ref[1];
 
@@ -171,14 +163,12 @@
     /* Sprint 6.7.1 — sync local checked state when initialChecked
        prop changes (e.g., parent state was updated by a sibling
        ActionItemRow's toggle). Skip while a request is in flight to
-       avoid clobbering an optimistic update.
-       feat/editable-tasks-ui follow-up (F3) — also re-sync when the
-       authoritative column status flips (isColumnDone), so a re-render
-       carrying a freshly-'done' action.status keeps the box checked
-       even when the legacy overlay was never written. */
+       avoid clobbering an optimistic update. Also re-syncs when the
+       authoritative column status flips, so a re-render carrying a
+       freshly-'done' action.status keeps the box checked. */
     React.useEffect(function () {
       if (pendingRef.current) return;
-      setChecked(!!props.initialChecked || isColumnDone(props));
+      setChecked(initialCheckedOf(props));
     }, [props.initialChecked, props.action && props.action.status]);
 
     /* Sprint 6.7.1 — listen for cross-component toggles via the bus.
@@ -198,7 +188,11 @@
       });
     }, [date, topicId, actionIndex, userFolder]);
 
+    /* No durable id → nothing to write to: read-only, never a fake tick. */
+    var toggleable = !!action.id;
+
     function onChange(e) {
+      if (!toggleable) return;
       if (pendingRef.current) return;
       var next = !!e.target.checked;
       var prev = checked;
@@ -208,16 +202,10 @@
       var api = window.FS && window.FS.api && window.FS.api.actions;
       /* feat/checkoff-org-api — one routed, ALWAYS-RESOLVING call
          (FS.api.actions.resolveActionItem): the AUTHORISED Aurora write
-         (PATCH /api/org/action-items/{id}) when the item carries a durable
-         action_items.id and the aurora gate is on, else the legacy
-         unauthenticated DynamoDB overlay toggle. Unlike the Today card
+         (PATCH /api/org/action-items/{id}). Unlike the Today card
          (check-only) this row IS uncheck-capable, so `checked` is the real
-         next value — and resolveActionItem's org leg additionally clears
-         the legacy overlay on an uncheck, without which an item whose
-         done-ness came from DynamoDB simply re-checked itself on the next
-         load (both readers union the two stores — see isColumnDone above).
-         It also emits the actionsBus event on every successful path, so
-         this handler no longer broadcasts itself. */
+         next value. It also emits the actionsBus event on every successful
+         path, so this handler no longer broadcasts itself. */
       var p = (api && api.resolveActionItem)
         ? api.resolveActionItem({
             actionItemId: action.id,
@@ -285,6 +273,8 @@
         className: 'fs-action-item-row__checkbox',
         checked:   checked,
         onChange:  onChange,
+        disabled:  !toggleable,
+        title:     toggleable ? undefined : 'This item has no task record yet, so it cannot be ticked here.',
         'aria-label': action.action,
       }),
       React.createElement('div', { className: 'fs-action-item-row__main' },

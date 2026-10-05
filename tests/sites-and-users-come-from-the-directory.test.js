@@ -192,9 +192,8 @@ test('wiring-only: sites.js makes no legacy read request and no legacy fallback'
   const code = src.replace(/\/\*[\s\S]*?\*\//g, '');
   assert.ok(!/legacyReadFallback/.test(code));
   /* Any request('/sites|/users|/site-users...') is a legacy call, whatever
-     follows the path. The out-of-scope writers (createSite, createUser,
-     updateUserRole) are excluded by FUNCTION scope: only their own bodies are
-     blanked out, so a read added anywhere else is still caught. */
-  const reads = code.replace(/async function (createSite|createUser|updateUserRole)[\s\S]*?\r?\n  \}\r?\n/g, '');
-  assert.deepStrictEqual(reads.match(/request\(\s*['"`]\/(sites|users|site-users)/g), null);
+     follows the path -- reads AND the writers (createSite, createUser,
+     updateUserRole), which are mock-only now. The whole file is scanned: no
+     function body is excused. */
+  assert.deepStrictEqual(code.match(/request\(\s*['"`]\/(sites|users|site-users)/g), null);
 });

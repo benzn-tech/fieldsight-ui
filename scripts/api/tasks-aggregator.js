@@ -1,16 +1,14 @@
 /* ==========================================================================
    FieldSight API · Tasks aggregator (Sprint 4.2)
    --------------------------------------------------------------------------
-   Joins two existing data shapes into a single flat list the Tasks
-   page can render without re-doing the join itself:
+   Flattens daily-report topics into a single list the Tasks page can
+   render without re-doing the walk itself. Each action item is read from
+   the org payload the page already has: text, responsible, deadline,
+   priority AND its own done-ness (`action_items.status === 'done'`).
+   There is no second store: the legacy DynamoDB tick overlay is gone, so
+   `audit.checked` below is derived from `status` alone.
 
-     • Action SOURCE    — lives inside daily-report topics
-                          (text, responsible, deadline, priority)
-     • Audit OVERLAY    — /api/actions per date
-                          (checked, checked_by, checked_at)
-
-   Single stable contract, regardless of mock vs real backend or
-   whether a future `/api/actions/all` endpoint is added — UI
+   Single stable contract, regardless of mock vs real backend — UI
    consumers see the same row shape.
 
    Returned row shape:
@@ -33,7 +31,7 @@
                      // stores the DERIVED label) — tasks.js's TasksRightDetail
                      // editors derive the display label themselves via
                      // FS.api.deriveStatus(row.status, row.audit.checked), same
-                     // helper today.js uses. null for legacy/pre-migration items.
+                     // helper today.js uses. null for pre-migration items.
        deadline:     string | null,                // free text e.g. "Today 09:00"
        topic_title:  string,
        topic_category: string,
@@ -62,9 +60,9 @@
                      // FS.api.org.getSiteMembers(row.siteId) call; null on a
                      // lookup miss degrades that picker to read-only.
        audit: {
-         checked:    boolean,
-         checked_by: string | null,
-         checked_at: ISO string | null,
+         checked:    boolean,              // status === 'done', nothing else
+         checked_by: string | null,        // a.updated_by_name, only when done
+         checked_at: ISO string | null,    // a.updated_at, only when done
        }
      }
 
@@ -171,8 +169,7 @@
       return { rows: [], from: from, to: to, user: user };
     }
 
-    /* 2) Fan out timeline (action source) AND actions (audit) per day,
-       in parallel.
+    /* 2) Fan out the timeline (the action source) per day.
        Sprint 8 follow-up — admin fan-out across all known users when
        no explicit user is provided, matching compliance-aggregator. */
     var isAdmin = caller.role === 'admin' || caller.role === 'gm' || !!caller.isAdmin;
@@ -220,27 +217,18 @@
           .then(function (r) { return { date: d, report: r }; });
       }));
     }
-    var auditPromise = window.FS.api.actions.getActionsRange({
-      from: datesInRange[0], to: datesInRange[datesInRange.length - 1],
-    });
-    /* feat/editable-tasks-ui — fetched in parallel with the timeline/audit
+    /* feat/editable-tasks-ui — fetched in parallel with the timeline
        fan-out above (cheap, one extra org call), never gating the rest of
        the load. */
     var siteIdMapPromise = getOrgSiteIdMap();
 
-    var both = await Promise.all([timelinePromise, auditPromise, siteIdMapPromise]);
+    var both = await Promise.all([timelinePromise, siteIdMapPromise]);
     var perDay = both[0];
-    var auditRange = both[1];
-    var siteIdMap = both[2];
+    var siteIdMap = both[1];
 
     /* 3) Surface page-level access-denied only when the caller genuinely
        can't read anything.
-       Audit leg: getActionsRange() already swallows per-date denials and
-       only signals _accessDenied when EVERY date's audit was denied. */
-    if (auditRange && auditRange._accessDenied) {
-      return { _accessDenied: true, error: auditRange.error };
-    }
-    /* Timeline leg: IB-1 fix — drop individual denied (date,folder) items
+       IB-1 fix — drop individual denied (date,folder) items
        and keep whatever came back accessible; a partial 403 degrades to
        "missing rows", not a dead page. Only surface _accessDenied if
        NOTHING accessible came back at all. */
@@ -258,14 +246,12 @@
 
     /* 4) Flatten into rows. Skip days where the report was not found,
        didn't materialise (admin disambiguation), or carried 0 topics. */
-    var auditByDate = (auditRange && auditRange.byDate) || {};
     var rows = [];
     perDay.forEach(function (x) {
       var r = x.report;
       if (!r || r._notFound || r.available_users) return;
       /* Report OWNER's folder — NOT the caller (AuthMock.currentUser). See
-         plan §1.3/owner≠caller. Hoisted once per report for the id + the
-         lookupAction() call below. */
+         plan §1.3/owner≠caller. Hoisted once per report for the id. */
       var folder = r.user_name ? window.FS.api.folderName(r.user_name) : null;
       /* feat/editable-tasks-ui — report.site is a DISPLAY NAME only (no
          slug/id travels with a report — same fact today-adapter.js
@@ -279,7 +265,8 @@
            never surface as rows. */
         if (t.redacted) return;
         (t.action_items || []).forEach(function (a, idx) {
-          var key = window.FS.api.actions.lookupAction(auditByDate[x.date], folder, t.topic_id, idx) || {};
+          /* Done-ness is the task's own status column — nothing else. */
+          var done = a.status === 'done';
           rows.push({
             id:             x.date + '_' + (folder || '') + '_' + t.topic_id + '_' + idx,
             date:           x.date,
@@ -306,9 +293,9 @@
             actionItemId:   a.id || null,
             siteId:         siteId,
             audit: {
-              checked:    !!key.checked,
-              checked_by: key.checked_by || null,
-              checked_at: key.checked_at || null,
+              checked:    done,
+              checked_by: done ? (a.updated_by_name || null) : null,
+              checked_at: done ? (a.updated_at || null) : null,
             },
           });
         });
@@ -318,92 +305,10 @@
     return { rows: rows, from: from, to: to, user: user, dates: datesInRange };
   }
 
-  /* ────────────────────────────────────────────────────────────────────
-     Sprint 11 C.1 — getCrossDayAudit({from, to, user})
-     --------------------------------------------------------------------
-     Mock spec for the future endpoint
-       GET /api/actions/all?from=YYYY-MM-DD&to=YYYY-MM-DD&user=<folder>
-     Returns: { entries: [...], from, to, user }
-       entry = {
-         action_id:        '<date>_<key>',                       // unique
-         topic_action_key: '<user_folder>|<topic_id>_<action_index>'  // groups
-                            // same logical action across dates. Composite
-                            // (user-dim audit key) when the underlying audit
-                            // map key has a folder segment; bare
-                            // '<topic_id>_<action_index>' for true legacy
-                            // (unmigrated) records — see plan §1.2/§1.3.
-         user_folder:      string | null,                        // parsed
-                                                                 // from the
-                                                                 // composite
-                                                                 // key, null
-                                                                 // for legacy
-         date:             'YYYY-MM-DD',
-         topic_id, action_index,
-         checked, checked_by, checked_at,
-       }
-
-     Cross-day flatten of `actions.getActionsRange`'s `{byDate}` shape so
-     /today's WeeklyCompletionKpi and /tasks's history drawer can iterate
-     a single flat array. Pure data — no timeline / report join (use
-     `getActionsResolvedRange` for that).
-
-     Backend wiring (Sprint 12+): drop the localStorage-backed
-     `actions.getActionsRange` fan-out and replace with one
-     `GET /api/actions/all` call returning the same shape. UI is
-     unchanged.
-     ────────────────────────────────────────────────────────────────── */
-
-  async function getCrossDayAudit(opts) {
-    opts = opts || {};
-    var from = opts.from;
-    var to   = opts.to;
-    if (!from || !to) {
-      return { entries: [], from: from, to: to };
-    }
-
-    var user      = resolveUser(opts.user);
-    var auditRes  = await window.FS.api.actions.getActionsRange({
-      from: from, to: to,
-    });
-    if (auditRes && auditRes._accessDenied) {
-      return { _accessDenied: true, error: auditRes.error };
-    }
-
-    var byDate  = (auditRes && auditRes.byDate) || {};
-    var entries = [];
-    Object.keys(byDate).sort().forEach(function (date) {
-      var dayActions = byDate[date] || {};
-      Object.keys(dayActions).forEach(function (key) {
-        var rec = dayActions[key] || {};
-        /* User-dim audit key (plan §1.3): split on the FIRST '|'. Composite
-           keys are '<user_folder>|<tid>_<idx>'; true legacy (unmigrated)
-           records have no '|' at all — folder stays null and bare === key. */
-        var pipeAt  = key.indexOf('|');
-        var folder  = pipeAt === -1 ? null : key.slice(0, pipeAt);
-        var bare    = pipeAt === -1 ? key  : key.slice(pipeAt + 1);
-        var parts   = bare.split('_');
-        entries.push({
-          action_id:        date + '_' + key,
-          topic_action_key: key,
-          user_folder:      folder,
-          date:             date,
-          topic_id:         parseInt(parts[0], 10),
-          action_index:     parseInt(parts[1], 10),
-          checked:          !!rec.checked,
-          checked_by:       rec.checked_by || null,
-          checked_at:       rec.checked_at || null,
-        });
-      });
-    });
-
-    return { entries: entries, from: from, to: to, user: user };
-  }
-
   if (!window.FS) window.FS = {};
   if (!window.FS.api) window.FS.api = {};
   window.FS.api.tasks = {
     getActionsResolvedRange: getActionsResolvedRange,
-    getCrossDayAudit:        getCrossDayAudit,
   };
 
 })();

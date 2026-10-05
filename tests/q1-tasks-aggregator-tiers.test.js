@@ -34,10 +34,6 @@ global.window = {
   FS: {
     api: {
       folderName: function (name) { return String(name || '').replace(/ /g, '_'); },
-      actions: {
-        lookupAction: function () { return undefined; },
-        getActionsRange: function () { return Promise.resolve({ byDate: {} }); },
-      },
       org: {
         getOrgSites: function () { return Promise.resolve({ sites: [] }); },
       },
