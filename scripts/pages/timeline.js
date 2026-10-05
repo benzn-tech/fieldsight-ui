@@ -1816,6 +1816,44 @@
   /* =====================================================================
      TimelineMiddleColumn
      ===================================================================== */
+  /* The checklists filled in on their own from the day's spoken checks
+     (owner, 2026-10-06: "starting the pre-pour check" -> the Concrete Pre-pour
+     Checklist, waiting when he is back at the office). Renders nothing on a
+     day with none -- almost every day. */
+  function ChecklistReportsCard(props) {
+    var h = React.createElement;
+    var org = ((window.FS || {}).api || {}).org;
+    var s = React.useState(null); var data = s[0], setData = s[1];
+    React.useEffect(function () {
+      if (!org || !org.getDayChecklistReports || !props.date) return undefined;
+      var alive = true;
+      setData(null);
+      Promise.resolve(org.getDayChecklistReports({ date: props.date, user: props.userFolder }))
+        .then(function (res) { if (alive) setData(res || null); })
+        .catch(function () { if (alive) setData(null); });
+      return function () { alive = false; };
+    }, [props.date, props.userFolder]);
+    if (!data) return null;
+    var reports = data.reports || [], unmatched = data.unmatched || [];
+    if (!reports.length && !unmatched.length) return null;
+    var cr = (window.FS || {}).checklistReports;
+    return h('div', { className: 'fs-checklist-reports' },
+      h('div', { className: 'fs-timeline-page__section-label' }, 'Checklist reports'),
+      reports.map(function (r) {
+        return h('div', { key: r.id, className: 'fs-checklist-reports__row' },
+          h('span', { className: 'fs-checklist-reports__name' },
+            cr ? cr.words(Object.assign({}, r, { date: data.date })) : r.templateName),
+          r.status === 'done' && cr ? h('button', {
+            type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm',
+            onClick: function () { cr.download(Object.assign({}, r, { date: data.date }), data.folder); },
+          }, 'Download') : null);
+      }),
+      unmatched.map(function (u, i) {
+        return h('div', { key: 'u' + i, className: 'fs-checklist-reports__row fs-checklist-reports__row--none' },
+          h('span', null, cr ? cr.unmatchedWords(u) : u.checkName));
+      }));
+  }
+
   function TimelineMiddleColumn(props) {
     var fs = window.FieldSight;
     var ExecutiveSummaryCard = fs.ExecutiveSummaryCard;
@@ -2887,6 +2925,7 @@
          context for reading the day, not a task buried under it. Renders
          nothing when the queue is empty, which is almost always. */
       React.createElement(ThreadReviewSection, { site: site }),
+      React.createElement(ChecklistReportsCard, { date: date, userFolder: user || null }),
       (showSessionPicker || excludedNote) ? React.createElement('div', {
         className: 'fs-session-picker-wrap',
       },

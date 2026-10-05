@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="styles/tokens.css?v=8" />
   <link rel="stylesheet" href="styles/app-shell.css?v=17" />
   <link rel="stylesheet" href="styles/components.css?v=15" />
-  <link rel="stylesheet" href="styles/composites.css?v=139" />
+  <link rel="stylesheet" href="styles/composites.css?v=140" />
 
   <style>
     /* Ensure full-bleed with no scroll */
@@ -140,7 +140,7 @@
   <script type="text/babel" src="scripts/composites/page-error-boundary.js?v=2"></script>
   <!-- Sprint 8.1.4 — Toast notification stack (vanilla JS, no React) -->
   <script src="scripts/composites/toast.js?v=1"></script>
-  <script type="text/babel" src="scripts/composites/notification-bell.js?v=3"></script>
+  <script type="text/babel" src="scripts/composites/notification-bell.js?v=4"></script>
   <!-- After modal-overlay.js (it renders one) and notification-bell.js (which
        opens it). Registers on window.FieldSight, so the FS.api reassignment
        in api/index.js cannot wipe it. -->
@@ -239,7 +239,7 @@
   <script src="scripts/mock/templates.fixture.js?v=1"></script>
   <!--   3. Per-endpoint api modules (read fixtures via FS.api.*) -->
   <script src="scripts/api/sites.js?v=5"></script>
-  <script src="scripts/api/org.js?v=33"></script>
+  <script src="scripts/api/org.js?v=34"></script>
   <!-- staffing — pure "who is on which project, and as what" helpers, read by
        pages/team.js. Loads before it (and before any page module) because the
        page calls into it during its first render. -->
@@ -260,6 +260,7 @@
   <script src="scripts/api/name-proposals.js?v=2"></script>
   <!-- Same constraint: after api/index.js. -->
   <script src="scripts/api/photo-notice.js?v=1"></script>
+  <script src="scripts/api/checklist-reports.js?v=1"></script>
   <script src="scripts/api/recording-deletion.js?v=3"></script>
   <script src="scripts/api/audio.js?v=1"></script>
   <script src="scripts/api/video.js?v=1"></script>
@@ -382,7 +383,7 @@
   <script type="text/babel" src="scripts/mock-data.js?v=4"></script>
   <script type="text/babel" src="scripts/pages/_page-registry.js?v=2"></script>
   <script type="text/babel" src="scripts/pages/today.js?v=63"></script>
-  <script type="text/babel" src="scripts/pages/timeline.js?v=72"></script>
+  <script type="text/babel" src="scripts/pages/timeline.js?v=73"></script>
   <script type="text/babel" src="scripts/pages/reports.js?v=6"></script>
   <script type="text/babel" src="scripts/pages/sites.js?v=14"></script>
   <script type="text/babel" src="scripts/pages/activity.js?v=5"></script>

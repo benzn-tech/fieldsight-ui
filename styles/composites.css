@@ -14045,3 +14045,11 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-srm__check--on { border-color: var(--color-accent-500); }
 .fs-srm__check-name { font-size: 13px; }
 .fs-srm__check-template { font-size: 12px; color: var(--text-secondary); }
+
+/* ── Timeline: checklist reports made from spoken checks ── */
+.fs-checklist-reports { margin: 8px 0 12px; }
+.fs-checklist-reports__row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 6px 0; border-bottom: 1px solid var(--border-subtle); font-size: 13px;
+}
+.fs-checklist-reports__row--none { color: var(--text-secondary); }
