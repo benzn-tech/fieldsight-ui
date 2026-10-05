@@ -79,7 +79,18 @@
     if (ctx && Array.isArray(ctx.topicRowIds) && ctx.topicRowIds.length) {
       payload.topicRowIds = ctx.topicRowIds.slice();
     }
+    /* A report for one spoken check covers exactly its window. */
+    if (ctx && ctx.window && ctx.window.from && ctx.window.to) {
+      payload.from = ctx.window.from;
+      payload.to = ctx.window.to;
+    }
     return payload;
+  }
+
+  /* "Pre-pour (Level 1) · 10:59-11:02 · Pre-pour Inspection Checklist" */
+  function checkLabel(c) {
+    var span = (c.start_at || '').slice(0, 5) + '–' + (c.end_at || '').slice(0, 5);
+    return [c.name, span].join(' · ');
   }
 
   /* Shared translation of the org client's "no folder mapping" server text (see
@@ -503,6 +514,10 @@
     var s_checked = React.useState({}); var checked = s_checked[0], setChecked = s_checked[1];
     var s_wf = React.useState(''); var winFrom = s_wf[0], setWinFrom = s_wf[1];
     var s_wt = React.useState(''); var winTo = s_wt[0], setWinTo = s_wt[1];
+    /* The checks he said he was doing (voice-triggered checklists), and the
+       one this report is for, if any: its window travels with the request. */
+    var s_checks = React.useState([]); var checks = s_checks[0], setChecks = s_checks[1];
+    var s_cwin = React.useState(null); var checkWin = s_cwin[0], setCheckWin = s_cwin[1];
     /* Only for the bell's label -- the request carries the id and version. */
     var s_tname = React.useState(null);
     var chosenTemplateName = s_tname[0], setChosenTemplateName = s_tname[1];
@@ -536,6 +551,35 @@
         }).catch(function () { /* no choice offered: the reports take their fair share */ });
       return function () { alive = false; };
     }, [props.open]);
+
+    React.useEffect(function () {
+      if (!props.open || props.scope !== 'day' || !org.getDayInspections) return undefined;
+      var alive = true;
+      setChecks([]); setCheckWin(null);
+      Promise.resolve(org.getDayInspections({ date: props.date, user: props.userFolder }))
+        .then(function (res) {
+          if (alive && res && Array.isArray(res.inspections)) setChecks(res.inspections);
+        }).catch(function () { /* nothing offered: the report is made as before */ });
+      return function () { alive = false; };
+    }, [props.open]);
+
+    /* One click: this check's topics, its window, and its checklist. */
+    function useCheck(c) {
+      var from = (c.start_at || '').slice(0, 5), to = (c.end_at || '').slice(0, 5);
+      setWinFrom(from); setWinTo(to);
+      setChecked(windowChecked(pTopics, from, to));
+      setCheckWin({ from: c.start_at, to: c.end_at, name: c.name });
+      if (!c.template_id) return;
+      var api = (((window.FS || {}).api) || {}).templates;
+      if (!api || !api.list) return;
+      Promise.resolve(api.list()).then(function (res) {
+        var row = ((res && res.templates) || []).filter(function (t) { return t.id === c.template_id; })[0];
+        if (!row) return;
+        setForm(function (f) { return applyTemplateChoice(f, row.id, row.version); });
+        setChosenTemplateName(row.title || c.template_name || null);
+        setDeliver('download');
+      }).catch(function () {});
+    }
 
     var photoTotal = photoSel ? photoSel.photos.length : 0;
     var photoIn = photoTotal - Object.keys(photoOut).filter(function (k) { return photoOut[k]; }).length;
@@ -643,6 +687,7 @@
         session: props.session, date: props.date, userFolder: props.userFolder,
         form: form, deliver: deliver, recipients: recipients,
         topicRowIds: selectedRowIds(preview ? preview.topics : [], checked),
+        window: checkWin,
       });
       Promise.resolve(org.generateSessionReport(payload)).then(function (res) {
         var v = interpretReportStatus(res, props.scope);
@@ -735,6 +780,17 @@
             : null,
           (preview.participants && preview.participants.length)
             ? h('p', { className: 'fs-srm__preview-attendees' }, 'Attendees: ' + preview.participants.join(', ')) : null,
+          checks.length ? h('div', { className: 'fs-srm__checks' },
+            h('span', { className: 'fs-srm__window-label' }, 'Checks heard'),
+            checks.map(function (c) {
+              var on = checkWin && checkWin.from === c.start_at && checkWin.to === c.end_at;
+              return h('div', { key: c.id, className: 'fs-srm__check' + (on ? ' fs-srm__check--on' : '') },
+                h('span', { className: 'fs-srm__check-name' }, checkLabel(c)),
+                h('span', { className: 'fs-srm__check-template' },
+                  c.template_name ? c.template_name : 'No checklist template matches this check'),
+                btn(on ? 'Selected' : (c.template_name ? 'Use this checklist' : 'Select this time'),
+                  function () { useCheck(c); }, on ? 'primary' : 'secondary', 'sm'));
+            })) : null,
           choosable ? h('div', { className: 'fs-srm__window' },
             h('span', { className: 'fs-srm__window-label' }, 'Cover only'),
             h('input', { type: 'time', className: 'fs-field__control fs-srm__window-time', value: winFrom,
@@ -742,8 +798,8 @@
             h('span', null, '–'),
             h('input', { type: 'time', className: 'fs-field__control fs-srm__window-time', value: winTo,
               'aria-label': 'Window end', onChange: function (e) { setWinTo(e.target.value); } }),
-            btn('Select this window', function () { setChecked(windowChecked(pTopics, winFrom, winTo)); }, 'secondary', 'sm'),
-            btn('Select all', function () { setChecked({}); }, 'secondary', 'sm'),
+            btn('Select this window', function () { setCheckWin(null); setChecked(windowChecked(pTopics, winFrom, winTo)); }, 'secondary', 'sm'),
+            btn('Select all', function () { setCheckWin(null); setChecked({}); }, 'secondary', 'sm'),
             h('span', { className: 'fs-srm__window-count' },
               chosenCount + ' of ' + choosable + ' topics'
               + (unplaceable ? ' · ' + unplaceable + ' without a time, not picked by a window' : ''))) : null,
@@ -888,6 +944,7 @@
   // Pure-helper export for node --test (browser ignores this).
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = { buildGeneratePayload: buildGeneratePayload, interpretReportStatus: interpretReportStatus, previewFieldDefaults: previewFieldDefaults, parseAttendees: parseAttendees, canGenerate: canGenerate, STEPS: STEPS, applyPreviewDefaults: applyPreviewDefaults, applyTemplateChoice: applyTemplateChoice, emailBlockedBecause: emailBlockedBecause,
+      checkLabel: checkLabel,
       parseTimeRange: parseTimeRange, parseClock: parseClock, overlapsWindow: overlapsWindow, windowChecked: windowChecked, selectedRowIds: selectedRowIds,
       previewErrorMessage: previewErrorMessage, generateErrorMessage: generateErrorMessage, noFolderMappingMessage: noFolderMappingMessage,
       /* The step components, so their STRUCTURE can be rendered and checked
