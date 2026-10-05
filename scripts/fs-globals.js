@@ -398,6 +398,13 @@
     regional:   { permission: P('regional','view'),   label: 'Regional',   path: '/regional' },
     executive:  { permission: P('executive','view'),  label: 'Executive',  path: '/executive' },
 
+    /* PLATFORM -- what the pipeline did with every customer's recordings
+       (pages/trace.js). platform_admin ONLY: `isAdmin` is also true for a
+       company admin, and these traces span every company, so the role itself
+       is checked (canSeeNav), not the permission. */
+    trace:      { permission: P('settings','view'),   label: 'Trace',      path: '/trace',
+                  platformAdminOnly: true },
+
     /* FOOTER */
     settings:   { permission: P('settings','view'),   label: 'Settings',   path: '/settings' },
   };
@@ -455,6 +462,9 @@
   function canSeeNav(navKey, user) {
     const item = NAV_ITEMS[navKey];
     if (!item) return false;
+    if (item.platformAdminOnly) {
+      return typeof user === 'object' && !!user && user.role === 'platform_admin';
+    }
     return can(user, item.permission);
   }
 
