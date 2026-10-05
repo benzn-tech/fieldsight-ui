@@ -153,7 +153,7 @@
         if (orgAvailable) {
           var obsRes = await window.FS.api.org.createObservation({
             kind:        'quality',
-            site_slug:   siteValue,
+            site_slug:   window.FS.api.sites.slugForSite(sitesList, siteValue),
             observation: form.observation.trim(),
           });
           /* 401/403/404 resolve as envelopes, not rejections (Fable batch-B

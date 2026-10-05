@@ -12,12 +12,11 @@
      onClose    fn()          — dismiss without persisting (Cancel /
                                  backdrop / ESC).
      onCreated  fn(newAction) — called after a successful create, BEFORE
-                                 onClose.
+                                 onClose. Mock mode only (see below).
      siteId     string        — current site context, kept for prop-shape
                                  parity with quality/safety create-modals.
-                                 NOT sent to createAction today — standalone
-                                 tasks have no site-scoped backend yet, see
-                                 the TOPIC-SCOPING NOTE below.
+                                 Unused today — standalone tasks have no
+                                 site-scoped backend yet.
 
    Fields:
      Task        Input, required (Submit disabled while empty)
@@ -35,26 +34,18 @@
      date only -> 'YYYY-MM-DD'
      neither   -> omitted from the payload entirely
 
-   *** TOPIC-SCOPING NOTE — read before wiring this modal up further ***
-   window.FS.api.actions.createAction(payload) (scripts/api/actions.js) is
-   built around the report/topic-scoped action-item model: the real
-   POST /actions body is { date, topic_id, action_index, action_text,
-   responsible, ... } (BACKEND-CONTEXT §4.10) and its MOCK branch keys the
-   write as actionKey(user_folder, topic_id, action_index) into
-   state[date]. A standalone task (this modal) has no real topic to scope
-   to, so this file fabricates placeholder keys — topic_id: -1 (mirrors
-   quality-create-modal.js's manual/no-topic rows, which use the same -1
-   sentinel), action_index: 0, and date: today (NZDT) — purely so
-   createAction has somewhere to land the write.
-
-   On the dev site (writeMocks=true) this demos end-to-end (toast +
-   onCreated + close), but the new task will NOT show up in /tasks or
-   /today's lists: both read action items OFF the daily-report topics
-   returned by getTimeline / getActionsResolvedRange, not off this
-   standalone actions.state map — there is no code path that surfaces a
-   topic_id:-1 phantom row anywhere. Wiring that up is real backend +
-   aggregator work (a genuine standalone-task data model), intentionally
-   out of scope here.
+   *** LIVE SUBMIT IS UNAVAILABLE — read before wiring this modal up ***
+   There is no backend that creates a standalone task. The only writer this
+   modal ever had was POST /actions on the legacy gateway, which has no
+   handler for it (it never worked in live mode) and which is being retired
+   along with the rest of that gateway. No org endpoint creates an
+   action_items row from a bare form (PATCH /action-items/{id} edits an
+   existing one; programme.createTask makes a programme task, a different
+   model). So in live mode the form says so and Create is disabled; nothing
+   is sent. Mock mode (useMocks or writeMocks) still demos end-to-end —
+   toast + onCreated + close — but writes nothing anywhere, and the new task
+   never shows up in /tasks or /today, which read action items off the
+   daily-report topics. A real standalone-task data model is backend work.
 
    Mirrors scripts/composites/quality-create-modal.js's structure/idiom:
    ModalOverlay body, raw <input>/<select> elements + .fs-create-task-
@@ -79,9 +70,15 @@
     var open      = !!props.open;
     var onClose   = props.onClose   || function () {};
     var onCreated = props.onCreated || function () {};
-    /* Reserved for when standalone tasks get real site scoping — see the
-       TOPIC-SCOPING NOTE above. Not sent to createAction yet. */
+    /* Reserved for when standalone tasks get real site scoping. */
     var siteId    = props.siteId    || '';
+
+    /* Live submit is unavailable (see the header note); only the mock demo
+       can complete. */
+    var api = window.FS && window.FS.api;
+    var canSubmit = !!(api && (api.useMocks || api.writeMocks));
+    var UNAVAILABLE_MSG = 'Creating a task from here is not available yet. '
+      + 'Tasks come from your recordings.';
 
     var refForm = React.useState({
       task_text: '',
@@ -117,6 +114,7 @@
     async function handleSubmit(e) {
       e.preventDefault();
       var text = form.task_text.trim();
+      if (!canSubmit) { setError(UNAVAILABLE_MSG); return; }
       if (!text) { setError('Task is required.'); return; }
 
       setStatus('submitting');
@@ -125,9 +123,7 @@
       var caller   = (window.AuthMock && window.AuthMock.currentUser) || {};
       var deadline = combineDeadline(form.due_date, form.due_time);
 
-      /* See TOPIC-SCOPING NOTE above — topic_id/action_index/date are
-         placeholders so createAction's mock write path has somewhere to
-         land; topic_id -1 never denotes a real topic so this can't
+      /* Mock demo only. topic_id -1 never denotes a real topic so this can't
          collide with genuine report-derived action rows. */
       var payload = {
         action_text:  text,
@@ -141,10 +137,8 @@
       if (deadline !== undefined) payload.deadline = deadline;
 
       try {
-        var res = await window.FS.api.actions.createAction(payload);
-        if (res && (res._accessDenied || res._notFound)) {
-          throw new Error(res.error || 'Could not create task — please retry');
-        }
+        await window.FS.api.delay(80);
+        var res = { id: 'mock-task-' + Date.now() };
 
         var toast = window.FS && window.FS.toast;
         if (toast) toast.show({ message: 'Task created.', tone: 'success' });
@@ -160,7 +154,7 @@
     }
 
     var isSubmitting   = status === 'submitting';
-    var submitDisabled = isSubmitting || !form.task_text.trim();
+    var submitDisabled = isSubmitting || !canSubmit || !form.task_text.trim();
 
     var content = React.createElement('form', {
       className: 'fs-create-task-modal',
@@ -223,8 +217,9 @@
         ),
       ),
 
-      errorMsg
-        ? React.createElement('div', { className: 'fs-create-task-modal__error', role: 'alert' }, errorMsg)
+      errorMsg || !canSubmit
+        ? React.createElement('div', { className: 'fs-create-task-modal__error', role: 'alert' },
+            errorMsg || UNAVAILABLE_MSG)
         : null,
 
       React.createElement('div', { className: 'fs-create-task-modal__actions' },
