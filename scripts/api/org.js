@@ -1140,6 +1140,10 @@
         body.from = opts.from;
         body.to = opts.to;
       }
+      /* An interrupted check's stretches; the gaps are left out. */
+      if (Array.isArray(opts.segments) && opts.segments.length > 1) {
+        body.segments = opts.segments.map(function (s) { return { from: s.from, to: s.to }; });
+      }
       return api.orgRequest(_reportPath(opts, ''), {
         method: 'POST',
         params: _reportParams(opts),

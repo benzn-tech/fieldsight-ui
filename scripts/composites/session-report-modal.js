@@ -83,14 +83,37 @@
     if (ctx && ctx.window && ctx.window.from && ctx.window.to) {
       payload.from = ctx.window.from;
       payload.to = ctx.window.to;
+      if (Array.isArray(ctx.window.segments) && ctx.window.segments.length > 1) {
+        payload.segments = ctx.window.segments.slice();
+      }
     }
     return payload;
   }
 
   /* "Pre-pour (Level 1) · 10:59-11:02 · Pre-pour Inspection Checklist" */
   function checkLabel(c) {
-    var span = (c.start_at || '').slice(0, 5) + '–' + (c.end_at || '').slice(0, 5);
+    var segs = checkSegments(c);
+    var span = segs.map(function (s) {
+      return (s.from || '').slice(0, 5) + '–' + (s.to || '').slice(0, 5);
+    }).join(', ');
     return [c.name, span].join(' · ');
+  }
+
+  /* A check's stretches -- several when he came back to it after another
+     check -- or its whole window as one. */
+  function checkSegments(c) {
+    return Array.isArray(c.segments) && c.segments.length
+      ? c.segments : [{ from: c.start_at, to: c.end_at }];
+  }
+
+  /* The topics of every stretch, ticked; the rest off. */
+  function stretchesChecked(topics, segs) {
+    var out = {};
+    segs.forEach(function (s, i) {
+      var one = windowChecked(topics, (s.from || '').slice(0, 5), (s.to || '').slice(0, 5));
+      Object.keys(one).forEach(function (k) { out[k] = i === 0 ? one[k] : (out[k] || one[k]); });
+    });
+    return out;
   }
 
   /* Shared translation of the org client's "no folder mapping" server text (see
@@ -566,9 +589,11 @@
     /* One click: this check's topics, its window, and its checklist. */
     function useCheck(c) {
       var from = (c.start_at || '').slice(0, 5), to = (c.end_at || '').slice(0, 5);
+      var segs = checkSegments(c);
       setWinFrom(from); setWinTo(to);
-      setChecked(windowChecked(pTopics, from, to));
-      setCheckWin({ from: c.start_at, to: c.end_at, name: c.name });
+      setChecked(stretchesChecked(pTopics, segs));
+      setCheckWin({ from: c.start_at, to: c.end_at, name: c.name,
+                    segments: segs.length > 1 ? segs : null });
       if (!c.template_id) return;
       var api = (((window.FS || {}).api) || {}).templates;
       if (!api || !api.list) return;
@@ -944,7 +969,7 @@
   // Pure-helper export for node --test (browser ignores this).
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = { buildGeneratePayload: buildGeneratePayload, interpretReportStatus: interpretReportStatus, previewFieldDefaults: previewFieldDefaults, parseAttendees: parseAttendees, canGenerate: canGenerate, STEPS: STEPS, applyPreviewDefaults: applyPreviewDefaults, applyTemplateChoice: applyTemplateChoice, emailBlockedBecause: emailBlockedBecause,
-      checkLabel: checkLabel,
+      checkLabel: checkLabel, checkSegments: checkSegments, stretchesChecked: stretchesChecked,
       parseTimeRange: parseTimeRange, parseClock: parseClock, overlapsWindow: overlapsWindow, windowChecked: windowChecked, selectedRowIds: selectedRowIds,
       previewErrorMessage: previewErrorMessage, generateErrorMessage: generateErrorMessage, noFolderMappingMessage: noFolderMappingMessage,
       /* The step components, so their STRUCTURE can be rendered and checked
