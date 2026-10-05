@@ -14035,3 +14035,13 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-trace__detail { color: var(--text-primary); overflow-wrap: anywhere; }
 .fs-trace__evidence { display: block; color: var(--text-secondary); margin-top: 2px; }
 .fs-trace__cost { display: block; color: var(--text-secondary); margin-top: 2px; }
+
+/* ── Report dialog: checks heard (voice-triggered checklists) ── */
+.fs-srm__checks { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 12px; }
+.fs-srm__check {
+  display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center;
+  padding: 6px 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+}
+.fs-srm__check--on { border-color: var(--color-accent-500); }
+.fs-srm__check-name { font-size: 13px; }
+.fs-srm__check-template { font-size: 12px; color: var(--text-secondary); }

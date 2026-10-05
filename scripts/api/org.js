@@ -1030,6 +1030,16 @@
         body: { excluded: (opts.excluded || []).slice() }, retry: false });
   }
 
+  /* The checks he said he was doing that day (pipeline: GET /days/{date}/
+     inspections; voice-triggered checklists), each with its window to the
+     second and the checklist template it matched. Offline: none. */
+  async function getDayInspections(opts) {
+    opts = opts || {};
+    if (!sessionReportLive()) return { inspections: [] };
+    return api.orgRequest('/days/' + encodeURIComponent(opts.date) + '/inspections',
+      { params: { user: opts.user } });
+  }
+
   async function getSessionReportPreview(opts) {
     opts = opts || {};
     if (sessionReportLive()) {
@@ -1123,6 +1133,12 @@
          be sent, and an untouched modal sends exactly what it always did. */
       if (Array.isArray(opts.topicRowIds) && opts.topicRowIds.length) {
         body.topicRowIds = opts.topicRowIds;
+      }
+      /* A spoken check's window ('HH:MM:SS'), when the report is for one.
+         Absent otherwise: the backend reads absent as the whole day. */
+      if (opts.from && opts.to) {
+        body.from = opts.from;
+        body.to = opts.to;
       }
       return api.orgRequest(_reportPath(opts, ''), {
         method: 'POST',
@@ -1491,6 +1507,7 @@
     getComplianceResolutions: getComplianceResolutions,
     getLiveItems: getLiveItems,
     getSiteWeather: getSiteWeather,
+    getDayInspections: getDayInspections,
     getTraceDay: getTraceDay,
     getTraceFunnel: getTraceFunnel,
     getSessions: getSessions,
