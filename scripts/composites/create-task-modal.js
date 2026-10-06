@@ -131,7 +131,7 @@
         date:         window.FS.api.todayNZDT(),
         topic_id:     -1,
         action_index: 0,
-        user_folder:  caller.name ? window.FS.api.folderName(caller.name) : undefined,
+        user_folder:  window.FS.api.callerFolder() || undefined,
         responsible:  caller.name || undefined,
       };
       if (deadline !== undefined) payload.deadline = deadline;

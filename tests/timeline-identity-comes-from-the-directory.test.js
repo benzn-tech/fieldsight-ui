@@ -122,6 +122,7 @@ function mount(o) {
     orgBaseUrl: 'https://org.example',
     legacyReadFallback: o.legacy !== false,
     folderName: function (n) { return String(n || '').replace(/ /g, '_'); },
+    callerFolder: function () { var u = (global.window.AuthMock && global.window.AuthMock.currentUser) || {}; return u.folder_name || (this.useMocks && u.name ? String(u.name).trim().replace(/\s+/g, '_') : null); },
     todayNZDT: function () { return '2026-09-29'; },
     delay: function () { return Promise.resolve(); },
     cache: { cached: function (k, t, fn) { return fn(); } },
@@ -153,7 +154,7 @@ function mount(o) {
         subscribe: function () { return function () {}; }, navigate: function (u) { calls.nav.push(u); },
       },
     },
-    AuthMock: { currentUser: { name: o.callerName || 'Ben Lin', role: o.role || 'pm' } },
+    AuthMock: { currentUser: { name: o.callerName || 'Ben Lin', role: o.role || 'pm', folder_name: o.noFolder ? undefined : (o.callerFolder || 'Ben_Lin') } },
     location: { href: 'https://example.test/#/timeline' },
     addEventListener() {}, removeEventListener() {},
   };
@@ -235,6 +236,26 @@ test('when aurora denies, the legacy fallback still sends the page\'s user, as b
   legacy.forEach((x) => assert.deepStrictEqual(x.params, { date: '2026-09-29', user: GUESS }));
 });
 
+test("Deandre' Alberts: the page asks for Deandre__Alberts, never the name-derived folder", async () => {
+  const m = mount({ callerName: "Deandre' Alberts", callerFolder: 'Deandre__Alberts', role: 'worker',
+    params: { date: '2026-09-29' }, orgResponse: { _accessDenied: true, error: 'no' } });
+  await m.rt.settle();
+  const sent = timelineCalls(m.calls.org).concat(timelineCalls(m.calls.legacy));
+  assert.ok(sent.length >= 1);
+  sent.forEach((x) => assert.notStrictEqual(x.params.user, "Deandre'_Alberts"));
+  timelineCalls(m.calls.legacy).forEach((x) => assert.strictEqual(x.params.user, 'Deandre__Alberts'));
+  m.calls.meeting.forEach((c) => assert.notStrictEqual(c.user, "Deandre'_Alberts"));
+});
+
+test('live caller with no folder_name: no name-derived folder reaches any request', async () => {
+  const m = mount({ callerName: "Deandre' Alberts", noFolder: true, role: 'worker',
+    params: { date: '2026-09-29' }, orgResponse: { _accessDenied: true, error: 'no' } });
+  await m.rt.settle();
+  const sent = timelineCalls(m.calls.org).concat(timelineCalls(m.calls.legacy));
+  assert.ok(sent.length >= 1);
+  sent.forEach((x) => assert.ok(!x.params.user, 'sent user=' + x.params.user));
+});
+
 test('with the legacy fallback retired, a denial is final and nothing legacy is asked', async () => {
   const m = mount({ params: { date: '2026-09-29' }, legacy: false, orgResponse: { _accessDenied: true, error: 'no' } });
   await m.rt.settle();
@@ -275,7 +296,7 @@ test('a success body with a DISPLAY-name user_name and no user keeps the existin
   /* The caller's correct folder is Ben_Lin_test2; the wire says user_name
      "Ben Lin". Deriving a folder from that would hand every follow-up call the
      orphan Ben_Lin. */
-  const m = mount({ callerName: 'Ben Lin test2', params: { date: '2026-09-29' },
+  const m = mount({ callerName: 'Ben Lin test2', callerFolder: 'Ben_Lin_test2', params: { date: '2026-09-29' },
     report: goodReport({ user: undefined, user_name: 'Ben Lin' }) });
   const tree = await m.rt.settle();
   const h = header(tree);

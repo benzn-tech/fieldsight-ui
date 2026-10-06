@@ -71,7 +71,7 @@
 
     /* Worker rule: server forces user = self (BACKEND-CONTEXT §3, §8.5). */
     if (caller.role === 'worker') {
-      user = window.FS.api.folderName(caller.name);
+      user = window.FS.api.callerFolder();
     }
 
     var report = lookupReport(date, user);

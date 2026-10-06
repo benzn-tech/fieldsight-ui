@@ -852,7 +852,8 @@ function loadTimeline(reactExtra) {
   global.React = makeReactStub(reactExtra);
   global.window = {
     FieldSight: {},
-    FS: { api: { folderName: n => String(n || '').trim().replace(/ /g, '_') } },
+    FS: { api: { folderName: n => String(n || '').trim().replace(/ /g, '_'),
+      callerFolder: function () { var u = (global.window.AuthMock && global.window.AuthMock.currentUser) || {}; return u.folder_name || (this.useMocks && u.name ? String(u.name).trim().replace(/\s+/g, '_') : null); }, } },
     AuthMock: { currentUser: null },
     location: { href: 'https://example.test/#/timeline' },
     addEventListener() {}, removeEventListener() {},
@@ -1129,6 +1130,7 @@ function driveMiddleReset(opts) {
     FS: {
       api: {
         folderName: n => String(n || '').trim().replace(/ /g, '_'),
+        callerFolder: function () { var u = (global.window.AuthMock && global.window.AuthMock.currentUser) || {}; return u.folder_name || (this.useMocks && u.name ? String(u.name).trim().replace(/\s+/g, '_') : null); },
         org: { getOrgSites: () => opts.orgSitesPromise() },
         programme: { getSuggestions: () => Promise.resolve({ suggestions: [] }) },
         programmeMentions: { indexByTopic: () => ({}) },

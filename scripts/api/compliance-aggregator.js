@@ -166,11 +166,11 @@
   function resolveUser(explicitUser) {
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
     if (caller.role === 'worker') {
-      return caller.name ? window.FS.api.folderName(caller.name) : null;
+      return window.FS.api.callerFolder();
     }
     if (explicitUser) return explicitUser;
     var isAdmin = caller.role === 'admin' || caller.role === 'gm' || caller.isAdmin;
-    if (!isAdmin && caller.name) return window.FS.api.folderName(caller.name);
+    if (!isAdmin) return window.FS.api.callerFolder();
     return explicitUser || null;
   }
 
@@ -337,7 +337,7 @@
         folders.forEach(function (f) {
           acc.push(function () {
             return window.FS.api.timeline.getTimeline({ date: d, user: f })
-              .then(function (r) { return { date: d, report: r }; });
+              .then(function (r) { return { date: d, report: r, user: f }; });
           });
         });
         return acc;
@@ -370,7 +370,7 @@
 
     var perDay = await Promise.all(datesInRange.map(function (d) {
       return window.FS.api.timeline.getTimeline({ date: d, user: user })
-        .then(function (r) { return { date: d, report: r }; });
+        .then(function (r) { return { date: d, report: r, user: user }; });
     }));
     var resolutions = await resolutionsPromise;
 
@@ -653,7 +653,9 @@
     fanout.perDay.forEach(function (x) {
       var r = x.report;
       if (!r || r._notFound || r.available_users) return;
-      var folder = r.user_name ? window.FS.api.folderName(r.user_name) : null;
+      /* The folder we ASKED for is the identity; the display name is only a
+         last resort (it is not a folder: "Deandre' Alberts" is Deandre__Alberts). */
+      var folder = x.user || (r.user_name ? window.FS.api.folderName(r.user_name) : null);
       var resolutions = fanout.resolutions;   /* durable resolved-state map, Aurora-first */
 
       /* b) Topic-level safety_flags — built FIRST (but appended after
@@ -857,7 +859,9 @@
     fanout.perDay.forEach(function (x) {
       var r = x.report;
       if (!r || r._notFound || r.available_users) return;
-      var folder = r.user_name ? window.FS.api.folderName(r.user_name) : null;
+      /* The folder we ASKED for is the identity; the display name is only a
+         last resort (it is not a folder: "Deandre' Alberts" is Deandre__Alberts). */
+      var folder = x.user || (r.user_name ? window.FS.api.folderName(r.user_name) : null);
       var resolutions = fanout.resolutions;   /* durable resolved-state map, Aurora-first */
 
       /* a) Report-level quality_and_compliance items. These carry a

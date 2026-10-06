@@ -64,6 +64,7 @@ global.window = {
       timelineSource: 'aurora', orgBaseUrl: 'https://org.example/api',
       delay: function () { return Promise.resolve(); },
       folderName: function (n) { return String(n || '').replace(/ /g, '_'); },
+      callerFolder: function () { var u = (global.window.AuthMock && global.window.AuthMock.currentUser) || {}; return u.folder_name || (this.useMocks && u.name ? String(u.name).trim().replace(/\s+/g, '_') : null); },
       /* The tripwire: the legacy gateway. Nothing may call it. */
       request: boom('request'),
       orgRequest: function (p, o) { orgCalls.push({ path: p, method: o && o.method, body: o && o.body });
@@ -150,7 +151,7 @@ test('deriveStatus takes the column alone', () => {
 });
 
 test('user-activity-aggregator: action events are checked by status, never by an overlay', async () => {
-  global.window.AuthMock.currentUser = { name: 'Jane Doe', role: 'worker' };
+  global.window.AuthMock.currentUser = { name: 'Jane Doe', role: 'worker', folder_name: 'Jane_Doe' };
   try {
     const res = await global.window.FS.api.userActivity.getUserActivityRange(
       { from: REPORT_DATE, to: REPORT_DATE });

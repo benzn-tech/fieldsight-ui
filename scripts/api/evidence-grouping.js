@@ -109,6 +109,12 @@
 
      A day without the field (an older backend, or a verbatim-history day)
      yields precisely what it yielded before. */
+  /* The owner's FOLDER (photo keys are users/<folder>/...), not the display name. */
+  function ownerOf(report) {
+    var api = typeof window !== 'undefined' && window.FS && window.FS.api;
+    return (api && api.reportOwnerFolder && api.reportOwnerFolder(report)) || report.user_name;
+  }
+
   function photosForReport(report) {
     if (!report) return [];
     var rows = [], bound = {};
@@ -119,7 +125,7 @@
           filename: filename,
           topic_id: t.topic_id,
           topic_title: t.topic_title,
-          userDisplayName: report.user_name,
+          userDisplayName: ownerOf(report),
         });
       });
     });
@@ -134,7 +140,7 @@
         filename: filename,
         topic_id: null,
         topic_title: null,
-        userDisplayName: report.user_name,
+        userDisplayName: ownerOf(report),
       });
     });
     return rows;
