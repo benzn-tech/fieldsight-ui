@@ -74,9 +74,7 @@
   'use strict';
 
   function callerFolder() {
-    var u = (window.AuthMock && window.AuthMock.currentUser) || {};
-    if (!u.name) return null;
-    return window.FS.api.folderName(u.name);
+    return window.FS.api.callerFolder();
   }
 
   function diffDays(fromISO, toISO) {

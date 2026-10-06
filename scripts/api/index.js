@@ -34,6 +34,23 @@
     return String(displayName == null ? '' : displayName).trim().replace(/\s+/g, '_');
   }
 
+  /* The signed-in caller's OWN recording folder -- an identity key that comes
+     from the directory (users.folder_name, carried onto
+     AuthMock.currentUser.folder_name by the session bridge), never from the
+     display name. Display names are not folders: "Deandre' Alberts" is the
+     folder "Deandre__Alberts", and the name-derived guess ("Deandre'_Alberts")
+     belongs to nobody, so the server refused the caller their OWN day.
+
+     Only mock mode (fixtures keyed by derived folders) may fall back to the
+     name. In live mode with no folder_name this returns null and the caller
+     must OMIT `user` and let the backend resolve "self" -- never guess. */
+  function callerFolder() {
+    var u = (window.AuthMock && window.AuthMock.currentUser) || {};
+    if (u.folder_name) return u.folder_name;
+    if (window.FS.api && window.FS.api.useMocks && u.name) return folderName(u.name);
+    return null;
+  }
+
   /* Small artificial delay so optimistic-UI patterns can be tested. */
   function delay(ms) {
     return new Promise(function (resolve) {
@@ -120,6 +137,7 @@
     legacyReadFallback: env.legacyReadFallback !== false,
     delay: delay,
     folderName: folderName,
+    callerFolder: callerFolder,
     mockPresignedUrl: mockPresignedUrl,
     addDaysISO: addDaysISO,
     todayNZDT: todayNZDT,

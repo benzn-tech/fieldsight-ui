@@ -183,7 +183,8 @@
   function _resolveAskFolder() {
     var caller  = (window.AuthMock && window.AuthMock.currentUser) || {};
     var isAdmin = caller.role === 'admin' || caller.role === 'gm' || caller.isAdmin;
-    if (!isAdmin && caller.name) return window.FS.api.folderName(caller.name);
+    var ownFolder = isAdmin ? null : window.FS.api.callerFolder();
+    if (ownFolder) return ownFolder;
     return ADMIN_ASK_FOLDER;
   }
 

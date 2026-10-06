@@ -85,11 +85,11 @@
   function resolveUser(explicitUser) {
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
     if (caller.role === 'worker') {
-      return caller.name ? window.FS.api.folderName(caller.name) : null;
+      return window.FS.api.callerFolder();
     }
     if (explicitUser) return explicitUser;
     var isAdmin = caller.role === 'admin' || caller.role === 'gm' || caller.isAdmin;
-    if (!isAdmin && caller.name) return window.FS.api.folderName(caller.name);
+    if (!isAdmin) return window.FS.api.callerFolder();
     return explicitUser || null;
   }
 
@@ -198,7 +198,7 @@
         folders.forEach(function (f) {
           acc.push(function () {
             return window.FS.api.timeline.getTimeline({ date: d, user: f })
-              .then(function (r) { return { date: d, report: r }; });
+              .then(function (r) { return { date: d, report: r, user: f }; });
           });
         });
         return acc;
@@ -214,7 +214,7 @@
     } else {
       timelinePromise = Promise.all(datesInRange.map(function (d) {
         return window.FS.api.timeline.getTimeline({ date: d, user: user })
-          .then(function (r) { return { date: d, report: r }; });
+          .then(function (r) { return { date: d, report: r, user: user }; });
       }));
     }
     /* feat/editable-tasks-ui — fetched in parallel with the timeline
@@ -252,7 +252,9 @@
       if (!r || r._notFound || r.available_users) return;
       /* Report OWNER's folder — NOT the caller (AuthMock.currentUser). See
          plan §1.3/owner≠caller. Hoisted once per report for the id. */
-      var folder = r.user_name ? window.FS.api.folderName(r.user_name) : null;
+      /* The folder we ASKED for is the identity; the display name is only a
+         last resort (it is not a folder: "Deandre' Alberts" is Deandre__Alberts). */
+      var folder = x.user || (r.user_name ? window.FS.api.folderName(r.user_name) : null);
       /* feat/editable-tasks-ui — report.site is a DISPLAY NAME only (no
          slug/id travels with a report — same fact today-adapter.js
          documents); resolved once per report against siteIdMap. */
