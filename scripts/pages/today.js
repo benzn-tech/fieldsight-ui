@@ -1049,6 +1049,8 @@
       function loadRollingOpenItems() {
         var EMPTY = { myTasks: [], teamTasks: [] };
 
+        /* folder is null for a live caller with no folder_name (unenrolled; /me
+           gives every enrolled user one) -- then there are no rolling items. */
         var foldersPromise = multiProject ? adminFoldersPromise : Promise.resolve([folder]);
 
         return Promise.all([foldersPromise, siteSlugMapPromise, window.FS.api.window.getSpan(), siteIdMapPromise])

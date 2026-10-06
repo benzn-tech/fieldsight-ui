@@ -51,6 +51,24 @@
     return null;
   }
 
+  /* The folder that OWNS a report. A success DailyReport carries only the
+     display name, and a display name is not a folder, so: the report's own
+     `user` folder when it has one; the caller's directory folder when the
+     report is the caller's own (same display name); only then the name-derived
+     guess (other people -- the backend gives no folder for them yet). */
+  function reportOwnerFolder(report) {
+    if (!report) return null;
+    if (typeof report.user === 'string' && report.user) return report.user;
+    var n = report.user_name;
+    if (!n) return null;
+    var me = (window.AuthMock && window.AuthMock.currentUser) || {};
+    if (me.name && String(me.name).trim() === String(n).trim()) {
+      var own = callerFolder();
+      if (own) return own;
+    }
+    return folderName(n);
+  }
+
   /* Small artificial delay so optimistic-UI patterns can be tested. */
   function delay(ms) {
     return new Promise(function (resolve) {
@@ -138,6 +156,7 @@
     delay: delay,
     folderName: folderName,
     callerFolder: callerFolder,
+    reportOwnerFolder: reportOwnerFolder,
     mockPresignedUrl: mockPresignedUrl,
     addDaysISO: addDaysISO,
     todayNZDT: todayNZDT,

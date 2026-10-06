@@ -2352,6 +2352,8 @@
          resolves `user` BEFORE this effect runs, so workers never land
          here — site && !user means admin/gm, OR a site_manager/PM with an
          anchored site (their forced-self rule is site-conditional). */
+      /* user is null for a live caller with no folder_name (unenrolled; every
+         enrolled user carries one after /me) -- they land here as before. */
       if (site && !user) {
         setState({ status: 'ok', aggregated: true });
         return undefined;
