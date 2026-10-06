@@ -13789,6 +13789,27 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-ask-web__source:hover,
 .fs-ask-web__source:focus-visible { color: var(--text-primary); }
 
+/* Outside-lookup status + records-vs-standard conflicts (spec 2026-10-06). */
+.fs-ask-webstatus { margin-bottom: 8px; display: flex; flex-direction: column; gap: 6px; }
+.fs-ask-webstatus__conflicts {
+  padding: 6px 10px;
+  border-left: 3px solid var(--color-warning-700, #b45309);
+  background: var(--color-warning-100, #fef3c7);
+  color: var(--color-warning-900, #78350f);
+  border-radius: var(--radius-sm, 4px);
+  font-size: 12px;
+}
+[data-theme="dark"] .fs-ask-webstatus__conflicts {
+  background: var(--color-warning-900, #451a03);
+  color: var(--color-warning-100, #fef3c7);
+}
+.fs-ask-webstatus__conflicts-head { font-weight: 600; }
+.fs-ask-webstatus__conflicts-list { margin: 4px 0 0; padding-left: 18px; }
+.fs-ask-webstatus__line { font-size: 12px; color: var(--text-tertiary); }
+.fs-ask-webstatus__line--ok { color: var(--text-secondary); }
+.fs-ask-webstatus__line--warn { color: var(--color-warning-700, #b45309); font-weight: 600; }
+[data-theme="dark"] .fs-ask-webstatus__line--warn { color: var(--color-warning-300, #fcd34d); }
+
 /* ---- Today: weather for the active site (today-weather-card.js) ---- */
 .fs-today-weather { margin-bottom: 12px; }
 .fs-today-weather__title {

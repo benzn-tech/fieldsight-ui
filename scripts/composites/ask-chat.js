@@ -193,6 +193,51 @@
         && res.searched !== false;
   }
 
+  /* The outside lookup's status line and the records-vs-standard conflicts
+     (backend spec 2026-10-06, D1/D5). Driven by `web.status`; a response
+     without `status` (older backend) yields nothing, so it renders as before.
+
+     Web sources are counted here but NEVER merged into `citations`: web [n]
+     markers stay inside the web block. */
+  function webStatusLine(web) {
+    if (!web || typeof web.status !== 'string') return null;
+    if (web.status === 'verified') {
+      var n = (web.sources || []).length;
+      return { level: 'ok', text: 'Checked against ' + n + ' web source' + (n === 1 ? '' : 's') };
+    }
+    if (web.status === 'unverified') {
+      return { level: 'warn', text: 'Model knowledge — not verified online (web search failed)' };
+    }
+    if (web.status === 'too_long') {
+      return { level: 'muted', text: 'Not searched online (question too long)' };
+    }
+    return null; /* not_needed or unknown */
+  }
+
+  function renderWebStatus(m) {
+    var web = m && m.web;
+    if (!web) return null;
+    var line = webStatusLine(web);
+    var conflicts = (web.conflicts || []).filter(function (c) { return typeof c === 'string' && c; });
+    if (!line && !conflicts.length) return null;
+    return React.createElement('div', { className: 'fs-ask-webstatus' },
+      conflicts.length
+        ? React.createElement('div', { className: 'fs-ask-webstatus__conflicts' },
+            React.createElement('div', { className: 'fs-ask-webstatus__conflicts-head' },
+              '⚠ Records and the standard disagree'),
+            React.createElement('ul', { className: 'fs-ask-webstatus__conflicts-list' },
+              conflicts.map(function (c, i) {
+                return React.createElement('li', { key: i }, c);
+              })))
+        : null,
+      line
+        ? React.createElement('div', {
+            className: 'fs-ask-webstatus__line fs-ask-webstatus__line--' + line.level,
+          }, line.text)
+        : null
+    );
+  }
+
   /* The line that keeps the two sources apart.
 
      It sits ABOVE the answer for the same reason the basis line does: by the
@@ -1188,12 +1233,16 @@
                must not look like the web answer's own [1]/[2] source list. */
             m.role === 'assistant' && m.fromWeb
               ? renderCitations(m.citations, true) : null,
+            m.role === 'assistant' ? renderWebStatus(m) : null,
             m.role === 'assistant' ? renderWebOrigin(m) : null,
             /* `question_admission` already returns the sentence explaining a
                refusal (a name, a commercially sensitive topic, ...); nothing
                rendered it, so the reader saw the web section simply absent
                and read a guard doing its job as an outage. */
+            /* With `status` present the backend no longer refuses by content
+               (`too_long` replaces it); the status line above says it instead. */
             m.role === 'assistant' && m.web && m.web.refused
+              && typeof m.web.status !== 'string'
               ? React.createElement('div', { className: 'fs-ask-chat__web-refused' }, m.web.refused)
               : null,
             /* The plain-text fallback below is also what renders the user's
@@ -1385,6 +1434,7 @@
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.AskChat = AskChat;
   window.FieldSight._corroborationHasNothingToShow = hasNothingToShow;
+  window.FieldSight._askWebStatus = { line: webStatusLine, render: renderWebStatus };
   window.FieldSight._corroborationSourceDomain = sourceDomain;
   /* Exported so the wording can be pinned by a test without rendering React,
      and so SP-Ask's spoken variant can be written against the same dict. */
