@@ -40,9 +40,7 @@
   }
 
   function callerFolder() {
-    var u = (window.AuthMock && window.AuthMock.currentUser) || {};
-    if (!u.name) return null;
-    return window.FS.api.folderName(u.name);
+    return window.FS.api.callerFolder();
   }
 
   /* Coerced: a caller without an `isAdmin` field used to make this return
@@ -1637,8 +1635,8 @@
         /* Q2 — merge optimistic patches, then split this section's topics into
            the visible list and its own "Removed / personal" area. */
         var _p = partitionTopics(applyTopicOverrides(report.topics, overrides));
-        var isOwnReport = !!(caller && caller.name
-            && window.FS.api.folderName(caller.name) === sectionUser);
+        var isOwnReport = !!(caller && sectionUser
+            && window.FS.api.callerFolder() === sectionUser);
         var sectionCanEdit = hasContentEditPerm || isOwnReport;
 
         return React.createElement('div', {
@@ -2261,6 +2259,8 @@
          resolves `user` BEFORE this effect runs, so workers never land
          here — site && !user means admin/gm, OR a site_manager/PM with an
          anchored site (their forced-self rule is site-conditional). */
+      /* user is null for a live caller with no folder_name (unenrolled; every
+         enrolled user carries one after /me) -- they land here as before. */
       if (site && !user) {
         setState({ status: 'ok', aggregated: true });
         return undefined;
@@ -2676,8 +2676,8 @@
     var hasContentEditPerm = !!(window.FS && window.FS.can && window.FS.P
         && window.FS.can(caller, window.FS.P('content', 'edit')));
     var ownerFolder = user || (report && report.user_name && window.FS.api.folderName(report.user_name)) || null;
-    var isOwnReport = !!(ownerFolder && caller && caller.name
-        && window.FS.api.folderName(caller.name) === ownerFolder);
+    var isOwnReport = !!(ownerFolder && caller
+        && window.FS.api.callerFolder() === ownerFolder);
     var canEditContent = hasContentEditPerm || isOwnReport;
 
     var MeetingTopicCard   = window.FieldSight.MeetingTopicCard;
@@ -4583,8 +4583,8 @@
        into OverviewTab as props.isOwnReport and reused below for the
        topic-title editor. */
     var rdCaller = (window.AuthMock && window.AuthMock.currentUser) || null;
-    var isOwnReport = !!(ownerFolder && rdCaller && rdCaller.name
-        && window.FS.api.folderName(rdCaller.name) === ownerFolder);
+    var isOwnReport = !!(ownerFolder && rdCaller
+        && window.FS.api.callerFolder() === ownerFolder);
 
     /* Q7 (keyframe delete) — SAME canEditContent formula used elsewhere in
        this file: TimelineMiddleColumn ~1335 (hasContentEditPerm ||

@@ -81,6 +81,14 @@
   };
 
   /* Map a daily-report priority + the existing TaskCard tone vocabulary. */
+  /* The report owner's FOLDER: the caller's directory folder when it is the
+     caller's own report (a display name is not a folder), else derived. */
+  function ownerFolderOf(report) {
+    var api = window.FS.api;
+    if (api.reportOwnerFolder) return api.reportOwnerFolder(report);
+    return report.user_name ? api.folderName(report.user_name) : null;
+  }
+
   function priorityLabel(p) {
     if (!p) return 'Medium';
     return p.charAt(0).toUpperCase() + p.slice(1);
@@ -329,7 +337,7 @@
        reusing that would corrupt both the owner key and the user_folder
        sent with the check-off. Falls back to deriving from report.user_name
        on the single-report fast path, where ctx.idPrefix is omitted. */
-    var ownerFolder = ctx.idPrefix || (report.user_name ? window.FS.api.folderName(report.user_name) : null);
+    var ownerFolder = ctx.idPrefix || ownerFolderOf(report);
 
     /* site_name is report.site verbatim (the ONLY site field a report
        carries — see the comment above, no slug exists on the report
@@ -353,9 +361,7 @@
       generatedAt: '5:42 AM',
       bullets:     bullets,
       date:        report.report_date || ctx.date || null,
-      userFolder:  report.user_name
-                     ? window.FS.api.folderName(report.user_name)
-                     : null,
+      userFolder:  ownerFolderOf(report),
     };
 
     /* ---- urgent: safety topics + non-empty safety_flags + high obs ----

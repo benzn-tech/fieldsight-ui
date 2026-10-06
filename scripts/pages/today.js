@@ -816,7 +816,7 @@
       setState({ status: 'loading' });
 
       var today    = window.FS.api.todayNZDT();
-      var folder   = window.FS.api.folderName(caller.name);
+      var folder   = window.FS.api.callerFolder();
 
       /* feat/today-rolling-open-items (§D) — widened from "scheduled
          today" to "deadline within the next PROGRAMME_DEADLINE_DAYS
@@ -1049,6 +1049,8 @@
       function loadRollingOpenItems() {
         var EMPTY = { myTasks: [], teamTasks: [] };
 
+        /* folder is null for a live caller with no folder_name (unenrolled; /me
+           gives every enrolled user one) -- then there are no rolling items. */
         var foldersPromise = multiProject ? adminFoldersPromise : Promise.resolve([folder]);
 
         return Promise.all([foldersPromise, siteSlugMapPromise, window.FS.api.window.getSpan(), siteIdMapPromise])
@@ -2697,8 +2699,8 @@
        own isOwnReport compares against via ownerFolder. */
     var hasContentEditPerm = !!(window.FS && window.FS.can && window.FS.P
                         && window.FS.can(caller, window.FS.P('content', 'edit')));
-    var isOwnReportRow     = !!(item.kind === 'task' && item.folder && caller && caller.name
-                        && window.FS.api.folderName && window.FS.api.folderName(caller.name) === item.folder);
+    var isOwnReportRow     = !!(item.kind === 'task' && item.folder && caller
+                        && window.FS.api.callerFolder && window.FS.api.callerFolder() === item.folder);
     var canEditContentRow  = hasContentEditPerm || isOwnReportRow;
     /* D7 — glossary PROMOTION is one tier above plain content:edit (see
        isSiteManagerPlusLocal's doc); the isOwnReportRow OR-branch never
