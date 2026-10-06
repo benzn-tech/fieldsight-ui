@@ -129,9 +129,10 @@
        of re-deriving the folder by string-mangling the display name.
        Left at AuthMock's default (undefined) when the session doesn't
        carry it — the predicate falls back to deriving it from name. */
-    if (sessionUser.folder_name) {
-      patch.folder_name = sessionUser.folder_name;
-    }
+    /* Always patched (null when absent): a later sign-in whose /me has no
+       folder must NOT inherit the previous account's folder -- callerFolder()
+       now makes it the identity for every self-scope. */
+    patch.folder_name = sessionUser.folder_name || null;
 
     var name = sessionUser.display_name || sessionUser.name || sessionUser.email;
     if (name) {

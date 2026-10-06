@@ -34,6 +34,41 @@
     return String(displayName == null ? '' : displayName).trim().replace(/\s+/g, '_');
   }
 
+  /* The signed-in caller's OWN recording folder -- an identity key that comes
+     from the directory (users.folder_name, carried onto
+     AuthMock.currentUser.folder_name by the session bridge), never from the
+     display name. Display names are not folders: "Deandre' Alberts" is the
+     folder "Deandre__Alberts", and the name-derived guess ("Deandre'_Alberts")
+     belongs to nobody, so the server refused the caller their OWN day.
+
+     Only mock mode (fixtures keyed by derived folders) may fall back to the
+     name. In live mode with no folder_name this returns null and the caller
+     must OMIT `user` and let the backend resolve "self" -- never guess. */
+  function callerFolder() {
+    var u = (window.AuthMock && window.AuthMock.currentUser) || {};
+    if (u.folder_name) return u.folder_name;
+    if (window.FS.api && window.FS.api.useMocks && u.name) return folderName(u.name);
+    return null;
+  }
+
+  /* The folder that OWNS a report. A success DailyReport carries only the
+     display name, and a display name is not a folder, so: the report's own
+     `user` folder when it has one; the caller's directory folder when the
+     report is the caller's own (same display name); only then the name-derived
+     guess (other people -- the backend gives no folder for them yet). */
+  function reportOwnerFolder(report) {
+    if (!report) return null;
+    if (typeof report.user === 'string' && report.user) return report.user;
+    var n = report.user_name;
+    if (!n) return null;
+    var me = (window.AuthMock && window.AuthMock.currentUser) || {};
+    if (me.name && String(me.name).trim() === String(n).trim()) {
+      var own = callerFolder();
+      if (own) return own;
+    }
+    return folderName(n);
+  }
+
   /* Small artificial delay so optimistic-UI patterns can be tested. */
   function delay(ms) {
     return new Promise(function (resolve) {
@@ -120,6 +155,8 @@
     legacyReadFallback: env.legacyReadFallback !== false,
     delay: delay,
     folderName: folderName,
+    callerFolder: callerFolder,
+    reportOwnerFolder: reportOwnerFolder,
     mockPresignedUrl: mockPresignedUrl,
     addDaysISO: addDaysISO,
     todayNZDT: todayNZDT,

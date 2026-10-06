@@ -62,8 +62,7 @@
       }
       var cancelled = false;
       var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
-      var callerFolder = caller.folder_name
-        || (caller.name && api.folderName && api.folderName(caller.name)) || null;
+      var callerFolder = api.callerFolder();
       api.transcripts.getTranscripts({ date: date, user: user, start: start, end: end })
         .then(function (res) {
           if (cancelled) return;

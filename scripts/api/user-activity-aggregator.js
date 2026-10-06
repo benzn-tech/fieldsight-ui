@@ -76,8 +76,9 @@
        read rejects. Mock mode keeps the fixture logic below untouched. */
     if (!window.FS.api.useMocks) {
       if (caller.role === 'worker') {
-        return caller.name ? [{ name: caller.name,
-          folder_name: window.FS.api.folderName(caller.name) }] : [];
+        var selfFolder = window.FS.api.callerFolder();
+        return (caller.name && selfFolder) ? [{ name: caller.name,
+          folder_name: selfFolder }] : [];
       }
       var liveRes = site
         ? await window.FS.api.sites.getSiteUsers(site)
@@ -106,7 +107,7 @@
     }
 
     if (caller.role === 'worker') {
-      var folder = window.FS.api.folderName(caller.name || '');
+      var folder = window.FS.api.callerFolder();
       return allUsers.filter(function (u) { return u.folder_name === folder; });
     }
     if (isAdminLike(caller)) return allUsers;
