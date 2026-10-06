@@ -271,8 +271,6 @@
     var showAnswer = !!webAnswer && webAnswer !== messageText;
     return React.createElement('div', { className: 'fs-ask-web' },
       React.createElement('div', { className: 'fs-ask-web__label' },
-        /* Only a verified lookup is "from the open web"; an unverified one is
-           the model's own knowledge. */
         web.status === 'unverified'
           ? 'Model knowledge — not verified online'
           : 'From the open web — not from your recordings'),
