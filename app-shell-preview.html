@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="styles/tokens.css?v=8" />
   <link rel="stylesheet" href="styles/app-shell.css?v=17" />
   <link rel="stylesheet" href="styles/components.css?v=15" />
-  <link rel="stylesheet" href="styles/composites.css?v=140" />
+  <link rel="stylesheet" href="styles/composites.css?v=141" />
 
   <style>
     /* Ensure full-bleed with no scroll */
@@ -141,6 +141,8 @@
   <!-- Sprint 8.1.4 — Toast notification stack (vanilla JS, no React) -->
   <script src="scripts/composites/toast.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/notification-bell.js?v=4"></script>
+  <!-- Before pages/today.js and pages/timeline.js, which mount it. -->
+  <script src="scripts/composites/pending-notes-banner.js?v=1"></script>
   <!-- After modal-overlay.js (it renders one) and notification-bell.js (which
        opens it). Registers on window.FieldSight, so the FS.api reassignment
        in api/index.js cannot wipe it. -->
@@ -238,7 +240,7 @@
   <script src="scripts/mock/templates.fixture.js?v=1"></script>
   <!--   3. Per-endpoint api modules (read fixtures via FS.api.*) -->
   <script src="scripts/api/sites.js?v=5"></script>
-  <script src="scripts/api/org.js?v=34"></script>
+  <script src="scripts/api/org.js?v=35"></script>
   <!-- staffing — pure "who is on which project, and as what" helpers, read by
        pages/team.js. Loads before it (and before any page module) because the
        page calls into it during its first render. -->
@@ -381,8 +383,8 @@
   <!-- Mock data shim (weather only) + page registry + pages -->
   <script type="text/babel" src="scripts/mock-data.js?v=4"></script>
   <script type="text/babel" src="scripts/pages/_page-registry.js?v=2"></script>
-  <script type="text/babel" src="scripts/pages/today.js?v=63"></script>
-  <script type="text/babel" src="scripts/pages/timeline.js?v=73"></script>
+  <script type="text/babel" src="scripts/pages/today.js?v=64"></script>
+  <script type="text/babel" src="scripts/pages/timeline.js?v=74"></script>
   <script type="text/babel" src="scripts/pages/reports.js?v=6"></script>
   <script type="text/babel" src="scripts/pages/sites.js?v=14"></script>
   <script type="text/babel" src="scripts/pages/activity.js?v=5"></script>
