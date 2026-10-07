@@ -28,7 +28,8 @@
 
   var TEXT = {
     body: function (range) {
-      return 'Your recording (' + range + ') was uploaded safely and won’t be lost. ' +
+      /* No range when the backend could not read times from the chunk names. */
+      return 'Your recording' + (range ? ' (' + range + ')' : '') + ' was uploaded safely and won’t be lost. ' +
         'Our AI model is temporarily unavailable — we’re reconnecting automatically ' +
         'and will show your notes as soon as it recovers.';
     },

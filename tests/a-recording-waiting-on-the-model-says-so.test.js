@@ -308,3 +308,12 @@ test('the Timeline only offers the banners on the caller own day', () => {
   assert.strictEqual(tl.isOwnDayView(admin, { view: 'team' }, 'Ben_Lin_admin'), false, 'the team view');
   assert.strictEqual(tl.isOwnDayView(worker, { user: 'Someone_Else' }, 'Me'), true, 'a worker is pinned to self');
 });
+
+test('a pending session with no time range reads without empty brackets', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'scripts', 'composites', 'pending-notes-banner.js'), 'utf8');
+  const m = src.match(/body: function \(range\) \{([\s\S]*?)\n    \}/);
+  const body = new Function('range', m[1]);
+  require('node:assert').strictEqual(body(''), body(null));
+  require('node:assert').ok(!body('').includes('()'));
+  require('node:assert').ok(body('15:40–15:41').includes('(15:40–15:41)'));
+});
