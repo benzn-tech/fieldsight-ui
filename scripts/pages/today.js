@@ -1371,7 +1371,8 @@
       });
     }, []);
 
-    return { state: state, removeMyTask: removeMyTask, patchTask: patchTask };
+    return { state: state, removeMyTask: removeMyTask, patchTask: patchTask,
+      reload: function () { setRetry(function (n) { return n + 1; }); } };
   }
 
   /* ---------- In-page lookups (replace old MockData helpers) ----------- */
@@ -1733,7 +1734,8 @@
     /* Stable-ish value object — not memoised because the TodayState
        hook already re-keys its effect on caller identity, and the
        consumers below read .state every render anyway. */
-    var ctx = { state: ts.state, removeMyTask: ts.removeMyTask, patchTask: ts.patchTask };
+    var ctx = { state: ts.state, removeMyTask: ts.removeMyTask, patchTask: ts.patchTask,
+                reload: ts.reload };
     return React.createElement(TodayContext.Provider, { value: ctx },
       props.children);
   }
@@ -3139,8 +3141,22 @@
   /* ---------- Register --------------------------------------------------- */
   if (!window.FieldSight) window.FieldSight = {};
   if (!window.FieldSight.PAGES) window.FieldSight.PAGES = {};
+  /* Pending-notes banners (model-fallback D6): today's own recordings that
+     wait on the AI model. Recovery reloads the Today data. */
+  function TodayWithPendingNotes(props) {
+    var ctx = React.useContext(TodayContext);
+    var Banners = window.FieldSight.PendingNotesBanners;
+    return React.createElement(React.Fragment, null,
+      Banners ? React.createElement(Banners, {
+        date: window.FS.api.todayNZDT(),
+        enabled: true,
+        onRecovered: function () { if (ctx && ctx.reload) ctx.reload(); },
+      }) : null,
+      React.createElement(TodayMiddleColumn, props));
+  }
+
   window.FieldSight.PAGES['/today'] = {
-    Middle:   TodayMiddleColumn,
+    Middle:   TodayWithPendingNotes,
     Right:    TodayRightDetail,
     /* P-07 — page-level Provider; AppShell wraps Middle + Right in this
        so they share TodayContext. Pages without page-level state simply
