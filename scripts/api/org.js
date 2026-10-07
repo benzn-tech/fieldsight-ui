@@ -1488,6 +1488,46 @@
     return { _notAvailable: true };
   }
 
+  /* Sessions that uploaded fine but whose notes are waiting on the AI model
+     (model-fallback spec D6). GET is the caller's OWN, for one day. It must
+     never block a page: 403/404 (route not deployed yet), a network error, or
+     an offline preview all read as "nothing pending". */
+  async function getPendingSessions(opts) {
+    opts = opts || {};
+    if (!orgLive() || !opts.date) return { sessions: [] };
+    try {
+      var res = await api.orgRequest('/sessions/pending', { params: { date: opts.date } });
+      if (!res || res._notFound || res._accessDenied || !Array.isArray(res.sessions)) {
+        return { sessions: [] };
+      }
+      return { sessions: res.sessions };
+    } catch (e) {
+      if (window.console) console.warn('[pending] could not read pending sessions', e && e.message);
+      return { sessions: [] };
+    }
+  }
+
+  /* "Expedite": ask for a prompt retry of one pending session. 429 means it
+     was already asked for -- reported as a result, not thrown, so the caller
+     shows the same "we're on it" state. Any other failure throws. */
+  async function expediteSession(sessionId) {
+    if (!orgWrite()) { await api.delay(); return { ok: true, expedited_at: new Date().toISOString() }; }
+    try {
+      var res = await api.orgRequest('/sessions/' + encodeURIComponent(sessionId) + '/expedite',
+        { method: 'POST', body: { session_id: String(sessionId) } });
+      if (!res || res._notFound || res._accessDenied) {
+        throw new Error('expedite unavailable (' + ((res && res.status) || '?') + ')');
+      }
+      return { ok: true, expedited_at: res.expedited_at || null };
+    } catch (e) {
+      if (e && e.status === 429) {
+        return { ok: false, alreadyExpedited: true,
+                 retry_after_s: (e.body && e.body.retry_after_s) || null };
+      }
+      throw e;
+    }
+  }
+
   window.FS.api.org = {
     getMe: getMe,
     setSpeakerName: setSpeakerName,
@@ -1530,6 +1570,8 @@
     getDayInspections: getDayInspections,
     getDayChecklistReports: getDayChecklistReports,
     getRecentChecklistReports: getRecentChecklistReports,
+    getPendingSessions: getPendingSessions,
+    expediteSession: expediteSession,
     getTraceDay: getTraceDay,
     getTraceFunnel: getTraceFunnel,
     getSessions: getSessions,

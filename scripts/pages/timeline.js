@@ -2448,7 +2448,7 @@
         setState({ status: 'error', error: { code: (err && err.status) || 0, message: (err && err.message) || 'Could not load report', retryable: true }, retry: function () { setRetry(function (n) { return n + 1; }); } });
       });
       return function () { cancelled = true; };
-    }, [date, requestUser, retryCount]);
+    }, [date, requestUser, retryCount, props.reloadTick]);
 
     /* life-conversation separation — a redaction / revert / keep-as-work in
        the right-detail refetches the report so the visible/removed partition
@@ -4841,12 +4841,45 @@
 
   if (!window.FieldSight) window.FieldSight = {};
   if (!window.FieldSight.PAGES) window.FieldSight.PAGES = {};
+  /* Pending-notes banners (model-fallback D6): a recording that uploaded but
+     whose notes wait on the AI model. Only on the caller's OWN day -- an admin
+     looking at someone else's day must not be shown (or expedite) their
+     sessions. Recovery remounts the day so the notes load. */
+  function isOwnDayView(caller, params, me) {
+    var scope = resolveTimelineScope(caller, params, me);
+    return !!(scope.resolveSelf || (scope.user && me && scope.user === me));
+  }
+
+  /* The day itself is TimelineMiddleColumn, called (not mounted) so its hooks stay
+     this component's and a recovery can bump props.reloadTick to refetch. */
+  function TimelineWithPendingNotes(props) {
+    var h = React.createElement;
+    var rp = React.useState(function () { return readRouteParams(); });
+    var params = rp[0], setParams = rp[1];
+    React.useEffect(function () {
+      return window.FS.Router.subscribe(function (route) {
+        setParams(Object.assign({}, route.params || {}));
+      });
+    }, []);
+    var tk = React.useState(0);
+    var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
+    var Banners = window.FieldSight.PendingNotesBanners;
+    var date = params.date || (window.FS.api.todayNZDT && window.FS.api.todayNZDT());
+    return h(React.Fragment, null,
+      Banners ? h(Banners, {
+        date: date,
+        enabled: isOwnDayView(caller, params, callerFolder()),
+        onRecovered: function () { tk[1](function (n) { return n + 1; }); },
+      }) : null,
+      TimelineMiddleColumn(Object.assign({}, props, { reloadTick: tk[0] })));
+  }
+
   window.FieldSight.PAGES['/timeline'] = {
     /* One Ask, scoped — the Provider shares the ask context, and the dock
        mounts in the shell's Footer slot so it sits OUTSIDE the middle
        column's scroll area (spec 2026-09-16 §3). */
     Provider: TimelineAskProvider,
-    Middle:   TimelineMiddleColumn,
+    Middle:   TimelineWithPendingNotes,
     Right:    TimelineRightDetail,
     Footer:   TimelineAskDock,
   };
@@ -4885,6 +4918,7 @@
       canSeeOverview: canSeeOverview,
       isAdminLike: isAdminLike,
       resolveTimelineScope: resolveTimelineScope,
+      isOwnDayView: isOwnDayView,
       serverSubjectFolder: serverSubjectFolder,
       reconcileTopicOverrides: reconcileTopicOverrides,
       diffWords: diffWords,
