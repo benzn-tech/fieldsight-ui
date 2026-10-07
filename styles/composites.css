@@ -13935,3 +13935,21 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* ── Pending notes: recording uploaded, AI model temporarily unavailable ── */
+.fs-pending-notes { display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; }
+.fs-pending-notes__banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  padding: 12px 14px; border-radius: var(--radius-md);
+  background: var(--color-info-50); border: 1px solid var(--color-info-200);
+  border-left: 3px solid var(--color-warning-500);
+  color: var(--text-primary); font-size: 13px; line-height: 1.45;
+}
+.fs-pending-notes__text { flex: 1 1 280px; }
+.fs-pending-notes__actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.fs-pending-notes__error { color: var(--color-danger-600, #dc2626); font-size: 12px; }
+[data-theme="dark"] .fs-pending-notes__banner {
+  background: var(--color-warning-950); border-color: var(--color-warning-800);
+  border-left-color: var(--color-warning-500);
+}
+[data-theme="dark"] .fs-pending-notes__error { color: var(--color-danger-300, #fca5a5); }
