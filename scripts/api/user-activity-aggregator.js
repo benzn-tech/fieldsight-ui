@@ -71,6 +71,25 @@
     var fixtures = (window.FieldSight && window.FieldSight.fixtures && window.FieldSight.fixtures.sites) || { users: [] };
     var allUsers = fixtures.users || [];
 
+    /* LIVE: people come from the org directory only — never from the fixture
+       roster (which would show made-up users to a real company). A failed
+       read rejects. Mock mode keeps the fixture logic below untouched. */
+    if (!window.FS.api.useMocks) {
+      if (caller.role === 'worker') {
+        var selfFolder = window.FS.api.callerFolder();
+        return (caller.name && selfFolder) ? [{ name: caller.name,
+          folder_name: selfFolder }] : [];
+      }
+      var liveRes = site
+        ? await window.FS.api.sites.getSiteUsers(site)
+        : await window.FS.api.sites.getUsers();
+      return (((liveRes && liveRes.users) || [])).map(function (u) {
+        return u.folder_name ? u : Object.assign({}, u, {
+          folder_name: (u.name || '').replace(/ /g, '_'),
+        });
+      });
+    }
+
     if (site && caller.role !== 'worker') {
       try {
         var su = await window.FS.api.sites.getSiteUsers(site);
@@ -88,7 +107,7 @@
     }
 
     if (caller.role === 'worker') {
-      var folder = window.FS.api.folderName(caller.name || '');
+      var folder = window.FS.api.callerFolder();
       return allUsers.filter(function (u) { return u.folder_name === folder; });
     }
     if (isAdminLike(caller)) return allUsers;
@@ -135,8 +154,7 @@
 
     /* Per (date × user) fan-out. Each (date, user) tuple may yield a
        _notFound (no report from that user on that date) — that's
-       expected and dropped silently. Audit overlay piggy-backs on
-       the same date list via getActionsRange. */
+       expected and dropped silently. */
     var perCall = [];
     visibleUsers.forEach(function (u) {
       dates.forEach(function (d) {
@@ -147,8 +165,7 @@
     /* Pooled, not Promise.all: the (dates × users) cross-product reaches
        150+ requests for admin-like callers — see FS.api.pooledAll. Failed
        fetches → null → filtered (partial data beats a dead page). */
-    var [reports, audit] = await Promise.all([
-      window.FS.api.pooledAll(perCall.map(function (k) {
+    var reports = await window.FS.api.pooledAll(perCall.map(function (k) {
         return function () {
           return window.FS.api.timeline.getTimeline({ date: k.date, user: k.user.folder_name })
             .then(function (r) { return Object.assign({ report: r }, k); });
@@ -160,16 +177,9 @@
           throw new Error('Could not load data — all requests failed. Please retry.');
         }
         return out;
-      }),
-      window.FS.api.actions.getActionsRange({ from: dates[0], to: dates[dates.length - 1] }),
-    ]);
+      });
 
-    /* Audit leg: getActionsRange() already swallows per-date denials and
-       only signals _accessDenied when EVERY date's audit was denied. */
-    if (audit && audit._accessDenied) {
-      return { _accessDenied: true, error: audit.error };
-    }
-    /* Timeline leg: IB-1 fix — drop individual denied (date,user) reports
+    /* IB-1 fix — drop individual denied (date,user) reports
        and keep whatever came back accessible; only surface _accessDenied
        if NOTHING accessible came back at all. */
     var deniedReports = reports.filter(function (r) { return r.report && r.report._accessDenied; });
@@ -179,8 +189,6 @@
         return { _accessDenied: true, error: deniedReports[0].report.error };
       }
     }
-
-    var byDate = (audit && audit.byDate) || {};
 
     /* Group results by user. perUserByName is the attribution index —
        events go to whoever's name appears in topic.participants /
@@ -208,7 +216,6 @@
       var r = rec.report;
       if (!r || r._notFound || r.available_users) return;
       var date         = rec.date;
-      var auditForDate = byDate[date] || {};
 
       (r.topics || []).forEach(function (t) {
 
@@ -242,7 +249,8 @@
           if (seenAction[key]) return;
           seenAction[key] = true;
 
-          var auditKey = window.FS.api.actions.lookupAction(auditForDate, rec.user.folder_name, t.topic_id, idx) || {};
+          /* Done-ness is the task's own status column. */
+          var done = a.status === 'done';
           bucket.counts.actions++;
           bucket.events.push({
             kind:        'action',
@@ -254,8 +262,8 @@
             extra:       {
               priority:   a.priority,
               deadline:   a.deadline,
-              checked:    !!auditKey.checked,
-              checked_at: auditKey.checked_at || null,
+              checked:    done,
+              checked_at: done ? (a.updated_at || null) : null,
             },
           });
         });

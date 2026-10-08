@@ -74,9 +74,12 @@
   'use strict';
 
   function callerFolder() {
+    return window.FS.api.callerFolder();
+  }
+
+  function isAdminLikeCaller() {
     var u = (window.AuthMock && window.AuthMock.currentUser) || {};
-    if (!u.name) return null;
-    return window.FS.api.folderName(u.name);
+    return u.role === 'admin' || u.role === 'gm' || !!u.isAdmin;
   }
 
   function diffDays(fromISO, toISO) {
@@ -91,6 +94,9 @@
     if (!today) return { rows: [] };
 
     var folder = opts.user || callerFolder();
+    /* No identity => nothing attributable. Only an admin-like caller may fall
+       through to "all assignees"; anyone else gets no rows, not everyone's. */
+    if (!folder && !isAdminLikeCaller()) return { rows: [] };
 
     var sitesRes = await window.FS.api.org.getOrgSites().catch(function () { return null; });
     if (!sitesRes || sitesRes._accessDenied || !(sitesRes.sites || []).length) {
@@ -204,6 +210,9 @@
     var asOf = opts.asOf || from;
 
     var folder = opts.user || callerFolder();
+    /* No identity => nothing attributable. Only an admin-like caller may fall
+       through to "all assignees"; anyone else gets no rows, not everyone's. */
+    if (!folder && !isAdminLikeCaller()) return { rows: [] };
 
     var sitesRes = await window.FS.api.org.getOrgSites().catch(function () { return null; });
     if (!sitesRes || sitesRes._accessDenied || !(sitesRes.sites || []).length) {

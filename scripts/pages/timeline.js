@@ -40,9 +40,7 @@
   }
 
   function callerFolder() {
-    var u = (window.AuthMock && window.AuthMock.currentUser) || {};
-    if (!u.name) return null;
-    return window.FS.api.folderName(u.name);
+    return window.FS.api.callerFolder();
   }
 
   /* Coerced: a caller without an `isAdmin` field used to make this return
@@ -386,8 +384,8 @@
 
   /* An action item's "done" signal. The authoritative source is the
      action_items.status column (feat/editable-tasks-ui). Default here is
-     column-only (status === 'done'); the render site injects a richer
-     predicate that also honours the legacy DynamoDB check-off boolean. */
+     column-only (status === 'done'); the render site injects a predicate
+     that also honours a tick made earlier in the same session. */
   function defaultActionDone(a) {
     return !!(a && a.status === 'done');
   }
@@ -1424,25 +1422,21 @@
 
     /* fix/action-checkoff-sync (Bug 1) — this view renders ONE date
        (props.date) fanned out across every user on the site, so a
-       single getActions(date) call covers every section's TopicCards.
+       single map covers every section's TopicCards.
        user-dimension audit key plan (docs/superpowers/plans/2026-07-13-
        user-dimension-audit-key.md, Task 5) — the audit key NOW carries
        the section owner's folder (see the TopicCard mount + bus
        subscription below), so two sections' topic 0 / action 0 on the
        same date no longer collide. Mirrors TimelineMiddleColumn's own
-       actions fetch (~line 743) so checked state actually shows here
-       instead of the hardcoded {} this view used to pass down. */
+       actions map (~line 743). It holds ONLY ticks announced on the bus this
+       session; everything else reads each item's own status column (see
+       FS.api.actions.itemState), so it starts empty. */
     var refActionsState = React.useState({});
     var actionsMap    = refActionsState[0];
     var setActionsMap = refActionsState[1];
 
     React.useEffect(function () {
-      var cancelled = false;
-      window.FS.api.actions.getActions(props.date).then(function (res) {
-        if (cancelled) return;
-        setActionsMap((res && res.actions) || {});
-      });
-      return function () { cancelled = true; };
+      setActionsMap(window.FS.api.actions.ticksFor(props.date));
     }, [props.date]);
 
     /* fix/action-checkoff-sync (Bug 1) — mirrors TimelineMiddleColumn's
@@ -1641,8 +1635,8 @@
         /* Q2 — merge optimistic patches, then split this section's topics into
            the visible list and its own "Removed / personal" area. */
         var _p = partitionTopics(applyTopicOverrides(report.topics, overrides));
-        var isOwnReport = !!(caller && caller.name
-            && window.FS.api.folderName(caller.name) === sectionUser);
+        var isOwnReport = !!(caller && sectionUser
+            && window.FS.api.callerFolder() === sectionUser);
         var sectionCanEdit = hasContentEditPerm || isOwnReport;
 
         return React.createElement('div', {
@@ -1695,16 +1689,14 @@
                 /* No `deepLink` prop (owner's ruling — the hand-off must
                    never carry our internal app URL); see the note in
                    buildSessionEmailDraft(). */
-                /* Mirrors the single-person view's _isActionDone: the Aurora
-                   status column wins when present, else the check-off overlay.
-                   Keyed on THIS section's folder — the audit key carries a user
-                   dimension (#23), so passing the caller's folder here would
-                   read another person's check-offs. */
+                /* Mirrors the single-person view's _isActionDone: the item's own
+                   status column, unless a tick made in this session says
+                   otherwise. Keyed on THIS section's folder — the key carries
+                   a user dimension (#23), so passing the caller's folder here
+                   would read another person's ticks. */
                 isDone: function (a, topicId, idx) {
-                  if (a && a.status) return a.status === 'done';
-                  var st = window.FS.api.actions.lookupAction(
-                    actionsMap, sectionUser, topicId, idx);
-                  return !!(st && st.checked);
+                  return window.FS.api.actions.itemState(a,
+                    window.FS.api.actions.lookupAction(actionsMap, sectionUser, topicId, idx)).checked;
                 },
               }),
               React.createElement('button', {
@@ -2267,6 +2259,8 @@
          resolves `user` BEFORE this effect runs, so workers never land
          here — site && !user means admin/gm, OR a site_manager/PM with an
          anchored site (their forced-self rule is site-conditional). */
+      /* user is null for a live caller with no folder_name (unenrolled; every
+         enrolled user carries one after /me) -- they land here as before. */
       if (site && !user) {
         setState({ status: 'ok', aggregated: true });
         return undefined;
@@ -2287,13 +2281,11 @@
       setState({ status: 'loading' });
       Promise.all([
         window.FS.api.timeline.getTimeline({ date: date, user: user }),
-        window.FS.api.actions.getActions(date),
         window.FS.api.meetings.getMeetingMinutes({ date: date, user: user }),
       ]).then(function (results) {
         if (cancelled) return;
         var report  = results[0];
-        var actions = results[1].actions || {};
-        var meeting = results[2];
+        var meeting = results[1];
 
         /* P-12 — page-level access-denied. If the daily-report endpoint
            rejected this caller (§8.4: non-admin querying another user),
@@ -2339,7 +2331,7 @@
         setState({
           status:  'ok',
           report:  report,
-          actions: actions,
+          actions: window.FS.api.actions.ticksFor(date),
           meeting: meeting,
         });
         /* Retire any optimistic redaction/revert patch the server has now
@@ -2351,7 +2343,7 @@
         setState({ status: 'error', error: { code: (err && err.status) || 0, message: (err && err.message) || 'Could not load report', retryable: true }, retry: function () { setRetry(function (n) { return n + 1; }); } });
       });
       return function () { cancelled = true; };
-    }, [date, user, retryCount]);
+    }, [date, user, retryCount, props.reloadTick]);
 
     /* life-conversation separation — a redaction / revert / keep-as-work in
        the right-detail refetches the report so the visible/removed partition
@@ -2684,8 +2676,8 @@
     var hasContentEditPerm = !!(window.FS && window.FS.can && window.FS.P
         && window.FS.can(caller, window.FS.P('content', 'edit')));
     var ownerFolder = user || (report && report.user_name && window.FS.api.folderName(report.user_name)) || null;
-    var isOwnReport = !!(ownerFolder && caller && caller.name
-        && window.FS.api.folderName(caller.name) === ownerFolder);
+    var isOwnReport = !!(ownerFolder && caller
+        && window.FS.api.callerFolder() === ownerFolder);
     var canEditContent = hasContentEditPerm || isOwnReport;
 
     var MeetingTopicCard   = window.FieldSight.MeetingTopicCard;
@@ -2808,16 +2800,15 @@
        "Draft email" control. When a specific session is selected the draft is
        that meeting; "All day" (null) drafts the whole day's outstanding items,
        labelled as such. The report owner's folder feeds the same done-check
-       (status column, else legacy DynamoDB check-off) the topic cards use, so
+       (status column, unless ticked in this session) the topic cards use, so
        an item ticked here counts as done and is left out of the draft. */
     var _selectedSession = selectedSessionId
       ? (daySessions.filter(function (s) { return s.session_id === selectedSessionId; })[0] || null)
       : null;
     var _draftUserFolder = report.user_name ? window.FS.api.folderName(report.user_name) : null;
     function _isActionDone(a, topicId, idx) {
-      if (a && a.status) return a.status === 'done';
-      var st = window.FS.api.actions.lookupAction(actionState, _draftUserFolder, topicId, idx);
-      return !!(st && st.checked);
+      return window.FS.api.actions.itemState(a,
+        window.FS.api.actions.lookupAction(actionState, _draftUserFolder, topicId, idx)).checked;
     }
     /* Belt-and-suspenders: the draft builder re-asserts redacted/non_work
        exclusion itself, but pass the ALREADY-visible (non-removed) topics so a
@@ -4182,8 +4173,9 @@
                side of the checked/unchecked split (Array.sort is stable
                in evergreen browsers). */
             actions.map(function (a, idx) {
-              var state = window.FS.api.actions.lookupAction(props.actionState, props.userFolder, topic.topic_id, idx) || {};
-              return { a: a, idx: idx, state: state, checked: !!state.checked };
+              var state = window.FS.api.actions.itemState(a,
+                window.FS.api.actions.lookupAction(props.actionState, props.userFolder, topic.topic_id, idx));
+              return { a: a, idx: idx, state: state, checked: state.checked };
             }).sort(function (x, y) {
               if (x.checked === y.checked) return 0;
               return x.checked ? 1 : -1;
@@ -4506,20 +4498,19 @@
     var refActions = React.useState({});
     var setActions = refActions[1];
 
+    /* Declared BEFORE the effects whose dependency arrays read it: a `var`
+       below them hoists as undefined, freezing those deps at [undefined]. */
     var sel = props.selectedItem;
+
+    /* Seed with ticks already accepted this session (the bus only reaches
+       panes that were mounted when it fired). */
+    React.useEffect(function () {
+      if (!sel || !sel.date) return;
+      setActions(window.FS.api.actions.ticksFor(sel.date));
+    }, [sel && sel.date]);
+
     var isMeeting = sel && sel.kind === 'meeting_topic';
     var isDaily   = sel && sel.kind === 'topic';
-
-    /* Load actions audit state once per (date) — only relevant for
-       daily-report topics; meeting actions are read-only. */
-    React.useEffect(function () {
-      if (!isDaily || !sel || !sel.date) return;
-      var cancelled = false;
-      window.FS.api.actions.getActions(sel.date).then(function (res) {
-        if (!cancelled) setActions(res.actions || {});
-      });
-      return function () { cancelled = true; };
-    }, [isDaily, sel && sel.date]);
 
     /* Sprint 6.7.1 — same bus subscription as MiddleColumn but for
        this right-detail's action map. Keeps the OverviewTab's
@@ -4592,8 +4583,8 @@
        into OverviewTab as props.isOwnReport and reused below for the
        topic-title editor. */
     var rdCaller = (window.AuthMock && window.AuthMock.currentUser) || null;
-    var isOwnReport = !!(ownerFolder && rdCaller && rdCaller.name
-        && window.FS.api.folderName(rdCaller.name) === ownerFolder);
+    var isOwnReport = !!(ownerFolder && rdCaller
+        && window.FS.api.callerFolder() === ownerFolder);
 
     /* Q7 (keyframe delete) — SAME canEditContent formula used elsewhere in
        this file: TimelineMiddleColumn ~1335 (hasContentEditPerm ||
@@ -4744,12 +4735,45 @@
 
   if (!window.FieldSight) window.FieldSight = {};
   if (!window.FieldSight.PAGES) window.FieldSight.PAGES = {};
+  /* Pending-notes banners (model-fallback D6): a recording that uploaded but
+     whose notes wait on the AI model. Only on the caller's OWN day -- an admin
+     looking at someone else's day must not be shown (or expedite) their
+     sessions. Recovery remounts the day so the notes load. */
+  function isOwnDayView(caller, params, me) {
+    var scope = resolveTimelineScope(caller, params, me);
+    return !!(scope.user && me && scope.user === me);
+  }
+
+  /* The day itself is TimelineMiddleColumn, called (not mounted) so its hooks stay
+     this component's and a recovery can bump props.reloadTick to refetch. */
+  function TimelineWithPendingNotes(props) {
+    var h = React.createElement;
+    var rp = React.useState(function () { return readRouteParams(); });
+    var params = rp[0], setParams = rp[1];
+    React.useEffect(function () {
+      return window.FS.Router.subscribe(function (route) {
+        setParams(Object.assign({}, route.params || {}));
+      });
+    }, []);
+    var tk = React.useState(0);
+    var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
+    var Banners = window.FieldSight.PendingNotesBanners;
+    var date = params.date || (window.FS.api.todayNZDT && window.FS.api.todayNZDT());
+    return h(React.Fragment, null,
+      Banners ? h(Banners, {
+        date: date,
+        enabled: isOwnDayView(caller, params, callerFolder()),
+        onRecovered: function () { tk[1](function (n) { return n + 1; }); },
+      }) : null,
+      TimelineMiddleColumn(Object.assign({}, props, { reloadTick: tk[0] })));
+  }
+
   window.FieldSight.PAGES['/timeline'] = {
     /* One Ask, scoped — the Provider shares the ask context, and the dock
        mounts in the shell's Footer slot so it sits OUTSIDE the middle
        column's scroll area (spec 2026-09-16 §3). */
     Provider: TimelineAskProvider,
-    Middle:   TimelineMiddleColumn,
+    Middle:   TimelineWithPendingNotes,
     Right:    TimelineRightDetail,
     Footer:   TimelineAskDock,
   };
@@ -4788,6 +4812,7 @@
       canSeeOverview: canSeeOverview,
       isAdminLike: isAdminLike,
       resolveTimelineScope: resolveTimelineScope,
+      isOwnDayView: isOwnDayView,
       reconcileTopicOverrides: reconcileTopicOverrides,
       diffWords: diffWords,
       formatEditTime: formatEditTime,

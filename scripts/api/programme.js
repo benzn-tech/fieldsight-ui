@@ -54,9 +54,7 @@
   }
 
   function callerFolder() {
-    var u = (window.AuthMock && window.AuthMock.currentUser) || {};
-    if (!u.name) return null;
-    return window.FS.api.folderName(u.name);
+    return window.FS.api.callerFolder();
   }
 
   function isAdminLike(u) {
@@ -67,7 +65,7 @@
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
     if (caller.role !== 'worker') return tasks;
     var folder = callerFolder();
-    if (!folder) return tasks;
+    if (!folder) return [];   /* no identity => nothing attributable, NOT the whole programme */
     return tasks.filter(function (t) {
       if (t.status === 'group') return false;          /* hide WBS groups for workers */
       return (t.assignees || []).indexOf(folder) !== -1;

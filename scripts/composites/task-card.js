@@ -18,10 +18,9 @@
        row from its rendered list.
      • feat/checkoff-org-api — the persistence call is now the single
        shared FS.api.actions.resolveActionItem(), which routes to the
-       AUTHORISED Aurora write (PATCH /api/org/action-items/{id}) when
-       the item carries a durable actionItemId and the aurora gate is
-       on, and falls back to the legacy unauthenticated DynamoDB toggle
-       otherwise. It ALWAYS RESOLVES {ok:true|false, reason, message} —
+       AUTHORISED Aurora write (PATCH /api/org/action-items/{id}). An item
+       with no durable actionItemId is read-only: no check button. It
+       ALWAYS RESOLVES {ok:true|false, reason, message} —
        previously this card only had a `.catch()`, so a 403 (which
        updateAction RESOLVES as {_accessDenied}) played the fade-out
        animation and dropped the row as if the write had succeeded.
@@ -33,8 +32,8 @@
                       topic_id, actionIndex, folder, work_class, ... } —
                       `folder` is the report OWNER's folder (feat/user-dim-
                       audit-key, Task 6; stamped by today-adapter.js), sent
-                      as `user_folder` on the toggleAction call below so
-                      the audit check-off is keyed per-user, never the
+                      as `user_folder` on the check-off call below so
+                      the bus event is keyed per-user, never the
                       caller/currentUser. `work_class` — Q1 (tier-aware
                       Today/Tasks) — the parent topic's work_class,
                       verbatim off today-adapter.js/tasks-aggregator.js;
@@ -133,7 +132,10 @@
     var task     = props.task;
     var isMine   = !!props.isMine;
     var onSelect = props.onSelect;
-    var checkable = !!props.checkable && task && task.topic_id != null && task.actionIndex != null;
+    /* No durable actionItemId → nothing to write to: read-only, no round
+       button (the legacy toggle that used to cover this case is gone). */
+    var checkable = !!props.checkable && task && task.topic_id != null && task.actionIndex != null
+                    && !!task.actionItemId;
     /* feat/leftover-batch-select (T1) — additive, no-op when `batchMode`
        is omitted/falsy (see prop-trio doc in the file header above). */
     var batchMode = !!props.batchMode;
@@ -162,8 +164,8 @@
          it from the parent's list; there is no uncheck affordance here),
          so checked is hard-coded true. user_folder is the report OWNER's
          folder (feat/user-dim-audit-key, Task 6 — task.folder, stamped by
-         today-adapter.js), never the caller/currentUser; it is only used
-         by the legacy fallback leg. */
+         today-adapter.js), never the caller/currentUser; it identifies the
+         bus event. */
       api.resolveActionItem({
         actionItemId: task.actionItemId,
         date:         props.date,
@@ -202,7 +204,7 @@
        select) / ctrlKey / metaKey (toggle-only) / plain (toggle + new
        anchor) — see today.js onBatchToggle. Selecting never resolves,
        so stopPropagation/preventDefault still apply (keeps the row's
-       onSelect from also firing) but toggleAction is never called here. */
+       onSelect from also firing) but resolveActionItem is never called here. */
     function handleCheckClick(e) {
       if (batchMode) {
         if (e) { e.stopPropagation(); e.preventDefault(); }

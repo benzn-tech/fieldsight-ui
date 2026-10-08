@@ -89,9 +89,7 @@
        use the chip to narrow to just their own assignments. */
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
     var canFilter = caller.role !== 'worker';
-    var callerFolderName = caller.name
-      ? window.FS.api.folderName(caller.name)
-      : null;
+    var callerFolderName = window.FS.api.callerFolder();
 
     var refFilter = React.useState('all');
     var filter    = refFilter[0];

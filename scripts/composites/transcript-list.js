@@ -907,8 +907,7 @@
        never offered where the write would 403 and never hidden where it would succeed.
        `folder_name` is the real folder from GET /api/org/me, threaded onto AuthMock by
        auth/session-bridge.js; the name-derived fallback is the same one isMineTask uses. */
-    var callerFolder = caller.folder_name
-      || (caller.name && window.FS.api.folderName(caller.name)) || null;
+    var callerFolder = window.FS.api.callerFolder();
     var namingOn = !!(sn && state.namingAvailable
                       && sn.mayName({ role: caller.role, callerFolder: callerFolder,
                                       folder: user })
