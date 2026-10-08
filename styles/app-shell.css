@@ -27,6 +27,7 @@ body {
   flex-direction: row;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;  /* iOS Safari: 100vh includes the toolbar area and hides the bottom of the page */
   overflow: hidden;
 }
 
@@ -157,6 +158,48 @@ body {
   }
 }
 
+/* ---------- Responsive: tablet (768–1023px, iPad portrait) ---------------- */
+/* Three panes left the detail column ~196px wide at 820px. Here the list
+   fills the width and the detail pane becomes a right drawer that opens on
+   selection. No backdrop: the list beside the drawer stays tappable so the
+   next row can be opened directly; Back closes it. */
+@media (min-width: 48rem) and (max-width: 63.9375rem) {
+  .middle-column {
+    width: auto !important;     /* beats the inline middleWidth */
+    max-width: none !important;
+    flex: 1;
+  }
+  .resize-handle { display: none; }
+
+  .app-shell:not(.app-shell--full-width) .right-detail {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    height: auto;
+    width: 480px;
+    max-width: 85vw;
+    z-index: 50;
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.18);
+    transform: translateX(100%);
+    visibility: hidden;
+    transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1), visibility 0ms 220ms;
+  }
+  .app-shell.has-selection .right-detail {
+    transform: none;
+    visibility: visible;
+    transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1), visibility 0ms;
+  }
+
+  /* Scoped to .right-detail: the base `.fs-mobile-back { display: none }`
+     comes later in this file and would win a tie. */
+  .right-detail .fs-mobile-back { display: flex; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .right-detail { transition: none !important; }
+}
+
 
 /* ---------- Body class while dragging ------------------------------------- */
 body.fs-dragging,
@@ -176,7 +219,8 @@ body.fs-dragging object {
 }
 
 /* ---------- Responsive: mobile (best-effort fallback) --------------------- */
-@media (max-width: 48rem) {
+/* 47.9375rem, not 48rem: 768px itself is tablet (block below). */
+@media (max-width: 47.9375rem) {
   .app-shell { flex-direction: column; }
 
   .left-nav {
