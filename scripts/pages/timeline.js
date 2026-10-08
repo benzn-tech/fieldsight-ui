@@ -1191,7 +1191,7 @@
       ctx.siteName = report.site;
     }
     var folder = routeUser
-      || (report && report.user_name && window.FS.api.folderName(report.user_name))
+      || (report && window.FS.api.reportOwnerFolder(report))
       || '';
     if (folder) ctx.authorFolder = folder;
     if (report && report.user_name) ctx.authorName = report.user_name;
@@ -1778,6 +1778,7 @@
                       site_id:    (section.report || {}).site_id || null,
                       user:       sectionUser,
                       user_name:  sectionUserName,
+                      user_folder: window.FS.api.reportOwnerFolder(section.report),
                     });
                   }
                 },
@@ -2083,7 +2084,7 @@
       if (!hasReportNow) { setSessionsState({ status: 'idle', sessions: [], excluded: null }); return undefined; }
       /* Same owner-folder resolution as ownerFolder further below (self-view
          has user===null; report.user_name is always the real owner). */
-      var folder = user || (rpt.user_name && window.FS.api.folderName(rpt.user_name)) || null;
+      var folder = user || window.FS.api.reportOwnerFolder(rpt) || null;
       if (!folder || !date) { setSessionsState({ status: 'idle', sessions: [], excluded: null }); return undefined; }
       var cancelled = false;
       setSessionsState({ status: 'loading', sessions: [], excluded: null });
@@ -2150,9 +2151,7 @@
        that gap without making the effect re-run on every new report object
        that resolves to the same folder. */
     var briefFolder = user
-      || ((state.report && state.report.user_name)
-            ? window.FS.api.folderName(state.report.user_name)
-            : null)
+      || (state.report ? window.FS.api.reportOwnerFolder(state.report) : null)
       || null;
 
     React.useEffect(function () {
@@ -2434,6 +2433,7 @@
           date:      date,
           user:      user,
           user_name: report.user_name,
+          user_folder: window.FS.api.reportOwnerFolder(report),
           turnTime:  targetTurnTime,
         });
       }
@@ -2675,7 +2675,7 @@
        in scope by this point (past every early-return branch above). */
     var hasContentEditPerm = !!(window.FS && window.FS.can && window.FS.P
         && window.FS.can(caller, window.FS.P('content', 'edit')));
-    var ownerFolder = user || (report && report.user_name && window.FS.api.folderName(report.user_name)) || null;
+    var ownerFolder = user || (report && window.FS.api.reportOwnerFolder(report)) || null;
     var isOwnReport = !!(ownerFolder && caller
         && window.FS.api.callerFolder() === ownerFolder);
     var canEditContent = hasContentEditPerm || isOwnReport;
@@ -2805,7 +2805,7 @@
     var _selectedSession = selectedSessionId
       ? (daySessions.filter(function (s) { return s.session_id === selectedSessionId; })[0] || null)
       : null;
-    var _draftUserFolder = report.user_name ? window.FS.api.folderName(report.user_name) : null;
+    var _draftUserFolder = window.FS.api.reportOwnerFolder(report);
     function _isActionDone(a, topicId, idx) {
       return window.FS.api.actions.itemState(a,
         window.FS.api.actions.lookupAction(actionState, _draftUserFolder, topicId, idx)).checked;
@@ -2935,7 +2935,7 @@
                report.user_name, never the page `user` param: the
                self-view route has user=null (documented crux trap), and
                report.user_name is always the actual report owner. */
-            userFolder:  report.user_name ? window.FS.api.folderName(report.user_name) : null,
+            userFolder:  window.FS.api.reportOwnerFolder(report),
             selected:    selectedTopicId === topic.topic_id,
             defaultOpen: defaultOpenProp,
             /* Sprint 7 follow-up — when &flag= is present, suppress
@@ -2958,6 +2958,7 @@
                   site_id:    report.site_id || null,   /* see the note at the daily-section onSelect */
                   user:       user,
                   user_name:  report.user_name,
+                  user_folder: window.FS.api.reportOwnerFolder(report),
                 });
               }
             },
@@ -4575,7 +4576,7 @@
        by the AggregatedDayView + single-user onSelect payloads above;
        sel.user_name is the display name fallback (folderName-derived)
        for callers that only set that. */
-    var ownerFolder = sel.user || (sel.user_name && window.FS.api.folderName(sel.user_name)) || null;
+    var ownerFolder = sel.user || sel.user_folder || (sel.user_name && window.FS.api.folderName(sel.user_name)) || null;
 
     /* editable-content-correction — "own report" fallback for the UX-only
        canEditContent gate (Task 17): true when the signed-in caller IS the
@@ -4601,7 +4602,7 @@
 
     var mediaProps = {
       date:  sel.date,
-      user:  sel.user || (sel.user_name && window.FS.api.folderName(sel.user_name)),
+      user:  sel.user || sel.user_folder || (sel.user_name && window.FS.api.folderName(sel.user_name)),
       start: range.start,
       end:   range.end,
     };

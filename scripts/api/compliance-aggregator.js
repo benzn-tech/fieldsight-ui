@@ -462,7 +462,7 @@
       date:               o.report_date,
       site:               o.site_slug || null,
       user_name:          o.author_name || null,
-      user_folder:        o.author_name ? window.FS.api.folderName(o.author_name) : null,
+      user_folder:        window.FS.api.rowFolder(o, 'author_folder', 'author_name'),
       topic_id:           -1,
       topic_title:        'Site safety observations',
       topic_category:     'safety',
@@ -487,7 +487,7 @@
       date:             o.report_date,
       site:             o.site_slug || null,
       user_name:        o.author_name || null,
-      user_folder:      o.author_name ? window.FS.api.folderName(o.author_name) : null,
+      user_folder:      window.FS.api.rowFolder(o, 'author_folder', 'author_name'),
       topic_id:         -1,
       topic_title:      'Quality & Compliance',
       topic_category:   'quality',
@@ -579,7 +579,7 @@
       date:               topic.report_date,
       site:               topic.site_name || null,
       user_name:          topic.user_name || null,
-      user_folder:        topic.user_name ? window.FS.api.folderName(topic.user_name) : null,
+      user_folder:        window.FS.api.rowFolder(topic, 'user_folder', 'user_name'),
       topic_id:           -1,
       topic_title:        topic.title,
       topic_category:     'safety',
@@ -606,7 +606,7 @@
       date:             topic.report_date,
       site:             topic.site_name || null,
       user_name:        topic.user_name || null,
-      user_folder:      topic.user_name ? window.FS.api.folderName(topic.user_name) : null,
+      user_folder:      window.FS.api.rowFolder(topic, 'user_folder', 'user_name'),
       topic_id:         -1,
       topic_title:      topic.title,
       topic_category:   'quality',
@@ -655,7 +655,7 @@
       if (!r || r._notFound || r.available_users) return;
       /* The folder we ASKED for is the identity; the display name is only a
          last resort (it is not a folder: "Deandre' Alberts" is Deandre__Alberts). */
-      var folder = x.user || (r.user_name ? window.FS.api.folderName(r.user_name) : null);
+      var folder = x.user || window.FS.api.reportOwnerFolder(r);
       var resolutions = fanout.resolutions;   /* durable resolved-state map, Aurora-first */
 
       /* b) Topic-level safety_flags — built FIRST (but appended after
@@ -861,7 +861,7 @@
       if (!r || r._notFound || r.available_users) return;
       /* The folder we ASKED for is the identity; the display name is only a
          last resort (it is not a folder: "Deandre' Alberts" is Deandre__Alberts). */
-      var folder = x.user || (r.user_name ? window.FS.api.folderName(r.user_name) : null);
+      var folder = x.user || window.FS.api.reportOwnerFolder(r);
       var resolutions = fanout.resolutions;   /* durable resolved-state map, Aurora-first */
 
       /* a) Report-level quality_and_compliance items. These carry a

@@ -1016,7 +1016,7 @@
               'No reports yet for this site.')
           : React.createElement('div', { className: 'fs-sites-detail__reports' },
               topReports.map(function (r) {
-                var folder = r.author ? window.FS.api.folderName(r.author) : null;
+                var folder = r.user_folder || (r.author ? window.FS.api.folderName(r.author) : null);
                 return React.createElement('button', {
                   key:       r.key,
                   type:      'button',

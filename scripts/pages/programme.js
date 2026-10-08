@@ -1942,9 +1942,7 @@
               text:         action ? action.action : '(action_index out of range)',
               responsible:  action ? action.responsible : null,
               topic_title:  topic.topic_title,
-              user_folder:  report && report.user_name
-                              ? window.FS.api.folderName(report.user_name)
-                              : null,
+              user_folder:  report ? window.FS.api.reportOwnerFolder(report) : null,
             });
           });
         });
