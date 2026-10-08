@@ -362,9 +362,7 @@
           rows.push({
             date:        x.date,
             user_name:   x.report.user_name,
-            user_folder: x.report.user_name
-                          ? window.FS.api.folderName(x.report.user_name)
-                          : null,
+            user_folder: window.FS.api.reportOwnerFolder(x.report),
             photos:      photosForDate,
           });
           total += photosForDate.length;

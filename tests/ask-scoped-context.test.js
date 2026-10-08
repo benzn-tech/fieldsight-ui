@@ -852,7 +852,7 @@ function loadTimeline(reactExtra) {
   global.React = makeReactStub(reactExtra);
   global.window = {
     FieldSight: {},
-    FS: { api: { folderName: n => String(n || '').trim().replace(/ /g, '_'),
+    FS: { api: { folderName: n => String(n || '').trim().replace(/ /g, '_'), reportOwnerFolder: r => !r ? null : (r.user || (r.user_name ? String(r.user_name).trim().replace(/ /g, '_') : null)),
       callerFolder: function () { var u = (global.window.AuthMock && global.window.AuthMock.currentUser) || {}; return u.folder_name || (this.useMocks && u.name ? String(u.name).trim().replace(/\s+/g, '_') : null); }, } },
     AuthMock: { currentUser: null },
     location: { href: 'https://example.test/#/timeline' },
@@ -1129,7 +1129,7 @@ function driveMiddleReset(opts) {
     FieldSight: {},
     FS: {
       api: {
-        folderName: n => String(n || '').trim().replace(/ /g, '_'),
+        folderName: n => String(n || '').trim().replace(/ /g, '_'), reportOwnerFolder: r => !r ? null : (r.user || (r.user_name ? String(r.user_name).trim().replace(/ /g, '_') : null)),
         callerFolder: function () { var u = (global.window.AuthMock && global.window.AuthMock.currentUser) || {}; return u.folder_name || (this.useMocks && u.name ? String(u.name).trim().replace(/\s+/g, '_') : null); },
         org: { getOrgSites: () => opts.orgSitesPromise() },
         programme: { getSuggestions: () => Promise.resolve({ suggestions: [] }) },

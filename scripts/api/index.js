@@ -69,6 +69,20 @@
     return folderName(n);
   }
 
+  /* The folder of a ROW (topic / observation / task row). Prefer the folder the
+     backend sent (`user_folder` on topics, `author_folder` on observations) --
+     it is the directory's identity key. Only when the field is ABSENT (old
+     backend, mock) derive it from the display name; a field that is present
+     and null means "no linked user" and stays null. */
+  function rowFolder(row, folderKey, nameKey) {
+    if (!row) return null;
+    if (Object.prototype.hasOwnProperty.call(row, folderKey) && row[folderKey] !== undefined) {
+      return row[folderKey] || null;
+    }
+    var n = row[nameKey];
+    return n ? folderName(n) : null;
+  }
+
   /* Small artificial delay so optimistic-UI patterns can be tested. */
   function delay(ms) {
     return new Promise(function (resolve) {
@@ -157,6 +171,7 @@
     folderName: folderName,
     callerFolder: callerFolder,
     reportOwnerFolder: reportOwnerFolder,
+    rowFolder: rowFolder,
     mockPresignedUrl: mockPresignedUrl,
     addDaysISO: addDaysISO,
     todayNZDT: todayNZDT,
