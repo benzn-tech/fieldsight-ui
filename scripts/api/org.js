@@ -380,6 +380,27 @@
     return { site: opts.site, date: opts.date, forecast: null, actual: null };
   }
 
+  /* What the pipeline did with the recordings (platform_admin; the pipeline's
+     trace_views). Day: the folders active on `date`, or one folder's
+     recordings step by step. Funnel: per folder over from..to. */
+  async function getTraceDay(opts) {
+    opts = opts || {};
+    if (orgLive()) {
+      return api.orgRequest('/trace/day', { params: { date: opts.date, folder: opts.folder || undefined } });
+    }
+    await api.delay();
+    return { date: opts.date, folders: [] };
+  }
+
+  async function getTraceFunnel(opts) {
+    opts = opts || {};
+    if (orgLive()) {
+      return api.orgRequest('/trace/funnel', { params: { from: opts.from, to: opts.to } });
+    }
+    await api.delay();
+    return { from: opts.from, to: opts.to, folders: [] };
+  }
+
   async function assetUrl(key) {
     if (orgLive()) return api.orgRequest('/asset-url', { params: { key: key } });
     await api.delay();
@@ -1510,6 +1531,8 @@
     getComplianceResolutions: getComplianceResolutions,
     getLiveItems: getLiveItems,
     getSiteWeather: getSiteWeather,
+    getTraceDay: getTraceDay,
+    getTraceFunnel: getTraceFunnel,
     getPendingSessions: getPendingSessions,
     expediteSession: expediteSession,
     getSessions: getSessions,

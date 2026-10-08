@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="styles/tokens.css?v=8" />
   <link rel="stylesheet" href="styles/app-shell.css?v=17" />
   <link rel="stylesheet" href="styles/components.css?v=15" />
-  <link rel="stylesheet" href="styles/composites.css?v=141" />
+  <link rel="stylesheet" href="styles/composites.css?v=142" />
 
   <style>
     /* Ensure full-bleed with no scroll */
@@ -38,7 +38,7 @@
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 
   <!-- FieldSight globals: tokens + roles (load order matters) -->
-  <script src="scripts/fs-globals.js?v=11"></script>
+  <script src="scripts/fs-globals.js?v=12"></script>
   <!-- Sprint 7.0 — theme module (must load after fs-globals, before app-shell) -->
   <script src="scripts/theme.js?v=1"></script>
   <!-- Sprint 7.6 — density module (must load after fs-globals, before app-shell) -->
@@ -53,7 +53,7 @@
   <script src="scripts/auth-mock.js?v=2"></script>
 
   <!-- React components (Babel transpiles JSX in-browser) -->
-  <script type="text/babel" src="scripts/left-nav.js?v=20"></script>
+  <script type="text/babel" src="scripts/left-nav.js?v=21"></script>
   <script type="text/babel" src="scripts/drag-divider.js?v=3"></script>
   <script type="text/babel" src="scripts/components/button.js?v=1"></script>
   <script type="text/babel" src="scripts/components/input.js?v=2"></script>
@@ -240,7 +240,7 @@
   <script src="scripts/mock/templates.fixture.js?v=1"></script>
   <!--   3. Per-endpoint api modules (read fixtures via FS.api.*) -->
   <script src="scripts/api/sites.js?v=5"></script>
-  <script src="scripts/api/org.js?v=35"></script>
+  <script src="scripts/api/org.js?v=36"></script>
   <!-- staffing — pure "who is on which project, and as what" helpers, read by
        pages/team.js. Loads before it (and before any page module) because the
        page calls into it during its first render. -->
@@ -391,6 +391,7 @@
   <script type="text/babel" src="scripts/pages/evidence.js?v=20"></script>
   <script type="text/babel" src="scripts/pages/programme.js?v=29"></script>
   <script type="text/babel" src="scripts/pages/my-work.js?v=1"></script>
+  <script type="text/babel" src="scripts/pages/trace.js?v=1"></script>
   <script type="text/babel" src="scripts/pages/safety.js?v=25"></script>
   <script type="text/babel" src="scripts/pages/quality.js?v=21"></script>
   <!-- Sprint 7.1+7.2 — /team page -->
