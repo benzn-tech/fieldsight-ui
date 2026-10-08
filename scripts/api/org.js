@@ -304,6 +304,63 @@
                      global_role: body.global_role || 'worker' }, memberships: body.memberships || [] };
   }
 
+  /* POST /api/org/sites/{site_id}/external-members -- add an EXISTING user of
+     ANOTHER company to one project, by exact login email. Body is built from
+     the two named fields only (the whitelist is the contract: nothing else the
+     caller holds may ride along). orgRequest THROWS on 400/409 but returns an
+     envelope for 403/404, so the envelopes are turned into thrown errors here
+     -- one failure channel for the modal, carrying status + the server text. */
+  var EXTERNAL_ROLES = ['worker', 'site_manager', 'pm'];
+  async function addExternalMember(siteId, input) {
+    input = input || {};
+    var body = { email: String(input.email == null ? '' : input.email).trim(), role: input.role };
+    if (orgWrite()) {
+      var res = await api.orgRequest('/sites/' + encodeURIComponent(siteId) + '/external-members',
+                                     { method: 'POST', body: body });
+      if (res && (res._accessDenied || res._notFound)) {
+        var msg = res._accessDenied ? res.error : (res.raw && res.raw.error);
+        var err = new Error(msg || ('HTTP ' + res.status));
+        err.status = res.status; err.body = res.raw || { error: msg };
+        throw err;
+      }
+      return res;
+    }
+    await api.delay(400);
+    return { site_id: siteId, role: body.role, external: true,
+             user_name: body.email.split('@')[0], home_company_name: 'Another Company',
+             email: body.email };
+  }
+
+  /* Only a company admin or a platform_admin may add an external member; the
+     raw role is on the profile (session-bridge). gm/pm/site_manager/worker no. */
+  function canAddExternalMember(user) {
+    return !!user && (user.role === 'admin' || user.role === 'platform_admin');
+  }
+
+  /* The sentence the modal shows for a failed add. */
+  function externalMemberErrorMessage(err) {
+    var status = err && err.status;
+    var text = (err && err.body && err.body.error) || (err && err.message) || '';
+    if (status === 404) {
+      return /no fieldsight user/i.test(text) ? 'No FieldSight user with that email'
+                                              : 'Project not found';
+    }
+    if (status === 400) {
+      return /normal add member/i.test(text)
+        ? 'This person is already in your company — use Add member'
+        : (text || 'Check the email and role');
+    }
+    if (status === 409) return 'Already a member of this project';
+    if (status === 403) return 'Only company admins can add external members';
+    return 'Could not add external member';
+  }
+
+  /* "from {home company}" for an external row, '' for everyone else. */
+  function externalBadgeText(u) {
+    return u && u.external && u.home_company_name ? 'from ' + u.home_company_name
+         : (u && u.external ? 'external' : '');
+  }
+
   async function updateMemberRole(sub, role) {
     if (orgWrite()) return api.orgRequest('/members/' + encodeURIComponent(sub) + '/role', { method: 'PATCH', body: { global_role: role } });
     await api.delay();
@@ -1587,6 +1644,9 @@
     confirmThreadSuggestion: confirmThreadSuggestion,
     rejectThreadSuggestion: rejectThreadSuggestion,
     getSiteMembers: getSiteMembers,
+    addExternalMember: addExternalMember, canAddExternalMember: canAddExternalMember,
+    externalMemberErrorMessage: externalMemberErrorMessage, externalBadgeText: externalBadgeText,
+    EXTERNAL_ROLES: EXTERNAL_ROLES,
     getSiteContributors: getSiteContributors,
     getPortfolioRollup: getPortfolioRollup,
     getActionClosures: getActionClosures,

@@ -4134,7 +4134,7 @@
        (it validates against members only) — and refusing to re-select the
        value that is already set costs nothing. */
     function optionsFor(current) {
-        var opts = roster.users.map(function (u) { return { value: u.name, label: u.name }; });
+        var opts = roster.users.map(function (u) { return { value: u.name, label: u.name + (u.external ? ' (' + window.FS.api.org.externalBadgeText(u) + ')' : '') }; });
         if (current && !opts.some(function (o) { return o.value === current; })) {
             opts.unshift({ value: current, label: current + ' (not on this site)' });
         }
