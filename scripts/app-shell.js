@@ -1101,10 +1101,11 @@ function RightDetail({ route, selectedItem, onClose }) {
   var page = window.FieldSight.getPageForRoute && window.FieldSight.getPageForRoute(route);
   if (page && page.Right) {
     return React.createElement('div', {
-      className: 'right-detail',
-      /* alignItems/justifyContent reset the empty-state centering (.right-detail
-         in app-shell.css) so a populated Right panel fills the full pane width. */
-      style: { background: 'var(--surface-panel)', height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start' },
+      /* right-detail--page resets the empty-state centering so a populated
+         Right panel fills the full pane width. Layout stays in CSS: an inline
+         display here overrode the mobile pane swap. */
+      className: 'right-detail right-detail--page',
+      style: { background: 'var(--surface-panel)' },
     },
       /* Sprint 8.4.1 — back button visible only on mobile via CSS */
       React.createElement(MobileBack, { onClose: onClose }),
