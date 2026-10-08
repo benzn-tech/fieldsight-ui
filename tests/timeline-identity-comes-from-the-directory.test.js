@@ -122,6 +122,7 @@ function mount(o) {
     orgBaseUrl: 'https://org.example',
     legacyReadFallback: o.legacy !== false,
     folderName: function (n) { return String(n || '').replace(/ /g, '_'); },
+    reportOwnerFolder: function (r) { return !r ? null : (r.user || (r.user_name ? String(r.user_name).replace(/ /g, '_') : null)); },
     callerFolder: function () { var u = (global.window.AuthMock && global.window.AuthMock.currentUser) || {}; return u.folder_name || (this.useMocks && u.name ? String(u.name).trim().replace(/\s+/g, '_') : null); },
     todayNZDT: function () { return '2026-09-29'; },
     delay: function () { return Promise.resolve(); },
