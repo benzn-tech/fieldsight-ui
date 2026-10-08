@@ -175,7 +175,7 @@
 
           var obsRes = await window.FS.api.org.createObservation({
             kind:                'safety',
-            site_slug:           siteValue,
+            site_slug:           window.FS.api.sites.slugForSite(sitesList, siteValue),
             observation:         form.observation.trim(),
             risk_level:          form.risk_level,
             recommended_action:  form.recommended_action.trim() || null,

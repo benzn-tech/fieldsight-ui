@@ -41,9 +41,7 @@
   /* ---------- Helpers --------------------------------------------------- */
 
   function callerFolder() {
-    var u = (window.AuthMock && window.AuthMock.currentUser) || {};
-    if (!u.name) return null;
-    return window.FS.api.folderName(u.name);
+    return window.FS.api.callerFolder();
   }
 
   function isAdminLike(user) {
@@ -61,12 +59,10 @@
      falling back to fixtures on error). Extracted so the site-scoped path
      below can fall back to the same unscoped source if getSiteUsers fails. */
   function allUsersFoldersPromise() {
+    /* No fixture fallback: a rejected directory read propagates to the
+       caller (mock-mode getUsers() returns the fixtures itself). */
     return window.FS.api.sites.getUsers().then(function (res) {
       return ((res && res.users) || []).map(deriveFolder).filter(Boolean);
-    }).catch(function () {
-      var fxUsers = (window.FieldSight && window.FieldSight.fixtures
-        && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [];
-      return fxUsers.map(deriveFolder).filter(Boolean);
     });
   }
 
@@ -260,8 +256,7 @@
          /evidence Photos tab isn't blank when running as admin. Sourced
          from the real GET /api/users (report identity) — live =
          pass-through of /api/users, mock = fixtures (unchanged
-         behaviour). Falls back to the fixtures read on any /api/users
-         error.
+         behaviour). A failure rejects — no fixture substitution.
 
          batch A2 Task 4 — when there's no forced single user AND an
          active site is selected, narrow the fan-out to that site's users

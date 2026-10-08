@@ -58,12 +58,13 @@
 
    feat/user-dim-audit-key (Task 6) — audit-state lookups and every
    derived task item now carry `folder` = the REPORT OWNER's folder
-   (see `ownerFolder` in adapt() below), so today.js's keep()/bus
-   removal predicate and task-card.js's toggleAction call can key the
-   check-off per-user instead of colliding on (topic_id, action_index)
-   alone across two different owners' reports on the same date. Reads
-   go through FS.api.actions.lookupAction (composite key with legacy
-   bare-key fallback) — never a raw actionState[key] lookup.
+   (see `ownerFolder` in adapt() below), so today.js's bus removal
+   predicate can tell two different owners' items apart instead of
+   colliding on (topic_id, action_index) alone on the same date.
+
+   Done-ness: a task is done when its own action_items.status is 'done'
+   (read straight off the item, see deriveStatus). There is no overlay
+   map and no ctx.actionState any more.
 
    Exported to window.FS.api.todayAdapter.adapt(report, ctx)
    ========================================================================== */
@@ -80,17 +81,22 @@
   };
 
   /* Map a daily-report priority + the existing TaskCard tone vocabulary. */
+  /* The report owner's FOLDER: the caller's directory folder when it is the
+     caller's own report (a display name is not a folder), else derived. */
+  function ownerFolderOf(report) {
+    var api = window.FS.api;
+    if (api.reportOwnerFolder) return api.reportOwnerFolder(report);
+    return report.user_name ? api.folderName(report.user_name) : null;
+  }
+
   function priorityLabel(p) {
     if (!p) return 'Medium';
     return p.charAt(0).toUpperCase() + p.slice(1);
   }
 
-  /* feat/editable-tasks-ui — status is now the AUTHORITATIVE
-     action_items.status column (Task 1, PATCH /api/org/action-items/{id}).
-     The DynamoDB check-off boolean (BACKEND-CONTEXT §4.10) is kept ONLY as
-     a legacy fallback: used when the item carries no column status
-     (pre-migration days), so a historical check-off never visibly
-     reverts. Tone vocabulary verified against the real Badge component
+  /* Status is the AUTHORITATIVE action_items.status column
+     (PATCH /api/org/action-items/{id}); an item with no column status
+     reads as open. Tone vocabulary verified against the real Badge component
      (scripts/components/badge.js: neutral|accent|success|warning|danger|
      info — NO 'magenta' tone exists there, despite tokens.css defining a
      bespoke --status-blocked magenta/fuchsia hue for a future dedicated
@@ -99,8 +105,8 @@
      timeline.js MEETING_STATUS_TONE, programme-task-card.js) — all of
      them use 'danger' for blocked. Matched here for consistency. */
   var STATUS_TONE = { done: 'success', in_progress: 'info', blocked: 'danger', open: 'info' };
-  function deriveStatus(columnStatus, checked) {
-    var s = columnStatus || (checked ? 'done' : 'open');
+  function deriveStatus(columnStatus) {
+    var s = columnStatus || 'open';
     var label = s === 'in_progress' ? 'In progress' : s.charAt(0).toUpperCase() + s.slice(1);
     return { status: label, statusTone: STATUS_TONE[s] || 'info' };
   }
@@ -288,7 +294,6 @@
        ctx.currentUserFolder). null/undefined here is fine — isMineTask
        falls back to deriving it from currentUserName itself. */
     var currentUserFolder = ctx.currentUserFolder || (window.AuthMock && window.AuthMock.currentUser && window.AuthMock.currentUser.folder_name) || null;
-    var actionState     = ctx.actionState     || {}; /* composite/legacy map — read via FS.api.actions.lookupAction only */
     var nowMinutes      = ctx.nowMinutes      != null ? ctx.nowMinutes : (16 * 60); /* 16:00 NZDT */
     var siteSlugByName  = ctx.siteSlugByName  || {};
     /* feat/editable-tasks-ui — org SITE UUID space (org.getOrgSites()'s
@@ -324,17 +329,15 @@
       };
     }
 
-    /* feat/user-dim-audit-key (Task 6) — the REPORT OWNER's folder. Feeds
-       the audit-state composite key (lookupAction below) and is stamped
-       onto every task item as `folder`, so today.js's keep()/bus-removal
-       predicate and task-card.js's toggleAction call can thread the
-       owner through without re-deriving it. MUST be the RAW ctx.idPrefix
+    /* feat/user-dim-audit-key (Task 6) — the REPORT OWNER's folder. Stamped
+       onto every task item as `folder`, so today.js's bus-removal
+       predicate can thread the owner through without re-deriving it. MUST be the RAW ctx.idPrefix
        — the `idPrefix` local above is a DIFFERENT, id-NAMESPACING string
        with a trailing '_' appended (see its declaration a few lines up);
-       reusing that would corrupt both the audit key and the user_folder
-       sent to toggleAction. Falls back to deriving from report.user_name
+       reusing that would corrupt both the owner key and the user_folder
+       sent with the check-off. Falls back to deriving from report.user_name
        on the single-report fast path, where ctx.idPrefix is omitted. */
-    var ownerFolder = ctx.idPrefix || (report.user_name ? window.FS.api.folderName(report.user_name) : null);
+    var ownerFolder = ctx.idPrefix || ownerFolderOf(report);
 
     /* site_name is report.site verbatim (the ONLY site field a report
        carries — see the comment above, no slug exists on the report
@@ -358,9 +361,7 @@
       generatedAt: '5:42 AM',
       bullets:     bullets,
       date:        report.report_date || ctx.date || null,
-      userFolder:  report.user_name
-                     ? window.FS.api.folderName(report.user_name)
-                     : null,
+      userFolder:  ownerFolderOf(report),
     };
 
     /* ---- urgent: safety topics + non-empty safety_flags + high obs ----
@@ -420,13 +421,9 @@
       if (t.redacted) return;
       (t.action_items || []).forEach(function (a, idx) {
         var key = t.topic_id + '_' + idx;
-        var auditEntry = window.FS.api.actions.lookupAction(actionState, ownerFolder, t.topic_id, idx);
-        var checked = !!(auditEntry && auditEntry.checked);
-        /* feat/editable-tasks-ui — a.status is the read shim's new
-           authoritative action_items.status column; checked (DynamoDB
-           audit) is now only consulted as the pre-migration fallback
-           inside deriveStatus itself. */
-        var status = deriveStatus(a.status, checked);
+        /* a.status is the read shim's authoritative action_items.status
+           column — the only place done-ness lives. */
+        var status = deriveStatus(a.status);
         var task = {
           id:          idPrefix + 'action_' + key,
           /* feat/editable-tasks-ui — durable action_items.id (read shim),
@@ -537,13 +534,13 @@
           /* feat/today-rolling-open-items — the report date this item
              was extracted from. today.js's rolling loader fans out
              across many report dates at once, so each item must carry
-             its OWN origin date for per-item check-off (toggleAction)
+             its OWN origin date for per-item check-off
              and age computation — mirrors morningBrief.date above. */
           date:        report.report_date || ctx.date || null,
           /* feat/user-dim-audit-key (Task 6) — report OWNER's folder
              (never AuthMock.currentUser / caller) — see ownerFolder
-             above. today.js's keep()/bus predicate and task-card.js's
-             toggleAction read this to key the audit lookup/write. */
+             above. today.js's bus predicate and task-card.js's
+             check-off read this to key the owner. */
           folder:      ownerFolder,
           site_name:   siteName,
           site_slug:   siteSlug,

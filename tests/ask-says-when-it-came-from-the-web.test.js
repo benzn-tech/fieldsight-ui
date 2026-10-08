@@ -53,7 +53,7 @@ test('sources are named by publisher, not by the redirect they arrived through',
      the two are not in source order, and slicing between them silently
      produced an empty string that passed every assertion. */
   const start = askChat.indexOf('function renderWebOrigin');
-  const block = askChat.slice(start, start + 1200);
+  const block = askChat.slice(start, start + 1600);
   assert.ok(block.length > 400, 'the slice found nothing to assert on');
   assert.match(block, /sourceDomain\(s\)/);
   assert.ok(!/sourceHost\(s\.url\)/.test(block), 'it parsed the redirect URL');

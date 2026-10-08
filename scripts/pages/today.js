@@ -28,17 +28,17 @@
 
    Pipeline (reused, not reimplemented):
      FS.api.timeline.getTimeline (DailyReport)  ─┐
-     FS.api.actions.getActionsRange (audit)     ├─► todayAdapter.adapt
-     fixtures.sites (for primary_site lookup)   ─┘   (same pure split
-                                                        used by both #1
-                                                        and #2 below)
+     fixtures.sites (for primary_site lookup)   ─┴─► todayAdapter.adapt
+                                                      (same pure split
+                                                       used by both #1
+                                                       and #2 below)
 
    Sprint 2 task-check-off lands on REAL action items here:
      • TaskCard for an item Jarley owns gets a checkbox
      • Click → optimistic toggle through FS.api.actions.resolveActionItem
        (feat/checkoff-org-api: the AUTHORISED PATCH /api/org/action-items/
-       {id} when the item carries a durable actionItemId, else the legacy
-       unauthenticated toggle), keyed by the ITEM'S OWN origin date
+       {id}; an item with no durable actionItemId is shown read-only, with
+       no checkbox), keyed by the ITEM'S OWN origin date
        (rolling items carry mixed dates — there is no single page-level
        "today" to check off against any more). Team cards are checkable
        too now; the server's ACL, not the UI, decides who may resolve
@@ -217,7 +217,8 @@
      item with no topic_id/actionIndex/date has nothing for
      FS.api.actions.resolveActionItem to resolve, batched or not. */
   function isBatchEligibleTask(t) {
-    return !!t && t.topic_id != null && t.actionIndex != null && !!t.date;
+    return !!t && t.topic_id != null && t.actionIndex != null && !!t.date
+        && !!t.actionItemId;   /* no durable id → read-only, no check button */
   }
 
   /* Today's date in NZDT — see BUG-19. We compute "today" via
@@ -548,7 +549,7 @@
     }).catch(function () { return []; });
   }
 
-  function buildTodayFromReport(report, actions, caller, date, siteSlugMap, idPrefix, onSiteMembers, siteIdMap) {
+  function buildTodayFromReport(report, caller, date, siteSlugMap, idPrefix, onSiteMembers, siteIdMap) {
     return window.FS.api.todayAdapter.adapt(report, {
       currentUserName: caller && caller.name,
       /* fix/mine-team-attribution — the viewer's REAL folder_name, when
@@ -556,7 +557,6 @@
          .folder_name from GET /api/org/me); today-adapter.js's isMineTask
          call falls back to deriving it from currentUserName when absent. */
       currentUserFolder: caller && caller.folder_name,
-      actionState:     actions || {},
       date:            date,
       siteSlugByName:  siteSlugMap || {},
       idPrefix:        idPrefix || null,
@@ -596,14 +596,10 @@
      tasks-aggregator.js:adminUserFolders() / compliance-aggregator.js:
      adminUserFolders() — same source, same fallback, intentional parity. */
   async function adminUserFolders() {
-    try {
-      var usersRes = await window.FS.api.sites.getUsers();
-      return ((usersRes && usersRes.users) || []).map(deriveFolderFromUser).filter(Boolean);
-    } catch (e) {
-      return ((window.FieldSight && window.FieldSight.fixtures
-          && window.FieldSight.fixtures.sites && window.FieldSight.fixtures.sites.users) || [])
-          .map(deriveFolderFromUser).filter(Boolean);
-    }
+    /* No fixture fallback: a failed directory read propagates (mock-mode
+       getUsers() returns the fixtures itself and never throws). */
+    var usersRes = await window.FS.api.sites.getUsers();
+    return ((usersRes && usersRes.users) || []).map(deriveFolderFromUser).filter(Boolean);
   }
 
   /* report.site is a DISPLAY NAME only ('SB1108 Ellesmere College') — no
@@ -820,7 +816,7 @@
       setState({ status: 'loading' });
 
       var today    = window.FS.api.todayNZDT();
-      var folder   = window.FS.api.folderName(caller.name);
+      var folder   = window.FS.api.callerFolder();
 
       /* feat/today-rolling-open-items (§D) — widened from "scheduled
          today" to "deadline within the next PROGRAMME_DEADLINE_DAYS
@@ -875,15 +871,13 @@
         if (!multiProject) {
           return Promise.all([
             window.FS.api.timeline.getTimeline({ date: date }),
-            window.FS.api.actions.getActions(date),
             siteSlugMapPromise,
             siteIdMapPromise,
           ]).then(function (results) {
             if (cancelled) return null;
             var report     = results[0];
-            var actions    = results[1].actions || {};
-            var siteSlugMap = results[2];
-            var siteIdMap    = results[3];
+            var siteSlugMap = results[1];
+            var siteIdMap    = results[2];
             /* Non-admin path: getTimeline() above is called with no
                `user`, so the backend already force-scopes to the
                caller's own identity (aurora shim forces user=self;
@@ -904,11 +898,10 @@
             var onSiteSlug = resolveOnSiteSlug(report, siteSlugMap, resolveCallerPrimarySite(caller));
             return getOnSiteMembers(onSiteSlug).then(function (onSiteMembers) {
               if (cancelled) return null;
-              var data = buildTodayFromReport(report, actions, caller, date, siteSlugMap, null, onSiteMembers, siteIdMap);
+              var data = buildTodayFromReport(report, caller, date, siteSlugMap, null, onSiteMembers, siteIdMap);
               return {
                 ok:            true,
                 data:          data,
-                actions:       actions,
                 effectiveDate: date,
                 today:         today,
               };
@@ -929,18 +922,12 @@
         return Promise.all([
           adminFoldersPromise,
           siteSlugMapPromise,
-          window.FS.api.actions.getActions(date),
           siteIdMapPromise,
         ]).then(function (results) {
           if (cancelled) return null;
           var folders     = results[0];
           var siteSlugMap = results[1];
-          var actionsRes  = results[2];
-          var siteIdMap    = results[3];
-          if (actionsRes && actionsRes._accessDenied) {
-            return { accessDenied: true, message: actionsRes.error };
-          }
-          var actions = actionsRes.actions || {};
+          var siteIdMap    = results[2];
 
           var thunks = folders.map(function (f) {
             return function () {
@@ -989,14 +976,13 @@
                 var onSiteMembers = slug ? (membersBySlug[slug] || []) : [];
                 return {
                   folder: x.folder,
-                  data:   buildTodayFromReport(x.report, actions, caller, date, siteSlugMap, x.folder, onSiteMembers, siteIdMap),
+                  data:   buildTodayFromReport(x.report, caller, date, siteSlugMap, x.folder, onSiteMembers, siteIdMap),
                 };
               });
               var merged = mergeTodayData(entries, folder);
               return {
                 ok:            true,
                 data:          merged,
-                actions:       actions,
                 effectiveDate: date,
                 today:         today,
               };
@@ -1026,20 +1012,19 @@
            1. Resolve report-dates per folder in [from, today] via
               FS.api.dates.getDates (pooled) — the (date, folder) pairs
               with hasReport true.
-           2. ONE FS.api.actions.getActionsRange({from, to}) call for
-              the whole span (not cached, but a single request).
+           2. (There used to be a second leg here: one overlay fetch for
+              the whole span. Done-ness now rides on each task's own
+              status, so nothing else is fetched.)
            3. Pooled FS.api.timeline.getTimeline per (date, folder) pair
               — cached (PR #53), so repeat visits are cheap; first load
               can issue up to pairs.length requests (pooled at 8) — now
               larger than before since the span covers every report
               date, not just a trailing 30d slice.
            4. buildTodayFromReport (SAME adapter call as loadFor above)
-              per report, using that report's OWN date's audit slice —
-              so status/checked state is correct for THAT date, not
-              today's. Items whose audit key is checked are dropped
-              (todayAdapter.adapt keeps checked items with status
-              'Done' rather than dropping them — see today-adapter.js
-              — so this filter is load-bearing, not a safety net).
+              per report. Items whose own status is done are dropped
+              (todayAdapter.adapt keeps done items with status 'Done'
+              rather than dropping them — see today-adapter.js — so this
+              filter is load-bearing, not a safety net).
            5. Each surviving item is stamped with its origin date (also
               carried by the adapter itself now — today-adapter.js §
               feat/today-rolling-open-items), ageDays (diffDaysISO vs
@@ -1064,6 +1049,8 @@
       function loadRollingOpenItems() {
         var EMPTY = { myTasks: [], teamTasks: [] };
 
+        /* folder is null for a live caller with no folder_name (unenrolled; /me
+           gives every enrolled user one) -- then there are no rolling items. */
         var foldersPromise = multiProject ? adminFoldersPromise : Promise.resolve([folder]);
 
         return Promise.all([foldersPromise, siteSlugMapPromise, window.FS.api.window.getSpan(), siteIdMapPromise])
@@ -1103,16 +1090,8 @@
             (perFolder || []).forEach(function (list) { if (list) pairs = pairs.concat(list); });
             if (pairs.length === 0) return EMPTY;
 
-            /* 2) One audit fan-out for the whole span. */
-            return window.FS.api.actions.getActionsRange({ from: from, to: today }).then(function (auditRange) {
-              if (cancelled) return EMPTY;
-              /* Partial data beats a dead page — the today-scoped
-                 brief/urgent/onSite load (loadFor above) succeeds
-                 independently of this leg. */
-              if (auditRange && auditRange._accessDenied) return EMPTY;
-              var byDate = auditRange.byDate || {};
-
-              /* 3) Pooled report fan-out. */
+            {
+              /* 2) Pooled report fan-out. */
               var reportThunks = pairs.map(function (p) {
                 return function () {
                   return window.FS.api.timeline.getTimeline({ date: p.date, user: p.folder })
@@ -1127,30 +1106,13 @@
                 var myById   = {};
                 var teamById = {};
 
-                function keep(list, bucket, actionState, date) {
+                function keep(list, bucket, date) {
                   (list || []).forEach(function (item) {
-                    /* feat/user-dim-audit-key (Task 6) — item.folder is
-                       the report OWNER's folder, stamped by
-                       today-adapter.js. lookupAction tries the
-                       composite key first, falls back to the legacy
-                       bare key only for true unmigrated records —
-                       never a raw actionState[bareKey] lookup
-                       (ANTI-REGRESSION IRON RULE). */
-                    var auditEntry = window.FS.api.actions.lookupAction(actionState, item.folder, item.topic_id, item.actionIndex);
-                    /* feat/editable-tasks-ui (Task 3 reconciliation) — done-ness
-                       now lives in TWO places during the overlay-retirement
-                       window: the authoritative action_items.status column
-                       (a check-off via task-card.js now writes status:'done'
-                       through PATCH, NOT the DynamoDB overlay) AND the legacy
-                       overlay boolean (older days / the Timeline ActionItemRow
-                       still on toggleAction). Drop on EITHER, or a task
-                       completed via the new column path would resurface in this
-                       rolling OPEN-items list (badge 'Done') on the next load,
-                       since the overlay was never written for it. item.status is
-                       today-adapter.js deriveStatus()'s label ('Done' only when
-                       the column is done). */
-                    var resolved = item.status === 'Done' || !!(auditEntry && auditEntry.checked);
-                    if (resolved) return; /* done (column) or checked off (overlay) — drop */
+                    /* Done-ness is the task's own action_items.status
+                       column; item.status is today-adapter.js
+                       deriveStatus()'s label ('Done' only when the column
+                       is done). There is no second store to consult. */
+                    if (item.status === 'Done') return; /* done — drop */
 
                     item.date       = item.date || date;
                     /* topic_id restarts at 0 in every report, so
@@ -1178,11 +1140,10 @@
                   var report = x.report;
                   if (report._notFound || report.available_users || report._accessDenied) return;
 
-                  var actionState = byDate[x.date] || {};
-                  var data = buildTodayFromReport(report, actionState, caller, x.date, siteSlugMap, x.folder, undefined, siteIdMap);
+                  var data = buildTodayFromReport(report, caller, x.date, siteSlugMap, x.folder, undefined, siteIdMap);
 
-                  keep(data.myTasks,   myById,   actionState, x.date);
-                  keep(data.teamTasks, teamById, actionState, x.date);
+                  keep(data.myTasks,   myById,   x.date);
+                  keep(data.teamTasks, teamById, x.date);
                 });
 
                 return {
@@ -1190,7 +1151,7 @@
                   teamTasks: Object.keys(teamById).map(function (k) { return teamById[k]; }),
                 };
               });
-            });
+            }
           });
         });
       }
@@ -1410,7 +1371,8 @@
       });
     }, []);
 
-    return { state: state, removeMyTask: removeMyTask, patchTask: patchTask };
+    return { state: state, removeMyTask: removeMyTask, patchTask: patchTask,
+      reload: function () { setRetry(function (n) { return n + 1; }); } };
   }
 
   /* ---------- In-page lookups (replace old MockData helpers) ----------- */
@@ -1772,7 +1734,8 @@
     /* Stable-ish value object — not memoised because the TodayState
        hook already re-keys its effect on caller identity, and the
        consumers below read .state every render anyway. */
-    var ctx = { state: ts.state, removeMyTask: ts.removeMyTask, patchTask: ts.patchTask };
+    var ctx = { state: ts.state, removeMyTask: ts.removeMyTask, patchTask: ts.patchTask,
+                reload: ts.reload };
     return React.createElement(TodayContext.Provider, { value: ctx },
       props.children);
   }
@@ -2657,7 +2620,8 @@
     var canCheckOff = item.kind === 'task'
                     && item.topic_id   != null
                     && item.actionIndex != null
-                    && !!item.date;
+                    && !!item.date
+                    && !!item.actionItemId;   /* no durable id → read-only */
 
     function onMarkComplete() {
       if (!canCheckOff) return;
@@ -2666,8 +2630,8 @@
       /* feat/checkoff-org-api — same routed, always-resolving call as the
          card + bulk paths. user_folder is the report OWNER's folder
          (feat/user-dim-audit-key, Task 6 — item.folder, stamped by
-         today-adapter.js), never the caller/currentUser; used only by the
-         legacy fallback leg. */
+         today-adapter.js), never the caller/currentUser; it identifies the
+         bus event. */
       api.resolveActionItem({
         actionItemId: item.actionItemId,
         date:         item.date,
@@ -2737,8 +2701,8 @@
        own isOwnReport compares against via ownerFolder. */
     var hasContentEditPerm = !!(window.FS && window.FS.can && window.FS.P
                         && window.FS.can(caller, window.FS.P('content', 'edit')));
-    var isOwnReportRow     = !!(item.kind === 'task' && item.folder && caller && caller.name
-                        && window.FS.api.folderName && window.FS.api.folderName(caller.name) === item.folder);
+    var isOwnReportRow     = !!(item.kind === 'task' && item.folder && caller
+                        && window.FS.api.callerFolder && window.FS.api.callerFolder() === item.folder);
     var canEditContentRow  = hasContentEditPerm || isOwnReportRow;
     /* D7 — glossary PROMOTION is one tier above plain content:edit (see
        isSiteManagerPlusLocal's doc); the isOwnReportRow OR-branch never
@@ -3177,8 +3141,22 @@
   /* ---------- Register --------------------------------------------------- */
   if (!window.FieldSight) window.FieldSight = {};
   if (!window.FieldSight.PAGES) window.FieldSight.PAGES = {};
+  /* Pending-notes banners (model-fallback D6): today's own recordings that
+     wait on the AI model. Recovery reloads the Today data. */
+  function TodayWithPendingNotes(props) {
+    var ctx = React.useContext(TodayContext);
+    var Banners = window.FieldSight.PendingNotesBanners;
+    return React.createElement(React.Fragment, null,
+      Banners ? React.createElement(Banners, {
+        date: window.FS.api.todayNZDT(),
+        enabled: true,
+        onRecovered: function () { if (ctx && ctx.reload) ctx.reload(); },
+      }) : null,
+      React.createElement(TodayMiddleColumn, props));
+  }
+
   window.FieldSight.PAGES['/today'] = {
-    Middle:   TodayMiddleColumn,
+    Middle:   TodayWithPendingNotes,
     Right:    TodayRightDetail,
     /* P-07 — page-level Provider; AppShell wraps Middle + Right in this
        so they share TodayContext. Pages without page-level state simply

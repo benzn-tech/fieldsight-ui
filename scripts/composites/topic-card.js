@@ -18,9 +18,10 @@
    Props:
      topic         DailyReport.topics[i]
      date          'YYYY-MM-DD' — needed for action toggle key
-     actionState   { '<topic_id>_<action_index>': { checked, checked_by, checked_at } }
-                   (legacy bare keys and/or v2 composite '<folder>|<topic_id>_<action_index>'
-                   keys — always read via FS.api.actions.lookupAction, never a raw index)
+     actionState   { '<folder>|<topic_id>_<action_index>': { checked, checked_by, checked_at } }
+                   ticks announced on FS.actionsBus THIS session only (may be empty);
+                   an item's done-ness otherwise comes from its own `status`. Always
+                   read via FS.api.actions.lookupAction + itemState, never a raw index.
      userFolder    string (optional) — report OWNER's folder (never the caller/current
                    user). Threads into the actionState lookup + down to each
                    ActionItemRow so same-day, same-index actions from different
@@ -298,10 +299,9 @@
                    list while unfinished items keep their existing
                    relative order. The raw `a` from topic.action_items
                    carries no `checked` field of its own — checked state
-                   is derived per-index via FS.api.actions.lookupAction
-                   (actionState is the real source of truth, keyed by
-                   topic_id_action_index / userFolder|topic_id_action_index
-                   — see action-item-row.js header). Pair each item with
+                   is derived per-index via FS.api.actions.itemState (this
+                   session's bus tick if any, else the item's own status
+                   column — see action-item-row.js header). Pair each item with
                    its original `idx` + derived checked state BEFORE
                    sorting so actionIndex/lookupAction keys stay tied to
                    the item's real backend position, not its sorted
@@ -312,8 +312,9 @@
                    on the same side of the checked/unchecked split
                    (Array.sort is stable in evergreen browsers). */
                 actions.map(function (a, idx) {
-                  var state = window.FS.api.actions.lookupAction(actionState, userFolder, topic.topic_id, idx) || {};
-                  return { a: a, idx: idx, state: state, checked: !!state.checked };
+                  var state = window.FS.api.actions.itemState(a,
+                    window.FS.api.actions.lookupAction(actionState, userFolder, topic.topic_id, idx));
+                  return { a: a, idx: idx, state: state, checked: state.checked };
                 }).sort(function (x, y) {
                   if (x.checked === y.checked) return 0;
                   return x.checked ? 1 : -1;

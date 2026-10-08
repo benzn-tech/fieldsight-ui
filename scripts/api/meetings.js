@@ -56,7 +56,7 @@
 
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
     var user = opts.user;
-    if (caller.role === 'worker') user = window.FS.api.folderName(caller.name);
+    if (caller.role === 'worker') user = window.FS.api.callerFolder();
 
     var record = lookup(opts.date, user);
     if (record) return record;
