@@ -620,6 +620,41 @@
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: props.onClose }, 'Close'))));
   }
 
+  /* ---------- AddExternalMemberModal -------------------------------------- */
+  /* An EXISTING FieldSight user of another company, by exact login email.
+     Offered only to a company admin / platform_admin (the server refuses
+     everyone else with 403). Server errors become one plain sentence each. */
+  function AddExternalMemberModal(props) {
+    var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
+    var orgApi = window.FS.api.org;
+    var refEmail = React.useState(''); var email = refEmail[0], setEmail = refEmail[1];
+    var refRole = React.useState('worker'); var role = refRole[0], setRole = refRole[1];
+    var refMsg = React.useState(null); var msg = refMsg[0], setMsg = refMsg[1];
+    var refBusy = React.useState(false); var busy = refBusy[0], setBusy = refBusy[1];
+    function submit() {
+      if (!email.trim() || busy) return;
+      setBusy(true); setMsg(null);
+      orgApi.addExternalMember(props.siteId, { email: email, role: role }).then(function (row) {
+        setBusy(false);
+        if (window.FS.toast) window.FS.toast.show({ message: ((row && row.user_name) || email.trim()) + ' added', tone: 'success' });
+        if (props.onAdded) props.onAdded(row);
+        if (props.onClose) props.onClose();
+      }).catch(function (err) { setBusy(false); setMsg(orgApi.externalMemberErrorMessage(err)); });
+    }
+    if (!Modal) return null;
+    return React.createElement(Modal, { open: true, size: 'md', title: 'Add external member', onClose: props.onClose },
+      React.createElement('div', { className: 'fs-settings__pw-form' },
+        fFieldRow('Login email *', fText(email, function (v) { setEmail(v); setMsg(null); }, 'email'),
+          'An existing FieldSight user from another company. They keep their own company.'),
+        fFieldRow('Role on this project', fSelect(role, [
+          { v: 'worker', l: 'Worker' }, { v: 'site_manager', l: 'Site Manager' }, { v: 'pm', l: 'Project Manager' },
+        ], function (v) { setRole(v); })),
+        msg ? React.createElement('div', { className: 'fs-settings__field-hint', role: 'alert' }, msg) : null,
+        React.createElement('div', { className: 'fs-settings__actions' },
+          React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: props.onClose }, 'Cancel'),
+          React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--md', disabled: busy || !email.trim(), onClick: submit }, busy ? 'Adding…' : 'Add external member'))));
+  }
+
   /* ---------- EditProjectModal (admin edit an existing project) -------- */
   function EditProjectModal(props) {
     var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
@@ -846,6 +881,11 @@
     var usersS   = refUsers[0];
     var setUsers = refUsers[1];
 
+    var refExt = React.useState(false);
+    var extOpen = refExt[0], setExtOpen = refExt[1];
+    var refTick = React.useState(0);
+    var usersTick = refTick[0], setUsersTick = refTick[1];
+
     var refArchiving = React.useState(false);
     var archiving    = refArchiving[0];
     var setArchiving = refArchiving[1];
@@ -882,7 +922,7 @@
         setUsers({ status: 'error', error: err, users: [] });
       });
       return function () { cancelled = true; };
-    }, [sel && sel.site_id]);
+    }, [sel && sel.site_id, usersTick]);
 
     if (!sel || sel.kind !== 'site') {
       return React.createElement('div', { className: 'fs-sites-detail__placeholder' },
@@ -1063,6 +1103,11 @@
       React.createElement('div', { className: 'fs-sites-detail__section' },
         React.createElement('div', { className: 'fs-sites-detail__section-label' },
           'Users on site'),
+        (window.FS.api.org && window.FS.api.org.canAddExternalMember && window.FS.api.org.canAddExternalMember(caller))
+          ? React.createElement('button', {
+              type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm',
+              onClick: function () { setExtOpen(true); },
+            }, 'Add external member') : null,
         usersS.status === 'loading'
           ? React.createElement('div', { className: 'fs-sites-detail__empty' },
               'Loading users…')
@@ -1087,7 +1132,10 @@
                 },
                   React.createElement('div', { className: 'fs-sites-detail__user-main' },
                     React.createElement('div', { className: 'fs-sites-detail__user-name' },
-                      u.name),
+                      u.name,
+                      (u.external && Badge) ? React.createElement(Badge, {
+                        tone: 'neutral', size: 'xs', variant: 'subtle',
+                      }, window.FS.api.org.externalBadgeText(u)) : null),
                     React.createElement('div', { className: 'fs-sites-detail__user-meta' },
                       [u.role, u.device_id].filter(Boolean).join(' · ')),
                   ),
@@ -1097,6 +1145,12 @@
               }),
             ),
       ),
+
+      extOpen ? React.createElement(AddExternalMemberModal, {
+        siteId:  sel.site_id,
+        onClose: function () { setExtOpen(false); },
+        onAdded: function () { setUsersTick(function (n) { return n + 1; }); },
+      }) : null,
 
       editOpen ? React.createElement(EditProjectModal, {
         site:     site,
