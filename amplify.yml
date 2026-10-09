@@ -7,6 +7,16 @@ frontend:
         - cp -R scripts styles assets dist/
         - cp *.html dist/
         - cp app-shell-preview.html dist/index.html
+        # Compile the JSX here instead of on every visitor's device (see
+        # tools/precompile.js). Same @babel/standalone version and options the
+        # page used in the browser; React switches to its production build.
+        # Set FS_PRECOMPILE=false in the Amplify console to ship the old
+        # in-browser-Babel artifact without a code change.
+        - >-
+          if [ "${FS_PRECOMPILE:-true}" = "true" ]; then
+          npm install --no-save --no-package-lock --no-audit --no-fund @babel/standalone@7.29.0 &&
+          node tools/precompile.js dist;
+          else echo "precompile skipped (FS_PRECOMPILE=${FS_PRECOMPILE})"; fi
         # Stamp every asset URL with this build's commit, in the ARTIFACT only.
         #
         # The 168 `?v=N` numbers in the HTML are maintained by hand, so shipping
