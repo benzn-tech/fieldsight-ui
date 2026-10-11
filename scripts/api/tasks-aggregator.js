@@ -254,7 +254,7 @@
          plan §1.3/owner≠caller. Hoisted once per report for the id. */
       /* The folder we ASKED for is the identity; the display name is only a
          last resort (it is not a folder: "Deandre' Alberts" is Deandre__Alberts). */
-      var folder = x.user || (r.user_name ? window.FS.api.folderName(r.user_name) : null);
+      var folder = x.user || window.FS.api.reportOwnerFolder(r);
       /* feat/editable-tasks-ui — report.site is a DISPLAY NAME only (no
          slug/id travels with a report — same fact today-adapter.js
          documents); resolved once per report against siteIdMap. */
