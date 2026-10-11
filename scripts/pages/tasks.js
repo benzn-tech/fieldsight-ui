@@ -996,7 +996,7 @@
     var ownerCell = assigneeEditable ? React.createElement(Select, {
       size: 'sm', fullWidth: true, value: assigneeValue,
       placeholder: assigneeValue ? undefined : 'Select a member',
-      options: roster.users.map(function (u) { return { value: u.name, label: u.name }; }),
+      options: roster.users.map(function (u) { return { value: u.name, label: u.name + (u.external ? ' (' + window.FS.api.org.externalBadgeText(u) + ')' : '') }; }),
       onChange: function (e) { commitRowField('responsible', e.target.value); },
     }) : (row.responsible || '—');
 

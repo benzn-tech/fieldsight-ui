@@ -744,6 +744,9 @@
                           (u.archived && Badge) ? React.createElement(Badge, {
                             tone: 'neutral', size: 'xs', variant: 'subtle',
                           }, 'Archived') : null,
+                          (u.external && Badge) ? React.createElement(Badge, {
+                            tone: 'neutral', size: 'xs', variant: 'subtle',
+                          }, window.FS.api.org.externalBadgeText(u)) : null,
                           elsewhere > 0
                             ? React.createElement('span', { className: 'fs-team__extra-sites' },
                                 '+' + elsewhere + ' project' + (elsewhere > 1 ? 's' : ''))
