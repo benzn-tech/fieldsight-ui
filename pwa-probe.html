@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Capture Probe</title>
+<!--
+  THROWAWAY SPIKE PAGE — not part of the product. Delete once the PWA capture
+  design is settled.
+
+  Answers, on a real phone, the questions the PWA capture design depends on:
+    1. Can the browser record video straight to MP4 (backend only takes .wav/.mp4)?
+    2. Does an in-page 16 kHz mono WAV (what the F2SP device uploads) come out right?
+    3. What photo resolution does an in-page frame grab give?
+    4. Does audio keep flowing while taking a photo in-page, and does opening the
+       system camera (<input capture>) interrupt it?
+  Plus feature checks the rest of the design leans on (wake lock, push, standalone).
+  Nothing is uploaded anywhere; results stay on the phone until copied.
+-->
+<style>
+  :root { --bg:#fafafa; --fg:#1b1b1b; --muted:#666; --card:#fff; --line:#ddd; --ok:#1b7f3b; --bad:#c62828; --warn:#b26a00; --accent:#e8540c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#121212; --fg:#eee; --muted:#aaa; --card:#1e1e1e; --line:#333; --ok:#66bb6a; --bad:#ef5350; --warn:#ffb74d; } }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:16px; padding-bottom:80px; background:var(--bg); color:var(--fg); font:15px/1.4 -apple-system, system-ui, sans-serif; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:16px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:14px; }
+  h2 { font-size:16px; margin:0 0 6px; }
+  p.q { color:var(--muted); font-size:13px; margin:0 0 10px; }
+  button { font:inherit; padding:10px 14px; border-radius:10px; border:none; background:var(--accent); color:#fff; margin:0 8px 8px 0; min-height:44px; }
+  button:disabled { opacity:.45; }
+  .out { font:12px/1.45 ui-monospace, Menlo, monospace; white-space:pre-wrap; word-break:break-word; margin-top:6px; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); }
+  video, img, audio { max-width:100%; border-radius:8px; margin-top:8px; display:block; }
+  .bar { position:fixed; left:0; right:0; bottom:0; padding:12px 16px calc(12px + env(safe-area-inset-bottom)); background:var(--card); border-top:1px solid var(--line); }
+  .bar button { width:100%; margin:0; }
+</style>
+</head>
+<body>
+<h1>Capture Probe</h1>
+<div class="sub">Test page for the FieldSight phone app. Run each test in order, then tap <b>Copy results</b> and paste them back to Claude. Nothing is uploaded.</div>
+
+<section>
+  <h2>0. Device</h2>
+  <div class="out" id="o0"></div>
+</section>
+
+<section>
+  <h2>1. Video format</h2>
+  <p class="q">Records two 5-second clips back to back, like the device's segments. Needs MP4.</p>
+  <button id="b1">Record 2 × 5 s video</button>
+  <div class="out" id="o1"></div>
+  <div id="v1"></div>
+</section>
+
+<section>
+  <h2>2. Audio as WAV</h2>
+  <p class="q">Records 10 s of raw microphone audio and writes a 16 kHz mono WAV, same as the device. Speak normally.</p>
+  <button id="b2">Record 10 s audio</button>
+  <div class="out" id="o2"></div>
+  <div id="a2"></div>
+</section>
+
+<section>
+  <h2>3. Photo resolution</h2>
+  <p class="q">Grabs a photo from the in-page camera at the highest resolution the browser offers.</p>
+  <button id="b3">Take in-page photo</button>
+  <div class="out" id="o3"></div>
+  <div id="p3"></div>
+</section>
+
+<section>
+  <h2>4. Does recording survive a photo?</h2>
+  <p class="q">Starts audio recording. While it runs: (a) tap <b>In-page photo</b>; then (b) tap <b>System camera</b>, take a photo there and come back. Then tap <b>Stop</b>. Reports any gap in the audio.</p>
+  <button id="b4start">Start recording</button>
+  <button id="b4photo" disabled>In-page photo</button>
+  <label><button id="b4sys" disabled type="button">System camera</button></label>
+  <input id="sysfile" type="file" accept="image/*" capture="environment" hidden>
+  <button id="b4stop" disabled>Stop</button>
+  <div class="out" id="o4"></div>
+</section>
+
+<div class="bar"><button id="copy">Copy results</button></div>
+
+<script>
+'use strict';
+/* Results collected here; "Copy results" puts them on the clipboard as JSON. */
+const R = {};
+const $ = id => document.getElementById(id);
+function line(el, text, cls) {
+  const d = document.createElement('div');
+  if (cls) d.className = cls;
+  d.textContent = text;
+  $(el).appendChild(d);
+}
+const kb = n => (n / 1024).toFixed(0) + ' KB';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* ---------- 0. Device ---------- */
+(function device() {
+  const mr = typeof MediaRecorder !== 'undefined';
+  const types = ['video/mp4', 'video/mp4;codecs=avc1,mp4a', 'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+                 'video/webm', 'video/webm;codecs=vp8,opus', 'audio/mp4', 'audio/webm;codecs=opus', 'audio/wav'];
+  R.device = {
+    ua: navigator.userAgent,
+    secure: window.isSecureContext,
+    standalone: !!(window.navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches)),
+    getUserMedia: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+    mediaRecorder: mr,
+    supported: mr ? types.filter(t => MediaRecorder.isTypeSupported(t)) : [],
+    audioWorklet: typeof AudioWorkletNode !== 'undefined',
+    imageCapture: typeof ImageCapture !== 'undefined',
+    wakeLock: 'wakeLock' in navigator,
+    push: 'PushManager' in window && 'serviceWorker' in navigator,
+    notification: 'Notification' in window,
+    connectionType: (navigator.connection && navigator.connection.type) || null,
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  };
+  for (const [k, v] of Object.entries(R.device)) line('o0', k + ': ' + (Array.isArray(v) ? v.join(', ') || '(none)' : v));
+})();
+
+/* ---------- 1. Video format ---------- */
+function pickVideoType() {
+  for (const t of ['video/mp4;codecs=avc1,mp4a', 'video/mp4', 'video/webm;codecs=vp8,opus', 'video/webm']) {
+    if (MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return '';
+}
+function recordClip(stream, mime, ms) {
+  return new Promise((resolve, reject) => {
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    const parts = [];
+    let startedAt = 0;
+    rec.ondataavailable = e => { if (e.data && e.data.size) parts.push(e.data); };
+    rec.onstart = () => { startedAt = performance.now(); setTimeout(() => rec.stop(), ms); };
+    rec.onstop = () => resolve({ blob: new Blob(parts, { type: rec.mimeType || mime }), mime: rec.mimeType, startedAt, stoppedAt: performance.now() });
+    rec.onerror = e => reject(e.error || e);
+    rec.start();
+  });
+}
+function mediaDuration(blob) {
+  return new Promise(resolve => {
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.muted = true;
+    v.onloadedmetadata = () => resolve(isFinite(v.duration) ? +v.duration.toFixed(2) : null);
+    v.onerror = () => resolve(null);
+    v.src = URL.createObjectURL(blob);
+    setTimeout(() => resolve(null), 4000);
+  });
+}
+$('b1').onclick = async () => {
+  $('o1').textContent = ''; $('v1').textContent = '';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: true });
+    const mime = pickVideoType();
+    line('o1', 'requested: ' + (mime || '(browser default)'));
+    const a = await recordClip(stream, mime, 5000);
+    const b = await recordClip(stream, mime, 5000);
+    stream.getTracks().forEach(t => t.stop());
+    const gapMs = Math.round(b.startedAt - a.stoppedAt);
+    const durs = [await mediaDuration(a.blob), await mediaDuration(b.blob)];
+    const isMp4 = /mp4/.test(a.mime || mime);
+    R.video = { mime: a.mime, sizes: [a.blob.size, b.blob.size], durations: durs, gapMs, mp4: isMp4 };
+    line('o1', 'recorded as: ' + a.mime, isMp4 ? 'ok' : 'bad');
+    line('o1', 'clip sizes: ' + kb(a.blob.size) + ', ' + kb(b.blob.size));
+    line('o1', 'clip durations: ' + durs.join(' s, ') + ' s');
+    line('o1', 'gap between clips: ' + gapMs + ' ms', gapMs < 300 ? 'ok' : 'warn');
+    const v = document.createElement('video');
+    v.controls = true; v.playsInline = true; v.src = URL.createObjectURL(b.blob);
+    $('v1').appendChild(v);
+  } catch (e) { R.video = { error: String(e) }; line('o1', 'ERROR: ' + e, 'bad'); }
+};
+
+/* ---------- 2 + 4. Raw audio capture -> 16 kHz mono WAV ---------- */
+/* AudioWorklet posts raw Float32 frames; we keep them, downsample to 16 kHz
+   and write a WAV header, exactly what the device uploads. The worklet also
+   timestamps every block so test 4 can see a gap in the audio. */
+const WORKLET = `
+class Tap extends AudioWorkletProcessor {
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (ch) this.port.postMessage({ data: ch.slice(0), t: currentTime });
+    return true;
+  }
+}
+registerProcessor('tap', Tap);`;
+
+async function startCapture(stream) {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  const ctx = new Ctx();
+  await ctx.resume();
+  const src = ctx.createMediaStreamSource(stream);
+  const cap = { ctx, chunks: [], gaps: [], lastWall: 0, rate: ctx.sampleRate, wallStart: performance.now() };
+  const onBlock = (data) => {
+    const now = performance.now();
+    if (cap.lastWall && now - cap.lastWall > 250) cap.gaps.push({ atS: +((cap.lastWall - cap.wallStart) / 1000).toFixed(1), ms: Math.round(now - cap.lastWall) });
+    cap.lastWall = now;
+    cap.chunks.push(data);
+  };
+  if (ctx.audioWorklet) {
+    const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
+    await ctx.audioWorklet.addModule(url);
+    const node = new AudioWorkletNode(ctx, 'tap');
+    node.port.onmessage = e => onBlock(e.data.data);
+    src.connect(node);
+    cap.node = node;
+    cap.kind = 'AudioWorklet';
+  } else {
+    const node = ctx.createScriptProcessor(4096, 1, 1);
+    node.onaudioprocess = e => onBlock(e.inputBuffer.getChannelData(0).slice(0));
+    src.connect(node); node.connect(ctx.destination);
+    cap.node = node;
+    cap.kind = 'ScriptProcessor';
+  }
+  return cap;
+}
+async function stopCapture(cap) {
+  try { cap.node.disconnect(); } catch (_) {}
+  await cap.ctx.close();
+  let n = 0; for (const c of cap.chunks) n += c.length;
+  const all = new Float32Array(n);
+  let o = 0; for (const c of cap.chunks) { all.set(c, o); o += c.length; }
+  return { samples: all, rate: cap.rate, gaps: cap.gaps, kind: cap.kind, wallS: (performance.now() - cap.wallStart) / 1000 };
+}
+function downsample(x, from, to) {
+  if (from === to) return x;
+  const ratio = from / to, out = new Float32Array(Math.floor(x.length / ratio));
+  for (let i = 0; i < out.length; i++) {
+    const a = Math.floor(i * ratio), b = Math.min(x.length, Math.floor((i + 1) * ratio));
+    let s = 0; for (let j = a; j < b; j++) s += x[j];
+    out[i] = s / Math.max(1, b - a);
+  }
+  return out;
+}
+function wav16k(samples, rate) {
+  const x = downsample(samples, rate, 16000);
+  const buf = new ArrayBuffer(44 + x.length * 2), v = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + x.length * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 16000, true); v.setUint32(28, 32000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  w(36, 'data'); v.setUint32(40, x.length * 2, true);
+  let peak = 0, sq = 0;
+  for (let i = 0; i < x.length; i++) {
+    const s = Math.max(-1, Math.min(1, x[i]));
+    peak = Math.max(peak, Math.abs(s)); sq += s * s;
+    v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  const db = a => a > 0 ? +(20 * Math.log10(a)).toFixed(1) : -Infinity;
+  return { blob: new Blob([buf], { type: 'audio/wav' }), seconds: +(x.length / 16000).toFixed(2), peakDb: db(peak), rmsDb: db(Math.sqrt(sq / Math.max(1, x.length))) };
+}
+
+$('b2').onclick = async () => {
+  $('o2').textContent = ''; $('a2').textContent = '';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    const cap = await startCapture(stream);
+    line('o2', 'recording… (' + cap.kind + ', ' + cap.rate + ' Hz)');
+    await sleep(10000);
+    const r = await stopCapture(cap);
+    stream.getTracks().forEach(t => t.stop());
+    const w = wav16k(r.samples, r.rate);
+    R.wav = { capture: r.kind, inputRate: r.rate, seconds: w.seconds, wallSeconds: +r.wallS.toFixed(2), bytes: w.blob.size, peakDb: w.peakDb, rmsDb: w.rmsDb, gaps: r.gaps };
+    line('o2', 'WAV: 16000 Hz mono 16-bit, ' + w.seconds + ' s of audio in ' + r.wallS.toFixed(1) + ' s wall clock', Math.abs(w.seconds - r.wallS) < 0.5 ? 'ok' : 'bad');
+    line('o2', 'size: ' + kb(w.blob.size) + '  (≈ ' + (w.blob.size / w.seconds * 3600 / 1048576).toFixed(0) + ' MB/hour)');
+    line('o2', 'level: peak ' + w.peakDb + ' dBFS, RMS ' + w.rmsDb + ' dBFS', w.peakDb > -40 ? 'ok' : 'warn');
+    if (r.gaps.length) line('o2', 'gaps: ' + JSON.stringify(r.gaps), 'bad');
+    const a = document.createElement('audio'); a.controls = true; a.src = URL.createObjectURL(w.blob);
+    $('a2').appendChild(a);
+  } catch (e) { R.wav = { error: String(e) }; line('o2', 'ERROR: ' + e, 'bad'); }
+};
+
+/* ---------- 3. Photo resolution ---------- */
+async function grabPhoto(track) {
+  if (typeof ImageCapture !== 'undefined') {
+    try {
+      const blob = await new ImageCapture(track).takePhoto();
+      const bmp = await createImageBitmap(blob);
+      return { via: 'ImageCapture.takePhoto', blob, w: bmp.width, h: bmp.height };
+    } catch (_) { /* fall through to a frame grab */ }
+  }
+  const v = document.createElement('video');
+  v.playsInline = true; v.muted = true;
+  v.srcObject = new MediaStream([track]);
+  await v.play();
+  await sleep(300);
+  const c = document.createElement('canvas');
+  c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v, 0, 0);
+  v.pause();
+  const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.92));
+  return { via: 'canvas frame grab', blob, w: c.width, h: c.height };
+}
+$('b3').onclick = async () => {
+  $('o3').textContent = ''; $('p3').textContent = '';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 4096 }, height: { ideal: 3072 } } });
+    const track = stream.getVideoTracks()[0];
+    const s = track.getSettings();
+    const p = await grabPhoto(track);
+    stream.getTracks().forEach(t => t.stop());
+    R.photo = { via: p.via, width: p.w, height: p.h, bytes: p.blob.size, trackSettings: { width: s.width, height: s.height, frameRate: s.frameRate } };
+    line('o3', 'via: ' + p.via);
+    line('o3', 'resolution: ' + p.w + ' × ' + p.h + ' (' + (p.w * p.h / 1e6).toFixed(1) + ' MP)', p.w * p.h >= 3e6 ? 'ok' : 'warn');
+    line('o3', 'JPEG size: ' + kb(p.blob.size));
+    const img = document.createElement('img'); img.src = URL.createObjectURL(p.blob);
+    $('p3').appendChild(img);
+  } catch (e) { R.photo = { error: String(e) }; line('o3', 'ERROR: ' + e, 'bad'); }
+};
+
+/* ---------- 4. Recording survives a photo? ---------- */
+let t4 = null;
+const events4 = [];
+const mark = what => { if (t4) events4.push({ what, atS: +((performance.now() - t4.cap.wallStart) / 1000).toFixed(1) }); };
+document.addEventListener('visibilitychange', () => mark('visibility:' + document.visibilityState));
+$('b4start').onclick = async () => {
+  $('o4').textContent = ''; events4.length = 0;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: 'environment' } });
+    const cap = await startCapture(stream);
+    let lock = null;
+    try { if ('wakeLock' in navigator) lock = await navigator.wakeLock.request('screen'); } catch (_) {}
+    t4 = { stream, cap, lock };
+    line('o4', 'recording… wake lock: ' + (lock ? 'on' : 'unavailable'));
+    $('b4photo').disabled = $('b4sys').disabled = $('b4stop').disabled = false;
+    $('b4start').disabled = true;
+  } catch (e) { line('o4', 'ERROR: ' + e, 'bad'); }
+};
+$('b4photo').onclick = async () => {
+  mark('in-page photo start');
+  try { const p = await grabPhoto(t4.stream.getVideoTracks()[0]); line('o4', 'in-page photo ' + p.w + '×' + p.h); }
+  catch (e) { line('o4', 'in-page photo ERROR: ' + e, 'bad'); }
+  mark('in-page photo done');
+};
+$('b4sys').onclick = () => { mark('system camera opened'); $('sysfile').click(); };
+$('sysfile').onchange = e => {
+  const f = e.target.files[0];
+  mark('system camera returned');
+  if (f) { line('o4', 'system camera file: ' + f.type + ', ' + kb(f.size)); R.systemCameraFile = { type: f.type, name: f.name, bytes: f.size }; }
+};
+$('b4stop').onclick = async () => {
+  const r = await stopCapture(t4.cap);
+  t4.stream.getTracks().forEach(t => t.stop());
+  try { if (t4.lock) await t4.lock.release(); } catch (_) {}
+  const audioS = +(r.samples.length / r.rate).toFixed(1), wallS = +r.wallS.toFixed(1);
+  R.survive = { audioSeconds: audioS, wallSeconds: wallS, lostSeconds: +(wallS - audioS).toFixed(1), gaps: r.gaps, events: events4.slice(), trackEndedEarly: false };
+  line('o4', 'audio captured: ' + audioS + ' s of ' + wallS + ' s', wallS - audioS < 1 ? 'ok' : 'bad');
+  line('o4', 'gaps (>250 ms): ' + (r.gaps.length ? JSON.stringify(r.gaps) : 'none'), r.gaps.length ? 'bad' : 'ok');
+  line('o4', 'events: ' + JSON.stringify(events4));
+  $('b4photo').disabled = $('b4sys').disabled = $('b4stop').disabled = true;
+  $('b4start').disabled = false;
+  t4 = null;
+};
+
+/* ---------- Copy ---------- */
+$('copy').onclick = async () => {
+  const text = JSON.stringify(R, null, 1);
+  try { await navigator.clipboard.writeText(text); $('copy').textContent = 'Copied ✓'; }
+  catch (_) {
+    const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy'); ta.remove(); $('copy').textContent = 'Copied ✓';
+  }
+  setTimeout(() => { $('copy').textContent = 'Copy results'; }, 2000);
+};
+</script>
+</body>
+</html>
