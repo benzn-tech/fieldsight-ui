@@ -477,8 +477,14 @@
              ['Due', …] row read task.dueTime directly, so this one
              change wires both. Falls back to the raw text unchanged
              when the pattern isn't recognised (resolveDeadline never
-             guesses a wrong date). */
-          dueTime:     resolveDeadline(a.deadline, report.report_date || ctx.date).display,
+             guesses a wrong date).
+             The backend's `deadline_display` wins when it is there
+             ("Wed 14 Oct 2026, morning", anchored on the recording's date
+             by src/due_display.py), so Today, the Timeline, the email and
+             the reports read the same words; resolveDeadline is the
+             fallback for a backend that has not sent it. */
+          dueTime:     a.deadline_display
+                         || resolveDeadline(a.deadline, report.report_date || ctx.date).display,
           /* §E-time — the PARENT TOPIC's time_range ('14:09 – 14:09'),
              carried down onto every action item flattened from it.
              action_items themselves have no time column; the topic is

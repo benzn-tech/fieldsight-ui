@@ -376,7 +376,7 @@
         extractionItemsBySession[sid].push({
           text:     a.action || a.text || '',
           assignee: a.responsible || '',
-          due:      a.deadline || a.deadline_text || '',
+          due:      a.deadline_display || a.deadline || a.deadline_text || '',
         });
       });
     });
@@ -417,7 +417,7 @@
           return {
             action:      a.action || a.text || '',
             responsible: a.responsible || '',
-            deadline:    a.deadline || a.deadline_text || '',
+            deadline:    a.deadline_display || a.deadline || a.deadline_text || '',
           };
         }),
         photos: photos,
@@ -513,7 +513,7 @@
           text:     a.action || a.text || '',
           at:       t.time_range || '',
           assignee: a.responsible || '',
-          due:      a.deadline || a.deadline_text || '',
+          due:      a.deadline_display || a.deadline || a.deadline_text || '',
         });
         fromExtractionCount += 1;
       });
