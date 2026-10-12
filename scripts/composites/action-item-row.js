@@ -258,7 +258,9 @@
        FS.api.actions.resolveActionItem above). Falls back to the raw text
        when resolveDeadline can't confidently parse it, or when the
        resolver isn't loaded yet — never shows a wrong date. */
-    var deadlineDisplay = action.deadline
+    var deadlineDisplay = action.deadline_display
+      ? action.deadline_display        /* the backend's words: same on every surface */
+      : action.deadline
       ? (window.FS && window.FS.api && window.FS.api.resolveDeadline
           ? window.FS.api.resolveDeadline(action.deadline, date).display
           : action.deadline)
