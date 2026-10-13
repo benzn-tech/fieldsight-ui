@@ -33,6 +33,14 @@
       ? opts.site
       : (window.FS.siteContext && window.FS.siteContext.get && window.FS.siteContext.get());
     if (siteId) body.site = siteId;
+    /* The browser's IANA zone, so the backend can turn "yesterday" or "last
+       week" in the question into a date range (pipeline #1100). Explicit
+       from/to above always win over it. A runtime that cannot name its zone
+       sends nothing and the search stays unfiltered, as before. */
+    try {
+      var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (tz) body.tz = tz;
+    } catch (e) { /* no zone: unfiltered search */ }
 
     return window.FS.api.request('/search', {
       method:  'POST',
