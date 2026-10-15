@@ -180,3 +180,34 @@ test('every flag the server can send has words for the person', () => {
     assert.ok(TD.FLAG_TEXT[f], f + ' has no wording');
   }
 });
+
+/* ---- Close stops the work (fix round 1) ------------------------------------- */
+
+test('cancelled during the upload: no further page is sent and the read is never requested', async () => {
+  const TD = load(server([DONE]));
+  let closed = false;
+  const fetchThenClose = async (url, o) => { puts.push({ url, o }); closed = true; return { ok: true, status: 200 }; };
+  const out = await TD.digitise([file('p1.jpg'), file('p2.jpg'), file('p3.jpg')], 'Form',
+    { fetch: fetchThenClose, sleep: noSleep, cancelled: () => closed });
+  assert.deepStrictEqual(out, { cancelled: true });
+  assert.strictEqual(puts.length, 1, 'pages after Close were still uploaded');
+  assert.ok(!calls.some((c) => c.path === '/templates/digitise'), 'the billed read was requested after Close');
+});
+
+test('cancelled while polling: polling stops', async () => {
+  const TD = load(server([{ id: 'r1', status: 'pending' }]));
+  let polls = 0; let closed = false;
+  const out = await TD.digitise([file('p1.jpg')], 'Form', {
+    fetch: okFetch, cancelled: () => closed, now: () => polls * 10000,
+    sleep: async () => { polls += 1; if (polls === 2) closed = true; },
+  });
+  assert.deepStrictEqual(out, { cancelled: true });
+  assert.strictEqual(calls.filter((c) => c.path === '/templates/digitise/r1').length, 2);
+});
+
+test('only a real 404 means reading is off; any other non-JSON answer is a failure', async () => {
+  let TD = load(() => ({ _notFound: true, status: 502 }));
+  await assert.rejects(TD.digitise([file('a.jpg')], 'Form', { fetch: okFetch, sleep: noSleep }), /unexpected answer \(502\)/);
+  TD = load(() => ({ _notFound: true, status: 200 }));
+  await assert.rejects(TD.digitise([file('a.jpg')], 'Form', { fetch: okFetch, sleep: noSleep }), /unexpected answer \(200\)/);
+});

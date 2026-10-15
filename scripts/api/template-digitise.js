@@ -79,12 +79,22 @@
     return res;
   }
 
+  /* orgRequest folds TWO things into _notFound: a real 404 and any answer that is
+     not JSON (a gateway error page, the CloudFront SPA shell). Only the first means
+     reading is switched off; the second is a failure and must say so, or a passing
+     502 would quietly create a template from starting sections. */
+  function isOff(res) {
+    if (!res || !res._notFound) return false;
+    if (res.status === 404) return true;
+    throw new Error('The server gave an unexpected answer (' + (res.status || 'no status') + ') — try again.');
+  }
+
   async function requestUploadUrl(file) {
     var res = await api().orgRequest('/templates/digitise/upload-url', {
       method: 'POST', retry: false,
       body: { filename: file.name, contentType: typeFor(file), size: file.size },
     });
-    if (res && res._notFound) return { off: true };
+    if (isOff(res)) return { off: true };
     return refused(res);
   }
 
@@ -99,17 +109,20 @@
     var res = await api().orgRequest('/templates/digitise', {
       method: 'POST', retry: false, body: { sourceKeys: sourceKeys, name: name },
     });
-    if (res && res._notFound) return { off: true };
+    if (isOff(res)) return { off: true };
     return refused(res);
   }
 
   async function waitForDraft(id, opts) {
     var now = opts.now || Date.now;
     var wait = opts.sleep || sleep;
+    var cancelled = opts.cancelled || function () { return false; };
     var started = now();
     for (;;) {
+      if (cancelled()) return { cancelled: true };
       var res = refused(await api().orgRequest('/templates/digitise/' + encodeURIComponent(id)));
-      if (res && res._notFound) throw new Error('This draft is no longer available — upload the form again.');
+      if (cancelled()) return { cancelled: true };
+      if (isOff(res)) throw new Error('This draft is no longer available — upload the form again.');
       if (res && res.status && res.status !== 'pending') return res;
       if (now() - started >= GIVE_UP_MS) throw new Error('Taking too long — try again.');
       await wait(POLL_MS);
@@ -119,22 +132,31 @@
   /* Upload each file, ask for the read, wait for the draft. Resolves { off: true }
      when the server does not offer reading (the caller then does today's thing),
      otherwise the poll result. onPhase('reading') fires only once the server has
-     ACCEPTED the read -- the screen never says it is reading a form it did not get. */
+     ACCEPTED the read -- the screen never says it is reading a form it did not get.
+
+     opts.cancelled() is asked before every request: once the person has closed the
+     modal, no further page is uploaded, the (billed) read is never requested, and
+     polling stops. Resolves { cancelled: true } then. */
   async function digitise(files, name, opts) {
     opts = opts || {};
     var onPhase = opts.onPhase || function () {};
+    var cancelled = opts.cancelled || function () { return false; };
     var problem = checkFiles(files);
     if (problem) throw new Error(problem);
     onPhase('uploading');
     var keys = [];
     for (var i = 0; i < files.length; i++) {
+      if (cancelled()) return { cancelled: true };
       var u = await requestUploadUrl(files[i]);
       if (u.off) return { off: true };
+      if (cancelled()) return { cancelled: true };
       await putFile(files[i], u.uploadUrl, opts.fetch);
       keys.push(u.sourceKey);
     }
+    if (cancelled()) return { cancelled: true };
     var started = await startRead(keys, name);
     if (started.off) return { off: true };
+    if (cancelled()) return { cancelled: true };
     onPhase('reading');
     return waitForDraft(started.id, opts);
   }

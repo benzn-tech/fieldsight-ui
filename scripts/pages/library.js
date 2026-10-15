@@ -268,8 +268,12 @@
       /* Three different things happened, and the toast says which. "readingOff" is the
          server answering 404 on /templates/digitise: the file was NOT read, and saying
          so is the rule tests/the-library-says-what-it-actually-does.test.js keeps. */
+      var kind = how && how.reportType
+        ? how.reportType.charAt(0).toUpperCase() + how.reportType.slice(1) + ' '
+        : '';
       var message = how && how.readingOff
-        ? 'Template created. Reading forms is not switched on here, so nothing was read from your file — edit its sections below'
+        ? 'Reading forms is not switched on here. A ' + kind + 'template was created from the starting sections; '
+          + 'nothing was read from your file — edit its sections below'
         : how && how.digitised
           ? 'Template saved from your form — it is in your library now'
           : 'Template created — edit its sections below';

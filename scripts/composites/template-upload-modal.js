@@ -19,7 +19,7 @@
 
    Props:
      scope       'org' | 'personal'   which library to add to
-     onComplete  fn(row, how)         how = {digitised:true} | {readingOff:true} | undefined
+     onComplete  fn(row, how)         how = {digitised:true} | {readingOff:true, reportType} | undefined
      onCancel    fn
 
    Phases: idle → uploading → reading → review → saving → (closed)
@@ -51,7 +51,7 @@
 
     var scope      = props.scope      || 'personal';
     var onComplete = props.onComplete || function () {};
-    var onCancel   = props.onCancel   || function () {};
+    var onCancelProp = props.onCancel || function () {};
     var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
 
     var s1 = React.useState('idle');  var phase = s1[0];   var setPhase = s1[1];
@@ -67,14 +67,29 @@
        the previous draft. */
     var s9 = React.useState(0);       var readNo = s9[0];  var setReadNo = s9[1];
 
-    /* A read takes half a minute and the person may press Close meanwhile. What
-       comes back after that must not create a template nobody is waiting for
-       (the off fallback creates one). */
+    /* A refused name (409, or empty) is shown beside the name field, not at the
+       foot of the review: the review itself has no name to change. */
+    var s10 = React.useState('');     var nameErr = s10[0]; var setNameErr = s10[1];
+    var nameRef = React.useRef(null);
+    var fileInputRef = React.useRef(null);
+
+    /* A read takes half a minute and the person may press Close meanwhile. From
+       then on nothing more is uploaded, the read is never requested, polling stops
+       (TD.digitise asks cancelled() before each request), and nothing that comes
+       back creates a template nobody is waiting for. */
     var alive = React.useRef(true);
     React.useEffect(function () {
       alive.current = true;
       return function () { alive.current = false; };
     }, []);
+    React.useEffect(function () {
+      if (nameErr && phase === 'review' && nameRef.current && nameRef.current.focus) nameRef.current.focus();
+    }, [nameErr, phase]);
+
+    function onCancel() {
+      alive.current = false;
+      onCancelProp();
+    }
 
     function pickFiles(list) {
       var picked = Array.prototype.slice.call(list || []);
@@ -92,7 +107,9 @@
           scope: scope, report_type: rt, title: title.trim(), description: desc.trim(),
           owner_user_id: caller.device_id || caller.sub || null,
         });
-        onComplete(row, readingOff ? { readingOff: true } : undefined);
+        /* The report type travels with the off fallback: with a file attached the
+           type selector is hidden, so the toast has to say which kind was made. */
+        onComplete(row, readingOff ? { readingOff: true, reportType: rt } : undefined);
       } catch (e) {
         setPhase('error');
         setErr((e && e.message) || 'Creating the template failed — please try again.');
@@ -106,8 +123,9 @@
       try {
         var result = await TD.digitise(files, title.trim(), {
           onPhase: function (p) { if (alive.current) setPhase(p); },
+          cancelled: function () { return !alive.current; },
         });
-        if (!alive.current) return;
+        if (!alive.current || result.cancelled) return;
         if (result.off) return createFromStarter(true);
         if (result.status !== 'done') {
           setPhase('error');
@@ -132,7 +150,9 @@
          (the body leaves out sections with no items). */
       var problem = TD.bodyProblem(body) && Review.problemFor(current);
       if (problem) { setErr(problem.message); return; }
+      if (!title.trim()) { setNameErr('Give the template a name.'); return; }
       setErr('');
+      setNameErr('');
       setPhase('saving');
       try {
         var row = await templates.create({
@@ -144,14 +164,17 @@
         /* Back to the draft, edits intact: a name already taken (409) is fixed by
            renaming, not by reading the form again. */
         setPhase('review');
-        setErr((e && e.message) || 'Saving failed — please try again.');
+        if (e && e.status === 409) setNameErr(e.message || 'A template with this name already exists — choose another name.');
+        else setErr((e && e.message) || 'Saving failed — please try again.');
       }
     }
 
     var inputId = 'tpl-file-input-' + scope;
 
-    function frame(children, wide) {
-      var heading = wide ? 'Check your form' : 'New template';
+    /* wide: the xl modal. Used for the whole read -- upload, reading, review and a
+       failed read -- so the panel does not jump size when the draft arrives. */
+    function frame(children, wide, heading) {
+      heading = heading || (wide ? 'Check your form' : 'New template');
       return React.createElement(ModalOverlay, {
         open: true, onClose: onCancel, ariaLabel: heading,
         size: wide ? 'xl' : 'md',
@@ -164,13 +187,26 @@
     }
 
     if (phase === 'review' || phase === 'saving') {
-      return frame(React.createElement(Review, {
-        key: 'read-' + readNo,
-        draft: draft, sources: sources, error: errMsg, saving: phase === 'saving',
-        onChange: function (next) { setDraft(next); setErr(''); },
-        onSave: handleSave, onCancel: onCancel,
-      }), true);
+      return frame([
+        React.createElement('label', { key: 'name', className: 'fs-tpl-upload__field' },
+          React.createElement('span', { className: 'fs-tpl-upload__label' }, 'Template name'),
+          React.createElement('input', {
+            ref: nameRef, className: 'fs-tpl-upload__input', value: title,
+            'aria-invalid': nameErr ? 'true' : undefined,
+            'aria-describedby': nameErr ? 'tpl-name-error-' + scope : undefined,
+            onChange: function (e) { setTitle(e.target.value); if (nameErr) setNameErr(''); },
+          }),
+          nameErr ? React.createElement('span', { id: 'tpl-name-error-' + scope, className: 'fs-tpl-upload__error', role: 'alert' }, nameErr) : null),
+        React.createElement(Review, {
+          key: 'read-' + readNo,
+          draft: draft, sources: sources, error: errMsg, saving: phase === 'saving',
+          onChange: function (next) { setDraft(next); setErr(''); },
+          onSave: handleSave, onCancel: onCancel,
+        }),
+      ], true);
     }
+
+    var reading = files.length > 0;
 
     if (phase === 'uploading' || phase === 'reading' || phase === 'creating') {
       var label = phase === 'uploading' ? 'Uploading your form…'
@@ -182,7 +218,7 @@
           React.createElement('p', { className: 'fs-tpl-upload__phase-label', role: 'status' }, label)),
         React.createElement('div', { key: 'f', className: 'fs-tpl-upload__footer' },
           React.createElement(Button, { variant: 'ghost', onClick: onCancel }, 'Close')),
-      ]);
+      ], reading, 'New template');
     }
 
     if (phase === 'error') {
@@ -191,7 +227,7 @@
         React.createElement('div', { key: 'f', className: 'fs-tpl-upload__footer' },
           React.createElement(Button, { variant: 'ghost', onClick: function () { setPhase('idle'); setErr(''); } }, 'Try again'),
           React.createElement(Button, { variant: 'ghost', onClick: onCancel }, 'Cancel')),
-      ]);
+      ], reading, 'New template');
     }
 
     /* idle / dragging */
@@ -212,7 +248,7 @@
         onKeyDown:   function (e) { if (e.key === 'Enter' || e.key === ' ') document.getElementById(inputId).click(); },
       },
         React.createElement('input', {
-          id: inputId, type: 'file', style: { display: 'none' }, accept: ACCEPT, multiple: true,
+          id: inputId, ref: fileInputRef, type: 'file', style: { display: 'none' }, accept: ACCEPT, multiple: true,
           onChange: function (e) { pickFiles(e.target.files); },
         }),
         hasFiles
@@ -223,7 +259,11 @@
               React.createElement('button', {
                 type: 'button',
                 className: 'fs-tpl-upload__file-clear',
-                onClick: function (e) { e.stopPropagation(); setFiles([]); setTitle(''); },
+                onClick: function (e) {
+                  e.stopPropagation(); setFiles([]); setTitle('');
+                  /* Or picking the same file again fires no change event. */
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                },
                 'aria-label': 'Remove file',
               }, '×'))
           : React.createElement('div', { className: 'fs-tpl-upload__drop-hint' },
