@@ -24,6 +24,11 @@
  * fact, that the system did something to the user's own document. When a real
  * extraction exists, these assertions should be replaced by ones that check it
  * ran -- not deleted.
+ *
+ * 2026-10-16: a real extraction exists (template digitise). The assertions that the
+ * modal says "Nothing is read" are REPLACED below by ones that check the reading
+ * claim is made only on the path that actually read the file -- the rule this file
+ * exists for, unchanged.
  */
 const test = require('node:test');
 const assert = require('node:assert');
@@ -64,8 +69,16 @@ test('THE test: no screen claims a file was read', () => {
   }
 });
 
-test('the upload screen says what actually decides the sections', () => {
-  assert.match(UPLOAD, /Nothing is read/);
+test('the reading claim is made only on the path that read the file', () => {
+  /* "Reading your form" appears only in the phase entered after the server ACCEPTED
+     the read (api/template-digitise.js fires onPhase('reading') after the request
+     returned), and the off fallback says nothing was read. */
+  assert.match(UPLOAD, /phase === 'reading'\s+\? 'Reading your form… about half a minute'/);
+  const TD = read('scripts', 'api', 'template-digitise.js');
+  const flow = TD.slice(TD.indexOf('async function digitise('));
+  assert.ok(flow.indexOf("onPhase('reading')") > flow.indexOf('await startRead('),
+    'the screen would claim to read a form before the server accepted it');
+  assert.match(LIBRARY, /nothing was read from your file/);
   assert.match(UPLOAD, /starting set of sections/);
 });
 
@@ -82,16 +95,21 @@ test('no filename is invented from the template name', () => {
 
 /* ---- the claim has to stay false-proof ------------------------------------- */
 
-test('the file is still neither read nor sent', () => {
-  /* The copy is only honest for as long as this stays true. If somebody wires
-     a real extraction, this test fails and whoever does it has to come back
-     and update the wording in the same change -- which is the point. */
+test('the file travels only through the reading path', () => {
+  /* Until 2026-10-16 this test said the file was neither read nor sent, and the
+     copy was honest only while that held. The file IS sent now -- but only by
+     api/template-digitise.js, the path whose phases the screen reports. The modal
+     itself still opens nothing, and the starter path is handed no file. */
   const visible = userFacing(UPLOAD);
   for (const api of ['FileReader', 'readAsText', 'readAsArrayBuffer',
                      '.arrayBuffer(', 'FormData', 'fetch(']) {
     assert.ok(!visible.includes(api),
-      'the upload modal now touches ' + api + ' -- the copy must say so');
+      'the upload modal now touches ' + api + ' itself -- route it through api/template-digitise.js');
   }
+  const starter = UPLOAD.slice(UPLOAD.indexOf('async function createFromStarter'),
+                               UPLOAD.indexOf('async function handleSubmit'));
+  assert.ok(starter.includes('templates.create('), 'the starter path has moved');
+  assert.ok(!/files/.test(starter), 'the starter path now sends the file -- the off toast would be a lie');
 });
 
 test('create() is handed no file, only what the person typed', () => {

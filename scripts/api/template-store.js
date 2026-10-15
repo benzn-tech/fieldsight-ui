@@ -318,7 +318,10 @@
         created_at: new Date().toISOString(), _status: 'ready',
         versions: [{ id: 'ver-mock-1',
                      schema: toEditorSchema(toBackendBody({
-                       sections: clone(STARTING_SECTIONS[rt] || STARTING_SECTIONS.daily) })),
+                       sections: (Array.isArray(data.sections) && data.sections.length)
+                         ? clone(data.sections)
+                         : (data.body ? clone(data.body.sections)
+                                      : clone(STARTING_SECTIONS[rt] || STARTING_SECTIONS.daily)) })),
                      created_at: new Date().toISOString(),
                      created_by_user_id: data.owner_user_id || 'you',
                      change_note: 'Created' }],
@@ -328,7 +331,12 @@
     }
     if (!orgLive()) return unavailable('Creating a template');
     var reportType = data.report_type || 'daily';
-    var starting = STARTING_SECTIONS[reportType] || STARTING_SECTIONS.daily;
+    /* What the caller made wins. This used to send the starting sections and drop
+       whatever it was handed -- a digitised form's items vanished here, between the
+       review screen and the server (spec 2026-10-16 section 5). */
+    var sections = (Array.isArray(data.sections) && data.sections.length)
+      ? clone(data.sections)
+      : clone(STARTING_SECTIONS[reportType] || STARTING_SECTIONS.daily);
     return api().orgRequest('/templates', {
       method: 'POST',
       retry: false,
@@ -337,8 +345,8 @@
         report_type: reportType,
         name: data.title || 'New Template',
         description: data.description || '',
-        body: toBackendBody({ sections: clone(starting) }),
-        change_note: 'Created',
+        body: data.body ? clone(data.body) : toBackendBody({ sections: sections }),
+        change_note: data.change_note || 'Created',
       },
     }).then(function (row) {
       var shaped = toRow(row, {});
@@ -571,6 +579,9 @@
     removeFavourite:  removeFavourite,
     toggleFavourite:  toggleFavourite,
     FAVOURITES_CAP:   FAV_CAP,
+    /* The UI's catch-all, for callers that build a whole body (template digitise). A
+       getter, so nobody can change it for everybody else by assigning to it. */
+    get DEFAULT_CATCH_ALL() { return clone(DEFAULT_CATCH_ALL); },
     /* Exported for tests: the two shapes meet here and nowhere else. */
     _toBackendBody:   toBackendBody,
     _toEditorSchema:  toEditorSchema,
