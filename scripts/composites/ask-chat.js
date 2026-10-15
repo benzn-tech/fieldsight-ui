@@ -290,6 +290,35 @@
     );
   }
 
+  /* Project documents (backend spec 2026-10-16, rule 3). Below the answer and the
+     recording Sources: these are what the project's documents REQUIRE, never what
+     happened on site, and the label says both halves. Old backends send no
+     `documents` and get no block; neither does a page where the org API is off
+     (mocks, no org base) -- an original can only be opened through it. */
+  function renderDocumentOrigin(m) {
+    var docs = (m && m.documents) || [];
+    if (!docs.length) return null;
+    var PD = window.FS && window.FS.api && window.FS.api.projectDocuments;
+    if (!PD || !PD.isLive || !PD.isLive()) return null;
+    return React.createElement('div', { className: 'fs-ask-docs' },
+      React.createElement('div', { className: 'fs-ask-docs__label' },
+        'From project documents — what should be, not what happened on site'),
+      React.createElement('div', { className: 'fs-ask-docs__list' },
+        docs.map(function (d, i) {
+          var label = window.FS.api.projectDocuments.citeLabel(d) || 'Document';
+          return React.createElement('button', {
+            key: i, type: 'button', className: 'fs-ask-docs__item',
+            disabled: !(d.site_id && d.document_id),
+            onClick: function () {
+              if (!d.site_id || !d.document_id) return;
+              PD.open(d.site_id, d.document_id, d.page).catch(function (err) {
+                if (window.FS.toast) window.FS.toast.show({ message: (err && err.message) || 'Could not open the document.', tone: 'error' });
+              });
+            },
+          }, label);
+        })));
+  }
+
   function renderCorroboration(res) {
     if (!res) return null;
 
@@ -1137,7 +1166,10 @@
           fromWeb:   !!res.from_web,
           grounded:  !!res.grounded,
           web:       res.web || null,
-          corrob:    wantsCorrob ? { _pending: true } : null,
+          /* Project documents the answer cited (backend rule 3): what should be, kept
+             apart from the recordings and the web. Absent when none were cited. */
+          documents:   res.documents || null,
+          corrob:   wantsCorrob ? { _pending: true } : null,
           /* Captured from the question at send time, not read off the answer:
              the model's reply language is not reliable (measured on prod, a
              Chinese question came back in English 2 runs out of 3), and the
@@ -1390,6 +1422,7 @@
             /* Already rendered above (records-first) for fromWeb messages --
                this is the grounded path's own "Sources" block only. */
             m.role === 'assistant' && !m.fromWeb ? renderCitations(m.citations) : null,
+            m.role === 'assistant' ? renderDocumentOrigin(m) : null,
             /* The web offer (FS_ASK_WEB_OFFER; spec 2026-10-16
                ask-screen-web-offer §5). The button IS the offer: the answer
                text asks no question a typed "yes" could accept. Gone once
@@ -1579,7 +1612,7 @@
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.AskChat = AskChat;
   window.FieldSight._corroborationHasNothingToShow = hasNothingToShow;
-  window.FieldSight._askWebStatus = { line: webStatusLine, render: renderWebStatus, origin: renderWebOrigin, citations: renderCitations };
+  window.FieldSight._askWebStatus = { line: webStatusLine, render: renderWebStatus, origin: renderWebOrigin, citations: renderCitations, docs: renderDocumentOrigin };
   window.FieldSight._corroborationSourceDomain = sourceDomain;
   /* Exported so the wording can be pinned by a test without rendering React,
      and so SP-Ask's spoken variant can be written against the same dict. */

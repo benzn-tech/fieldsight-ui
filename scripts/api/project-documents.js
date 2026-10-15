@@ -219,6 +219,7 @@
   if (!window.FS) window.FS = {};
   if (!window.FS.api) window.FS.api = {};
   window.FS.api.projectDocuments = {
+    isLive: orgLive,
     EXT_TYPES: EXT_TYPES, MAX_BYTES: MAX_BYTES, STUCK_MS: STUCK_MS, REFRESH_MS: REFRESH_MS,
     typeFor: typeFor, checkFile: checkFile, list: list, history: history, upload: upload,
     rename: rename, remove: remove, retry: retry, open: open, pageHref: pageHref,

@@ -45,7 +45,7 @@ test('the project page mounts it between the reports and the people', () => {
 });
 
 test('both files are loaded by the app and styled', () => {
-  assert.match(html, /scripts\/api\/project-documents\.js\?v=1/);
+  assert.match(html, /scripts\/api\/project-documents\.js\?v=\d+/);
   assert.match(html, /scripts\/composites\/project-documents-section\.js\?v=1/);
   assert.match(css, /\.fs-project-docs \{/);
 });

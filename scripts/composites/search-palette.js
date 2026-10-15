@@ -223,6 +223,8 @@
        task/safety/site/people matches below. */
     var refTopics = React.useState([]);
     var topicRows = refTopics[0]; var setTopicRows = refTopics[1];
+    var refDocs = React.useState([]);
+    var docRows = refDocs[0]; var setDocRows = refDocs[1];
     var refTLoad  = React.useState(false);
     var topicLoading = refTLoad[0]; var setTopicLoading = refTLoad[1];
     /* Imp3 (Fable UI review) — topicsFor tracks the query the current
@@ -247,9 +249,9 @@
     React.useEffect(function () {
       var q = query.trim();
       setSelIdx(0);
-      if (!q) { reqSeq.current++; setResults([]); setTopicRows([]); setTopicsFor(''); setTopicLoading(false); return; }
+      if (!q) { reqSeq.current++; setResults([]); setTopicRows([]); setDocRows([]); setTopicsFor(''); setTopicLoading(false); return; }
       setResults(_search(q));                 /* tasks/safety/sites/people, sync */
-      if (q.length < 2) { reqSeq.current++; setTopicRows([]); setTopicsFor(q); setTopicLoading(false); return; }
+      if (q.length < 2) { reqSeq.current++; setTopicRows([]); setDocRows([]); setTopicsFor(q); setTopicLoading(false); return; }
       var mine = ++reqSeq.current;
       setTopicLoading(true);
       var t = setTimeout(function () {
@@ -263,12 +265,14 @@
           .then(function (r) {
             if (mine !== reqSeq.current) return;       /* superseded */
             setTopicRows((r && r.results) || []);
+            setDocRows((r && r.documents) || []);
             setTopicsFor(q);
             setTopicLoading(false);
           })
           .catch(function () {
             if (mine !== reqSeq.current) return;
             setTopicRows([]);
+            setDocRows([]);
             setTopicsFor(q);
             setTopicLoading(false);
           });
@@ -327,6 +331,13 @@
       };
     });
 
+    /* Project documents (backend R7): their own group, never mixed into Topics.
+       Only where the org API is live (the org kill switch): an original can only be
+       opened through it, so with mocks on or no org base there is no group at all. */
+    var PD = window.FS.api.projectDocuments;
+    var docItems = (PD && PD.isLive && PD.isLive() && docRows.length)
+      ? window.FS.api.projectDocuments.toPaletteItems(docRows) : [];
+
     var clientFlat = groups.reduce(function (acc, g) { return acc.concat(g.items); }, []);
 
     /* topicsSettled: the server topic search has landed for THIS exact query
@@ -344,7 +355,8 @@
       : null;
     var flatItems = clientFlat
       .concat(askItem ? [askItem] : [])
-      .concat(topicItems);
+      .concat(topicItems)
+      .concat(docItems);
 
     function saveRecent(q) {
       if (!q) return;
@@ -397,6 +409,15 @@
 
     function doSelect(item) {
       if (!item) return;
+      if (item.type === 'document') {
+        saveRecent(trimmedQuery);
+        window.FS.api.projectDocuments.open(item.siteId, item.documentId, item.page)
+          .catch(function (err) {
+            if (window.FS.toast) window.FS.toast.show({ message: (err && err.message) || 'Could not open the document.', tone: 'error' });
+          });
+        onClose();
+        return;
+      }
       if (item.type === 'ask') {
         doAsk(trimmedQuery);
         return;
@@ -524,7 +545,7 @@
               )
             :
           /* No match */
-          query.trim() && results.length === 0 && !topicItems.length && !topicLoading && topicsSettled
+          query.trim() && results.length === 0 && !topicItems.length && !docItems.length && !topicLoading && topicsSettled
             ? React.createElement('div', { className: 'fs-search-palette__empty' },
                 'No results for “' + query.trim() + '”')
 
@@ -680,6 +701,32 @@
                           item.subtitle ? React.createElement('span', {
                             className: 'fs-search-palette__result-sub' }, item.subtitle) : null));
                     }))
+            : null,
+
+          /* Project documents (backend R7) -- what the project's documents say. */
+          (!askMode && query.trim() && docItems.length)
+            ? React.createElement('div', { className: 'fs-search-palette__group', key: '__documents__' },
+                React.createElement('div', {
+                  className: 'fs-search-palette__group-label', role: 'presentation',
+                }, 'Project documents'),
+                docItems.map(function (item) {
+                  var idx = flatItems.indexOf(item);
+                  var isSel = idx === selIdx;
+                  return React.createElement('button', {
+                    key: item.id, type: 'button', role: 'option',
+                    'aria-selected': isSel, 'data-selected': String(isSel),
+                    className: 'fs-search-palette__result'
+                      + (isSel ? ' fs-search-palette__result--active' : ''),
+                    onClick: function () { doSelect(item); },
+                    onMouseEnter: function () { setSelIdx(idx); },
+                  },
+                    NavIcon && React.createElement(NavIcon, {
+                      name: 'file', size: 15, color: 'var(--text-tertiary)' }),
+                    React.createElement('div', { className: 'fs-search-palette__result-body' },
+                      React.createElement('span', { className: 'fs-search-palette__result-title' }, item.title),
+                      item.subtitle ? React.createElement('span', {
+                        className: 'fs-search-palette__result-sub' }, item.subtitle) : null));
+                }))
             : null,
 
           /* (Ask row is rendered ABOVE the Topics group now — user pref
