@@ -13884,7 +13884,10 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 }
 .fs-ask-fold__summary:not(.fs-ask-fold__summary--static):hover {
   color: var(--text-primary);
-  background: var(--surface-panel-muted);
+  background: var(--surface-panel);
+}
+.fs-ask-fold__summary:not(.fs-ask-fold__summary--static):hover .fs-ask-fold__text {
+  text-decoration: underline;
 }
 .fs-ask-fold__summary:focus-visible {
   outline: 2px solid var(--border-focus, currentColor);
@@ -13901,7 +13904,6 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 }
 .fs-ask-fold--open > .fs-ask-fold__summary .fs-ask-fold__chevron { transform: rotate(90deg); }
 .fs-ask-fold__text { min-width: 0; overflow-wrap: anywhere; }
-.fs-ask-fold__text.fs-ask-chat__citations-label { margin-bottom: 0; }
 .fs-ask-fold__body {
   display: flex;
   flex-direction: column;
@@ -13917,9 +13919,19 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   .fs-ask-fold__body[hidden] { display: block; }
   .fs-ask-fold__chevron { display: none; }
 }
-/* The records summary carries the old 10px uppercase heading class (so the
-   records accent rule still matches); the whole basis line now sits in it. */
-.fs-ask-fold__text.fs-ask-chat__citations-label { font-size: 12px; text-transform: none; letter-spacing: 0; }
+/* The records summary carries the old heading class; the whole line now sits
+   in it and it is the only visible control on a closed fold, so it reads at
+   body size in the summary font, on a semantic colour (the records label's
+   accent-600 is ~1.6:1 on the bubble in light mode). Later than, and as
+   specific as, `.fs-ask-chat__citations--records .fs-ask-chat__citations-label`. */
+.fs-ask-fold__text.fs-ask-chat__citations-label {
+  margin-bottom: 0;
+  font-size: 12px;
+  font-family: inherit;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-secondary);
+}
 /* ── end Ask · folds ── */
 
 /* ---- Today: weather for the active site (today-weather-card.js) ---- */

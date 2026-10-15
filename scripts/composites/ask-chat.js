@@ -359,6 +359,8 @@
     if (conflicts.length) {
       out.text += ' · ' + conflicts.length + ' conflict' + (conflicts.length === 1 ? '' : 's');
       out.level = 'warn';
+      /* A refusal row that also carries conflicts must still read as a warning. */
+      if (out.textClass) out.textClass += ' fs-ask-webstatus__line--warn';
     }
     if (!out.textClass) out.textClass = 'fs-ask-webstatus__line fs-ask-webstatus__line--' + out.level;
     /* The body: the conflicts list, then the web prose and source links. */
