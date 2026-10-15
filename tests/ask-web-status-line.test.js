@@ -75,7 +75,11 @@ test('ungrounded from_web: bullets only', () => {
 test('message wiring: grounded stored and picks the numbered form', () => {
   const src = fs.readFileSync(require.resolve('../scripts/composites/ask-chat.js'), 'utf8');
   assert.match(src, /grounded:\s+!!res\.grounded/);
-  assert.match(src, /renderCitations\(m\.citations, !m\.grounded\)/);
+  /* Rewritten 2026-10-17 (spec ask-answer-first-folds §7): the call moved
+     into the records fold and gained a third argument (omit the in-body
+     heading, the fold summary says it). The contract is the second argument:
+     numbering keyed on `!m.grounded`, wherever the call sits. */
+  assert.match(src, /renderCitations\(m\.citations, !m\.grounded\b/);
 });
 test('unverified with no answer says no general answer', () => {
   const t = text(load().render(web({ status: 'unverified', answer: null })));

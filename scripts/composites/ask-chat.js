@@ -436,15 +436,22 @@
      (user, 2026-09-02).
 
      The question, not the browser locale — the locale is the device's language
-     and this is the asker's. Same rule the backend's metric renderer uses. */
+     and this is the asker's. Same rule the backend's metric renderer uses.
+
+     `count` (optional, spec 2026-10-17 §4): the number of excerpts the reply
+     actually SHOWS, which replaces `basis.chunks` in the tail. The offer turn
+     measured on TEST said "5 excerpts" over a reply that showed none -- the
+     backend's count is what it searched, not what the reader can check.
+     0 drops the tail entirely; absent keeps the old output exactly. */
   var CJK = /[㐀-䶿一-鿿豈-﫿]/;
   function askedInChinese(question) { return CJK.test(question || ''); }
 
-  function formatAnswerBasis(basis, zh) {
+  function formatAnswerBasis(basis, zh, count) {
     if (!basis || !basis.chunks) return null;
     var dates = basis.dates || [];
-    var n = basis.chunks;
-    var tail = zh ? ' · ' + n + ' 段摘录'
+    var n = typeof count === 'number' ? count : basis.chunks;
+    var tail = !n ? ''
+             : zh ? ' · ' + n + ' 段摘录'
                   : ' · ' + n + ' excerpt' + (n === 1 ? '' : 's');
     if (basis.widened) {
       return zh
@@ -478,14 +485,17 @@
      [2] — a worse mix-up than the one that used to throw these away. So on
      this path the heading names them as records explicitly, and the card
      marker is a bullet, never a bracketed number, so it can never be read as
-     an inline reference into the answer text above or below it. */
-  function renderCitations(citations, fromWeb) {
+     an inline reference into the answer text above or below it.
+
+     `omitLabel`: inside the records fold the heading is the fold's own
+     summary row (recordsFoldSummary), so the body does not say it twice. */
+  function renderCitations(citations, fromWeb, omitLabel) {
     if (!citations || !citations.length) return null;
     return React.createElement('div', {
       className: 'fs-ask-chat__citations'
         + (fromWeb ? ' fs-ask-chat__citations--records' : ''),
     },
-      React.createElement('div', { className: 'fs-ask-chat__citations-label' },
+      omitLabel ? null : React.createElement('div', { className: 'fs-ask-chat__citations-label' },
         fromWeb
           ? 'What we found in your records · ' + citations.length
           : 'Sources · ' + citations.length),
@@ -542,6 +552,60 @@
         );
       }),
     );
+  }
+
+  /* ---- folds: the answer first, the details under it ----------------------
+
+     Spec docs/specs/2026-10-17-ask-answer-first-folds.md. The owner scrolled
+     past a basis line and five record cards before reaching a word of the
+     answer. Above the answer now sits only one-line context that changes how
+     it must be read; everything else is a fold below it.
+
+     A fold is a native <button aria-expanded aria-controls> over a body that
+     stays IN the DOM with the `hidden` attribute when collapsed -- not
+     removed, not visually hidden: `hidden` takes the citation cards (which
+     are role=button tabIndex=0) out of the tab order, and the print rule in
+     composites.css brings a collapsed body back on paper.
+
+     `foldable: false` renders the summary as a plain line: a row that only
+     carries a status has nothing to expand into. */
+  function renderFold(o) {
+    var cls = 'fs-ask-fold fs-ask-fold--' + o.kind + (o.extraClass ? ' ' + o.extraClass : '');
+    var textCls = 'fs-ask-fold__text' + (o.textClass ? ' ' + o.textClass : '');
+    if (!o.foldable) {
+      return React.createElement('div', { className: cls },
+        React.createElement('div', {
+          className: 'fs-ask-fold__summary fs-ask-fold__summary--static ' + textCls,
+        }, o.summary));
+    }
+    return React.createElement('div', { className: cls + (o.open ? ' fs-ask-fold--open' : '') },
+      React.createElement('button', {
+        type:            'button',
+        className:       'fs-ask-fold__summary',
+        'aria-expanded': !!o.open,
+        'aria-controls': o.bodyId,
+        onClick:         o.onToggle,
+      },
+        React.createElement('span', { className: 'fs-ask-fold__chevron', 'aria-hidden': 'true' }, '›'),
+        React.createElement('span', { className: textCls }, o.summary)),
+      React.createElement('div', {
+        id:        o.bodyId,
+        className: 'fs-ask-fold__body',
+        hidden:    !o.open,
+      }, o.body));
+  }
+
+  /* The records fold's one line (spec §4). Grounded: "Sources · 5 · <basis>",
+     the basis WITHOUT its own excerpt tail (the count is already said), and
+     without it at all when widened -- that sentence already sits above the
+     answer. Not grounded: the records-named heading the web branch has always
+     used, so the bullets below cannot be read as the web prose's [n]. */
+  function recordsFoldSummary(m) {
+    var n = (m.citations || []).length;
+    if (!n) return null;
+    if (!m.grounded) return 'What we found in your records · ' + n;
+    var basis = m.basis && !m.basis.widened ? formatAnswerBasis(m.basis, m.zh, 0) : null;
+    return 'Sources · ' + n + (basis ? ' · ' + basis : '');
   }
 
   /* ---- scope: what this Ask is narrowed to --------------------------------
@@ -791,6 +855,12 @@
     var refReaskOf = React.useState(null);
     var reaskOf    = refReaskOf[0];
     var setReaskOf = refReaskOf[1];
+    /* Fold open/closed, per message and per fold: { key: bool }. A key that
+       is absent means "the default for this fold" (spec §4/§5), so a new
+       message always starts from its defaults and nothing is persisted. */
+    var refFolds = React.useState({});
+    var folds    = refFolds[0];
+    var setFolds = refFolds[1];
 
     var listRef = React.useRef(null);
     var rootRef  = React.useRef(null);
@@ -1255,6 +1325,28 @@
     var reaskInline = busy && reaskOf != null
       && msgs.some(function (x) { return x.id === reaskOf; });
 
+    /* A message's fold. Keyed by message id; a row without one (an error row,
+       the alerts route) falls back to its index, namespaced so the two can
+       never collide. The body id comes from the same key, and message ids are
+       module-unique, so two mounts on one page never share an aria target. */
+    function fold(m, i, kind, o) {
+      var key = (m.id != null ? 'id' + m.id : 'i' + i) + '-' + kind;
+      var has = function (f) { return Object.prototype.hasOwnProperty.call(f, key); };
+      var open = has(folds) ? folds[key] : !!o.defaultOpen;
+      return renderFold(Object.assign({}, o, {
+        kind:     kind,
+        bodyId:   'fs-ask-fold-' + key,
+        open:     open,
+        onToggle: function () {
+          setFolds(function (f) {
+            var next = Object.assign({}, f);
+            next[key] = !(has(f) ? f[key] : !!o.defaultOpen);
+            return next;
+          });
+        },
+      }));
+    }
+
     var className = 'fs-ask-chat'
       + (props.compact ? ' fs-ask-chat--compact' : '')
       + (dock ? ' fs-ask-chat--dock' : '');
@@ -1300,6 +1392,8 @@
           : null,
 
         msgs.map(function (m, i) {
+          /* The excerpts this reply SHOWS -- the count the basis line states. */
+          var shown = (m.citations || []).length;
           var row = React.createElement('div', {
             key: i,
             /* Marks the anchor the scroll effect looks for. The question is
@@ -1320,18 +1414,18 @@
               ? React.createElement('div', { className: 'fs-ask-chat__divider-text' }, m.text)
               : null,
 
-            /* FIRST, above the answer — not after it, and not at the end of the
-               prose. The reader asked about a period; if that period is empty
-               they learn it before they read a word about another day.
-               A version of this sat under the answer and it was wrong for the
-               same reason the model's closing caveat was: by the time you reach
-               it you have already read three sentences about a date you did not
-               ask about (user, 2026-08-31). */
-            m.role === 'assistant' && formatAnswerBasis(m.basis, m.zh)
+            /* FIRST, above the answer -- but only when WIDENED (spec
+               2026-10-17 §4). The reader asked about a period; if that period
+               is empty they learn it before they read a word about another
+               day (user, 2026-08-31). It renders even with no citations,
+               because that is exactly when the reader must know first; its
+               tail counts the cards shown, and is dropped when there are none.
+               Every other basis line moved into the records fold's summary:
+               the answer's first sentence now says what it is based on. */
+            m.role === 'assistant' && formatAnswerBasis(m.basis, m.zh, shown) && m.basis.widened
               ? React.createElement('div', {
-                  className: 'fs-ask-chat__basis'
-                    + (m.basis && m.basis.widened ? ' fs-ask-chat__basis--widened' : ''),
-                }, formatAnswerBasis(m.basis, m.zh))
+                  className: 'fs-ask-chat__basis fs-ask-chat__basis--widened',
+                }, formatAnswerBasis(m.basis, m.zh, shown))
               : null,
             /* What the scope turned out to be. Above the answer for the same
                reason as the basis line: the reader learns the answer is not
@@ -1352,15 +1446,6 @@
               ? React.createElement('div', { className: 'fs-ask-chat__asked' },
                   'Searched for: ' + m.asked)
               : null,
-            /* Records first, web after (spec 2026-09-22): a union, not
-               either/or. On a fromWeb message these are the customer's own
-               record excerpts the verdict judged insufficient -- rendered
-               here, ABOVE the "From the open web" label and the web prose,
-               so the reading order matches the plan's own name for it. See
-               renderCitations for why this block's heading and card marker
-               must not look like the web answer's own [1]/[2] source list. */
-            m.role === 'assistant' && m.fromWeb
-              ? renderCitations(m.citations, !m.grounded) : null,
             m.role === 'assistant' ? renderWebStatus(m) : null,
             m.role === 'assistant' ? renderWebOrigin(m) : null,
             /* `question_admission` already returns the sentence explaining a
@@ -1387,9 +1472,6 @@
                     })
                   : React.createElement('div', { className: 'fs-ask-chat__msg-text' },
                       m.text)),
-            /* Already rendered above (records-first) for fromWeb messages --
-               this is the grounded path's own "Sources" block only. */
-            m.role === 'assistant' && !m.fromWeb ? renderCitations(m.citations) : null,
             /* The web offer (FS_ASK_WEB_OFFER; spec 2026-10-16
                ask-screen-web-offer §5). The button IS the offer: the answer
                text asks no question a typed "yes" could accept. Gone once
@@ -1403,6 +1485,23 @@
                   disabled: busy,
                   onClick: function () { acceptWebOffer(m); },
                 }, 'Search the web')
+              : null,
+            /* The records fold (spec 2026-10-17 §4), BELOW the answer for
+               every kind of message. Still a union, not either/or (spec
+               2026-09-22): a web answer keeps its records, only the position
+               moved. Open with numbered [n] cards when `m.grounded` -- the
+               answer cites them inline, including a `mixed` web answer;
+               collapsed with bullets otherwise, so the cards can never be read
+               as the web prose's own [1]/[2] (see renderCitations). */
+            m.role === 'assistant' && shown
+              ? fold(m, i, 'records', {
+                  summary:     recordsFoldSummary(m),
+                  textClass:   'fs-ask-chat__citations-label',
+                  extraClass:  m.grounded ? '' : 'fs-ask-chat__citations--records',
+                  defaultOpen: !!m.grounded,
+                  foldable:    true,
+                  body:        renderCitations(m.citations, !m.grounded, true),
+                })
               : null,
             /* A scoped answer whose records did not answer it: offer the same
                question across everything. The host clears the context; the
@@ -1580,6 +1679,8 @@
   window.FieldSight.AskChat = AskChat;
   window.FieldSight._corroborationHasNothingToShow = hasNothingToShow;
   window.FieldSight._askWebStatus = { line: webStatusLine, render: renderWebStatus, origin: renderWebOrigin, citations: renderCitations };
+  /* Pure fold helpers, exported for tests (tests/ask-answer-first-folds.test.js). */
+  window.FieldSight._askFolds = { records: recordsFoldSummary };
   window.FieldSight._corroborationSourceDomain = sourceDomain;
   /* Exported so the wording can be pinned by a test without rendering React,
      and so SP-Ask's spoken variant can be written against the same dict. */

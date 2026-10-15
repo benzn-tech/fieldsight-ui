@@ -150,17 +150,29 @@ function renderAssistantChildren(msg) {
     require.resolve('../scripts/composites/ask-chat.js'), 'utf8') };
 }
 
-test('the basis line is rendered before the answer text, not after it', () => {
+/* Rewritten 2026-10-17 (spec ask-answer-first-folds §4/§7): the basis line
+   precedes the answer only when WIDENED -- the one case where the reader must
+   know first. Every other basis moved into the records fold's summary, below
+   the answer (driven in tests/ask-answer-first-folds.test.js R1-R4). */
+test('the widened basis line is rendered before the answer text; no other basis line is', () => {
   const { source } = renderAssistantChildren();
-  const basisAt  = source.indexOf("'fs-ask-chat__basis'");
-  const answerAt = source.indexOf("fs-ask-chat__msg-text fs-ask-chat__msg-text--md");
-  const citesAt  = source.indexOf('renderCitations(m.citations)');
+  const tree     = source.slice(source.indexOf('msgs.map(function (m, i)'));
+  const basisAt  = tree.indexOf("'fs-ask-chat__basis fs-ask-chat__basis--widened'");
+  const answerAt = tree.indexOf("fs-ask-chat__msg-text fs-ask-chat__msg-text--md");
+  const citesAt  = tree.indexOf('renderCitations(m.citations');
 
   assert.ok(basisAt > 0 && answerAt > 0 && citesAt > 0, 'renderers not found');
   assert.ok(basisAt < answerAt,
-    'the basis line renders AFTER the answer — the reader learns the period was empty ' +
+    'the widened line renders AFTER the answer — the reader learns the period was empty ' +
     'only once they have read about another day');
   assert.ok(answerAt < citesAt, 'citations must still follow the answer');
+
+  /* The line above the answer is gated on `widened`, so a plain basis never
+     sits there. */
+  const gate = tree.slice(tree.lastIndexOf('formatAnswerBasis(m.basis', basisAt), basisAt);
+  assert.match(gate, /m\.basis\.widened/, 'the line above the answer is not gated on widened');
+  assert.strictEqual(tree.indexOf("'fs-ask-chat__basis'"), -1,
+    'a non-widened basis line is still rendered on its own');
 });
 
 test('a widened basis carries the class that makes it red', () => {
@@ -205,6 +217,41 @@ test('every other shape of the line is translated too', () => {
   assert.strictEqual(fmt({ from: '2026-08-24', to: '2026-08-30', chunks: 6,
                            dates: ['2026-08-24', '2026-08-27', '2026-08-30'] }, true),
     '基于 2026-08-24 至 2026-08-30 · 3 天 · 6 段摘录');
+});
+
+/* Added 2026-10-17 (spec ask-answer-first-folds §4): an optional third
+   argument, the number of excerpts the reply SHOWS. The offer turn measured on
+   TEST said "5 excerpts" over a reply that showed none. Given, it replaces
+   `basis.chunks` in the tail; 0 drops the tail; absent changes nothing (every
+   exact string above is the no-count case). */
+test('a shown count replaces basis.chunks in the tail, and 0 drops the tail', () => {
+  const fmt = loadFormatter();
+  const widened = { from: '2026-08-28', to: '2026-08-28', widened: true, chunks: 4,
+                    dates: ['2026-08-28'] };
+  assert.strictEqual(fmt(widened, false, 2),
+    'Nothing in the period asked about — based on 2026-08-28 instead · 2 excerpts');
+  assert.strictEqual(fmt(widened, false, 1),
+    'Nothing in the period asked about — based on 2026-08-28 instead · 1 excerpt');
+  assert.strictEqual(fmt(widened, false, 0),
+    'Nothing in the period asked about — based on 2026-08-28 instead');
+  assert.strictEqual(fmt(widened, true, 3),
+    '所问的时间段没有记录 — 改为基于 2026-08-28 · 3 段摘录');
+  assert.strictEqual(fmt(widened, true, 0),
+    '所问的时间段没有记录 — 改为基于 2026-08-28');
+
+  const all = { from: null, to: null, widened: false, chunks: 5, dates: [] };
+  assert.strictEqual(fmt(all, false, 0), 'Based on all records you can see');
+  assert.strictEqual(fmt(all, true, 0), '基于你能看到的全部记录');
+  assert.strictEqual(fmt({ from: '2026-08-24', to: '2026-08-30', chunks: 6,
+                           dates: ['2026-08-24', '2026-08-27', '2026-08-30'] }, false, 0),
+    'Based on 2026-08-24 to 2026-08-30 · 3 days');
+
+  /* Absent is today's output, exactly. */
+  assert.strictEqual(fmt(all, false), 'Based on all records you can see · 5 excerpts');
+  assert.strictEqual(fmt(all, false, undefined), 'Based on all records you can see · 5 excerpts');
+  /* No basis is still no line, whatever the count. */
+  assert.strictEqual(fmt(null, false, 3), null);
+  assert.strictEqual(fmt({ chunks: 0, dates: [], from: null, to: null }, false, 3), null);
 });
 
 test('the language is decided by the question, not by the answer', () => {

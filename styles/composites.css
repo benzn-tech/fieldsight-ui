@@ -13843,6 +13843,72 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-ask-webstatus__line--warn { color: var(--color-warning-700, #b45309); font-weight: 600; }
 [data-theme="dark"] .fs-ask-webstatus__line--warn { color: var(--color-warning-300, #fcd34d); }
 
+/* ── Ask · folds (spec 2026-10-17 ask-answer-first-folds) ─────────────────
+   The answer comes first; records, web details and the corroboration check
+   fold below it. A fold is a native button over a body that stays in the DOM
+   with the `hidden` attribute, so `[hidden]` must win over the body's own
+   display rule -- a class rule setting `display` beats the UA's [hidden]
+   otherwise. Semantic tokens only: no palette-scale foreground here (the
+   records label keeps its existing accent rule above, which is not copied). */
+.fs-ask-fold {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fs-ask-fold__summary {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 6px 4px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm, 4px);
+  text-align: left;
+  cursor: pointer;
+}
+.fs-ask-fold__summary:not(.fs-ask-fold__summary--static):hover {
+  color: var(--text-primary);
+  background: var(--surface-panel-muted);
+}
+.fs-ask-fold__summary:focus-visible {
+  outline: 2px solid var(--border-focus, currentColor);
+  outline-offset: 1px;
+}
+.fs-ask-fold__summary--static { cursor: default; }
+.fs-ask-fold__chevron {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+  color: var(--text-tertiary);
+  transition: transform 120ms ease;
+}
+.fs-ask-fold--open > .fs-ask-fold__summary .fs-ask-fold__chevron { transform: rotate(90deg); }
+.fs-ask-fold__text { min-width: 0; overflow-wrap: anywhere; }
+.fs-ask-fold__text.fs-ask-chat__citations-label { margin-bottom: 0; }
+.fs-ask-fold__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fs-ask-fold__body[hidden] { display: none; }
+.fs-ask-fold__body > .fs-ask-chat__citations { margin-top: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .fs-ask-fold__chevron { transition: none; }
+}
+/* A printed answer keeps its sources: a collapsed body prints expanded. */
+@media print {
+  .fs-ask-fold__body[hidden] { display: block; }
+  .fs-ask-fold__chevron { display: none; }
+}
+/* ── end Ask · folds ── */
+
 /* ---- Today: weather for the active site (today-weather-card.js) ---- */
 .fs-today-weather { margin-bottom: 12px; }
 .fs-today-weather__title {
