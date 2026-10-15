@@ -1876,9 +1876,11 @@
               ? h('button', { type: 'button', className: 'fs-checklist-reports__gaps',
                   'aria-expanded': !!open[r.id],
                   onClick: function () {
-                    var next = Object.assign({}, open);
-                    next[r.id] = !open[r.id];
-                    setOpen(next);
+                    setOpen(function (prev) {
+                      var next = Object.assign({}, prev);
+                      next[r.id] = !prev[r.id];
+                      return next;
+                    });
                   } }, gw)
               : h('span', { className: 'fs-checklist-reports__gaps fs-checklist-reports__gaps--ok' }, gw))
               : null,

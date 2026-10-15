@@ -14002,7 +14002,7 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-checklist-reports__row--none { color: var(--text-secondary); }
 /* What the check left open (owner, 2026-10-16): a count that folds out. */
 .fs-checklist-reports__gaps {
-  margin-left: 8px; padding: 0; border: 0; background: none; font: inherit;
+  margin-left: auto; padding: 0; border: 0; background: none; font: inherit;
   color: var(--text-warning); cursor: pointer; text-decoration: underline;
 }
 .fs-checklist-reports__gaps--ok { color: var(--text-secondary); cursor: default; text-decoration: none; }
