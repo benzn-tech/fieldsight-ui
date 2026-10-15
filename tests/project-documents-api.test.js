@@ -12,9 +12,11 @@ let calls, puts;
 const OFF = { _notFound: true, status: 404, raw: { error: 'not found' } };
 const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
-function load(reply) {
+function load(reply, env) {
   calls = []; puts = [];
+  env = Object.assign({ useMocks: false, orgBaseUrl: 'https://org.test/api', orgWrites: true }, env || {});
   global.window = { FS: { api: {
+    useMocks: env.useMocks, orgBaseUrl: env.orgBaseUrl, orgWrites: env.orgWrites,
     orgRequest: async function (p, o) {
       calls.push({ path: p, method: (o && o.method) || 'GET', body: o && o.body, retry: o && o.retry });
       return reply(p, o || {});
@@ -76,6 +78,7 @@ test('checkFile refuses other types and files over 50 MB', () => {
   assert.match(PD.checkFile(file('plan.dwg')), /Word file/);
   assert.match(PD.checkFile(file('a.pdf', 50 * 1024 * 1024 + 1)), /larger than 50 MB/);
   assert.strictEqual(PD.checkFile(file('notes.txt')), null);
+  assert.strictEqual(PD.checkFile({ name: 'empty.pdf', size: 0, type: '' }), 'This file is empty.');
 });
 
 test('rename, remove and retry use their routes and are never retried', async () => {
@@ -142,4 +145,42 @@ test('labels and palette rows', () => {
     title: 'Spec', heading: '3.2 Formwork', page_from: 4, page_to: 5 }]);
   assert.deepStrictEqual(items, [{ type: 'document', id: 'doc_0_d1', title: 'Spec',
     subtitle: '3.2 Formwork · pp. 4–5 · Tower', siteId: 's1', documentId: 'd1', page: 4 }]);
+});
+
+test('kill switch: no org base URL, or mocks on, is off and asks nothing', async () => {
+  for (const env of [{ orgBaseUrl: '' }, { useMocks: true }]) {
+    const PD = load(() => { throw new Error('must not be called'); }, env);
+    assert.deepStrictEqual(await PD.list('s1'), { off: true });
+    assert.deepStrictEqual(await PD.history('s1', 'ser'), { off: true });
+    assert.deepStrictEqual(await PD.upload('s1', file('a.pdf'), { fetch: okFetch }), { off: true });
+    assert.deepStrictEqual(await PD.rename('s1', 'd1', 'x'), { off: true });
+    assert.deepStrictEqual(await PD.remove('s1', 'd1'), { off: true });
+    assert.deepStrictEqual(await PD.retry('s1', 'd1'), { off: true });
+    assert.strictEqual(calls.length, 0);
+    assert.strictEqual(puts.length, 0);
+  }
+});
+
+test('org writes off: the list reads but says no changes, and a write asks nothing', async () => {
+  const PD = load(() => ({ documents: [], canWrite: true }), { orgWrites: false });
+  assert.deepStrictEqual(await PD.list('s1'), { documents: [], canWrite: false });
+  await assert.rejects(PD.upload('s1', file('a.pdf'), { fetch: okFetch }), /switched off/);
+  await assert.rejects(PD.rename('s1', 'd1', 'x'), /switched off/);
+  await assert.rejects(PD.remove('s1', 'd1'), /switched off/);
+  await assert.rejects(PD.retry('s1', 'd1'), /switched off/);
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(puts.length, 0);
+});
+
+test('shouldPoll: only while something young is indexing and the tab is visible', () => {
+  const PD = load(() => ({}));
+  const now = Date.parse('2026-10-16T10:00:00Z');
+  const young = { status: 'pending', requestedAt: '2026-10-16T09:50:00Z' };
+  const stuck = { status: 'pending', requestedAt: '2026-10-16T09:39:00Z' };
+  assert.strictEqual(PD.shouldPoll([young], now, 'visible'), true);
+  assert.strictEqual(PD.shouldPoll([young], now, 'hidden'), false);
+  assert.strictEqual(PD.shouldPoll([stuck], now, 'visible'), false);
+  assert.strictEqual(PD.shouldPoll([{ status: 'indexed' }, { status: 'error' }, { status: 'unreadable' }], now, 'visible'), false);
+  assert.strictEqual(PD.shouldPoll([], now, 'visible'), false);
+  assert.strictEqual(PD.shouldPoll([stuck, young], now, 'visible'), true);
 });

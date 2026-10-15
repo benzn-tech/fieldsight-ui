@@ -69,3 +69,25 @@ test('finger targets and a 16px field on touch screens', () => {
   assert.match(coarse[0], /min-height: 44px/);
   assert.match(coarse[0], /font-size: 16px/);
 });
+
+test('nothing renders while the first load is in flight (no flash when off)', () => {
+  assert.match(src, /if \(st\.status === 'loading'\) return null;/);
+  assert.doesNotMatch(src, /Loading documents/);
+});
+
+test('polling follows shouldPoll and the tab being visible', () => {
+  assert.match(src, /api\(\)\.shouldPoll\(st\.documents, Date\.now\(\), visibility\)/);
+  assert.match(src, /addEventListener\('visibilitychange'/);
+  assert.match(src, /removeEventListener\('visibilitychange'/);
+});
+
+test('a new revision keeps the series title', () => {
+  assert.match(src, /\{ seriesId: rev\.seriesId, title: rev\.title \}/);
+});
+
+test('the component showcase renders it', () => {
+  const preview = fs.readFileSync(__dirname + '/../components-preview.html', 'utf8');
+  assert.match(preview, /scripts\/api\/project-documents\.js/);
+  assert.match(preview, /scripts\/composites\/project-documents-section\.js/);
+  assert.match(preview, /<ProjectDocumentsShowcase \/>/);
+});

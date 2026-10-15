@@ -13,6 +13,13 @@
    that exact answer means off; a 404 with its own message ("project not
    found", "the uploaded file was not found — upload it again") is shown.
 
+   The org kill switch comes first, the way api/org.js does it: with mocks on or
+   orgBaseUrl empty (local preview, a stack without the org API) every call is
+   "off" and nothing is requested -- orgRequest has no base to send it to and
+   would otherwise land on the legacy gateway. Changes additionally need
+   orgWrites (org WRITE = org LIVE && orgWrites); without it the list says
+   canWrite: false and a write is refused before any request.
+
    Exported to: window.FS.api.projectDocuments
    ========================================================================== */
 
@@ -31,6 +38,9 @@
   var OFF_ERROR  = 'not found';
 
   function api() { return window.FS.api; }
+  function orgLive()  { var a = api(); return !a.useMocks && !!a.orgBaseUrl; }
+  function orgWrite() { return orgLive() && !!api().orgWrites; }
+  var WRITES_OFF = 'Changes to project documents are switched off here.';
   function enc(s) { return encodeURIComponent(s); }
   function base(siteId) { return '/sites/' + enc(siteId) + '/documents'; }
 
@@ -46,6 +56,7 @@
   function checkFile(file) {
     if (!file) return 'Choose a file.';
     if (!EXT_TYPES[extOf(file.name)]) return 'Use a Word file (.docx), a PDF, or a text file (.txt, .md).';
+    if (!file.size) return 'This file is empty.';
     if (file.size > MAX_BYTES) return file.name + ' is larger than 50 MB.';
     return null;
   }
@@ -74,6 +85,8 @@
   }
 
   async function call(path, opts) {
+    if (!orgLive()) return { off: true };
+    if (opts && opts.method && opts.method !== 'GET' && !orgWrite()) throw new Error(WRITES_OFF);
     var res = await api().orgRequest(path, opts);
     if (isOff(res)) return { off: true };
     return refused(res) || {};
@@ -82,7 +95,7 @@
   async function list(siteId) {
     var res = await call(base(siteId));
     if (res.off) return res;
-    return { documents: res.documents || [], canWrite: !!res.canWrite };
+    return { documents: res.documents || [], canWrite: !!res.canWrite && orgWrite() };
   }
 
   async function history(siteId, seriesId) {
@@ -102,6 +115,8 @@
      and a retried create would be refused as "already added" at best. */
   async function upload(siteId, file, opts) {
     opts = opts || {};
+    if (!orgLive()) return { off: true };
+    if (!orgWrite()) throw new Error(WRITES_OFF);
     var problem = checkFile(file);
     if (problem) throw new Error(problem);
     var u = await call(base(siteId) + '/upload-url', {
@@ -175,6 +190,18 @@
     return { label: 'Indexing…', tone: 'info', canRetry: false, detail: '' };
   }
 
+  /* Re-read the list only while it can change on its own: something is indexing and
+     is not yet past the stuck line (past it, only a Retry moves it), and the tab is
+     visible (a hidden tab resumes on visibilitychange). */
+  function shouldPoll(docs, now, visibility) {
+    if (visibility === 'hidden') return false;
+    return (docs || []).some(function (d) {
+      if (!d || d.status !== 'pending') return false;
+      var since = Date.parse(d.requestedAt || d.createdAt);
+      return isNaN(since) || now - since <= STUCK_MS;
+    });
+  }
+
   function toPaletteItems(rows) {
     return (rows || []).map(function (r, i) {
       return {
@@ -195,6 +222,6 @@
     EXT_TYPES: EXT_TYPES, MAX_BYTES: MAX_BYTES, STUCK_MS: STUCK_MS, REFRESH_MS: REFRESH_MS,
     typeFor: typeFor, checkFile: checkFile, list: list, history: history, upload: upload,
     rename: rename, remove: remove, retry: retry, open: open, pageHref: pageHref,
-    pageLabel: pageLabel, citeLabel: citeLabel, statusOf: statusOf, toPaletteItems: toPaletteItems,
+    pageLabel: pageLabel, citeLabel: citeLabel, statusOf: statusOf, shouldPoll: shouldPoll, toPaletteItems: toPaletteItems,
   };
 })();
