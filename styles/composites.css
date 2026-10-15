@@ -14321,3 +14321,31 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   .fs-project-docs__title { min-height: 44px; display: flex; align-items: center; }
   .fs-project-docs__input { font-size: 16px; min-height: 44px; }
 }
+
+/* Ask: project documents block (backend spec 2026-10-16, rule 3).
+   Below the answer and the recording Sources, never inside a recording card.
+   Colours are semantic tokens defined in both theme blocks (--text-link flips). */
+.fs-ask-docs {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--text-link);
+  background: var(--surface-panel-muted);
+  border-radius: var(--radius-sm, 4px);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.fs-ask-docs__label {
+  font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--text-secondary); font-family: var(--font-mono);
+}
+.fs-ask-docs__list { display: flex; flex-direction: column; gap: 4px; }
+.fs-ask-docs__item {
+  all: unset; cursor: pointer; font-size: 12px; color: var(--text-primary);
+  border-bottom: 1px dotted var(--border-default); overflow-wrap: anywhere;
+  align-self: flex-start;
+}
+.fs-ask-docs__item:hover, .fs-ask-docs__item:focus-visible { color: var(--text-link-hover); }
+.fs-ask-docs__item:focus-visible { outline: 2px solid var(--text-link); outline-offset: 2px; }
+.fs-ask-docs__item:disabled { cursor: default; color: var(--text-secondary); border-bottom-color: transparent; }
+@media (pointer: coarse) {
+  .fs-ask-docs__item { font-size: 16px; min-height: 44px; display: flex; align-items: center; }
+}
