@@ -13779,13 +13779,15 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 }
 
 /* ── Ask · answered from the open web ─────────────────────────────────────
-   Sits ABOVE the answer, unlike the corroboration block which sits below it.
-   Corroboration annotates an answer that came from the customer's own
-   recordings; this one says the answer did NOT. A reader who meets that fact
-   after the prose has already read it as their own record. */
+   The LABEL sits ABOVE the answer, unlike the corroboration block which sits
+   below it. Corroboration annotates an answer that came from the customer's
+   own recordings; this one says the answer did NOT. A reader who meets that
+   fact after the prose has already read it as their own record.
+   The block itself (web prose + source links) is the body of the web fold
+   below the answer (spec 2026-10-17 ask-answer-first-folds §3). */
 
 .fs-ask-web {
-  margin-bottom: 10px;
+  margin: 0;
   padding: 8px 10px;
   border-left: 3px solid var(--color-accent-700, #C9762B);
   background: var(--surface-panel-muted);
@@ -13801,6 +13803,14 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   text-transform: uppercase;
   color: var(--text-secondary);
   font-family: var(--font-mono);
+}
+
+/* The label on its own above the answer: the same left rule as the block it
+   heads, so the two read as one source even with the fold closed. */
+.fs-ask-web__label--lead {
+  margin-bottom: 6px;
+  padding: 2px 0 2px 8px;
+  border-left: 3px solid var(--color-accent-700, #C9762B);
 }
 
 .fs-ask-web__answer {

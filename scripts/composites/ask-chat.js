@@ -217,22 +217,34 @@
     return null; /* not_needed or unknown */
   }
 
+  function webConflicts(web) {
+    return ((web && web.conflicts) || []).filter(function (c) { return typeof c === 'string' && c; });
+  }
+
+  /* The records-vs-standard list. Its own function because it renders in two
+     places: inside renderWebStatus (kept whole for its tests and any caller)
+     and inside the web fold's body, where the status line is the fold's own
+     summary and must not be said twice. */
+  function renderWebConflicts(web) {
+    var conflicts = webConflicts(web);
+    if (!conflicts.length) return null;
+    return React.createElement('div', { className: 'fs-ask-webstatus__conflicts' },
+      React.createElement('div', { className: 'fs-ask-webstatus__conflicts-head' },
+        '⚠ Records and the standard disagree'),
+      React.createElement('ul', { className: 'fs-ask-webstatus__conflicts-list' },
+        conflicts.map(function (c, i) {
+          return React.createElement('li', { key: i }, c);
+        })));
+  }
+
   function renderWebStatus(m) {
     var web = m && m.web;
     if (!web) return null;
     var line = webStatusLine(web);
-    var conflicts = (web.conflicts || []).filter(function (c) { return typeof c === 'string' && c; });
+    var conflicts = webConflicts(web);
     if (!line && !conflicts.length) return null;
     return React.createElement('div', { className: 'fs-ask-webstatus' },
-      conflicts.length
-        ? React.createElement('div', { className: 'fs-ask-webstatus__conflicts' },
-            React.createElement('div', { className: 'fs-ask-webstatus__conflicts-head' },
-              '⚠ Records and the standard disagree'),
-            React.createElement('ul', { className: 'fs-ask-webstatus__conflicts-list' },
-              conflicts.map(function (c, i) {
-                return React.createElement('li', { key: i }, c);
-              })))
-        : null,
+      renderWebConflicts(web),
       line
         ? React.createElement('div', {
             className: 'fs-ask-webstatus__line fs-ask-webstatus__line--' + line.level,
@@ -243,17 +255,22 @@
 
   /* The line that keeps the two sources apart.
 
-     It sits ABOVE the answer for the same reason the basis line does: by the
-     time a reader reaches a footnote they have already read the answer as if it
-     came from their own recordings. The separation has to arrive first.
+     The LABEL sits ABOVE the answer for the same reason the widened basis line
+     does: by the time a reader reaches a footnote they have already read the
+     answer as if it came from their own recordings. The separation has to
+     arrive first. Called with one argument this renders that label and nothing
+     else. With `part === 'details'` it renders the rest -- the web prose and
+     the source links -- for the web fold BELOW the answer (spec 2026-10-17
+     §2/§3): the owner read the web facts twice, once here above the answer
+     and once in it, before this split.
 
      `sources` carries `domain` because this vendor returns Google grounding
      redirects -- parsing the URL would attribute every source to
      `vertexaisearch.cloud.google.com`, which is the opposite of naming a
      publisher.
 
-     `web.answer` is the web prose itself. It renders inside this block, under
-     the label, so provenance never blurs into the grounded answer above it.
+     `web.answer` is the web prose itself. It renders inside the details
+     block, in the web fold, so provenance never blurs into the answer above.
      But it renders ONLY when it differs (trimmed) from `m.text`: today
      `res.answer` IS the web answer, so the two fields hold the same string
      and printing both would show the prose twice. Once the backend change in
@@ -261,7 +278,7 @@
      becomes the grounded answer and `web.answer` stays the web prose -- they
      diverge and this starts rendering, with no frontend change needed at
      that point. See tests/ask-web-prose-inside-block.test.js. */
-  function renderWebOrigin(m) {
+  function renderWebOrigin(m, part) {
     if (!m.fromWeb) return null;
     var web = m.web || {};
     var sources = web.sources || [];
@@ -269,11 +286,14 @@
     var webAnswer = typeof web.answer === 'string' ? web.answer.trim() : '';
     var messageText = typeof m.text === 'string' ? m.text.trim() : '';
     var showAnswer = !!webAnswer && webAnswer !== messageText;
-    return React.createElement('div', { className: 'fs-ask-web' },
-      React.createElement('div', { className: 'fs-ask-web__label' },
+    if (part !== 'details') {
+      return React.createElement('div', { className: 'fs-ask-web__label fs-ask-web__label--lead' },
         web.status === 'unverified'
           ? 'Model knowledge — not verified online'
-          : 'From the open web — not from your recordings'),
+          : 'From the open web — not from your recordings');
+    }
+    if (!showAnswer && !sources.length) return null;
+    return React.createElement('div', { className: 'fs-ask-web' },
       showAnswer
         ? React.createElement('div', { className: 'fs-ask-web__answer' }, web.answer)
         : null,
@@ -288,6 +308,93 @@
             }))
         : null
     );
+  }
+
+  /* The web fold's one line (spec 2026-10-17 §3), or null when there is no
+     fold. In order of precedence:
+       - a refusal with no `status`: the refused sentence itself, as a plain
+         line. A guard doing its job must not read as an outage, so it is
+         never hidden behind a button;
+       - a status line: its text, then the first three DISTINCT source domains
+         in source order, then +N for the rest;
+       - no status but fromWeb (an older backend): "From the open web · N
+         sources · <domains>";
+       - then " · N conflicts" appended. A conflict makes the row warn: a
+         disagreement folded away must not read as all-clear.
+     `foldable`: whether the body has anything under the line -- a summary
+     with nothing to expand is a plain line, not a button. */
+  function webSourceDomains(sources) {
+    var seen = [];
+    (sources || []).forEach(function (s) {
+      var d = sourceDomain(s);
+      if (d && seen.indexOf(d) === -1) seen.push(d);
+    });
+    if (!seen.length) return '';
+    return ' · ' + seen.slice(0, 3).join(', ') + (seen.length > 3 ? ' +' + (seen.length - 3) : '');
+  }
+
+  function webFoldSummary(m) {
+    if (!m || (!m.web && !m.fromWeb)) return null;
+    var web = m.web || {};
+    var line = webStatusLine(web);
+    var conflicts = webConflicts(web);
+    /* With `status` present the backend no longer refuses by content
+       (`too_long` replaces it); the status line says it instead. */
+    var refused = m.web && m.web.refused
+      && typeof m.web.status !== 'string' ? String(m.web.refused) : null;
+    if (!m.fromWeb && !line && !conflicts.length && !refused) return null;
+    var sources = web.sources || [];
+    var out;
+    if (refused) {
+      out = { text: refused, level: 'muted', textClass: 'fs-ask-chat__web-refused' };
+    } else if (line) {
+      out = { text: line.text + webSourceDomains(sources), level: line.level };
+    } else if (m.fromWeb) {
+      out = { text: 'From the open web · ' + sources.length + ' source'
+                    + (sources.length === 1 ? '' : 's') + webSourceDomains(sources),
+              level: 'muted' };
+    } else {
+      out = { text: 'Records and the standard disagree', level: 'warn' };
+    }
+    if (conflicts.length) {
+      out.text += ' · ' + conflicts.length + ' conflict' + (conflicts.length === 1 ? '' : 's');
+      out.level = 'warn';
+    }
+    if (!out.textClass) out.textClass = 'fs-ask-webstatus__line fs-ask-webstatus__line--' + out.level;
+    /* The body: the conflicts list, then the web prose and source links. */
+    out.foldable = !!(conflicts.length || renderWebOrigin(m, 'details'));
+    return out;
+  }
+
+  /* The corroboration fold's one line (spec 2026-10-17 §3a). Pending and
+     failed show as they always have, and a row that only carries a status --
+     timed out, broke, or never searched -- is a plain line with the sentence
+     that says which: "Checked on the web · 0 claims" would assert a search
+     that did not happen. Otherwise the claim count, then the disagreements,
+     then whatever was not checked. Truncation carries no count, so it says
+     only what it knows. */
+  function corrobFoldSummary(res) {
+    if (!res) return null;
+    if (res._pending) return { text: 'Checking the web…', foldable: false, level: 'muted' };
+    if (res._failed) return { text: 'Web check unavailable', foldable: false, level: 'muted' };
+    if (hasNothingToShow(res)) return null;
+    var items = res.corroborations || [];
+    var dropped = res.dropped || [];
+    if (!items.length && !dropped.length && !res.truncated) {
+      return {
+        text: res.timed_out ? 'Web check timed out'
+            : res.failed    ? 'The web check could not be completed'
+            : 'Couldn’t check the web for this answer',
+        foldable: false, level: 'muted',
+      };
+    }
+    var k = items.filter(function (c) { return c && c.state === 'conflicts'; }).length;
+    var text = 'Checked on the web · ' + items.length + ' claim' + (items.length === 1 ? '' : 's');
+    if (k) text += ' · ' + k + ' disagree';
+    if (dropped.length) text += ' · ' + dropped.length + ' not checked';
+    if (res.truncated) text += ' · only the first ' + items.length + ' checked';
+    if (res.timed_out) text += ' · timed out';
+    return { text: text, foldable: true, level: k ? 'warn' : 'ok' };
   }
 
   function renderCorroboration(res) {
@@ -1446,18 +1553,11 @@
               ? React.createElement('div', { className: 'fs-ask-chat__asked' },
                   'Searched for: ' + m.asked)
               : null,
-            m.role === 'assistant' ? renderWebStatus(m) : null,
+            /* The one-line provenance label, and only the label, above the
+               answer (spec 2026-10-17 §2): "a caveat reached after three
+               sentences has already been read past". The status, the web
+               prose and its sources fold below the answer. */
             m.role === 'assistant' ? renderWebOrigin(m) : null,
-            /* `question_admission` already returns the sentence explaining a
-               refusal (a name, a commercially sensitive topic, ...); nothing
-               rendered it, so the reader saw the web section simply absent
-               and read a guard doing its job as an outage. */
-            /* With `status` present the backend no longer refuses by content
-               (`too_long` replaces it); the status line above says it instead. */
-            m.role === 'assistant' && m.web && m.web.refused
-              && typeof m.web.status !== 'string'
-              ? React.createElement('div', { className: 'fs-ask-chat__web-refused' }, m.web.refused)
-              : null,
             /* The plain-text fallback below is also what renders the user's
                own question; a divider already rendered its one line above
                and must not get a second copy of it here (m.role !== 'divider'
@@ -1503,6 +1603,27 @@
                   body:        renderCitations(m.citations, !m.grounded, true),
                 })
               : null,
+            /* The web fold (spec 2026-10-17 §3), closed by default, after the
+               records. Its summary carries the status line, the source domains
+               and any conflict count; its body the conflicts list, the web
+               prose (only when it differs from the answer) and the links.
+               `question_admission`'s refusal sentence renders here as a plain
+               line -- nothing rendered it once, and the reader read a guard
+               doing its job as an outage. */
+            m.role === 'assistant' && webFoldSummary(m)
+              ? (function (ws) {
+                  return fold(m, i, 'web', {
+                    summary:     ws.text,
+                    textClass:   ws.textClass,
+                    foldable:    ws.foldable,
+                    defaultOpen: false,
+                    body:        [
+                      React.createElement(React.Fragment, { key: 'c' }, renderWebConflicts(m.web)),
+                      React.createElement(React.Fragment, { key: 'o' }, renderWebOrigin(m, 'details')),
+                    ],
+                  });
+                })(webFoldSummary(m))
+              : null,
             /* A scoped answer whose records did not answer it: offer the same
                question across everything. The host clears the context; the
                reset effect re-sends once the new (empty) context has rendered.
@@ -1539,8 +1660,23 @@
 
             /* Below the citations, deliberately: citations point back into the
                customer's own recordings, and this points out of them. Reading
-               order carries the same separation the styling does. */
-            m.role === 'assistant' ? renderCorroboration(m.corrob) : null,
+               order carries the same separation the styling does.
+               Pending and failed render exactly as they always have; anything
+               else is its own fold (spec 2026-10-17 §3a), closed, with today's
+               block unchanged as its body. */
+            m.role === 'assistant' && m.corrob && (m.corrob._pending || m.corrob._failed)
+              ? renderCorroboration(m.corrob)
+              : (m.role === 'assistant' && corrobFoldSummary(m.corrob)
+                  ? (function (cs) {
+                      return fold(m, i, 'corrob', {
+                        summary:     cs.text,
+                        textClass:   'fs-ask-webstatus__line fs-ask-webstatus__line--' + cs.level,
+                        foldable:    cs.foldable,
+                        defaultOpen: false,
+                        body:        cs.foldable ? renderCorroboration(m.corrob) : null,
+                      });
+                    })(corrobFoldSummary(m.corrob))
+                  : null),
             /* Customers must never learn which model/vendor answers Ask
                (owner's ruling). `m.model` is deliberately never rendered —
                the backend is being changed in parallel to stop sending it
@@ -1680,7 +1816,7 @@
   window.FieldSight._corroborationHasNothingToShow = hasNothingToShow;
   window.FieldSight._askWebStatus = { line: webStatusLine, render: renderWebStatus, origin: renderWebOrigin, citations: renderCitations };
   /* Pure fold helpers, exported for tests (tests/ask-answer-first-folds.test.js). */
-  window.FieldSight._askFolds = { records: recordsFoldSummary };
+  window.FieldSight._askFolds = { records: recordsFoldSummary, web: webFoldSummary, corrob: corrobFoldSummary };
   window.FieldSight._corroborationSourceDomain = sourceDomain;
   /* Exported so the wording can be pinned by a test without rendering React,
      and so SP-Ask's spoken variant can be written against the same dict. */

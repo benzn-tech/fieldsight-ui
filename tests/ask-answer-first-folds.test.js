@@ -372,3 +372,219 @@ test('R10 the fold styles use semantic tokens only (no palette-scale foreground)
     'a palette-scale token in the fold styles');
   assert.ok(!/#[0-9a-fA-F]{3,6}\b/.test(block), 'a hard-coded colour in the fold styles');
 });
+
+/* ---- Task 2: the web fold and the corroboration fold ------------------------ */
+
+function loadFolds() {
+  delete require.cache[require.resolve('../scripts/composites/ask-chat.js')];
+  global.window = { FieldSight: {}, FS: { api: {} } };
+  global.React = { createElement(type, props, ...kids) { return { type, props: props || {}, kids }; } };
+  global.document = { addEventListener() {}, removeEventListener() {} };
+  require('../scripts/composites/ask-chat.js');
+  return global.window.FieldSight._askFolds;
+}
+const src = (domain) => ({ url: 'https://vertexaisearch.cloud.google.com/r/' + domain, title: domain, domain });
+
+test('S1 web summary: status text, then the first 3 distinct domains in source order, then +N', () => {
+  const F = loadFolds();
+  const m = { fromWeb: true, text: 'a', web: { status: 'verified',
+    sources: ['b.org', 'a.com', 'b.org', 'c.net', 'd.io', 'e.nz'].map(src) } };
+  assert.strictEqual(F.web(m).text, 'Checked against 6 web sources · b.org, a.com, c.net +2');
+  assert.strictEqual(F.web(m).level, 'ok');
+
+  /* The real re-ask (4 sources). */
+  assert.strictEqual(F.web({ fromWeb: true, grounded: true, text: DUMP_WEB.answer, web: DUMP_WEB.web }).text,
+    'Checked against 4 web sources · placemakers.co.nz, scribd.com, cloudfront.net +1');
+
+  /* Three or fewer: no +N. A source without `domain` falls back to its host. */
+  assert.strictEqual(F.web({ fromWeb: true, web: { status: 'verified',
+    sources: [src('x.com'), { url: 'https://www.y.org/p' }] } }).text,
+    'Checked against 2 web sources · x.com, y.org');
+});
+
+test('S2 web summary: the unverified, failed, too_long and refused texts', () => {
+  const F = loadFolds();
+  const un = F.web({ fromWeb: true, text: 'm', web: { status: 'unverified', answer: 'general', sources: [] } });
+  assert.strictEqual(un.text, 'Model knowledge — not verified online (web search failed)');
+  assert.strictEqual(un.level, 'warn');
+  const failed = F.web({ fromWeb: false, text: 'm', web: { status: 'unverified', answer: null, sources: [] } });
+  assert.strictEqual(failed.text, 'Web check unavailable — no general answer');
+  assert.strictEqual(failed.level, 'warn');
+  assert.strictEqual(failed.foldable, false, 'a status with nothing under it is a plain line');
+  const long = F.web({ text: 'm', web: { status: 'too_long', sources: [] } });
+  assert.strictEqual(long.text, 'Not searched online (question too long)');
+  assert.strictEqual(long.foldable, false);
+
+  const sentence = 'This question asks about a named individual, which the web check will not run for.';
+  const refused = F.web({ text: 'm', web: { refused: sentence } });
+  assert.strictEqual(refused.text, sentence, 'a refusal is never hidden behind a fold');
+  assert.strictEqual(refused.foldable, false);
+  /* With `status` the backend no longer refuses by content; the status speaks. */
+  assert.strictEqual(F.web({ text: 'm', web: { refused: sentence, status: 'too_long' } }).text,
+    'Not searched online (question too long)');
+});
+
+test('S3 web summary: the older-backend fallback and the conflict count', () => {
+  const F = loadFolds();
+  assert.strictEqual(F.web({ fromWeb: true, text: 'm',
+    web: { answer: 'w', sources: [src('example.com'), src('b.org')] } }).text,
+    'From the open web · 2 sources · example.com, b.org');
+  assert.strictEqual(F.web({ fromWeb: true, text: 'm', web: { sources: [src('one.nz')] } }).text,
+    'From the open web · 1 source · one.nz');
+
+  const one = F.web({ fromWeb: true, text: 'm', web: { status: 'verified', sources: [src('a.nz')],
+    conflicts: ['records say 900 mm; F4/AS1 says 1000 mm'] } });
+  assert.strictEqual(one.text, 'Checked against 1 web source · a.nz · 1 conflict');
+  assert.strictEqual(one.level, 'warn', 'a hidden disagreement must not read as all-clear');
+  assert.strictEqual(F.web({ text: 'm', web: { status: 'verified', sources: [],
+    conflicts: ['x', 'y', '', null] } }).text, 'Checked against 0 web sources · 2 conflicts');
+});
+
+test('S4 web summary: nothing to say is no fold at all', () => {
+  const F = loadFolds();
+  assert.strictEqual(F.web({ text: 'm', web: null }), null);
+  assert.strictEqual(F.web({ text: 'm' }), null);
+  assert.strictEqual(F.web({ text: 'm', web: { status: 'not_needed', sources: [] } }), null);
+  assert.strictEqual(F.web({ text: 'm', web: { sources: [], refused: null, conflicts: [] } }), null);
+});
+
+test('C1 corroboration summary: pending, failed and timed_out are plain lines', () => {
+  const F = loadFolds();
+  assert.deepStrictEqual(F.corrob({ _pending: true }), { text: 'Checking the web…', foldable: false, level: 'muted' });
+  assert.deepStrictEqual(F.corrob({ _failed: true }), { text: 'Web check unavailable', foldable: false, level: 'muted' });
+  const t = F.corrob({ corroborations: [], dropped: [], truncated: false, timed_out: true, searched: true });
+  assert.strictEqual(t.text, 'Web check timed out');
+  assert.strictEqual(t.foldable, false);
+  assert.strictEqual(F.corrob(null), null);
+  assert.strictEqual(F.corrob({ corroborations: [], dropped: [], searched: true }), null);
+});
+
+test('C2 corroboration summary: claims, "· K disagree" and "· M not checked"', () => {
+  const F = loadFolds();
+  const res = { corroborations: [
+    { entity: 'NZS 3604', state: 'corroborated' },
+    { entity: 'F4/AS1', state: 'conflicts' },
+    { entity: 'C30', state: 'not_found' },
+  ], dropped: [{ entity: 'Acme', reason: 'name' }, { entity: 'Bob', reason: 'name' }], searched: true };
+  const s = F.corrob(res);
+  assert.strictEqual(s.text, 'Checked on the web · 3 claims · 1 disagree · 2 not checked');
+  assert.strictEqual(s.foldable, true);
+  assert.strictEqual(s.level, 'warn');
+  assert.strictEqual(F.corrob({ corroborations: [{ state: 'corroborated' }], searched: true }).text,
+    'Checked on the web · 1 claim');
+  assert.strictEqual(F.corrob({ corroborations: [{ state: 'corroborated' }], searched: true }).level, 'ok');
+  /* Truncation has no count to report, so it says what it knows. */
+  assert.strictEqual(F.corrob({ corroborations: [{}, {}, {}], truncated: true, searched: true }).text,
+    'Checked on the web · 3 claims · only the first 3 checked');
+  /* A broken or skipped check states the fact, never "0 claims". */
+  assert.strictEqual(F.corrob({ corroborations: [], failed: true, searched: true }).text,
+    'The web check could not be completed');
+  assert.strictEqual(F.corrob({ corroborations: [], searched: false }).text,
+    'Couldn’t check the web for this answer');
+});
+
+test('D1 the real re-ask: label, answer, records (open), web fold (closed) -- in that order', async () => {
+  const h = await answered(DUMP_WEB);
+  const row = h.answers()[0];
+  const { kids, answerAt } = assertAnswerFirst(h, row, 'mixed');
+  const labels = h.within(row, 'fs-ask-web__label');
+  assert.strictEqual(labels.length, 1, 'the provenance label renders once');
+  assert.ok(kids.indexOf(labels[0]) < answerAt, 'the provenance label stays above the answer');
+  assert.strictEqual(h.text(labels[0]), 'From the open web — not from your recordings');
+
+  const records = h.within(row, 'fs-ask-fold--records')[0];
+  const web = h.within(row, 'fs-ask-fold--web')[0];
+  assert.ok(answerAt < kids.indexOf(records) && kids.indexOf(records) < kids.indexOf(web),
+    'order must be answer, records, web');
+
+  const btn = h.within(web, 'fs-ask-fold__summary')[0];
+  assert.strictEqual(btn.type, 'button');
+  assert.strictEqual(btn.props['aria-expanded'], false, 'the web fold starts closed');
+  assert.strictEqual(h.text(h.within(btn, 'fs-ask-fold__text')[0]),
+    'Checked against 4 web sources · placemakers.co.nz, scribd.com, cloudfront.net +1');
+  const body = h.within(web, 'fs-ask-fold__body')[0];
+  assert.strictEqual(body.props.hidden, true);
+  assert.strictEqual(btn.props['aria-controls'], body.props.id);
+  /* Collapsed, not removed: the web prose and every source are in the body. */
+  assert.strictEqual(h.within(body, 'fs-ask-web__answer').length, 1);
+  assert.strictEqual(h.within(body, 'fs-ask-web__source').length, 4);
+  assert.strictEqual(h.within(body, 'fs-ask-web__label').length, 0, 'the body repeats the label');
+
+  btn.props.onClick();
+  h.rerender();
+  const web2 = h.byClass('fs-ask-fold--web')[0];
+  assert.strictEqual(h.within(web2, 'fs-ask-fold__summary')[0].props['aria-expanded'], true);
+  assert.strictEqual(h.within(web2, 'fs-ask-fold__body')[0].props.hidden, false);
+});
+
+test('D2 not grounded, from the web: answer, records (closed), web fold (closed)', async () => {
+  const h = await answered(NOT_GROUNDED_WEB);
+  const row = h.answers()[0];
+  const { kids, answerAt } = assertAnswerFirst(h, row, 'not grounded web');
+  const records = h.within(row, 'fs-ask-fold--records')[0];
+  const web = h.within(row, 'fs-ask-fold--web')[0];
+  assert.ok(answerAt < kids.indexOf(records) && kids.indexOf(records) < kids.indexOf(web));
+  assert.strictEqual(h.within(records, 'fs-ask-fold__summary')[0].props['aria-expanded'], false);
+  assert.strictEqual(h.text(h.within(web, 'fs-ask-fold__text')[0]),
+    'From the open web · 1 source · example.com');
+});
+
+test('D3 a warn status keeps its warn class on the row (and so its dark-mode override)', async () => {
+  const h = await answered({ answer: 'Typically 50mm.', from_web: true, grounded: false, citations: [],
+    web: { status: 'unverified', answer: 'Typically 50mm.', sources: [] } });
+  const text = h.within(h.byClass('fs-ask-fold--web')[0], 'fs-ask-fold__text')[0];
+  assert.ok(h.has(text, 'fs-ask-webstatus__line--warn'), text.props.className);
+  assert.match(css, /\[data-theme="dark"\] \.fs-ask-webstatus__line--warn/);
+  assert.strictEqual(h.text(h.byClass('fs-ask-web__label')[0]), 'Model knowledge — not verified online');
+});
+
+test('D4 a refusal renders as a plain line below the answer, never behind a button', async () => {
+  const sentence = 'This question asks about a named individual, which the web check will not run for.';
+  const h = await answered({ answer: 'a', citations: [], web: { refused: sentence } });
+  const row = h.answers()[0];
+  const { kids, answerAt } = assertAnswerFirst(h, row, 'refused');
+  const fold = h.within(row, 'fs-ask-fold--web')[0];
+  assert.ok(kids.indexOf(fold) > answerAt);
+  assert.strictEqual(h.within(fold, 'fs-ask-fold__body').length, 0);
+  assert.strictEqual(h.walk(fold).filter(n => n.type === 'button').length, 0);
+  assert.strictEqual(h.text(h.within(fold, 'fs-ask-chat__web-refused')[0]), sentence);
+});
+
+test('D5 corroboration: pending under the records, then a closed fold with the counts', async () => {
+  const h = await answered(GROUNDED, 'What did we do yesterday?', { externalCorroboration: true });
+  let row = h.answers()[0];
+  let kids = h.children(row);
+  const records = h.within(row, 'fs-ask-fold--records')[0];
+  const pending = h.within(row, 'fs-ask-corrob--pending')[0];
+  assert.ok(pending, 'pending shows as today');
+  assert.ok(kids.indexOf(records) < kids.indexOf(pending), 'corroboration stays below the citations');
+
+  await h.settleCorrob(0, { corroborations: [
+    { entity: 'NZS 3604', state: 'corroborated', summary: 'ok', sources: [src('standards.govt.nz')] },
+    { entity: 'F4/AS1', state: 'conflicts', claim: '900', summary: '1000', sources: [] },
+  ], dropped: [], searched: true });
+  row = h.answers()[0];
+  kids = h.children(row);
+  const { answerAt } = assertAnswerFirst(h, row, 'corroborated');
+  const fold = h.within(row, 'fs-ask-fold--corrob')[0];
+  assert.ok(kids.indexOf(fold) > kids.indexOf(h.within(row, 'fs-ask-fold--records')[0]));
+  assert.ok(kids.indexOf(fold) > answerAt);
+  const btn = h.within(fold, 'fs-ask-fold__summary')[0];
+  assert.strictEqual(btn.props['aria-expanded'], false);
+  assert.strictEqual(h.text(h.within(btn, 'fs-ask-fold__text')[0]),
+    'Checked on the web · 2 claims · 1 disagree');
+  const body = h.within(fold, 'fs-ask-fold__body')[0];
+  assert.strictEqual(body.props.hidden, true);
+  /* Today's block, unchanged, inside the body. */
+  assert.strictEqual(h.within(body, 'fs-ask-corrob__item').length, 2);
+  assert.strictEqual(h.within(body, 'fs-ask-corrob__conflict').length, 1);
+});
+
+test('D6 a corroboration that only timed out is a plain line, not a button', async () => {
+  const h = await answered(GROUNDED, 'q', { externalCorroboration: true });
+  await h.settleCorrob(0, { corroborations: [], dropped: [], truncated: false, timed_out: true, searched: true });
+  const fold = h.byClass('fs-ask-fold--corrob')[0];
+  assert.ok(fold);
+  assert.strictEqual(h.walk(fold).filter(n => n.type === 'button').length, 0);
+  assert.strictEqual(h.text(fold), 'Web check timed out');
+});

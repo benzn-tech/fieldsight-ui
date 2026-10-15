@@ -202,6 +202,10 @@ test('records render, labelled as records, AFTER the answer, never as "Sources"'
   const answer = h.byClass('fs-ask-chat__msg-text').slice(-1)[0];
   assert.ok(h.indexOf(answer) < h.indexOf(recordBlocks[0]),
     'records must render after the answer, not before it');
+  /* Records still come before the web details: the web block is now the body
+     of the web fold, which follows the records fold. */
+  assert.ok(h.indexOf(recordBlocks[0]) < h.indexOf(webOrigin),
+    'records must render before the web block, not after');
 
   /* The hazard this guards against: reusing the grounded "[i+1]" marker
      would read as the web prose's own [1] inline reference. */
