@@ -14087,13 +14087,13 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   background: var(--surface-panel);
 }
 .fs-tpl-digitise__section--flagged,
-.fs-tpl-digitise__item--flagged { border-color: var(--color-warning-500); }
+.fs-tpl-digitise__item--flagged { border-color: var(--text-warning); } /* flips: warning-700 light (>=3:1 on white), warning-400 dark */
 .fs-tpl-digitise__section-head { display: flex; align-items: center; gap: var(--space-2); }
 .fs-tpl-digitise__section-head .fs-tpl-upload__input { flex: 1; font-weight: var(--font-weight-semibold); }
 .fs-tpl-digitise__items { margin: 0; padding-left: var(--space-5); display: flex; flex-direction: column; gap: var(--space-1-5); }
 .fs-tpl-digitise__item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-1); align-items: start; border: 1px solid transparent; border-radius: var(--radius-md); padding: 2px; }
 .fs-tpl-digitise__item .fs-tpl-digitise__flags { grid-column: 1 / -1; }
-.fs-tpl-digitise__item-text { min-height: 34px; }
+.fs-tpl-digitise__item-text { min-height: 34px; resize: vertical; } /* rows come from the text length (rowsFor) */
 .fs-tpl-digitise__item-tools { display: flex; gap: 2px; }
 .fs-tpl-digitise__tool {
   min-width: 32px; min-height: 32px;
@@ -14104,6 +14104,52 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   cursor: pointer;
 }
 .fs-tpl-digitise__tool:disabled { color: var(--text-disabled); cursor: default; }
-.fs-tpl-digitise__tool:focus-visible { outline: 2px solid var(--color-accent-500); outline-offset: 1px; }
+.fs-tpl-digitise__tool:focus-visible { outline: 2px solid var(--text-accent); outline-offset: 1px; } /* text-accent flips; accent-500 is ~1.4:1 on white */
 .fs-tpl-digitise__flags { margin: 0; padding-left: var(--space-4); color: var(--text-warning); font-size: 12px; }
 .fs-tpl-digitise__section-tools { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+
+/* x sits apart from the arrows: there is an Undo, but a near-miss should not need it. */
+.fs-tpl-digitise__tool--delete { margin-left: 12px; }
+.fs-tpl-digitise__section-no { color: var(--text-secondary); font-size: 12px; font-weight: var(--font-weight-semibold); white-space: nowrap; }
+.fs-tpl-digitise__problem { margin: 0; color: var(--text-warning); font-size: 12px; font-weight: var(--font-weight-semibold); }
+.fs-tpl-digitise__undo {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel-muted);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.fs-tpl-digitise__open-pdf {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-bottom: var(--space-2);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-input);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: var(--font-weight-semibold);
+  text-decoration: none;
+}
+.fs-tpl-digitise__open-pdf:focus-visible { outline: 2px solid var(--text-accent); outline-offset: 1px; }
+/* Phone width: the arrows go under the text so the text gets the whole line. */
+@media (max-width: 600px) {
+  .fs-tpl-digitise__item { grid-template-columns: minmax(0, 1fr); }
+  .fs-tpl-digitise__item-tools { justify-content: flex-end; }
+}
+/* Finger, not mouse: 44px targets (gloved-hand floor in CLAUDE.md is 44/48). */
+@media (pointer: coarse) {
+  .fs-tpl-digitise__tool { min-width: 44px; min-height: 44px; }
+  .fs-tpl-digitise__item-tools { gap: var(--space-1); }
+  .fs-tpl-digitise__section-tools .fs-btn,
+  .fs-tpl-digitise__undo .fs-btn { min-height: 44px; }
+}
