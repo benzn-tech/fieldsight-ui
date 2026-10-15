@@ -3772,6 +3772,9 @@
   cursor: pointer;
 }
 .fs-ask-chat__widen:focus-visible { outline: 2px solid var(--border-focus, var(--border-strong)); outline-offset: 2px; }
+/* "Search the web" (FS_ASK_WEB_OFFER) wears the widen pill; this only adds
+   the in-flight state, which it shares with the suggestion chips. */
+.fs-ask-chat__web-offer:disabled { opacity: 0.5; cursor: default; }
 @media (pointer: coarse) {
   .fs-ask-chat__widen { min-height: 44px; }
 }

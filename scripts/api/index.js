@@ -166,6 +166,12 @@
        the env says otherwise (Amplify FS_ASK_ASYNC): a stack whose backend
        has no /ask/start must keep sending exactly today's request. */
     askAsync: env.askAsync !== undefined ? !!env.askAsync : false,
+    /* Ask offers the web instead of running it unasked (Amplify
+       FS_ASK_WEB_OFFER; spec 2026-10-16 ask-screen-web-offer §5). On, Ask
+       sends `offer_web: true` and renders a "Search the web" button under an
+       answer that carries `web_offer`. Off unless the env says otherwise:
+       prod (`main`) must keep sending exactly today's request. */
+    askWebOffer: env.askWebOffer !== undefined ? !!env.askWebOffer : false,
     /* D5 (visibility spec) — legacy report-gateway read fallback (/timeline,
        /dates, /site-users). Default ON during Phase 2 rollout; flip to false
        (env.legacyReadFallback = false) to retire the legacy read paths once

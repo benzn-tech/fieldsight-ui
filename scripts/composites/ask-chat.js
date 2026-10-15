@@ -582,7 +582,11 @@
      of that would just be a second number to keep in sync with the first,
      and the caller here builds `history` from the visible log, which is
      already the right size for a reader to have typed. */
-  function requestBodyFor(context, question, history) {
+  /* `web` (optional): { offerWeb, webIntent } -- the web-offer opt-in (spec
+     2026-10-16 ask-screen-web-offer §2). Each key goes on the body only when
+     exactly `true`, so a caller that passes nothing (every caller before
+     FS_ASK_WEB_OFFER) builds the same body as before. */
+  function requestBodyFor(context, question, history, web) {
     var c = context || {};
     var body = { question: question };
     if (present(c.date))         body.date          = c.date;
@@ -593,6 +597,8 @@
       body.scoped = true;
     }
     if (history && history.length) body.history = history;
+    if (web && web.offerWeb === true)  body.offer_web  = true;
+    if (web && web.webIntent === true) body.web_intent = true;
     return body;
   }
 
@@ -601,14 +607,21 @@
      request renders the one reassuring line (see `send()`'s catch below),
      and feeding that back to the model as if it had answered would teach
      it that the agent said "FieldSight is busy" on a prior turn -- noise,
-     not memory. `m.error` is exactly the flag that failure path sets. */
+     not memory. `m.error` is exactly the flag that failure path sets.
+
+     An offer whose "Search the web" button was taken (`webAccepted`) is not a
+     turn either: the web answer inserted right after it is, so the question
+     pairs with that answer and the next turn sees (Q, web answer), not
+     (Q, "Your site records don't cover that."). An offer nobody took --
+     including a partial records answer that carried the button -- is the
+     answer the reader got, and pairs as a normal turn. */
   function historyFromMessages(msgs) {
     var out = [];
     var pendingQuestion = null;
     (msgs || []).forEach(function (m) {
       if (m.role === 'user') {
         pendingQuestion = m.text;
-      } else if (m.role === 'assistant' && !m.error && pendingQuestion != null) {
+      } else if (m.role === 'assistant' && !m.error && !m.webAccepted && pendingQuestion != null) {
         out.push({ question: pendingQuestion, answer: m.text });
         pendingQuestion = null;
       }
@@ -771,6 +784,13 @@
     var refCollapsed = React.useState(false);
     var collapsed    = refCollapsed[0];
     var setCollapsed = refCollapsed[1];
+    /* The id of the offer message whose "Search the web" re-ask is in flight
+       (FS_ASK_WEB_OFFER), else null. Its own state rather than `progress`:
+       the async hook reports 'pending' for that turn too, and "Searching your
+       records…" is the wrong line for a search the reader sent to the web. */
+    var refReaskOf = React.useState(null);
+    var reaskOf    = refReaskOf[0];
+    var setReaskOf = refReaskOf[1];
 
     var listRef = React.useRef(null);
     var rootRef  = React.useRef(null);
@@ -955,7 +975,48 @@
       });
     }
 
-    /* `opts.noHistory`: the "Ask across everything" resend path (both the
+    /* Mark an offer message taken (true) or give its button back (false).
+       By id, like patchCorrob; a miss is a no-op. */
+    function patchWebAccepted(mid, value) {
+      setMsgs(function (m) {
+        var hit = false;
+        var next = m.map(function (msg) {
+          if (msg.id !== mid) return msg;
+          hit = true;
+          return Object.assign({}, msg, { webAccepted: value });
+        });
+        return hit ? next : m;
+      });
+    }
+
+    /* Where a reply lands. An ordinary turn appends. A web re-ask goes right
+       after the offer it answers -- the reader may have asked something else
+       before clicking an older offer, and historyFromMessages pairs by
+       order. If the offer is gone (the log was reset), the reply is dropped
+       rather than resurrected into a conversation that no longer has it. */
+    function placeReply(m, afterId, reply) {
+      if (afterId == null) return m.concat([reply]);
+      for (var k = 0; k < m.length; k++) {
+        if (m[k].id === afterId) return m.slice(0, k + 1).concat([reply], m.slice(k + 1));
+      }
+      return m;
+    }
+
+    /* "Search the web" on an offer (spec 2026-10-16 ask-screen-web-offer §5):
+       no second user bubble, the original question verbatim, and the exact
+       history the offer's own turn sent -- carried on the message, never
+       rebuilt from `msgs`, so the rewrite step sees what it saw the first
+       time. */
+    function acceptWebOffer(m) {
+      if (busy || m.webAccepted) return;
+      patchWebAccepted(m.id, true);
+      send(m.question, { webReaskOf: m.id, history: m.sentHistory || [] });
+    }
+
+    /* `opts.webReaskOf` (with `opts.history`): the offer button's re-ask --
+       see acceptWebOffer above.
+
+       `opts.noHistory`: the "Ask across everything" resend path (both the
        immediate send below and the deferred one fired once a busy request
        settles) is a SCOPE CHANGE -- it is what widening the scope to
        "everything" IS -- and decision 5 clears history on every scope
@@ -974,11 +1035,18 @@
        updated yet) is what actually prevents it. */
     function send(question, opts) {
       if (!question || busy) return;
-      var userMsg = { role: 'user', text: question };
-      setMsgs(function (m) { return m.concat([userMsg]); });
-      setQ('');
+      var reaskOfId = (opts && opts.webReaskOf != null) ? opts.webReaskOf : null;
+      var webReask  = reaskOfId != null;
+      /* A web re-ask asks nothing new: the question is already on screen, and
+         whatever the reader is typing meanwhile stays in the box. */
+      if (!webReask) {
+        var userMsg = { role: 'user', text: question };
+        setMsgs(function (m) { return m.concat([userMsg]); });
+        setQ('');
+      }
       setBusy(true);
       setProgress(null);
+      setReaskOf(reaskOfId);
       /* A new question always re-opens the overlay: closing it (dock only)
          hides the conversation, not the ability to ask another one. */
       setCollapsed(false);
@@ -996,7 +1064,7 @@
          The answer says which path it took. A route the reader cannot see is
          a route they cannot correct. */
       var alerts = window.FS.api.programmeAlerts;
-      if (alerts && props.alertsProvider && alerts.isAlertsQuestion(question)) {
+      if (!webReask && alerts && props.alertsProvider && alerts.isAlertsQuestion(question)) {
         var built = null;
         try {
           built = alerts.buildAlerts(props.alertsProvider() || {});
@@ -1023,8 +1091,14 @@
          request already under way. `opts.noHistory` overrides this to `[]`
          (which `requestBodyFor` then omits from the wire) for the widen
          resend -- see the comment on `send`'s signature above. */
-      var history = (opts && opts.noHistory) ? [] : historyFromMessages(msgs);
-      var body = requestBodyFor(context, question, history);
+      var history = webReask ? (opts.history || [])
+                  : (opts && opts.noHistory) ? [] : historyFromMessages(msgs);
+      /* FS_ASK_WEB_OFFER. Off: no web keys, the body is exactly today's. The
+         re-ask always carries both (it only exists because an offer did). */
+      var offerWeb = !!(((window.FS || {}).api || {}).askWebOffer);
+      var body = (offerWeb || webReask)
+        ? requestBodyFor(context, question, history, { offerWeb: true, webIntent: webReask })
+        : requestBodyFor(context, question, history);
       body.user = user;   /* undefined is dropped on the wire */
       var gen = genRef.current;
       function isStale() { return gen !== genRef.current; }
@@ -1047,7 +1121,7 @@
            questions can be in flight, and matching on text attaches the block
            to the wrong one as soon as somebody asks the same thing twice. */
         var mid = ++_midSeq;
-        setMsgs(function (m) { return m.concat([{
+        setMsgs(function (m) { return placeReply(m, reaskOfId, {
           id:        mid,
           role:      'assistant',
           text:      answerText,
@@ -1083,7 +1157,15 @@
              case where there was nothing to resolve, both of which say
              nothing worth a line. */
           asked:         res.asked,
-        }]); });
+          /* The backend offered the web instead of running it (spec
+             2026-10-16 ask-screen-web-offer §3): renders "Search the web".
+             Only honoured with the flag on -- prod never sends `offer_web`,
+             so it should never see one, and must not render a button if it
+             somehow did. */
+          webOffer:      offerWeb && !!res.web_offer,
+          /* The exact history this turn sent, for the offer's re-ask. */
+          sentHistory:   history,
+        }); });
 
         /* The second pass. Fired after the answer is already on screen and
            awaited by nothing the answer depends on -- /ask spends its whole
@@ -1119,17 +1201,22 @@
         } else {
           console.warn('[AskChat] request failed (network)', err);
         }
-        setMsgs(function (m) { return m.concat([{
+        setMsgs(function (m) { return placeReply(m, reaskOfId, {
           role:  'assistant',
           text:  'FieldSight is busy at the moment. Your question has not been '
                + 'lost — please try again shortly. If it keeps happening, '
                + 'contact the FieldSight team.',
           error: true,
-        }]); });
+        }); });
+        /* No web answer followed the offer, so it is not taken: the button
+           comes back for another try, and the offer pairs with its question
+           in history again. */
+        if (webReask) patchWebAccepted(reaskOfId, false);
       }).then(function () {
         /* Even for a stale response: the request is over either way. */
         setBusy(false);
         setProgress(null);
+        setReaskOf(null);
       });
     }
 
@@ -1146,6 +1233,27 @@
       if (msgs[li].scopeResponse) { lastAnswer = msgs[li]; break; }
     }
     var chips = chipsFor(context, lastAnswer ? lastAnswer.scopeResponse : undefined);
+
+    /* The "thinking" row. One builder for both places it appears: the foot of
+       the log (every ordinary turn) and right under an offer message whose
+       "Search the web" re-ask is in flight. */
+    function pendingRow(label, key) {
+      return React.createElement('div', {
+        key:          key,
+        className: 'fs-ask-chat__msg fs-ask-chat__msg--assistant fs-ask-chat__msg--pending',
+        role:         'status',
+        'aria-live':  'polite',
+      },
+        React.createElement('span', { className: 'fs-ask-chat__pending-dots', 'aria-hidden': 'true' },
+          React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
+          React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
+          React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
+        ),
+        React.createElement('span', { className: 'fs-ask-chat__pending-label' }, label),
+      );
+    }
+    var reaskInline = busy && reaskOf != null
+      && msgs.some(function (x) { return x.id === reaskOf; });
 
     var className = 'fs-ask-chat'
       + (props.compact ? ' fs-ask-chat--compact' : '')
@@ -1192,7 +1300,7 @@
           : null,
 
         msgs.map(function (m, i) {
-          return React.createElement('div', {
+          var row = React.createElement('div', {
             key: i,
             /* Marks the anchor the scroll effect looks for. The question is
                where reading starts, so it is the thing that gets put at the top
@@ -1282,6 +1390,20 @@
             /* Already rendered above (records-first) for fromWeb messages --
                this is the grounded path's own "Sources" block only. */
             m.role === 'assistant' && !m.fromWeb ? renderCitations(m.citations) : null,
+            /* The web offer (FS_ASK_WEB_OFFER; spec 2026-10-16
+               ask-screen-web-offer §5). The button IS the offer: the answer
+               text asks no question a typed "yes" could accept. Gone once
+               taken (the web answer lands right under this message); back if
+               that re-ask fails. Disabled while any question is in flight,
+               because `send` refuses then anyway. */
+            m.role === 'assistant' && m.webOffer && !m.webAccepted && !m.error
+              ? React.createElement('button', {
+                  type: 'button',
+                  className: 'fs-ask-chat__widen fs-ask-chat__web-offer',
+                  disabled: busy,
+                  onClick: function () { acceptWebOffer(m); },
+                }, 'Search the web')
+              : null,
             /* A scoped answer whose records did not answer it: offer the same
                question across everything. The host clears the context; the
                reset effect re-sends once the new (empty) context has rendered.
@@ -1333,28 +1455,27 @@
                   'from the programme, not the reports')
               : null,
           );
+          /* The offer's re-ask is in flight: its placeholder follows the
+             offer, where the web answer will be inserted. Every other row
+             renders exactly as before. */
+          return reaskInline && m.id === reaskOf
+            ? React.createElement(React.Fragment, { key: i },
+                row, pendingRow('Searching the web…', 'web-reask-pending'))
+            : row;
         }),
 
         /* The wait is p90 8.6s — long enough that three silent dots read as a
            stall. The dots say "alive"; the line says what it is doing, so a
            reader who looks away and back knows the request did not die. */
-        busy ? React.createElement('div', {
-          className: 'fs-ask-chat__msg fs-ask-chat__msg--assistant fs-ask-chat__msg--pending',
-          role:         'status',
-          'aria-live':  'polite',
-        },
-          React.createElement('span', { className: 'fs-ask-chat__pending-dots', 'aria-hidden': 'true' },
-            React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
-            React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
-            React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
-          ),
+        /* A web re-ask's placeholder is drawn under its offer message (in
+           the map above), not here. */
+        busy && !reaskInline ? pendingRow(
           /* An async turn says which stage it is in; the one-request path
              never reports one and keeps the original line. */
-          React.createElement('span', { className: 'fs-ask-chat__pending-label' },
-            progress === 'searching_web' ? 'Checking the web…'
-              : progress === 'pending'   ? 'Searching your records…'
-              : 'Looking through your records…'),
-        ) : null,
+          reaskOf != null ? 'Searching the web…'
+            : progress === 'searching_web' ? 'Checking the web…'
+            : progress === 'pending'   ? 'Searching your records…'
+            : 'Looking through your records…') : null,
       );
         if (!dock) return messagesDiv;
         var closeBtn = React.createElement('button', {
