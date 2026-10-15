@@ -1846,6 +1846,8 @@
     var h = React.createElement;
     var org = ((window.FS || {}).api || {}).org;
     var s = React.useState(null); var data = s[0], setData = s[1];
+    /* Which reports have their gap list unfolded, keyed by report id. */
+    var o = React.useState({}); var open = o[0], setOpen = o[1];
     React.useEffect(function () {
       if (!org || !org.getDayChecklistReports || !props.date) return undefined;
       var alive = true;
@@ -1862,13 +1864,42 @@
     return h('div', { className: 'fs-checklist-reports' },
       h('div', { className: 'fs-timeline-page__section-label' }, 'Checklist reports'),
       reports.map(function (r) {
-        return h('div', { key: r.id, className: 'fs-checklist-reports__row' },
-          h('span', { className: 'fs-checklist-reports__name' },
-            cr ? cr.words(Object.assign({}, r, { date: data.date })) : r.templateName),
-          r.status === 'done' && cr ? h('button', {
-            type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm',
-            onClick: function () { cr.download(Object.assign({}, r, { date: data.date }), data.folder); },
-          }, 'Download') : null);
+        /* "3 not covered · 2 failed" folds out into the items themselves
+           (owner, 2026-10-16). Nothing is said when the gaps are unknown. */
+        var gw = cr && cr.gapWords ? cr.gapWords(r) : '';
+        var hasList = !!(r.gaps && ((r.gaps.notCovered || []).length || (r.gaps.failed || []).length));
+        var multi = hasList && cr && cr.gapsSpanChecklists ? cr.gapsSpanChecklists(r.gaps) : false;
+        return h('div', { key: r.id, className: 'fs-checklist-reports__item' },
+          h('div', { className: 'fs-checklist-reports__row' },
+            h('span', { className: 'fs-checklist-reports__name' },
+              cr ? cr.words(Object.assign({}, r, { date: data.date })) : r.templateName),
+            gw ? (hasList
+              ? h('button', { type: 'button', className: 'fs-checklist-reports__gaps',
+                  'aria-expanded': !!open[r.id],
+                  onClick: function () {
+                    setOpen(function (prev) {
+                      var next = Object.assign({}, prev);
+                      next[r.id] = !prev[r.id];
+                      return next;
+                    });
+                  } }, gw)
+              : h('span', { className: 'fs-checklist-reports__gaps fs-checklist-reports__gaps--ok' }, gw))
+              : null,
+            r.status === 'done' && cr ? h('button', {
+              type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm',
+              onClick: function () { cr.download(Object.assign({}, r, { date: data.date }), data.folder); },
+            }, 'Download') : null),
+          open[r.id] && hasList ? h('div', { className: 'fs-checklist-reports__gap-lists' },
+            (r.gaps.notCovered || []).length ? h('div', null,
+              h('div', { className: 'fs-checklist-reports__gap-head' }, 'Not covered'),
+              h('ul', null, r.gaps.notCovered.map(function (g, i) {
+                return h('li', { key: 'n' + i }, cr.gapLine(g, multi));
+              }))) : null,
+            (r.gaps.failed || []).length ? h('div', null,
+              h('div', { className: 'fs-checklist-reports__gap-head' }, 'Failed'),
+              h('ul', null, r.gaps.failed.map(function (g, i) {
+                return h('li', { key: 'f' + i }, cr.gapLine(g, multi));
+              }))) : null) : null);
       }),
       unmatched.map(function (u, i) {
         return h('div', { key: 'u' + i, className: 'fs-checklist-reports__row fs-checklist-reports__row--none' },
