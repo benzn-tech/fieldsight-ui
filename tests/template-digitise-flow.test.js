@@ -33,6 +33,8 @@ function load(reply) {
 function file(name, size, type) { return { name, size: size || 10, type: type === undefined ? 'x' : type }; }
 const okFetch = async (url, o) => { puts.push({ url, o }); return { ok: true, status: 200 }; };
 const noSleep = async () => {};
+/* What orgRequest resolves for the server's flag-off answer, error("not found", 404). */
+const OFF = { _notFound: true, status: 404, raw: { error: 'not found' } };
 
 function server(results) {
   let n = 0; const seq = results.slice();
@@ -49,7 +51,7 @@ const DONE = { id: 'r1', status: 'done', name: 'Form', flags: [], counts: { sect
   sources: [{ key: 'k', contentType: 'image/jpeg', url: 'https://s3/get/k' }] };
 
 test('THE: reading switched off falls back without uploading anything', async () => {
-  const TD = load(() => ({ _notFound: true, status: 404 }));
+  const TD = load(() => OFF);
   const phases = [];
   const out = await TD.digitise([file('a.jpg')], 'Form', { onPhase: (p) => phases.push(p), fetch: okFetch, sleep: noSleep });
   assert.deepStrictEqual(out, { off: true });
@@ -89,7 +91,7 @@ test('the poll gives up after three minutes', async () => {
 });
 
 test('a draft that has gone (404 on the poll) is said so', async () => {
-  const TD = load((p) => (p === '/templates/digitise/r1' ? { _notFound: true, status: 404 } : server([DONE])(p)));
+  const TD = load((p) => (p === '/templates/digitise/r1' ? OFF : server([DONE])(p)));
   await assert.rejects(TD.digitise([file('a.jpg')], 'Form', { fetch: okFetch, sleep: noSleep }),
     /no longer available/);
 });
@@ -210,4 +212,86 @@ test('only a real 404 means reading is off; any other non-JSON answer is a failu
   await assert.rejects(TD.digitise([file('a.jpg')], 'Form', { fetch: okFetch, sleep: noSleep }), /unexpected answer \(502\)/);
   TD = load(() => ({ _notFound: true, status: 200 }));
   await assert.rejects(TD.digitise([file('a.jpg')], 'Form', { fetch: okFetch, sleep: noSleep }), /unexpected answer \(200\)/);
+});
+
+test('a 404 that explains itself is shown to the person, not taken for "off"', async () => {
+  const msg = 'an uploaded file was not found — upload it again';
+  const TD = load((p) => (p === '/templates/digitise'
+    ? { _notFound: true, status: 404, raw: { error: msg } } : server([DONE])(p)));
+  await assert.rejects(TD.digitise([file('a.jpg')], 'Form', { fetch: okFetch, sleep: noSleep }),
+    (e) => e.message === 'An uploaded file was not found — upload it again.');
+  assert.ok(puts.length === 1, 'the upload happened; only the read was refused');
+});
+
+test('a 404 with no JSON message is a failure, not "off"', async () => {
+  const TD = load(() => ({ _notFound: true, status: 404 }));
+  await assert.rejects(TD.digitise([file('a.jpg')], 'Form', { fetch: okFetch, sleep: noSleep }),
+    /unexpected answer \(404\)/);
+  const TD2 = load(() => ({ _notFound: true, status: 404, raw: { message: 'Not Found' } }));
+  await assert.rejects(TD2.digitise([file('a.jpg')], 'Form', { fetch: okFetch, sleep: noSleep }),
+    /unexpected answer \(404\)/);
+});
+
+test('an expired draft on the poll says what the server said', async () => {
+  const TD = load((p) => (p === '/templates/digitise/r1'
+    ? { _notFound: true, status: 404, raw: { error: 'this draft has expired — upload the form again' } }
+    : server([DONE])(p)));
+  await assert.rejects(TD.digitise([file('a.jpg')], 'Form', { fetch: okFetch, sleep: noSleep }),
+    /This draft has expired — upload the form again\./);
+});
+
+test('the poll gives up at three minutes exactly', () => {
+  const TD = load(server([DONE]));
+  assert.strictEqual(TD.GIVE_UP_MS, 180000);
+});
+
+test('one 502 blip while polling is a missed poll, then done resolves done', async () => {
+  let polls = 0;
+  const TD = load((p) => {
+    if (p !== '/templates/digitise/r1') return server([DONE])(p);
+    polls += 1;
+    if (polls === 1) { const e = new Error('HTTP 502'); e.status = 502; throw e; }
+    return DONE;
+  });
+  const out = await TD.digitise([file('a.jpg')], 'Form', { fetch: okFetch, sleep: noSleep });
+  assert.strictEqual(out.status, 'done');
+  assert.strictEqual(polls, 2);
+});
+
+test('a non-JSON answer while polling is a missed poll too', async () => {
+  let polls = 0;
+  const TD = load((p) => {
+    if (p !== '/templates/digitise/r1') return server([DONE])(p);
+    polls += 1;
+    return polls === 1 ? { _notFound: true, status: 504 } : DONE;
+  });
+  const out = await TD.digitise([file('a.jpg')], 'Form', { fetch: okFetch, sleep: noSleep });
+  assert.strictEqual(out.status, 'done');
+});
+
+test('5xx on every poll still gives up at GIVE_UP_MS, not before', async () => {
+  let t = 0; let polls = 0;
+  const TD = load((p) => {
+    if (p !== '/templates/digitise/r1') return server([DONE])(p);
+    polls += 1;
+    const e = new Error('HTTP 503'); e.status = 503; throw e;
+  });
+  await assert.rejects(
+    TD.digitise([file('a.jpg')], 'Form', { fetch: okFetch, sleep: async (ms) => { t += ms; }, now: () => t }),
+    /Taking too long — try again\./);
+  assert.strictEqual(polls, TD.GIVE_UP_MS / TD.POLL_MS + 1);
+});
+
+test('a 4xx error while polling is still a failure at once', async () => {
+  const TD = load((p) => {
+    if (p !== '/templates/digitise/r1') return server([DONE])(p);
+    const e = new Error('nope'); e.status = 400; throw e;
+  });
+  await assert.rejects(TD.digitise([file('a.jpg')], 'Form', { fetch: okFetch, sleep: noSleep }), /nope/);
+});
+
+test('the library names a digitised template "Custom" in a neutral badge', () => {
+  const lib = fs.readFileSync(path.join(__dirname, '../scripts/pages/library.js'), 'utf8');
+  assert.match(lib, /RT_LABEL = \{[^}]*custom: 'Custom'/);
+  assert.match(lib, /RT_TONE  = \{[^}]*custom: 'neutral'/);
 });

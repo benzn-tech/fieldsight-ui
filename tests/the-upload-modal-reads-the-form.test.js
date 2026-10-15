@@ -186,7 +186,7 @@ test('Close during the upload: the read is never requested and nothing is create
 });
 
 test('reading off with a file attached: the toast is told which report type was made', async () => {
-  const h = harness(async () => ({ _notFound: true, status: 404 }));
+  const h = harness(async () => ({ _notFound: true, status: 404, raw: { error: 'not found' } }));
   h.pick([jpg()]);
   h.button('Read the form').props.onClick();
   for (let n = 0; n < 5; n++) await tick();

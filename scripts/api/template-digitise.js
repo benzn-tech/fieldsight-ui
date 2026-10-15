@@ -79,14 +79,40 @@
     return res;
   }
 
-  /* orgRequest folds TWO things into _notFound: a real 404 and any answer that is
-     not JSON (a gateway error page, the CloudFront SPA shell). Only the first means
-     reading is switched off; the second is a failure and must say so, or a passing
-     502 would quietly create a template from starting sections. */
+  /* orgRequest folds THREE things into _notFound: the route-level 404 the server
+     sends when reading is switched off (`error("not found", 404)` in
+     lambda_org_api), a 404 that explains itself ("an uploaded file was not found
+     -- upload it again"), and any answer that is not JSON (a gateway error page,
+     the CloudFront SPA shell). Only the first means reading is off. The second is
+     the server telling the person something and is shown to them; the third is a
+     failure and must say so, or a passing 502 would quietly create a template
+     from starting sections. */
+  var OFF_ERROR = 'not found';
+
+  function serverMessage(res) {
+    var raw = res && res.raw;
+    return raw && typeof raw.error === 'string' ? raw.error.trim() : '';
+  }
+
+  function sentence(s) {
+    s = s.charAt(0).toUpperCase() + s.slice(1);
+    return /[.!?]$/.test(s) ? s : s + '.';
+  }
+
   function isOff(res) {
     if (!res || !res._notFound) return false;
-    if (res.status === 404) return true;
+    var msg = serverMessage(res);
+    if (res.status === 404 && msg === OFF_ERROR) return true;
+    if (res.status === 404 && msg) throw new Error(sentence(msg));
     throw new Error('The server gave an unexpected answer (' + (res.status || 'no status') + ') — try again.');
+  }
+
+  /* A poll that got no usable answer: a 5xx (orgRequest throws those) or a body
+     that is not JSON. One of these mid-read is a blip, not the end of the read --
+     the draft is still being written on the server -- so it counts as a missed
+     poll and polling carries on until GIVE_UP_MS. */
+  function isMissedPoll(res) {
+    return !!(res && res._notFound && !(res.status === 404 && serverMessage(res)));
   }
 
   async function requestUploadUrl(file) {
@@ -120,10 +146,19 @@
     var started = now();
     for (;;) {
       if (cancelled()) return { cancelled: true };
-      var res = refused(await api().orgRequest('/templates/digitise/' + encodeURIComponent(id)));
+      var res;
+      try {
+        res = await api().orgRequest('/templates/digitise/' + encodeURIComponent(id));
+      } catch (e) {
+        if (!(e && e.status >= 500)) throw e;
+        res = null;
+      }
       if (cancelled()) return { cancelled: true };
-      if (isOff(res)) throw new Error('This draft is no longer available — upload the form again.');
-      if (res && res.status && res.status !== 'pending') return res;
+      if (res && !isMissedPoll(res)) {
+        refused(res);
+        if (isOff(res)) throw new Error('This draft is no longer available — upload the form again.');
+        if (res.status && res.status !== 'pending') return res;
+      }
       if (now() - started >= GIVE_UP_MS) throw new Error('Taking too long — try again.');
       await wait(POLL_MS);
     }

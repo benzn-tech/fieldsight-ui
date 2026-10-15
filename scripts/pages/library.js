@@ -48,8 +48,11 @@
     { key: 'personal', label: 'Personal'     },
   ];
 
-  var RT_LABEL = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', incident: 'Incident' };
-  var RT_TONE  = { daily: 'info', weekly: 'success', monthly: 'accent', incident: 'danger' };
+  /* custom: a template read from the customer's own form (template-digitise). It
+     has no cadence of its own, so it takes the neutral tone -- the badge says what
+     it is without borrowing a colour that means daily/weekly/incident. */
+  var RT_LABEL = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', incident: 'Incident', custom: 'Custom' };
+  var RT_TONE  = { daily: 'info', weekly: 'success', monthly: 'accent', incident: 'danger', custom: 'neutral' };
 
   /* PHOTOS IS GONE FROM HERE, and that is the honest half of wiring the rest up.
      A generated report is prose the model writes; nothing in that path inserts
