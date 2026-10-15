@@ -356,12 +356,11 @@
                   h('div', { className: 'fs-bell__panel-head' }, h('span', null, 'Checklists')),
                   h('ul', { className: 'fs-bell__list' },
                     checks.reports.map(function (r) {
+                      var gw = checksApi.gapWords ? checksApi.gapWords(r) : '';
                       return h('li', { key: r.id, className: 'fs-bell__row' },
                         h('div', { className: 'fs-bell__row-main' },
                           h('span', { className: 'fs-bell__row-title' }, checksApi.words(r)),
-                          checksApi.gapWords && checksApi.gapWords(r)
-                            ? h('span', { className: 'fs-bell__row-sub' }, checksApi.gapWords(r))
-                            : null),
+                          gw ? h('span', { className: 'fs-bell__row-sub' }, gw) : null),
                         r.status === 'done'
                           ? h('button', {
                               type: 'button', className: 'fs-bell__row-action',

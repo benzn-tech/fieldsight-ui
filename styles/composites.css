@@ -13997,8 +13997,12 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-checklist-reports { margin: 8px 0 12px; }
 .fs-checklist-reports__row {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 6px 0; border-bottom: 1px solid var(--border-subtle); font-size: 13px;
+  padding: 6px 0; font-size: 13px;
 }
+/* The divider goes under the whole report, below its unfolded gap list --
+   and under the bare "no checklist" rows, which have no item wrapper. */
+.fs-checklist-reports__item,
+.fs-checklist-reports__row--none { border-bottom: 1px solid var(--border-subtle); }
 .fs-checklist-reports__row--none { color: var(--text-secondary); }
 /* What the check left open (owner, 2026-10-16): a count that folds out. */
 .fs-checklist-reports__gaps {

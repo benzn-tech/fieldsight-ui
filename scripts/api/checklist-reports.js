@@ -117,6 +117,28 @@
     return parts.join(' · ');
   }
 
+  /* True when the gaps come from more than one checklist section, so each
+     line must say which one -- "3. Braced" is ambiguous across two. */
+  function gapsSpanChecklists(gaps) {
+    if (!gaps) return false;
+    var seen = {}, count = 0;
+    var all = (gaps.notCovered || []).concat(gaps.failed || []);
+    for (var i = 0; i < all.length; i++) {
+      var t = all[i] && all[i].checklist;
+      if (t && !seen[t]) { seen[t] = true; count++; }
+    }
+    return count > 1;
+  }
+
+  /* One gap item as a line: "5. Cover to rebar (Reinforcement) — comment —
+     Responsible: X — Due: Y". The section only when multi is true. */
+  function gapLine(g, multi) {
+    var line = g.n + '. ' + g.text + (multi && g.checklist ? ' (' + g.checklist + ')' : '');
+    var extra = [g.comment, g.responsible && ('Responsible: ' + g.responsible),
+                 g.due && ('Due: ' + g.due)].filter(Boolean).join(' — ');
+    return line + (extra ? ' — ' + extra : '');
+  }
+
   /* The Word file: through the day report's status, which re-checks
      deletions before it hands out a link. */
   async function download(r, folder) {
@@ -136,9 +158,11 @@
   window.FS.checklistReports = {
     subscribe: subscribe, refresh: refresh, get: snapshot, words: words,
     unmatchedWords: unmatchedWords, unmatchedKey: unmatchedKey, gapWords: gapWords,
+    gapLine: gapLine, gapsSpanChecklists: gapsSpanChecklists,
     markSeen: markSeen, download: download,
   };
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { words: words, unmatchedWords: unmatchedWords, gapWords: gapWords };
+    module.exports = { words: words, unmatchedWords: unmatchedWords, gapWords: gapWords,
+                       gapLine: gapLine, gapsSpanChecklists: gapsSpanChecklists };
   }
 })();

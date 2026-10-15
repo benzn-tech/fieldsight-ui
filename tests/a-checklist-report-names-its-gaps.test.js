@@ -37,3 +37,25 @@ test('the day card and the bell both show the gap words', () => {
   assert.match(read('scripts', 'composites', 'notification-bell.js'), /gapWords\(/);
   assert.match(read('styles', 'composites.css'), /\.fs-checklist-reports__gaps/);
 });
+
+test('a gap line names its checklist section only when the gaps span more than one', () => {
+  const nc = { n: 3, text: 'Formwork braced', checklist: 'Formwork' };
+  const f = { n: 5, text: 'Cover to rebar', checklist: 'Reinforcement',
+              comment: 'short at grid C', responsible: 'Sam', due: '2026-10-17' };
+  assert.strictEqual(cr.gapLine(nc, false), '3. Formwork braced');
+  assert.strictEqual(cr.gapLine(nc, true), '3. Formwork braced (Formwork)');
+  assert.strictEqual(cr.gapLine(f, false),
+    '5. Cover to rebar — short at grid C — Responsible: Sam — Due: 2026-10-17');
+  assert.strictEqual(cr.gapLine(f, true),
+    '5. Cover to rebar (Reinforcement) — short at grid C — Responsible: Sam — Due: 2026-10-17');
+  assert.strictEqual(cr.gapLine({ n: 1, text: 'x' }, true), '1. x');
+
+  assert.strictEqual(cr.gapsSpanChecklists({ notCovered: [nc], failed: [f] }), true);
+  assert.strictEqual(cr.gapsSpanChecklists({ notCovered: [nc, nc], failed: [] }), false);
+  assert.strictEqual(cr.gapsSpanChecklists({ notCovered: [nc], failed: [{ n: 9, text: 'y', checklist: 'Formwork' }] }), false);
+  assert.strictEqual(cr.gapsSpanChecklists(null), false);
+});
+
+test('the day card writes its gap lines through gapLine', () => {
+  assert.match(read('scripts', 'pages', 'timeline.js'), /gapLine\(/);
+});

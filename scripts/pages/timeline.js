@@ -1868,6 +1868,7 @@
            (owner, 2026-10-16). Nothing is said when the gaps are unknown. */
         var gw = cr && cr.gapWords ? cr.gapWords(r) : '';
         var hasList = !!(r.gaps && ((r.gaps.notCovered || []).length || (r.gaps.failed || []).length));
+        var multi = hasList && cr && cr.gapsSpanChecklists ? cr.gapsSpanChecklists(r.gaps) : false;
         return h('div', { key: r.id, className: 'fs-checklist-reports__item' },
           h('div', { className: 'fs-checklist-reports__row' },
             h('span', { className: 'fs-checklist-reports__name' },
@@ -1892,14 +1893,12 @@
             (r.gaps.notCovered || []).length ? h('div', null,
               h('div', { className: 'fs-checklist-reports__gap-head' }, 'Not covered'),
               h('ul', null, r.gaps.notCovered.map(function (g, i) {
-                return h('li', { key: 'n' + i }, g.n + '. ' + g.text);
+                return h('li', { key: 'n' + i }, cr.gapLine(g, multi));
               }))) : null,
             (r.gaps.failed || []).length ? h('div', null,
               h('div', { className: 'fs-checklist-reports__gap-head' }, 'Failed'),
               h('ul', null, r.gaps.failed.map(function (g, i) {
-                var extra = [g.comment, g.responsible && ('Responsible: ' + g.responsible),
-                             g.due && ('Due: ' + g.due)].filter(Boolean).join(' — ');
-                return h('li', { key: 'f' + i }, g.n + '. ' + g.text + (extra ? ' — ' + extra : ''));
+                return h('li', { key: 'f' + i }, cr.gapLine(g, multi));
               }))) : null) : null);
       }),
       unmatched.map(function (u, i) {
