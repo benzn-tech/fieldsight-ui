@@ -5868,6 +5868,13 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-modal--sm { width: 400px; max-width: calc(100vw - 32px); }
 .fs-modal--md { width: 560px; max-width: calc(100vw - 32px); }
 .fs-modal--lg { width: 760px; max-width: calc(100vw - 32px); }
+/* Two panes side by side (TemplateDigitiseReview). Full screen on a phone, where
+   a floating panel would leave a strip of page around a form that needs every pixel. */
+.fs-modal--xl { width: min(1180px, calc(100vw - 32px)); max-width: calc(100vw - 32px); }
+@media (max-width: 600px) {
+  .fs-modal--xl { width: 100vw; max-width: 100vw; max-height: 100dvh; border-radius: 0; }
+  .fs-modal--xl .fs-modal__body { padding: 16px; }
+}
 
 .fs-modal__header {
   display: flex;
@@ -11231,6 +11238,8 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   flex-direction: column;
   gap: 14px;
 }
+/* The review: fills the xl modal (.fs-modal--xl), never wider than it. */
+.fs-tpl-upload--wide { width: min(1140px, 100%); }
 
 .fs-tpl-upload__title {
   font-size: 16px;
@@ -11305,6 +11314,9 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   border-radius: 50%;
 }
 .fs-tpl-upload__file-clear:hover { color: var(--text-danger); }
+@media (pointer: coarse) {
+  .fs-tpl-upload__file-clear { min-width: 44px; min-height: 44px; }
+}
 
 /* Fields */
 .fs-tpl-upload__fields { display: flex; flex-direction: column; gap: 10px; }

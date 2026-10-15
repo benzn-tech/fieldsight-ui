@@ -261,12 +261,20 @@
       return unsub;
     }, []);
 
-    function handleUploadComplete(stub) {
+    function handleUploadComplete(stub, how) {
       setUploadFor(null);
       setRetry(function (n) { return n + 1; });
       setSel(stub);
+      /* Three different things happened, and the toast says which. "readingOff" is the
+         server answering 404 on /templates/digitise: the file was NOT read, and saying
+         so is the rule tests/the-library-says-what-it-actually-does.test.js keeps. */
+      var message = how && how.readingOff
+        ? 'Template created. Reading forms is not switched on here, so nothing was read from your file — edit its sections below'
+        : how && how.digitised
+          ? 'Template saved from your form — it is in your library now'
+          : 'Template created — edit its sections below';
       if (window.FS && window.FS.toast) {
-        window.FS.toast.show({ message: 'Template created — edit its sections below', tone: 'info' });
+        window.FS.toast.show({ message: message, tone: 'info' });
       }
     }
 
