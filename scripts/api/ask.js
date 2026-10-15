@@ -1,7 +1,7 @@
 /* ==========================================================================
    FieldSight API · Ask Agent — BACKEND-CONTEXT §4.12
    --------------------------------------------------------------------------
-   POST /api/ask  body { question, date?, user?, site_id?, author_folder?, topic_row_id?, scoped?, tz?, scope?, topic_id? }
+   POST /api/ask  body { question, date?, user?, site_id?, author_folder?, topic_row_id?, scoped?, tz?, scope?, topic_id?, history?, offer_web?, web_intent? }
      → { answer, citations, model, ... }
 
    Stateless on the server (BACKEND-CONTEXT §10) — multi-turn must be
@@ -239,6 +239,15 @@
          Ask did before this existed. */
       var tz = ('tz' in opts) ? opts.tz : _browserZone();
       if (tz) body.tz = tz;
+      /* Web offer (spec 2026-10-16 ask-screen-web-offer §2/§5). Same
+         whitelist trap as `history` above: the caller (requestBodyFor) sets
+         these, and a field missing from this list would vanish silently.
+         Forwarded only as `true` -- the backend honours only JSON true, and
+         absent keeps every caller that never sets them byte-identical. Set
+         before the transport is chosen, so /ask and /ask/start carry the same
+         body. */
+      if (opts.offer_web === true)  body.offer_web  = true;
+      if (opts.web_intent === true) body.web_intent = true;
       /* Read at call time, not load time: index.js builds FS.api after env.js. */
       if (window.FS.api.askAsync) return _askAsyncTurn(body, askBaseUrl, hooks);
       return window.FS.api.request('/ask', {
