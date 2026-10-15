@@ -358,7 +358,10 @@
                     checks.reports.map(function (r) {
                       return h('li', { key: r.id, className: 'fs-bell__row' },
                         h('div', { className: 'fs-bell__row-main' },
-                          h('span', { className: 'fs-bell__row-title' }, checksApi.words(r))),
+                          h('span', { className: 'fs-bell__row-title' }, checksApi.words(r)),
+                          checksApi.gapWords && checksApi.gapWords(r)
+                            ? h('span', { className: 'fs-bell__row-sub' }, checksApi.gapWords(r))
+                            : null),
                         r.status === 'done'
                           ? h('button', {
                               type: 'button', className: 'fs-bell__row-action',

@@ -14000,6 +14000,15 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   padding: 6px 0; border-bottom: 1px solid var(--border-subtle); font-size: 13px;
 }
 .fs-checklist-reports__row--none { color: var(--text-secondary); }
+/* What the check left open (owner, 2026-10-16): a count that folds out. */
+.fs-checklist-reports__gaps {
+  margin-left: 8px; padding: 0; border: 0; background: none; font: inherit;
+  color: var(--text-warning); cursor: pointer; text-decoration: underline;
+}
+.fs-checklist-reports__gaps--ok { color: var(--text-secondary); cursor: default; text-decoration: none; }
+.fs-checklist-reports__gap-lists { margin: 4px 0 8px 12px; color: var(--text-primary); font-size: 0.92em; }
+.fs-checklist-reports__gap-lists ul { margin: 2px 0 6px; padding-left: 18px; }
+.fs-checklist-reports__gap-head { font-weight: 600; color: var(--text-secondary); }
 
 /* ── Pending notes: recording uploaded, AI model temporarily unavailable ── */
 .fs-pending-notes { display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; }

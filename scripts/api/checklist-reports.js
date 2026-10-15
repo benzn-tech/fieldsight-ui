@@ -104,6 +104,19 @@
       + ' — no checklist in your Library matches it.';
   }
 
+  /* "3 not covered · 2 failed" (owner, 2026-10-16). '' when the gaps are not
+     known -- an old report, or one still being written -- never "All items
+     covered" on a guess. */
+  function gapWords(r) {
+    if (!r || r.status !== 'done' || !r.gaps) return '';
+    var nc = (r.gaps.notCovered || []).length, f = (r.gaps.failed || []).length;
+    if (!nc && !f) return 'All items covered';
+    var parts = [];
+    if (nc) parts.push(nc + ' not covered');
+    if (f) parts.push(f + ' failed');
+    return parts.join(' · ');
+  }
+
   /* The Word file: through the day report's status, which re-checks
      deletions before it hands out a link. */
   async function download(r, folder) {
@@ -122,10 +135,10 @@
   if (!window.FS) window.FS = {};
   window.FS.checklistReports = {
     subscribe: subscribe, refresh: refresh, get: snapshot, words: words,
-    unmatchedWords: unmatchedWords, unmatchedKey: unmatchedKey,
+    unmatchedWords: unmatchedWords, unmatchedKey: unmatchedKey, gapWords: gapWords,
     markSeen: markSeen, download: download,
   };
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { words: words, unmatchedWords: unmatchedWords };
+    module.exports = { words: words, unmatchedWords: unmatchedWords, gapWords: gapWords };
   }
 })();
