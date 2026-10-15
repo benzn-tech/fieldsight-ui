@@ -13997,9 +13997,23 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-checklist-reports { margin: 8px 0 12px; }
 .fs-checklist-reports__row {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 6px 0; border-bottom: 1px solid var(--border-subtle); font-size: 13px;
+  padding: 6px 0; font-size: 13px;
 }
+/* The divider goes under the whole report, below its unfolded gap list --
+   and under the bare "no checklist" rows, which have no item wrapper. */
+.fs-checklist-reports__item,
+.fs-checklist-reports__row--none { border-bottom: 1px solid var(--border-subtle); }
 .fs-checklist-reports__row--none { color: var(--text-secondary); }
+/* What the check left open (owner, 2026-10-16): a count that folds out. */
+.fs-checklist-reports__gaps {
+  margin-left: auto; padding: 0; border: 0; background: none; font: inherit;
+  color: var(--text-warning); cursor: pointer; text-decoration: underline;
+}
+.fs-checklist-reports__gaps--ok { color: var(--text-secondary); cursor: default; text-decoration: none; }
+.fs-checklist-reports__gap-lists { margin: 4px 0 8px 12px; color: var(--text-primary); font-size: 0.92em; }
+.fs-checklist-reports__gap-lists ul { margin: 2px 0 6px; padding-left: 18px; }
+.fs-checklist-reports__gap-head { font-weight: 600; color: var(--text-secondary); }
+
 /* ── Pending notes: recording uploaded, AI model temporarily unavailable ── */
 .fs-pending-notes { display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; }
 .fs-pending-notes__banner {
