@@ -754,6 +754,12 @@
     var refBusy = React.useState(false);
     var busy    = refBusy[0];
     var setBusy = refBusy[1];
+    /* What an async Ask turn (FS_ASK_ASYNC) last said it is doing:
+       null | 'pending' | 'searching_web'. Stays null on the one-request path,
+       which reports no progress, so the pending line reads as it always has. */
+    var refProgress = React.useState(null);
+    var progress    = refProgress[0];
+    var setProgress = refProgress[1];
 
     /* Dock-only state (docs/specs/2026-09-16-ask-dock.md §5). Declared
        unconditionally, same as every other hook here, so the hook order
@@ -972,6 +978,7 @@
       setMsgs(function (m) { return m.concat([userMsg]); });
       setQ('');
       setBusy(true);
+      setProgress(null);
       /* A new question always re-opens the overlay: closing it (dock only)
          hides the conversation, not the ability to ask another one. */
       setCollapsed(false);
@@ -1021,7 +1028,13 @@
       body.user = user;   /* undefined is dropped on the wire */
       var gen = genRef.current;
       function isStale() { return gen !== genRef.current; }
-      window.FS.api.ask.ask(body).then(function (res) {
+      /* The hooks are read only by the async-turn path; the one-request path
+         ignores them. `isStale` lets that path cancel a turn whose context the
+         reader has already left. */
+      window.FS.api.ask.ask(body, {
+        isStale:    isStale,
+        onProgress: function (status) { if (!isStale()) setProgress(status); },
+      }).then(function (res) {
         if (isStale()) return;
         var answerText = res.answer || '';
         /* Not on a web-derived answer: corroborating the web against the web
@@ -1116,6 +1129,7 @@
       }).then(function () {
         /* Even for a stale response: the request is over either way. */
         setBusy(false);
+        setProgress(null);
       });
     }
 
@@ -1334,8 +1348,12 @@
             React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
             React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
           ),
+          /* An async turn says which stage it is in; the one-request path
+             never reports one and keeps the original line. */
           React.createElement('span', { className: 'fs-ask-chat__pending-label' },
-            'Looking through your records…'),
+            progress === 'searching_web' ? 'Checking the web…'
+              : progress === 'pending'   ? 'Searching your records…'
+              : 'Looking through your records…'),
         ) : null,
       );
         if (!dock) return messagesDiv;
