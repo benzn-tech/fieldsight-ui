@@ -161,6 +161,11 @@
        says otherwise -- an older deploy, or a stack whose backend has no
        /ask/corroborate route, must render exactly what it renders today. */
     externalCorroboration: env.externalCorroboration !== undefined ? !!env.externalCorroboration : false,
+    /* Ask as an async turn (POST /ask/start, poll GET /ask/result) instead of
+       one POST /ask held open against API Gateway's 29s ceiling. Off unless
+       the env says otherwise (Amplify FS_ASK_ASYNC): a stack whose backend
+       has no /ask/start must keep sending exactly today's request. */
+    askAsync: env.askAsync !== undefined ? !!env.askAsync : false,
     /* D5 (visibility spec) — legacy report-gateway read fallback (/timeline,
        /dates, /site-users). Default ON during Phase 2 rollout; flip to false
        (env.legacyReadFallback = false) to retire the legacy read paths once
