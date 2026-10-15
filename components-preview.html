@@ -152,6 +152,11 @@
        which are equally unwired to a live api layer in this file). -->
   <script src="scripts/mock/programme-suggestions.fixture.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/suggestion-review.js?v=1"></script>
+  <!-- Project documents (spec 2026-10-16). The api module supplies the real
+       statusOf/checkFile/shouldPoll; ProjectDocumentsShowcase below swaps the
+       network calls for an in-memory list. -->
+  <script src="scripts/api/project-documents.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/project-documents-section.js?v=1"></script>
 
   <script type="text/babel">
     const { Button, IconButton, Input, Textarea, Select, Card,
@@ -242,6 +247,39 @@
           {Dialog ? <Dialog /> : <em>NameProposalsDialog not loaded</em>}
         </div>
       );
+    }
+
+    /* Project documents: the real api module with its network calls replaced by an
+       in-memory list, so every state (indexing, taking too long, searchable, not
+       readable, failed) and the write controls can be seen without a backend. */
+    function ProjectDocumentsShowcase() {
+      React.useState(() => {
+        const PD = window.FS && window.FS.api && window.FS.api.projectDocuments;
+        if (!PD) return false;
+        const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
+        let docs = [
+          { id: 'pd1', seriesId: 'ps1', title: 'Structural specification Rev C', filename: 'spec.pdf', revision: 3, status: 'indexed', uploadedByName: 'Jack Gibson', createdAt: ago(3000) },
+          { id: 'pd2', seriesId: 'ps2', title: 'Formwork method statement', filename: 'formwork.docx', revision: 1, status: 'pending', requestedAt: ago(2), createdAt: ago(2) },
+          { id: 'pd3', seriesId: 'ps3', title: 'Site survey (scanned)', filename: 'survey.pdf', revision: 1, status: 'unreadable', reason: 'Scanned pages with no text layer.', createdAt: ago(600) },
+          { id: 'pd4', seriesId: 'ps4', title: 'Fire stopping schedule', filename: 'fire.pdf', revision: 1, status: 'error', reason: 'Too large to index in one go', createdAt: ago(400) },
+          { id: 'pd5', seriesId: 'ps5', title: 'Concrete pour notes', filename: 'pour.md', revision: 1, status: 'pending', requestedAt: ago(45), createdAt: ago(45) },
+        ];
+        PD.list = async () => ({ documents: docs.slice(), canWrite: true });
+        PD.history = async (s, series) => ({ documents: [
+          { id: 'h3', revision: 3, status: 'indexed', createdAt: ago(3000) },
+          { id: 'h2', revision: 2, status: 'indexed', createdAt: ago(9000), supersededAt: ago(3000) },
+        ] });
+        PD.rename = async (s, id, title) => { docs = docs.map((d) => d.id === id ? { ...d, title } : d); return {}; };
+        PD.remove = async (s, id) => { docs = docs.filter((d) => d.id !== id); return {}; };
+        PD.retry = async (s, id) => { docs = docs.map((d) => d.id === id ? { ...d, status: 'pending', requestedAt: new Date().toISOString() } : d); return {}; };
+        PD.upload = async () => ({ id: 'new', status: 'pending', seriesId: 'new', revision: 1 });
+        PD.open = async () => '';
+        return true;
+      });
+      const Section = window.FieldSight.ProjectDocumentsSection;
+      return Section
+        ? <div style={{ flex: 1, minWidth: 0, maxWidth: '420px' }}><Section siteId="demo-site" /></div>
+        : <em>ProjectDocumentsSection not loaded</em>;
     }
 
     /* Same self-contained-stub pattern as VoicesShowcase above, so this section
@@ -2122,6 +2160,12 @@
             </Row>
             <Row label="closed (open=false) renders nothing">
               {TodoHistory && <TodoHistory open={false} actionItemId="cd155836-49f7-44d7-8b7e-e36505140733" />}
+            </Row>
+          </Section>
+
+          <Section title="ProjectDocumentsSection">
+            <Row label="every status · a manager (canWrite)">
+              <ProjectDocumentsShowcase />
             </Row>
           </Section>
 
