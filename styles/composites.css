@@ -14034,3 +14034,76 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   border-left-color: var(--color-warning-500);
 }
 [data-theme="dark"] .fs-pending-notes__error { color: var(--color-danger-300, #fca5a5); }
+
+/* ==========================================================================
+   §TEMPLATE-DIGITISE · the draft a form was read into, beside the form
+   (template-digitise-review.js). Two panes side by side on a wide screen,
+   stacked on a tablet/phone. Tokens only; checked in both themes.
+   ========================================================================== */
+
+.fs-tpl-digitise {
+  width: min(1100px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.fs-tpl-digitise__banner {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--surface-panel-muted);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.fs-tpl-digitise__panes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-4);
+  max-height: 65vh;
+}
+@media (max-width: 900px) {
+  .fs-tpl-digitise__panes { grid-template-columns: minmax(0, 1fr); max-height: none; }
+}
+.fs-tpl-digitise__source,
+.fs-tpl-digitise__draft {
+  overflow: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.fs-tpl-digitise__page { width: 100%; height: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
+.fs-tpl-digitise__pdf { width: 100%; height: 60vh; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
+.fs-tpl-digitise__doc { color: var(--text-secondary); font-size: 13px; }
+.fs-tpl-digitise__count { color: var(--text-secondary); font-size: 12px; margin: 0; white-space: nowrap; }
+.fs-tpl-digitise__section {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--surface-panel);
+}
+.fs-tpl-digitise__section--flagged,
+.fs-tpl-digitise__item--flagged { border-color: var(--color-warning-500); }
+.fs-tpl-digitise__section-head { display: flex; align-items: center; gap: var(--space-2); }
+.fs-tpl-digitise__section-head .fs-tpl-upload__input { flex: 1; font-weight: var(--font-weight-semibold); }
+.fs-tpl-digitise__items { margin: 0; padding-left: var(--space-5); display: flex; flex-direction: column; gap: var(--space-1-5); }
+.fs-tpl-digitise__item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-1); align-items: start; border: 1px solid transparent; border-radius: var(--radius-md); padding: 2px; }
+.fs-tpl-digitise__item .fs-tpl-digitise__flags { grid-column: 1 / -1; }
+.fs-tpl-digitise__item-text { min-height: 34px; }
+.fs-tpl-digitise__item-tools { display: flex; gap: 2px; }
+.fs-tpl-digitise__tool {
+  min-width: 32px; min-height: 32px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-input);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.fs-tpl-digitise__tool:disabled { color: var(--text-disabled); cursor: default; }
+.fs-tpl-digitise__tool:focus-visible { outline: 2px solid var(--color-accent-500); outline-offset: 1px; }
+.fs-tpl-digitise__flags { margin: 0; padding-left: var(--space-4); color: var(--text-warning); font-size: 12px; }
+.fs-tpl-digitise__section-tools { display: flex; flex-wrap: wrap; gap: var(--space-1); }
