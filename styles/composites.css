@@ -13917,6 +13917,9 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   .fs-ask-fold__body[hidden] { display: block; }
   .fs-ask-fold__chevron { display: none; }
 }
+/* The records summary carries the old 10px uppercase heading class (so the
+   records accent rule still matches); the whole basis line now sits in it. */
+.fs-ask-fold__text.fs-ask-chat__citations-label { font-size: 12px; text-transform: none; letter-spacing: 0; }
 /* ── end Ask · folds ── */
 
 /* ---- Today: weather for the active site (today-weather-card.js) ---- */
