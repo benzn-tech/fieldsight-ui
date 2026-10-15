@@ -48,8 +48,11 @@
     { key: 'personal', label: 'Personal'     },
   ];
 
-  var RT_LABEL = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', incident: 'Incident' };
-  var RT_TONE  = { daily: 'info', weekly: 'success', monthly: 'accent', incident: 'danger' };
+  /* custom: a template read from the customer's own form (template-digitise). It
+     has no cadence of its own, so it takes the neutral tone -- the badge says what
+     it is without borrowing a colour that means daily/weekly/incident. */
+  var RT_LABEL = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', incident: 'Incident', custom: 'Custom' };
+  var RT_TONE  = { daily: 'info', weekly: 'success', monthly: 'accent', incident: 'danger', custom: 'neutral' };
 
   /* PHOTOS IS GONE FROM HERE, and that is the honest half of wiring the rest up.
      A generated report is prose the model writes; nothing in that path inserts
@@ -261,12 +264,24 @@
       return unsub;
     }, []);
 
-    function handleUploadComplete(stub) {
+    function handleUploadComplete(stub, how) {
       setUploadFor(null);
       setRetry(function (n) { return n + 1; });
       setSel(stub);
+      /* Three different things happened, and the toast says which. "readingOff" is the
+         server answering 404 on /templates/digitise: the file was NOT read, and saying
+         so is the rule tests/the-library-says-what-it-actually-does.test.js keeps. */
+      var kind = how && how.reportType
+        ? how.reportType.charAt(0).toUpperCase() + how.reportType.slice(1) + ' '
+        : '';
+      var message = how && how.readingOff
+        ? 'Reading forms is not switched on here. A ' + kind + 'template was created from the starting sections; '
+          + 'nothing was read from your file — edit its sections below'
+        : how && how.digitised
+          ? 'Template saved from your form — it is in your library now'
+          : 'Template created — edit its sections below';
       if (window.FS && window.FS.toast) {
-        window.FS.toast.show({ message: 'Template created — edit its sections below', tone: 'info' });
+        window.FS.toast.show({ message: message, tone: 'info' });
       }
     }
 
