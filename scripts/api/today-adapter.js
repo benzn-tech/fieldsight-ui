@@ -490,6 +490,15 @@
              `=== 'non_work'`, never `!== 'work'` — same rule the
              timeline "aurora" shape already follows elsewhere. */
           work_class:  t.work_class,
+          /* The parent topic's domain, threaded down so Today can order
+             safety work first (api/today-ordering.js). The task carried no
+             category at all before, so the page had no way to tell a
+             scaffold hazard from a delivery reschedule. `hasSafetyFlags` is
+             kept separate because a flag outranks the category label: a
+             topic filed under 'progress' that raised a safety flag is a
+             safety item whatever the extractor called it. */
+          category:       t.category || null,
+          hasSafetyFlags: (t.safety_flags || []).length > 0,
           kind:        'task',
           /* feat/today-rolling-open-items — the report date this item
              was extracted from. today.js's rolling loader fans out
@@ -514,7 +523,14 @@
            see mine-team.js's doc for the full rule set. Tasks page
            (tasks.js computeBuckets) calls the exact same predicate so
            the two pages can't drift apart again. */
-        if (window.FS.api.isMineTask(task.assignee, ownerFolder, { name: currentUserName, folderName: currentUserFolder })) {
+        /* Recorded on the task as well as used to bucket it: Today renders
+           the two sections separately, but Tasks and the ordering
+           comparator both want the answer without re-deriving it, and a
+           second derivation is how the two pages drifted apart before. */
+        task.isMine = window.FS.api.isMineTask(
+          task.assignee, ownerFolder,
+          { name: currentUserName, folderName: currentUserFolder });
+        if (task.isMine) {
           myTasks.push(task);
         } else {
           teamTasks.push(task);

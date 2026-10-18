@@ -1222,6 +1222,18 @@ function AppShell({ showDevSwitcher = false }) {
       onNavigate: navigate,
     }),
 
+    /* The page — and ONLY the page — sits inside the error boundary. LeftNav
+       is mounted above, outside it, so a page that throws leaves the
+       navigation on screen and the user can walk away from it. Before this
+       existed, a null date range in the Gantt unmounted the entire tree on
+       prod: white screen, no nav, no way back.
+
+       `key: route` resets the boundary on navigation. Without it a caught
+       error would stick and every page visited afterwards would show the
+       failure notice instead of itself. */
+    React.createElement(
+      window.FieldSight.PageErrorBoundary || React.Fragment,
+      window.FieldSight.PageErrorBoundary ? { key: route, route: route } : null,
     React.createElement(PageProvider, null,
       React.createElement(MiddleColumn, {
         route: route,
@@ -1251,7 +1263,7 @@ function AppShell({ showDevSwitcher = false }) {
             onClose:      function() { setSelectedItem(null); },
           })
         : null,
-    ),
+    )),
 
     /* Sprint 8.4.1 — bottom navigation bar (rendered outside PageProvider
        so it's always present regardless of page layout mode). */

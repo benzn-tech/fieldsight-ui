@@ -45,8 +45,67 @@
     return window.FS.api.folderName(u.name);
   }
 
+  /* Coerced: a caller without an `isAdmin` field used to make this return
+     `undefined`. Equivalent inside an `if`, but it is a predicate — callers
+     (and tests) should be able to compare it. */
   function isAdminLike(user) {
-    return user && (user.role === 'admin' || user.role === 'gm' || user.isAdmin);
+    return !!(user && (user.role === 'admin' || user.role === 'gm' || user.isAdmin));
+  }
+
+  /* Can this caller reach a multi-person view at all, from where they are?
+     The question the "back to overview" control actually needs answered —
+     it used to ask isAdminLike, which silently excluded pm and site_manager
+     and left them with NO way out of a person's day once they opened one.
+
+     It is not the same question as isAdminLike — that silently excluded pm
+     and site_manager, who are most of the people who open someone else's day.
+
+     It is also no longer gated on having a site anchored, which is what the
+     first version of this got wrong. The reasoning then was that a siteless
+     "back" would bounce a pm/site_manager into the view they just left. It
+     does not: ?view=team with no site renders the PROJECT PICKER, which is a
+     next step rather than a dead end.
+
+     Requiring a site made this false in exactly the default state — the
+     header sits on "— All projects —", so siteContext is null until someone
+     chooses — and that took the empty-day handover below down with it. On
+     prod, 8 of 10 site managers have no recordings of their own, so the
+     handover firing is the difference between them landing on a usable page
+     and landing on "No report for <their own name>".
+
+       • worker — never; they are pinned to themselves and have no overview
+                  to return to.
+
+     A caller with NO role is not a caller yet — identity has not resolved.
+     Answering "yes" there would guess upward from silence, so it answers no
+     and the page shows the one thing it can be sure of. */
+  function canSeeOverview(caller) {
+    return !!(caller && caller.role) && caller.role !== 'worker';
+  }
+
+  /* Whose day does this URL mean? Pure, so the landing rule is testable
+     without mounting the page.
+
+       ?user=X     → that person (explicit; how "Open" navigates)
+       ?view=team  → the multi-person view (explicit; how the team control
+                     and the back control navigate)
+       neither     → the caller's OWN day
+
+     `selfDefaulted` distinguishes "we put you here" from "you asked for
+     this", which is what licenses the empty-day handover to the team view:
+     an explicitly requested empty day still renders its own empty state,
+     because redirecting away from a page someone asked for is disorienting.
+
+     Workers are pinned to themselves whatever the URL says — they have no
+     team view to be sent to, so no marker is needed. */
+  function resolveTimelineScope(caller, params, selfFolder) {
+    var p = params || {};
+    if (caller && caller.role === 'worker') {
+      return { user: selfFolder, selfDefaulted: false };
+    }
+    if (p.user) return { user: p.user, selfDefaulted: false };
+    if (p.view === 'team') return { user: null, selfDefaulted: false };
+    return { user: selfFolder, selfDefaulted: true };
   }
 
   /* ---------- life-conversation separation: optimistic overrides --------- */
@@ -596,16 +655,29 @@
          directions of the same bidirectional control different visibility
          rules. Both directions now share one URL contract: drop ?user=,
          keep date + site. */
-      (user && isAdminLike((window.AuthMock && window.AuthMock.currentUser) || {}))
+      (user && canSeeOverview((window.AuthMock && window.AuthMock.currentUser) || {}, site))
         ? React.createElement('button', {
             type:      'button',
             className: 'fs-btn fs-btn--tertiary fs-btn--sm',
             style:     { marginTop: '6px' },
             onClick:   function () {
-              window.FS.Router.navigate('/timeline?date=' + (date || '')
+              /* view=team is what makes this an EXPLICIT choice. Dropping
+                 ?user= alone is no longer enough: the resolver now treats
+                 "no user" as "show me my own day", so a bare back link
+                 would land the caller straight back on themselves. */
+              window.FS.Router.navigate('/timeline?view=team&date=' + (date || '')
                 + (site ? '&site=' + encodeURIComponent(site) : ''));
             },
-          }, site ? '← All people on this site' : '← Back to overview')
+          },
+            /* Same destination, two different journeys — the label has to say
+               which one this is. On your OWN day (where own-day-first now
+               lands you by default) the team view is somewhere you have not
+               been, so "back" would be a lie; on someone else's it is
+               genuinely where you came from. Derived from the folder rather
+               than a new prop so the control stays self-contained. */
+            (user === callerFolder())
+              ? (site ? 'View everyone on this site →' : 'View the team →')
+              : (site ? '← All people on this site' : '← Back to overview'))
         : null,
     );
   }
@@ -632,8 +704,14 @@
     var StatCard = window.FieldSight.StatCard;
     var report = props.report || {};
 
-    var topics  = (report.topics || []).length;
-    var safetyCount = (report.topics || []).reduce(function (acc, t) {
+    /* Counted over the topics ACTUALLY ON SCREEN. With a meeting selected in
+       the session picker the list narrows to that meeting, and a strip still
+       reading the whole day's "4 Topics" above a one-topic list is not a
+       header — it is a contradiction, and it undermines the filter it sits
+       above. props.topics is the already-scoped list when there is one. */
+    var counted = props.topics || report.topics || [];
+    var topics  = counted.length;
+    var safetyCount = counted.reduce(function (acc, t) {
       var tagged = (t.category === 'safety') || ((t.safety_flags || []).length > 0);
       return acc + (tagged ? 1 : 0);
     }, 0);
@@ -651,6 +729,14 @@
     // ("nothing recorded today"), not a missing metric.
     var meta = report._report_metadata || {};
 
+    /* Recordings and Recorded time are counted per DAY off the recordings
+       table; there is no per-session split of them. When the view is scoped
+       to one meeting they become unavailable rather than wrong — showing the
+       day's totals beside a one-meeting topic count would attribute the whole
+       day's recording to that meeting. '—' already means "metric unavailable"
+       everywhere else in this strip, so it needs no new vocabulary. */
+    var dayOnly = !props.sessionScoped;
+
     return React.createElement(KpiStrip, null,
       React.createElement(StatCard, {
         value: topics, label: 'Topics',
@@ -659,11 +745,11 @@
         value: safetyCount, label: 'Safety', tone: safetyCount > 0 ? 'danger' : 'neutral',
       }),
       React.createElement(StatCard, {
-        value: meta.recordings_processed != null ? meta.recordings_processed : '—',
+        value: (dayOnly && meta.recordings_processed != null) ? meta.recordings_processed : '—',
         label: 'Recordings',
       }),
       React.createElement(StatCard, {
-        value: fmtRecordedTime(meta.duration_seconds),
+        value: dayOnly ? fmtRecordedTime(meta.duration_seconds) : '—',
         label: 'Recorded',
       }),
     );
@@ -1136,6 +1222,10 @@
               React.createElement(DraftEmailButton, {
                 topics:     _p.visible,
                 session:    null,
+                /* THIS section's recorder — photo S3 keys are per-folder, so
+                   the caller's own folder here would resolve someone else's
+                   pictures prefix (or none). */
+                userFolder: sectionUser,
                 siteName:   report.site,
                 date:       props.date,
                 reportDate: report.report_date || props.date,
@@ -1415,8 +1505,27 @@
       site = null;
     }
 
-    if (caller.role === 'worker') user = callerFolder();
-    if (!user && !site && !isAdminLike(caller)) user = callerFolder();
+    /* Whose day are we on?
+         ?user=X     → that person (explicit; how "Open" navigates)
+         ?view=team  → the multi-person view (explicit; how "back" navigates)
+         neither     → YOUR OWN day.
+
+       The default used to be the team view for anyone with a site anchored,
+       which made "see what I recorded" — the single most common thing a
+       recorder opens this page for — cost an extra click and a scan down a
+       list of colleagues to find yourself. Own-day-first inverts that; the
+       team view is one labelled control away, and `view=team` keeps it a
+       real URL so it survives refresh, bookmarks and shared links.
+
+       A caller whose own day turns out to be EMPTY falls through to the team
+       view in the fetch effect below (managers often record nothing
+       themselves). That fallback is deliberately state-only, not a redirect:
+       the URL stays "no explicit choice", so moving to a date where they DID
+       record shows their own day again rather than stranding them on the
+       team view. */
+    var _scope        = resolveTimelineScope(caller, params, callerFolder());
+    user              = _scope.user;
+    var selfDefaulted = _scope.selfDefaulted;
 
     /* Switching projects resets the active person — a user picked for
        one site rarely maps onto another. Persists the choice via the
@@ -1430,6 +1539,43 @@
         : '';
       window.FS.Router.navigate('/timeline' + qs);
     }
+
+    /* Project 3 §2 — matcher suggestions, so a topic can show that what was
+       said reached the programme. Mirrors AggregatedDayView's fetch (same
+       state:'all' reasoning: the point here is that the LINK EXISTS, and a
+       confirmed suggestion is the strongest evidence of that, so fetching
+       only pending ones would hide the link at the moment it was accepted).
+
+       This view rendered `mentionsByTopic` without ever declaring it — the
+       block was carried over from AggregatedDayView, comment and all, into a
+       component that has neither the fetch nor the index. The result was a
+       bare ReferenceError inside the topic map, which React turns into an
+       unmounted subtree: EVERY single-person timeline was a white screen, not
+       just the ones reached through "Open". The variable is now real.
+
+       Failure is silent by design: this is an annotation, and a topic without
+       it must still render. */
+    var suggRef        = React.useState([]);
+    var suggestions    = suggRef[0];
+    var setSuggestions = suggRef[1];
+
+    React.useEffect(function () {
+      var mocked = window.FS.api.useMocks;
+      var suggSite = window.FS.siteContext ? window.FS.siteContext.get() : null;
+      if (!suggSite && !mocked) { setSuggestions([]); return undefined; }
+      var cancelled = false;
+      window.FS.api.programme.getSuggestions({ site: suggSite, state: 'all' })
+        .then(function (res) {
+          if (!cancelled) setSuggestions((res && res.suggestions) || []);
+        })
+        .catch(function () { if (!cancelled) setSuggestions([]); });
+      return function () { cancelled = true; };
+    }, [date]);
+
+    var mentionsByTopic = React.useMemo(function () {
+      var m = window.FS.api.programmeMentions;
+      return m ? m.indexByTopic(suggestions) : {};
+    }, [suggestions]);
 
     var refState = React.useState({ status: 'loading' });
     var state    = refState[0];
@@ -1479,7 +1625,20 @@
           setSessionsState({ status: 'ok', sessions: [], excluded: null });
           return;
         }
-        setSessionsState({ status: 'ok', sessions: res.sessions || [], excluded: res.excluded || null });
+        var loaded = res.sessions || [];
+        setSessionsState({ status: 'ok', sessions: loaded, excluded: res.excluded || null });
+        /* Deep link: ?session=<id> preselects that meeting in the picker, so
+           arriving from Today's "Open" lands on THAT meeting's topics instead
+           of an unfiltered day the caller then has to scroll. Applied here
+           rather than at mount because the picker can only hold a session that
+           actually exists in the loaded list — a stale or cross-day id would
+           otherwise filter everything away and render a blank day, which is
+           strictly worse than showing all of it. Silently ignored when it does
+           not match; "All day" remains the honest fallback. */
+        var wanted = params.session;
+        if (wanted && loaded.some(function (s) { return s.session_id === wanted; })) {
+          setSelectedSessionId(wanted);
+        }
       }).catch(function () {
         if (!cancelled) setSessionsState({ status: 'ok', sessions: [], excluded: null });
       });
@@ -1576,6 +1735,18 @@
         return undefined;
       }
 
+      /* Own-day-first fallback. `selfDefaulted` marks the case where nobody
+         asked for this person — the resolver put the caller on their own day
+         because no ?user= and no view=team was given. If that day turns out
+         to hold nothing, showing an empty page would be a worse landing than
+         the team view the default replaced, so hand over to it.
+
+         Only ever applies to the implicit default: an explicit ?user= (an
+         empty day someone deliberately opened) still renders its own empty
+         state, because silently redirecting away from a page you asked for
+         is disorienting. */
+      var canFallBackToTeam = selfDefaulted && canSeeOverview(caller, site);
+
       setState({ status: 'loading' });
       Promise.all([
         window.FS.api.timeline.getTimeline({ date: date, user: user }),
@@ -1610,6 +1781,16 @@
 
         var hasReport  = !!(report && !report._notFound && !report.available_users);
         var hasMeeting = !!meeting;
+
+        /* Nothing of the caller's own on this date, and they were only here
+           by default — show the team instead of an empty page (see
+           canFallBackToTeam above). Checked against BOTH sources: a day with
+           no daily report but a meeting recording is still the caller's day
+           and must not hand over. */
+        if (canFallBackToTeam && !hasReport && !hasMeeting) {
+          setState({ status: 'ok', aggregated: true, selfEmpty: true });
+          return;
+        }
 
         /* Default to daily if it exists, otherwise meeting. The toggle
            UI surfaces only when both are present (§5.5). */
@@ -1796,14 +1977,24 @@
       );
     }
 
-    /* Batch A — multi-project admin/gm caller with no project chosen:
-       offer the project picker instead of the raw cross-site user list
+    /* "Is this the multi-person view?" — asked once, because it is NOT the
+       same as `!user` any more. The own-day handover deliberately leaves
+       `user` set to the caller (so moving to a date where they DID record
+       shows their own day again, with no URL rewrite) and signals itself
+       through state. Every branch that used to test `!user` has to test this
+       instead, or the handover sets a state nothing renders and the page
+       falls through to the very empty day it was trying to avoid — which is
+       exactly what it did. */
+    var teamView = !user || !!state.aggregated;
+
+    /* Batch A — multi-project caller with no project chosen: offer the
+       project picker instead of the raw cross-site user list
        (available_users below) once we know there's more than one option.
        While sitesList is still resolving, sitesList.length is 0 so this
        branch simply doesn't match yet — the 'loading' branch above (from
        the still-in-flight, non-short-circuited fetch below) covers that
        window without any extra state. */
-    if (!site && !user && sitesList.length > 1) {
+    if (!site && teamView && sitesList.length > 1) {
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: null,
@@ -1819,12 +2010,24 @@
        every user on the site (AggregatedDayView) instead of a single
        report. The fetch effect above short-circuits to a minimal
        ok-state for this case; AggregatedDayView does its own fetching. */
-    if (site && !user) {
+    if (site && teamView) {
       return React.createElement('div', { className: 'fs-timeline-page' },
         React.createElement(PageHeader, {
           date: date, user: null,
           site: site,
         }),
+        state.selfEmpty
+          ? React.createElement('div', {
+              className: 'fs-timeline-page__self-empty-note',
+              style: {
+                fontSize: '13px', color: 'var(--text-tertiary)',
+                margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: '8px',
+              },
+            },
+              React.createElement('span', null,
+                'You have no recordings on this date — showing the team instead.'),
+            )
+          : null,
         React.createElement(AggregatedDayView, {
           site: site, date: date,
           onSelect: props.onSelect, selectedItem: props.selectedItem,
@@ -2020,6 +2223,9 @@
     var _draftEl = React.createElement(DraftEmailButton, {
       topics:     visibleTopics,
       session:    _selectedSession,
+      /* ownerFolder, not `user`: the self-view has user===null and the photos
+         belong to whoever recorded the day. */
+      userFolder: ownerFolder,
       siteName:   report.site || site || '',
       date:       date,
       reportDate: report.report_date || date,
@@ -2045,10 +2251,25 @@
         site: site,
       }),
       React.createElement(ViewToggle),
-      React.createElement(ReportKpis, { report: report }),
-      React.createElement(ExecutiveSummaryCard, {
+      React.createElement(ReportKpis, {
+        report: report,
+        /* The visible list, not the day — see ReportKpis. */
+        topics: visibleTopics,
+        sessionScoped: !!selectedSessionId,
+      }),
+      /* The executive summary narrates the whole DAY — it is written once,
+         over every topic, and there is no per-meeting version of it. Left
+         standing under a one-meeting view it describes four meetings above a
+         list showing one, which is the same contradiction the KPI strip had.
+         Hidden rather than trimmed: a summary cannot be filtered down to the
+         sentences that happen to mention this session without rewriting it. */
+      selectedSessionId ? null : React.createElement(ExecutiveSummaryCard, {
         bullets: report.executive_summary,
       }),
+      /* Above the picker, below the summary: a subject that came up again is
+         context for reading the day, not a task buried under it. Renders
+         nothing when the queue is empty, which is almost always. */
+      React.createElement(ThreadReviewSection, { site: site }),
       (showSessionPicker || excludedNote) ? React.createElement('div', {
         className: 'fs-session-picker-wrap',
       },
@@ -2251,13 +2472,111 @@
          + ' item' + (draft.omittedItems === 1 ? '' : 's')
          + ' trimmed to fit; full list via the link in the email. Nothing is sent until you send it.')
       : 'Opens a draft in your mail client — nothing is sent until you send it';
-    return React.createElement('a', {
-      className: 'fs-btn fs-btn--secondary fs-btn--sm fs-draft-email',
-      href:      draft.url,
-      title:     tip,
-      /* mailto stays in the same tab handoff to the OS mail client; no
-         target/_blank needed and no rel required for a mailto scheme. */
-    }, 'Draft email');
+    return React.createElement(React.Fragment, null,
+      React.createElement('a', {
+        className: 'fs-btn fs-btn--secondary fs-btn--sm fs-draft-email',
+        href:      draft.url,
+        title:     tip,
+        /* mailto stays in the same tab handoff to the OS mail client; no
+           target/_blank needed and no rel required for a mailto scheme. */
+      }, 'Draft email'),
+      /* Beside it, not instead of it. The two hand-offs lose different
+         things and neither dominates:
+           Draft email  pre-fills recipient + subject and opens the compose
+                        window — but mailto rides in a URL, so it cannot
+                        attach a photo and it TRIMS items past ~1800 chars.
+           Preview      shows what is about to go, carries the photos that
+                        evidence each finding, and never truncates — but the
+                        user pastes into a message they opened themselves.
+         A finding without its photo is an assertion; with it, it is
+         evidence. That is what earns the second button. */
+      React.createElement(PreviewEmailButton, props),
+    );
+  }
+
+  /* Opens EmailPreviewModal. Separate component so the modal's open/closed
+     state does not live in DraftEmailButton, which renders in two places
+     (the aggregated person-section and the single-day view) and would
+     otherwise share one flag across both. */
+  function PreviewEmailButton(props) {
+    var openRef = React.useState(false);
+    var open    = openRef[0];
+    var setOpen = openRef[1];
+    var Modal   = window.FieldSight.EmailPreviewModal;
+    if (!Modal) return null;          /* script not loaded → no broken button */
+    return React.createElement(React.Fragment, null,
+      React.createElement('button', {
+        type:      'button',
+        className: 'fs-btn fs-btn--tertiary fs-btn--sm',
+        title:     'See the hand-off with its photos, then copy it into any email',
+        onClick:   function () { setOpen(true); },
+      }, 'Preview & copy'),
+      React.createElement(Modal, {
+        open:       open,
+        onClose:    function () { setOpen(false); },
+        topics:     props.topics,
+        session:    props.session,
+        date:       props.date,
+        reportDate: props.reportDate || props.date,
+        siteName:   props.siteName,
+        userFolder: props.userFolder,
+        isDone:     props.isDone,
+        deepLink:   props.deepLink,
+      }),
+    );
+  }
+
+  /* Recurring-item threading — the review queue, where the day's recordings
+     already are.
+
+     Self-fetching rather than lifted into TimelineMiddleColumn's state: the
+     page has no other reason to know about proposals, and threading them
+     through would put a loading flag and an error branch into a component
+     that is already the largest on the page.
+
+     RENDERS NOTHING when there is nothing to review, which is almost always.
+     The matcher is off by default and most topics are a new subject, so a
+     permanent section — or a nav item — would be a standing reminder of a
+     queue that is empty. A queue is only useful while it is short; the same
+     reasoning is why the backend refuses to re-propose a rejected link. */
+  function ThreadReviewSection(props) {
+    var Queue = (window.FieldSight || {}).ThreadReview;
+    var s_rows = React.useState(null);
+    var rows = s_rows[0], setRows = s_rows[1];
+
+    React.useEffect(function () {
+      var org = ((window.FS || {}).api || {}).org || {};
+      if (!Queue || !org.getThreadSuggestions) return undefined;
+      var cancelled = false;
+      Promise.resolve(org.getThreadSuggestions({ site: props.site }))
+        .then(function (res) {
+          if (cancelled) return;
+          /* A benign envelope is not an empty queue — it means we could not
+             ask. Either way there is nothing to show, but they must not be
+             conflated in a way that would later read as "reviewed". */
+          if (!res || res._accessDenied || res._notFound) { setRows([]); return; }
+          setRows(res.suggestions || []);
+        })
+        .catch(function () { if (!cancelled) setRows([]); });
+      return function () { cancelled = true; };
+    }, [props.site]);
+
+    if (!Queue || !rows || !rows.length) return null;
+
+    return React.createElement('section', { className: 'fs-timeline-page__threads' },
+      React.createElement('div', { className: 'fs-timeline-page__section-label' },
+        'Came up again · ' + rows.length),
+      React.createElement(Queue, {
+        suggestions: rows,
+        /* Drop the row locally; the backend has already recorded the
+           decision, and re-fetching would cost a round trip to learn
+           something we just did. */
+        onResolved: function (id) {
+          setRows(function (cur) {
+            return (cur || []).filter(function (r) { return r.id !== id; });
+          });
+        },
+      }));
   }
 
   /* Delivery-C Tier-2 — a per-session "Generate report" control beside the mailto
@@ -3493,6 +3812,10 @@
     module.exports = {
       applyTopicOverrides: applyTopicOverrides,
       partitionTopics: partitionTopics,
+      /* own-day-first landing + the way back out of a person's day */
+      canSeeOverview: canSeeOverview,
+      isAdminLike: isAdminLike,
+      resolveTimelineScope: resolveTimelineScope,
       reconcileTopicOverrides: reconcileTopicOverrides,
       diffWords: diffWords,
       formatEditTime: formatEditTime,

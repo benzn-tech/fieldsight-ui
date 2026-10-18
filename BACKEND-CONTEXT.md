@@ -131,18 +131,41 @@ GET /api/transcripts?date=YYYY-MM-DD&user=Jarley_Trainor&start=08:15:00&end=09:0
       {
         speaker:    "spk_0",
         text:       "...",
-        start:      29672.5,         // absolute seconds since midnight
-        end:        29684.1,
+        start:      29672.5,         // absolute seconds since midnight — DISPLAY ONLY
+        end:        29684.1,         // absolute — DISPLAY ONLY
         time_label: "08:14:32",
-        duration:   11.6
+        duration:   11.6,            // in-file span  ← use this to write back
+        chunk_start:     41.203,     // offset WITHIN source_filename ← write back
+        source_filename: "Benl1_2026-04-29_11-49-00_sid<32 hex>_c0000_srcwav.json",
+        speaker_name:    "Ben L",       // only when this turn has been named
+        speaker_state:   "confirmed"    // | "tentative"
       }
     ],
     speakers: ["spk_0","spk_1","spk_2"],
     count: 3,                       // segment files in range
     speaker_count: 3,
-    total_speaker_segments: 142
+    total_speaker_segments: 142,
+    unmatchedNames: 0               // present ONLY when speaker identity is on
   }
 The query is **time-windowed with a 60s buffer** on both sides. start/end accept HH:MM:SS or HH:MM.
+
+`source_filename` / `chunk_start` / `duration` have always been returned and were
+undocumented until 2026-08-14 — an undocumented field is one refactor away from
+being deleted as dead weight, and these three are what the speaker-correction
+write is addressed with. **`start`/`end` are resolved through the batch map,
+which re-inserts the silence batching removed, so `end - start` is LARGER than
+the real in-file span for any turn straddling a batch seam. Write back with
+`chunk_start` + `duration`; nothing validates it and the wrong window still
+returns 202** (see `scripts/api/speaker-naming.js`).
+
+`unmatchedNames` appears only when `SPEAKER_IDENTITY_MODE` is not `off` AND the
+payload has at least one speaker segment. Its PRESENCE is the only feature
+signal — this route is not gated on the switch and does not 403 for workers, so
+a feature-detect that waits for the read to fail never fires. Writes:
+`POST /api/org/sessions/{ref}/speaker-corrections` and
+`DELETE /api/org/sessions/{ref}/speaker-names?name=` — both need a `{ref}` that
+carries **a date AND a `sid<32 hex>`** (the session list's `session_id` has no
+date and 400s; send `source_filename`, which has both).
 ### 4.6 Audio segments (playable VAD chunks)
 GET /api/audio-segments?date=...&user=...&start=08:15:00&end=09:00:00
 → {

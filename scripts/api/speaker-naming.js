@@ -1,0 +1,144 @@
+/* ==========================================================================
+   api/speaker-naming.js — the rules behind naming a passage in a transcript
+   --------------------------------------------------------------------------
+   Spec: docs/specs/2026-08-14-speaker-naming-ui.md
+   Backend: fieldsight-pipeline PRs #487-#496.
+
+   These are pure functions so the render path (composites/transcript-list.js)
+   and the tests read the SAME rules — three of them are corrections the spec
+   marks with a warning because getting them wrong fails silently:
+
+   1. `end_sec` is `chunk_start + duration`, NEVER `chunk_start + (end - start)`.
+      `start`/`end` are absolute clock seconds resolved through the batch map,
+      which re-inserts the silence batching removed. For a turn straddling a
+      batch seam, `end - start` is larger than the real in-file span by that
+      whole gap and the backend analyses the wrong audio window. NOTHING
+      validates it: the request returns 202 and writes a row either way.
+
+   2. The session reference in the URL is not the session list's `session_id`.
+      The POST route searches the path segment for BOTH a `YYYY-MM-DD` date
+      AND a `sid<32 hex>` token; a bare `session_id` carries no date and 400s
+      every time. `source_filename` carries both, and is what we have in hand
+      on a segment, so it is what we send.
+
+   3. A legacy (RealPTT-era) transcript filename has no `sid`, and the backend
+      overlay + both write routes decline for it. `sessionRefForSegment`
+      returns null there, which is what suppresses the affordance — a correct
+      refusal, not a bug to hunt.
+
+   Feature detection is the presence of the `unmatchedNames` KEY on the
+   transcripts response (§"Feature detection"). The GET route is not gated on
+   the switch and does not 403 for workers, so a feature-detect that expects
+   the read to fail would never fire.
+
+   Exported to:
+     window.FS.speakerNaming   (browser)
+     module.exports            (node --test)
+   ========================================================================== */
+
+(function () {
+  'use strict';
+
+  /* voiceprint_utils.DEFAULT_MIN_TURN_S — the backend declines to propagate
+     from a turn shorter than this, so we do not invite the gesture. */
+  var MIN_TURN_SECONDS = 3;
+
+  /* Both write routes 403 for anyone else (lambda_org_api). Gating the UI on
+     the same list means a worker is never offered a control that refuses. */
+  var NAMING_ROLES = ['admin', 'gm', 'pm', 'site_manager', 'platform_admin'];
+
+  var SID_RE = /sid[0-9a-f]{32}/i;
+  var DATE_RE = /\d{4}-\d{2}-\d{2}/;
+
+  /* The path segment the write routes locate the session by. Requires BOTH
+     tokens; returns null when either is missing (legacy recordings), and the
+     caller treats null as "this feature does not apply here". */
+  function sessionRefForSegment(seg) {
+    var f = seg && seg.source_filename;
+    if (!f || typeof f !== 'string') return null;
+    if (!SID_RE.test(f) || !DATE_RE.test(f)) return null;
+    return f;
+  }
+
+  /* A turn we may offer to name. Short turns are refused by the backend
+     (roughly a fifth of them are under 3 s, by its own comment). */
+  function canName(seg) {
+    if (!seg) return false;
+    if (!sessionRefForSegment(seg)) return false;
+    if (typeof seg.duration !== 'number' || !(seg.duration >= MIN_TURN_SECONDS)) return false;
+    return typeof seg.chunk_start === 'number';
+  }
+
+  function roleMayName(role) {
+    return NAMING_ROLES.indexOf(String(role || '')) !== -1;
+  }
+
+  /* The POST body. `consent_given` is hard-false here BY DESIGN: consent is a
+     different act from naming — it stores a voiceprint, which is biometric
+     data, and the consent required is the consent of the person whose voice
+     it is. Phase 1 ships no consent UI (spec §Consent). Do not add a flag to
+     this function; add a deliberate surface with real wording instead. */
+  function correctionBody(seg, opts) {
+    opts = opts || {};
+    return {
+      user: opts.user || '',
+      source_filename: seg.source_filename,
+      start_sec: seg.chunk_start,
+      end_sec: seg.chunk_start + seg.duration,
+      display_name: String(opts.displayName || '').trim(),
+      consent_given: false,
+      consented_by: null,
+    };
+  }
+
+  /* Presence of the KEY, not its value: 0 unmatched names is still a
+     feature-is-on signal. The key appears only when the backend mode is not
+     `off` and the payload has at least one speaker segment. */
+  function featureAvailable(res) {
+    return !!res && Object.prototype.hasOwnProperty.call(res, 'unmatchedNames');
+  }
+
+  /* Precedence: a name a person asserted beats a positional guess. If the
+     guess won, a real correction would be invisible — which is the failure
+     the whole backend layer exists to avoid. */
+  function displayLabel(seg, hint) {
+    if (!seg) return '';
+    if (seg.speaker_name) return seg.speaker_name;
+    return hint || seg.speaker;
+  }
+
+  /* `tentative` is the SYSTEM's guess, not the user's assertion, and must
+     never render in a form a reader would quote. */
+  function isTentative(seg) {
+    return !!(seg && seg.speaker_name && seg.speaker_state !== 'confirmed');
+  }
+
+  /* Names already used in this meeting — offered as suggestions so a second
+     correction spells the person the same way as the first. */
+  function namesInSession(segments) {
+    var seen = {};
+    (segments || []).forEach(function (s) {
+      if (s && s.speaker_name) seen[s.speaker_name] = true;
+    });
+    return Object.keys(seen).sort();
+  }
+
+  var mod = {
+    MIN_TURN_SECONDS: MIN_TURN_SECONDS,
+    NAMING_ROLES: NAMING_ROLES,
+    sessionRefForSegment: sessionRefForSegment,
+    canName: canName,
+    roleMayName: roleMayName,
+    correctionBody: correctionBody,
+    featureAvailable: featureAvailable,
+    displayLabel: displayLabel,
+    isTentative: isTentative,
+    namesInSession: namesInSession,
+  };
+
+  if (typeof window !== 'undefined') {
+    if (!window.FS) window.FS = {};
+    window.FS.speakerNaming = mod;
+  }
+  if (typeof module !== 'undefined' && module.exports) module.exports = mod;
+})();

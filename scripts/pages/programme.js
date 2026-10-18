@@ -412,12 +412,58 @@
       var useWindow = viewMode === 'window' && !window.FS.api.useMocks
                       && !!window.FS.api.orgBaseUrl;
       var win = pw.resolveWindow(preset, window.FS.api.todayNZDT());
+      /* A window that comes back with no rows is TWO different facts, and
+         telling them apart needs a second question.
+
+           (a) this site has no programme at all      → the empty state, which
+                                                         offers import/create
+           (b) it has one, but not in these ten weeks → say so, and let them
+                                                         widen the range
+
+         `windowRowsToDoc([])` cannot distinguish them: it always returns an
+         object, with `start_date`/`end_date` null because no row carried a
+         date. That truthy object walked straight past the `if (!doc)` contract
+         below — the one that means "no programme uploaded" — so the page went
+         to status 'ok' holding a null range, and handed it to the Gantt. That
+         crash is what took the whole app down on prod (no error boundary
+         above it, so React unmounted everything: white screen, no nav).
+
+         Guarding the null range alone would have stopped the crash and left
+         the lie: a site with an 849-task programme would be shown "no
+         programme yet" and offered a fresh import. So the zero-row case asks
+         `getProgramme` whether a programme exists — one extra request, only
+         ever on the empty path. */
       var load = useWindow
         ? api.getTasksInWindow(orgSiteId, { from: win.from, to: win.to })
             .then(function (r) {
               if (r && (r._accessDenied || r._notFound)) return r;
+              var rows = (r && r.tasks) || [];
+              if (rows.length === 0) {
+                return Promise.resolve(api.getProgramme(orgSiteId)).then(function (full) {
+                  if (full && (full._accessDenied || full._notFound)) return full;
+                  var fullDoc = full && full.programme;
+                  /* (a) — no programme at all. The existing contract. */
+                  if (!fullDoc) return { programme: null };
+                  /* (b) — a programme exists, this window is just empty. Its
+                     dates come from the real document, so the header states
+                     the programme's actual span rather than inventing one. */
+                  return { programme: Object.assign({}, fullDoc, {
+                    parents: [], leaves: [],
+                    name: fullDoc.name || 'Programme',
+                    windowed: true, emptyWindow: true,
+                    windowFrom: win.from, windowTo: win.to,
+                  }) };
+                }, function () {
+                  /* The probe failing must not turn a loaded page into an
+                     error — fall back to (b) without dates, which the render
+                     path already has to handle. */
+                  return { programme: { parents: [], leaves: [], name: 'Programme',
+                    start_date: null, end_date: null, windowed: true,
+                    emptyWindow: true, windowFrom: win.from, windowTo: win.to } };
+                });
+              }
               return { programme: Object.assign(
-                window.FS.api.programmeWindowDoc.windowRowsToDoc(r && r.tasks),
+                window.FS.api.programmeWindowDoc.windowRowsToDoc(rows),
                 { name: 'Programme', windowed: true }) };
             })
         : api.getProgramme(orgSiteId);
@@ -452,6 +498,13 @@
         var critIds = sched ? sched.computeCriticalPath(leaves, doc.start_date) : [];
         setState({
           status:   'ok',
+          /* The window held no tasks, but a programme exists. Carried through
+             so the render can say which of the two it is; the Gantt is not
+             drawn in this state, because there is nothing to draw and its
+             range would have to be invented. */
+          emptyWindow: !!doc.emptyWindow,
+          windowFrom:  doc.windowFrom || null,
+          windowTo:    doc.windowTo || null,
           programme: {
             site_id:      orgSiteId,
             programme_id: orgSiteId,   /* 1:1 per site now — also keys baseline localStorage below */
@@ -1425,6 +1478,14 @@
 
     var isEmpty    = s.status === 'empty';
     var p           = isEmpty ? null : s.programme;
+    /* The Gantt cannot be drawn without a real range, and a range it cannot
+       draw is one it used to crash on. Anything that reaches here without two
+       ordered ISO dates is routed to the same "nothing to show" branch as an
+       empty window, rather than being handed to GanttView to find out. */
+    var hasRange   = !!p && typeof p.start_date === 'string' && typeof p.end_date === 'string'
+                     && /^\d{4}-\d{2}-\d{2}$/.test(p.start_date)
+                     && /^\d{4}-\d{2}-\d{2}$/.test(p.end_date)
+                     && p.start_date <= p.end_date;
     var selectedId  = (!isEmpty && props.selectedItem && props.selectedItem.kind === 'programme_task')
       ? props.selectedItem.task_id
       : null;
@@ -1462,7 +1523,8 @@
         ),
         !isEmpty
           ? React.createElement('div', { className: 'fs-programme__subtitle' },
-              fmtDate(p.start_date) + ' → ' + fmtDate(p.end_date)
+              (hasRange ? (fmtDate(p.start_date) + ' → ' + fmtDate(p.end_date))
+                        : 'Date range unavailable')
                 + ' · ' + s.leaves.length + ' tasks'
                 + ' · ' + (s.critical && s.critical.size) + ' on critical path'
                 + (ctx.dirty ? ' · unsaved changes' : ''))
@@ -1610,6 +1672,22 @@
                 )
               : React.createElement('div', { className: 'fs-programme__empty-card-readonly' },
                   'No programme uploaded yet'),
+          )
+        /* A programme exists; this window just has nothing in it. Distinct
+           from the empty state above, which offers to import — offering that
+           over a real programme is how someone replaces one by accident. The
+           toolbar above stays mounted, so the range picker they need is
+           already on screen. */
+        : (s.emptyWindow || !hasRange)
+        ? React.createElement('div', { className: 'fs-programme__empty-card' },
+            React.createElement('div', { className: 'fs-programme__empty-card-title' },
+              'No tasks in this date range'),
+            React.createElement('div', { className: 'fs-programme__empty-card-body' },
+              (s.windowFrom && s.windowTo)
+                ? ('This programme has no tasks between ' + fmtDate(s.windowFrom)
+                   + ' and ' + fmtDate(s.windowTo)
+                   + '. Widen the range above, or switch to Overview to see all of it.')
+                : 'Widen the range above, or switch to Overview to see the whole programme.'),
           )
         : (ctx.view === 'gantt'
             ? React.createElement(GanttView, {

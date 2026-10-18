@@ -34,6 +34,22 @@
                    the window start doesn't always land exactly on a
                    segment boundary.
 
+   Speaker naming (spec docs/specs/2026-08-14-speaker-naming-ui.md)
+     A named passage carries `speaker_name` + `speaker_state`, laid over the
+     response at read time (names are NOT baked into the transcript), and the
+     payload carries `unmatchedNames`. The rules live in
+     scripts/api/speaker-naming.js so this render and its tests read the same
+     ones. Two decisions the spec makes explicitly, both load-bearing here:
+
+       • `speaker_name` WINS over participantHint. The hint is a positional
+         guess; the name is something a person asserted. If the guess won, a
+         real correction would be invisible.
+       • The chip is already the click-to-jump gesture and naming must not
+         steal it, so naming lives behind a separate caret button.
+
+     The colour stays keyed on `s.speaker` (the diarisation label) — naming
+     someone must not reshuffle every colour in the view.
+
    Exported to:
      window.FieldSight.TranscriptList
    ========================================================================== */
@@ -83,6 +99,64 @@
     return lastAtOrBefore !== null ? lastAtOrBefore : 0;
   }
 
+  /* The naming form. Mounted only while its row's panel is open, so the input
+     is uncontrolled with a defaultValue — it remounts fresh each time. */
+  function NamePanel(props) {
+    var inputRef = React.useRef(null);
+    var listId = 'fs-spk-names';
+
+    React.useEffect(function () {
+      if (inputRef.current && inputRef.current.focus) inputRef.current.focus();
+    }, []);
+
+    function save() {
+      props.onSave(inputRef.current ? inputRef.current.value : '');
+    }
+
+    return React.createElement('div', { className: 'fs-transcript-list__name-panel' },
+      React.createElement('input', {
+        ref: inputRef,
+        type: 'text',
+        className: 'fs-transcript-list__name-input',
+        defaultValue: props.segment.speaker_name || '',
+        placeholder: 'Who is speaking?',
+        list: props.names && props.names.length ? listId : undefined,
+        'aria-label': 'Name for this passage',
+        onKeyDown: function (e) {
+          if (e.key === 'Enter') { e.preventDefault(); save(); }
+          if (e.key === 'Escape') { e.preventDefault(); props.onCancel(); }
+        },
+      }),
+      (props.names && props.names.length)
+        ? React.createElement('datalist', { id: listId },
+            props.names.map(function (n) {
+              return React.createElement('option', { key: n, value: n });
+            }))
+        : null,
+      React.createElement('button', {
+        type: 'button',
+        className: 'fs-transcript-list__name-save',
+        onClick: save,
+      }, 'Save'),
+      props.onRemove
+        ? React.createElement('button', {
+            type: 'button',
+            className: 'fs-transcript-list__name-remove',
+            onClick: props.onRemove,
+          }, 'Remove this name')
+        : null,
+      React.createElement('button', {
+        type: 'button',
+        className: 'fs-transcript-list__name-cancel',
+        onClick: props.onCancel,
+      }, 'Cancel'),
+      /* Naming propagates within THIS meeting only. Future meetings are
+         backend Phase 5 and are not built — do not imply it in copy. */
+      React.createElement('span', { className: 'fs-transcript-list__name-hint' },
+        'Applies to this meeting.'),
+    );
+  }
+
   function TranscriptList(props) {
     var refState = React.useState({ status: 'loading', segments: [] });
     var state    = refState[0];
@@ -93,9 +167,39 @@
     var start = props.start;
     var end   = props.end;
 
+    /* Bumped after a naming write to re-fetch: the POST returns 202 (queued),
+       clustering runs outside the VPC and there is no push. */
+    var refReload = React.useState(0);
+    var reloadTick    = refReload[0];
+    var setReloadTick = refReload[1];
+
+    /* index of the row whose naming panel is open, or null. */
+    var refOpen = React.useState(null);
+    var openIndex    = refOpen[0];
+    var setOpenIndex = refOpen[1];
+
+    /* { [rowIndex]: name } — shown until the re-fetch replaces it with the
+       server's answer, which may name MORE turns than the one clicked. */
+    var refOptimistic = React.useState({});
+    var optimistic    = refOptimistic[0];
+    var setOptimistic = refOptimistic[1];
+
+    var refNotice = React.useState(null);
+    var notice    = refNotice[0];
+    var setNotice = refNotice[1];
+
+    var windowRef = React.useRef('');
+
     React.useEffect(function () {
       var cancelled = false;
-      setState({ status: 'loading', segments: [] });
+      /* A naming re-fetch must NOT blank the list back to "Loading…" — that
+         would throw away the optimistic label the user just set and flash the
+         whole transcript. Only a genuine window change resets. */
+      var windowKey = [date, user, start, end].join('|');
+      if (windowRef.current !== windowKey) {
+        windowRef.current = windowKey;
+        setState({ status: 'loading', segments: [] });
+      }
       window.FS.api.transcripts.getTranscripts({
         date: date, user: user, start: start, end: end,
       }).then(function (res) {
@@ -122,18 +226,27 @@
           segments: res.speaker_segments || [],
           speakers: res.speakers || [],
           message:  res.message,
+          /* Feature detection is the PRESENCE of this key (see
+             speaker-naming.featureAvailable), so the narrowing that builds
+             this state object has to carry it — narrowing it away is how the
+             naming control would silently never appear. */
+          namingAvailable: window.FS.speakerNaming
+            ? window.FS.speakerNaming.featureAvailable(res) : false,
+          unmatchedNames: res.unmatchedNames,
           counts: {
             files:    res.count,
             segments: res.total_speaker_segments,
             speakers: res.speaker_count,
           },
         });
+        /* The server's answer has arrived and supersedes the guess. */
+        setOptimistic({});
       }).catch(function (err) {
         if (cancelled) return;
         setState({ status: 'error', error: err, segments: [] });
       });
       return function () { cancelled = true; };
-    }, [date, user, start, end]);
+    }, [date, user, start, end, reloadTick]);
 
     /* A2-2 — precision spotlight, same shape as SafetyFlagRow /
        TopicCard (rootRef + flashing state + useEffect keyed on the
@@ -157,6 +270,79 @@
       var t = setTimeout(function () { setFlashIndex(null); }, 1900);
       return function () { clearTimeout(t); };
     }, [props.highlightTime, state.segments]);
+
+    var sn = window.FS.speakerNaming;
+
+    /* 202 = queued. Clustering typically takes a few seconds and there is no
+       push, so re-fetch once on a timer. The optimistic label holds the gap. */
+    var REFETCH_DELAY_MS = 2000;
+
+    function scheduleRefetch() {
+      setTimeout(function () { setReloadTick(function (n) { return n + 1; }); },
+        REFETCH_DELAY_MS);
+    }
+
+    function submitName(seg, index, name) {
+      var ref = sn.sessionRefForSegment(seg);
+      if (!ref) return;
+      var trimmed = String(name || '').trim();
+      if (!trimmed) return;
+      setOpenIndex(null);
+      setOptimistic(function (prev) {
+        var next = Object.assign({}, prev); next[index] = trimmed; return next;
+      });
+      setNotice(null);
+      window.FS.api.org.setSpeakerName(ref, sn.correctionBody(seg, {
+        user: user, displayName: trimmed,
+      })).then(function (res) {
+        if (res && res._notAvailable) {
+          setNotice('Naming is not available in this environment.');
+          setOptimistic({});
+          return;
+        }
+        if (res && (res._accessDenied || res._notFound)) {
+          /* 404 here means SPEAKER_IDENTITY_MODE=off — "not enabled here",
+             not a bug. 403 means the role may not name. Neither is an error
+             worth alarming about, but silence would read as "it worked". */
+          setNotice(res._notFound
+            ? 'Speaker naming is not enabled for this environment.'
+            : (res.error || 'You do not have permission to name speakers.'));
+          setOptimistic({});
+          return;
+        }
+        scheduleRefetch();
+      }).catch(function () {
+        setNotice('Could not save that name.');
+        setOptimistic({});
+      });
+    }
+
+    function removeName(seg, name) {
+      var ref = sn.sessionRefForSegment(seg);
+      if (!ref || !name) return;
+      /* Say what it does. The scope is one meeting, and a person asking for
+         their name off one transcript has not asked for anything else. */
+      var msg = 'Remove "' + name + '" from this meeting. '
+        + 'Other meetings are not affected.';
+      if (typeof window.confirm === 'function' && !window.confirm(msg)) return;
+      setOpenIndex(null);
+      setNotice(null);
+      window.FS.api.org.removeSpeakerName(ref, name).then(function (res) {
+        if (res && res._notAvailable) {
+          setNotice('Naming is not available in this environment.');
+          return;
+        }
+        if (res && (res._accessDenied || res._notFound)) {
+          setNotice(res._notFound
+            ? 'Speaker naming is not enabled for this environment.'
+            : (res.error || 'You do not have permission to remove this name.'));
+          return;
+        }
+        scheduleRefetch();
+      }).catch(function () {
+        setNotice('Could not remove that name.');
+      });
+    }
 
     if (state.status === 'loading') {
       return React.createElement('div', { className: 'fs-transcript-list__loading' },
@@ -199,6 +385,15 @@
       if (participants[i]) participantHint[label] = participants[i];
     });
 
+    /* The naming affordance appears only when the backend says the feature is
+       on for this environment (the `unmatchedNames` key) AND the caller holds
+       a role the write routes accept — otherwise we would be offering a
+       gesture that 403s. */
+    var caller = (window.AuthMock && window.AuthMock.currentUser) || {};
+    var namingOn = !!(sn && state.namingAvailable && sn.roleMayName(caller.role)
+                      && window.FS.api.org && window.FS.api.org.setSpeakerName);
+    var knownNames = sn ? sn.namesInSession(state.segments) : [];
+
     return React.createElement('div', { className: 'fs-transcript-list' },
 
       React.createElement('div', { className: 'fs-transcript-list__caption' },
@@ -206,9 +401,30 @@
           + state.counts.speakers + ' speakers · '
           + state.counts.files + ' source files'),
 
+      /* Somebody set a name and it is no longer shown. Staying silent here
+         reads as "nobody ever named this", which is a different and wrong
+         statement. */
+      (namingOn && state.unmatchedNames > 0)
+        ? React.createElement('div', { className: 'fs-transcript-list__unmatched' },
+            state.unmatchedNames + (state.unmatchedNames === 1
+              ? ' name no longer matches any passage.'
+              : ' names no longer match any passage.'))
+        : null,
+
+      notice
+        ? React.createElement('div', { className: 'fs-transcript-list__notice' }, notice)
+        : null,
+
       state.segments.map(function (s, i) {
         var palette = SPEAKER_PALETTE[labelToIdx[s.speaker] % SPEAKER_PALETTE.length];
         var nameHint = participantHint[s.speaker];
+        var pending  = optimistic[i];
+        var label    = pending || sn.displayLabel(s, nameHint);
+        /* Tentative is the system's guess, not the user's assertion, and must
+           never render in a form a reader would quote. So is the optimistic
+           label, which is our own guess until the re-fetch lands. */
+        var unresolved = !!pending || sn.isTentative(s);
+        var offerNaming = namingOn && sn.canName(s);
 
         return React.createElement('div', {
           key: i,
@@ -216,20 +432,59 @@
           className: 'fs-transcript-list__row'
             + (flashIndex === i ? ' fs-transcript-list__row--flash' : ''),
         },
-          React.createElement('button', {
-            type:    'button',
-            className: 'fs-transcript-list__chip',
-            style:   { color: palette.fg, background: palette.bg },
-            onClick: function () { if (props.onJump) props.onJump(s); },
-            title:   'Jump to ' + s.time_label,
-          },
-            React.createElement('span', {
-              className: 'fs-transcript-list__chip-label',
-            }, nameHint || s.speaker),
-            React.createElement('span', {
-              className: 'fs-transcript-list__chip-time',
-            }, s.time_label),
+          React.createElement('div', { className: 'fs-transcript-list__speaker' },
+            React.createElement('button', {
+              type:    'button',
+              className: 'fs-transcript-list__chip',
+              style:   { color: palette.fg, background: palette.bg },
+              onClick: function () { if (props.onJump) props.onJump(s); },
+              title:   'Jump to ' + s.time_label,
+            },
+              React.createElement('span', {
+                className: 'fs-transcript-list__chip-label'
+                  + (unresolved ? ' fs-transcript-list__chip-label--tentative' : ''),
+                title: unresolved
+                  ? 'Unconfirmed — the system\'s guess at who this is'
+                  : undefined,
+              }, label, unresolved
+                ? React.createElement('span', {
+                    className: 'fs-transcript-list__tentative-mark',
+                    'aria-label': 'unconfirmed',
+                  }, '?')
+                : null),
+              React.createElement('span', {
+                className: 'fs-transcript-list__chip-time',
+              }, s.time_label),
+            ),
+
+            /* Separate from the chip on purpose: the chip is already the
+               click-to-jump gesture and naming must not steal it. */
+            offerNaming
+              ? React.createElement('button', {
+                  type: 'button',
+                  className: 'fs-transcript-list__name-toggle',
+                  'aria-expanded': openIndex === i,
+                  'aria-label': s.speaker_name
+                    ? 'Change who is speaking' : 'Say who is speaking',
+                  title: s.speaker_name
+                    ? 'Change who is speaking' : 'Say who is speaking',
+                  onClick: function () {
+                    setOpenIndex(openIndex === i ? null : i);
+                  },
+                }, '▾')
+              : null,
           ),
+
+          openIndex === i
+            ? React.createElement(NamePanel, {
+                segment: s,
+                names:   knownNames,
+                onSave:  function (name) { submitName(s, i, name); },
+                onRemove: s.speaker_name
+                  ? function () { removeName(s, s.speaker_name); } : null,
+                onCancel: function () { setOpenIndex(null); },
+              })
+            : null,
 
           React.createElement('div', { className: 'fs-transcript-list__text' },
             s.text),

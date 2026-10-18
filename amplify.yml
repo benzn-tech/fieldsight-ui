@@ -7,6 +7,27 @@ frontend:
         - cp -R scripts styles assets dist/
         - cp *.html dist/
         - cp app-shell-preview.html dist/index.html
+        # Stamp every asset URL with this build's commit, in the ARTIFACT only.
+        #
+        # The 168 `?v=N` numbers in the HTML are maintained by hand, so shipping
+        # a changed file without bumping its number leaves every browser serving
+        # the cached old one — indefinitely. A hard reload does not reliably
+        # rescue it either: these are `type="text/babel"` scripts that Babel
+        # fetches by XHR, and the reload's cache bypass does not always reach an
+        # XHR. That is why the only reliable fix has been closing the browser,
+        # which is not something to ask of a site manager on a phone.
+        #
+        # Rewriting at build time means a deploy cannot serve a stale asset,
+        # whatever anyone remembered to bump — and it removes the collisions
+        # that happen when two branches touch the same number.
+        #
+        # The SOURCE keeps its hand-maintained numbers: they are what makes
+        # file:// and `python3 -m http.server` pick up local edits, and this
+        # never writes back to them.
+        - >-
+          STAMP="${AWS_COMMIT_ID:-$(date +%s)}";
+          sed -i "s/?v=[0-9A-Za-z._-]\+/?v=${STAMP}/g" dist/*.html;
+          echo "cache-stamped dist/*.html with ?v=${STAMP}"
         - >-
           printf 'window.FS_ENV = { baseUrl: "%s", useMocks: %s, writeMocks: %s, orgBaseUrl: "%s", orgWrites: %s, timelineSource: "%s" };\n'
           "${FS_BASEURL:-/api}" "${FS_USEMOCKS:-true}" "${FS_WRITEMOCKS:-true}" "${FS_ORG_BASEURL:-}" "${FS_ORGWRITES:-false}" "${FS_TIMELINE_SOURCE:-report}"

@@ -493,6 +493,34 @@
     Sarah_Chen: REPORT_2026_04_23_SARAH,
   };
 
+  /* Every topic gets the session it was recorded in.
+     --------------------------------------------------------------------
+     The timeline's session filter matches on `topic.session_id`, and the
+     session picker's rows come from GET /sessions. With no session_id on
+     the fixture topics, picking any meeting filtered the day down to
+     ZERO topics — the picker rendered, the deep link from Today's "Open"
+     resolved, and the list went blank. That reads as a broken feature
+     when what is actually missing is the fixture's half of the join.
+
+     Stamped here rather than written into each topic by hand so the two
+     sides cannot drift: org.js's mock /sessions groups BY this field, the
+     way the backend groups topic rows by the session parsed out of
+     source_s3_key. The shape mirrors a real session_base
+     ('Benl1_2026-04-29_07-00-00') because the picker and the ?session=
+     deep link both carry it around as an opaque id. */
+  Object.keys(window.FieldSight.fixtures.reports).forEach(function (date) {
+    var byUser = window.FieldSight.fixtures.reports[date];
+    Object.keys(byUser).forEach(function (folder) {
+      var rep = byUser[folder];
+      (rep.topics || []).forEach(function (t) {
+        if (t.session_id) return;                       // never overwrite an explicit one
+        var start = String(t.time_range || '').split(EN)[0].trim() || '00:00';
+        t.session_id = (rep.device || 'Benl1') + '_' + (rep.report_date || date)
+          + '_' + start.replace(/:/g, '-') + '-00';
+      });
+    });
+  });
+
   /* Reports archive fixture — feeds /api/reports/history (Phase F).
      Mix of daily / weekly / monthly across the last few weeks so the
      list page has enough rows for a useful preview. */

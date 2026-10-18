@@ -700,8 +700,46 @@
     return { status: 'unavailable' };
   }
 
+  // -------- speaker naming (spec 2026-08-14-speaker-naming-ui) --------
+  /* Name the passage a segment belongs to. The backend clusters the meeting
+     by voiceprint and names the OTHER turns in the same cluster too, so one
+     call can rename several turns — or exactly one, which is a normal outcome
+     (short turn, voice spoke once, margin under 0.15), not a failure.
+
+     202 means QUEUED. Clustering runs outside the VPC, typically a few
+     seconds; there is no push, so the caller re-fetches the transcript.
+
+     `sessionRef` must carry BOTH a date and a `sid<32 hex>` — see
+     api/speaker-naming.js. We send segment.source_filename, which has both. */
+  async function setSpeakerName(sessionRef, body) {
+    if (orgWrite()) {
+      return api.orgRequest(
+        '/sessions/' + encodeURIComponent(sessionRef) + '/speaker-corrections',
+        { method: 'POST', body: body });
+    }
+    await api.delay();
+    /* A WRITE stub is right to refuse offline: the alternative is faking a
+       propagation result that will never exist (CLAUDE.md, fixtures-lie). */
+    return { _notAvailable: true };
+  }
+
+  /* Take a name off THIS meeting only. Does not touch the stored voiceprint —
+     someone who wants their name off one transcript has not asked for their
+     profile to be destroyed. */
+  async function removeSpeakerName(sessionRef, name) {
+    if (orgWrite()) {
+      return api.orgRequest(
+        '/sessions/' + encodeURIComponent(sessionRef) + '/speaker-names',
+        { method: 'DELETE', params: { name: name } });
+    }
+    await api.delay();
+    return { _notAvailable: true };
+  }
+
   window.FS.api.org = {
     getMe: getMe,
+    setSpeakerName: setSpeakerName,
+    removeSpeakerName: removeSpeakerName,
     updateProfile: updateProfile,
     getOrgSites: getOrgSites, createOrgSite: createOrgSite, updateOrgSite: updateOrgSite, geocodeAddress: geocodeAddress,
     archiveSite: archiveSite, unarchiveSite: unarchiveSite,

@@ -83,8 +83,12 @@ higher ones:
   Most files use `React.createElement` directly to avoid Babel parse cost.
 - **Reduced motion**: respected globally via `@media (prefers-reduced-motion:
   reduce)` in `tokens.css` (~line 627). Any new animation must check too.
-- **Cache busters**: bump `?v=N` query strings in preview HTMLs when shipping
-  changes, so `file://` and dev servers pick up the new version.
+- **Cache busters**: the `?v=N` numbers exist for `file://` and dev servers —
+  bump one when you change the file it loads, so a local preview picks the
+  change up. They are NOT what protects deployed users: `amplify.yml` rewrites
+  every `?v=` in `dist/*.html` to the build's commit id, so a deploy can never
+  serve a stale asset regardless of what anyone remembered to bump. Forgetting
+  a bump now costs a local reload, not a customer stuck on old code.
 - **No build step**: don't introduce npm/webpack/vite. The whole point of the
   prototype is to stay editable in any text editor.
 
@@ -271,7 +275,12 @@ Both of these pass every unit test and fail only in the browser. A green
 - **Token sync**: `tokens.css` and `fs-globals.js` are mirrored
   manually. Edit one → edit the other.
 - **Cache busters**: bump `?v=N` in preview HTMLs whenever a loaded
-  `.js` / `.css` changes.
+  `.js` / `.css` changes — this is for LOCAL previews only. Deploys are
+  stamped with the commit id by `amplify.yml`; the hand-maintained numbers
+  never reach a customer's browser. Before that stamping existed, a missed
+  bump left users on cached code that survived even a hard reload (Babel
+  fetches `type="text/babel"` scripts by XHR, which the reload's cache
+  bypass does not reliably reach) — the only cure was closing the browser.
 
 ### Mobile-only floating UI clusters
 
@@ -380,6 +389,29 @@ caught that session; none was caught by reading a diff.
 - **A module that cannot be `require`d has no coverage at all.** Guard the
   `window` attach and add `module.exports`, or the parser behind every import
   is untested and nobody notices.
+- **An empty mock is not a neutral default — it is a claim that the feature
+  is finished and the data is absent.** `org.getSessions` and
+  `getSessionReportPreview` both returned `{sessions: []}` / `{topics: []}`.
+  Between them that silently removed the meeting picker, Today's meeting
+  groups, the `?session=` deep link and the whole Generate-report entry
+  point: four surfaces that looked complete-and-empty rather than
+  unverifiable, so none of them could be checked locally and two of them
+  shipped bugs. The rule that came out of it: a **read** stub has nothing to
+  refuse and should serve the day's own fixture. Only a **write** stub is
+  right to refuse offline, because there the alternative is faking a result
+  that will never exist.
+- **A join needs both halves in the fixture.** The timeline filters topics on
+  `topic.session_id`; no fixture topic carried one, so picking any meeting
+  filtered the day to zero and the feature read as broken when only the
+  fixture was. Derive the id in ONE place and let both sides read it, the way
+  the backend derives sessions from the topics' own `source_s3_key`.
+- **Known remaining gap (2026-08-05):** on prod a session usually holds
+  SEVERAL topics — one real recording covered three. The fixture stamps a
+  distinct session per topic, so multi-topic grouping (`topic_count`, block
+  merging, a session report spanning topics) is never exercised locally.
+  Fixing it means adding a topic that shares a session with an existing one;
+  it was left alone the night before a manual test because it moves the
+  per-day topic counts other suites assert on.
 
 ### Design rules these produced
 
@@ -403,7 +435,10 @@ caught that session; none was caught by reading a diff.
   that format when proposing new specs.
 - **Ask before making architectural changes** (build tooling, framework,
   major restructure). The "no build step" constraint is intentional.
-- **Don't auto-bump cache busters** unless changes touch the loaded file.
+- **Don't auto-bump cache busters in SOURCE** unless changes touch the loaded
+  file — churning 168 numbers makes every diff unreadable and collides across
+  branches. The deployed artifact is stamped automatically by `amplify.yml`;
+  that is a build step, not a source edit, and needs no bookkeeping.
 - When delivering, run `node --check` on every modified JS, `grep` the spec
   pre-checks, and confirm script load order in `app-shell-preview.html`.
 - Real browser verification isn't always possible from this environment;
