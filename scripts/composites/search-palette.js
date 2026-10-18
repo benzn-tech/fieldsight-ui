@@ -351,7 +351,7 @@
        onClose — the palette stays open showing the answer.
        Guard: if AskChat isn't loaded (script missing/load-order issue),
        fall back to the original Task C behaviour — stash the query for
-       Timeline's report-level AskChat to prefill-and-clear, then route to
+       Timeline's docked AskChat to prefill-and-clear, then route to
        the latest report date for the resolved user folder. getSpan() is
        already warm by the time this fires (kicked off by _loadCache on
        palette open), so the async hop is imperceptible in practice; still
@@ -359,8 +359,10 @@
        Unscoped by design (spec 2026-09-15-one-ask-scoped §4): no context, so
        the chips are empty and the placeholder reads "Ask across all your
        projects…". The fallback below hands the question to Timeline, which
-       sees the prefill and keeps that first Ask global (askFromPaletteRef in
-       pages/timeline.js) — a question typed in the global palette stays
+       sees the prefill and keeps that first Ask global (the read-and-clear
+       lives in TimelineAskDock, pages/timeline.js — it must be the dock,
+       because as a Footer sibling the dock's first render is what AskChat's
+       auto-send hangs off) — a question typed in the global palette stays
        global. */
     function doAsk(q) {
       if (!q) return;

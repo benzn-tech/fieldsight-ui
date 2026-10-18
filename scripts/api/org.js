@@ -506,6 +506,139 @@
     });
   }
 
+  /* -------- the session brief (GET /sessions/{id}/brief) --------
+     lambda_session_finalize has been writing a brief per session since the
+     brief shipped, and until now no client had ever read one: the whole
+     narrative — sections with timestamps and verbatim quotes, the entities
+     with the spellings the transcriber produced, the tasks themselves — went
+     to S3 and stopped there.
+
+     THREE STATES, NONE OF THEM AN ERROR. The endpoint answers `pending` for a
+     brief that has not been written yet (and for one that never will be —
+     they are the same thing to a caller), `removed` for a session whose
+     recordings were deleted, and `ready` with the artifact spread whole
+     underneath. A caller must read `status`: anything other than 'ready' is
+     "no brief", not a failure.
+
+     `status` IS TWO TYPES ON ONE KEY. The brief's own is a STRING
+     ('ready' | 'pending' | 'removed'); the _accessDenied/_notFound envelopes
+     below carry a NUMERIC one (401/403/404) under the same name. So
+     `switch (brief.status)` is unsafe — 404 never equals '404', and a
+     `default:` branch silently swallows every denial. Test the envelope
+     flags first, then the string.
+
+     And "nothing throws" is true only of these three states: a 5xx still
+     rejects, because _fetch.js retries three times and then throws the last
+     error. A caller that must not break on a bad gateway needs a catch.
+
+     _accessDenied/_notFound pass straight through unswallowed, the posture
+     getSessions and getSiteMembers already take — the caller decides how to
+     degrade. Those two envelopes are ALSO "no brief", never an error banner.
+
+     Returned whole, not projected: the server deliberately spreads defaults
+     UNDER the stored object so a field the writer gains tomorrow reaches a
+     reader with no edit, and re-filtering it here would reintroduce exactly
+     the whitelist that made this endpoint necessary. */
+
+  /* The mock brief, derived from the day's own report fixture — the same
+     source _mockSessions reads, so the picker cannot offer a session whose
+     brief then comes back empty. Returns null when the day's fixture has no
+     such session, which the caller reports as `pending` (truthfully: nothing
+     has been written for it).
+
+     Deliberately carries NO key the live endpoint does not return (no date,
+     no sessionId): a caller that grew to read one would break the moment it
+     went live. */
+  function _mockBrief(date, user, sessionId) {
+    var hit = _mockSessions(date, user).filter(function (p) {
+      return p.session.session_id === sessionId;
+    })[0];
+    if (!hit) return null;
+    var topics = hit.topics, session = hit.session;
+    function at(t) { return (String(t.time_range || '').split(/\s*[–—-]\s*/)[0] || '').trim(); }
+
+    var sections = topics.map(function (t) {
+      var bullets = [{ text: t.summary || '', at: at(t), quote: null }];
+      (t.key_decisions || []).forEach(function (d) {
+        bullets.push({ text: d, at: at(t), quote: null });
+      });
+      return { title: t.topic_title || 'Untitled', bullets: bullets };
+    });
+
+    /* `quote` is null above, not invented. On the real thing it is a line
+       copied verbatim out of the transcript, and the fixture has no
+       transcript — a plausible-looking quote attributed to nobody is the one
+       thing a brief must never contain. */
+
+    var entities = [];
+    (session.participants || []).forEach(function (n) {
+      entities.push({ name: n, aliases: [], kind: 'person',
+                      note: 'Took part in ' + (session.title || 'this meeting') + '.' });
+    });
+    if (session.site_name) {
+      entities.push({ name: session.site_name, aliases: [], kind: 'place',
+                      note: 'Where this meeting was recorded.' });
+    }
+
+    var tasks = [];
+    topics.forEach(function (t) {
+      (t.action_items || []).forEach(function (a) {
+        /* Exactly the four keys build_brief_prompt asks the model for
+           (session_brief.py). `why` and `basis` are not among them: the
+           per-item context line was dropped on purpose, and the task's OWN
+           sentence carries that context now. Reinstating either here would
+           invent a field no live brief returns. */
+        tasks.push({
+          text: a.action, at: at(t),
+          assignee: a.responsible || null, due: a.deadline || null,
+        });
+      });
+    });
+
+    var headline = (topics[0] && topics[0].summary) || session.title || '';
+    return {
+      headline: headline, summary: headline,
+      sections: sections, entities: entities, tasks: tasks,
+      /* NOT the task objects. `to_session_summary` in session_brief.py
+         rebuilds each one as {text, responsible, due, at} — `responsible`,
+         not `assignee`, because it passes the name through `_real_name`
+         first. And it filters on TEXT, not on who it was given to: an
+         unassigned to-do is still outstanding work, and dropping it here
+         made the mock's list shorter than the live one for the same brief. */
+      open_todos: tasks.filter(function (t) { return !!(t.text || '').trim(); })
+        .map(function (t) {
+          return { text: t.text, responsible: t.assignee, due: t.due, at: t.at };
+        }),
+      /* Empty because the fixture states nothing hedged, not because open
+         points are unimplemented — they are lifted from a speaker flagging
+         their own uncertainty, and no fixture line does. */
+      open_points: [],
+      /* A dict, because every brief finalize writes carries one: session_brief
+         assigns `stats` unconditionally and then adds the open-point counts.
+         `null` is only what _BRIEF_DEFAULTS serves for a brief written before
+         the field existed, so a caller reading brief.stats.X off the mock
+         would throw here and work live — backwards. These zeros are honest
+         counts of work this mock did none of, not a measurement. */
+      stats: { reanchored: 0, unmatched: 0, aliases_rejected: 0,
+               open_points_admitted: 0, open_points_rejected: {},
+               open_points_resolved: 0 },
+      status: 'ready',
+    };
+  }
+
+  async function getSessionBrief(opts) {
+    opts = opts || {};
+    if (!api.useMocks && api.timelineSource === 'aurora' && api.orgBaseUrl) {
+      return api.orgRequest('/sessions/' + encodeURIComponent(opts.sessionId) + '/brief',
+        { params: { date: opts.date, user: opts.user } });
+    }
+    await api.delay();
+    /* A READ stub with nothing to refuse: it serves the day's own fixture
+       rather than an empty object, because an empty read stub is a claim
+       that the feature is finished and the data is absent. */
+    return _mockBrief(opts.date, opts.user, opts.sessionId) || { status: 'pending' };
+  }
+
   // -------- recurring-item threading: the review queue --------
   /* The matcher proposes which earlier SUBJECT a topic restates; confirming
      is what actually links them, and it is a person's call. A wrong link
@@ -871,6 +1004,7 @@
     getLiveItems: getLiveItems,
     getSessions: getSessions,
     getSessionsCached: getSessionsCached,
+    getSessionBrief: getSessionBrief,
     getSessionReportPreview: getSessionReportPreview,
     generateSessionReport: generateSessionReport,
     getSessionReportStatus: getSessionReportStatus,

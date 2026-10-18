@@ -23,8 +23,13 @@
                       topicRowId?, topicTitle?} — omitted = unscoped
      onContextChange function(nextContext) — chip removal / "Ask across
                      everything"; without it chips have no remove button
-     focusNonce      number — a change scrolls the Ask into view and focuses
-                     its input (Timeline's "Ask about this topic")
+     variant         'dock' — the docked bar (docs/specs/2026-09-16-ask-dock.md
+                     §5): chips + input row only; suggestions show only while
+                     the input is focused or empty-log-and-non-dock; the
+                     message log renders in an absolutely-positioned overlay
+                     anchored above the bar, shown only while it has
+                     something in it, so the bar's own height never changes
+                     and nothing below it ever reflows.
      user            folder-name string (optional — server handles default)
      placeholder     overrides placeholderFor(context)
      suggestions     overrides suggestionsFor(context)
@@ -475,7 +480,19 @@
      the body -- it tells the backend "honour date/site/author/topic for
      narrowing", and an unscoped question must not opt into that by accident
      (user decision 2026-09-16). */
-  function requestBodyFor(context, question) {
+  /* `history`: the most recent turns from the log this component already
+     keeps, as [{question, answer}] -- exactly those two key names, the
+     server drops anything else. Omitted entirely when there is nothing to
+     send: absent is not the same as an empty list to the backend, and an
+     always-present `history: []` would be a claim that this is turn one
+     when it might not be.
+
+     No second, smaller cap here. The backend caps at 6 turns / 2000 chars
+     per field (ask conversation memory spec §4); a client-side cap on top
+     of that would just be a second number to keep in sync with the first,
+     and the caller here builds `history` from the visible log, which is
+     already the right size for a reader to have typed. */
+  function requestBodyFor(context, question, history) {
     var c = context || {};
     var body = { question: question };
     if (present(c.date))         body.date          = c.date;
@@ -485,7 +502,28 @@
     if (present(c.date) || present(c.siteId) || present(c.authorFolder) || present(c.topicRowId)) {
       body.scoped = true;
     }
+    if (history && history.length) body.history = history;
     return body;
+  }
+
+  /* Turns the log into [{question, answer}] pairs for `requestBodyFor`.
+     Only a question that got a REAL answer counts as a turn: a failed
+     request renders the one reassuring line (see `send()`'s catch below),
+     and feeding that back to the model as if it had answered would teach
+     it that the agent said "FieldSight is busy" on a prior turn -- noise,
+     not memory. `m.error` is exactly the flag that failure path sets. */
+  function historyFromMessages(msgs) {
+    var out = [];
+    var pendingQuestion = null;
+    (msgs || []).forEach(function (m) {
+      if (m.role === 'user') {
+        pendingQuestion = m.text;
+      } else if (m.role === 'assistant' && !m.error && pendingQuestion != null) {
+        out.push({ question: pendingQuestion, answer: m.text });
+        pendingQuestion = null;
+      }
+    });
+    return out;
   }
 
   var SCOPE_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -627,6 +665,17 @@
     var busy    = refBusy[0];
     var setBusy = refBusy[1];
 
+    /* Dock-only state (docs/specs/2026-09-16-ask-dock.md §5). Declared
+       unconditionally, same as every other hook here, so the hook order
+       never depends on `dock` -- a non-dock mount just never reads them. */
+    var dock = props.variant === 'dock';
+    var refFocus = React.useState(false);
+    var focused    = refFocus[0];
+    var setFocused = refFocus[1];
+    var refCollapsed = React.useState(false);
+    var collapsed    = refCollapsed[0];
+    var setCollapsed = refCollapsed[1];
+
     var listRef = React.useRef(null);
     var rootRef  = React.useRef(null);
     var inputRef = React.useRef(null);
@@ -676,26 +725,108 @@
       }
     }, [msgs.length, busy]);
 
-    /* When scope keys change (the host changed the context: a day/owner
-       change, a pinned or removed topic, "Ask across everything"), drop
-       history since prior context no longer applies. */
+    /* When scope keys change (the host changed the DAY: a date, project or
+       owner change, or "Ask across everything"), drop history since prior
+       context no longer applies. A topic change is handled by the effect
+       below and deliberately does NOT clear (spec 2026-09-16 §5). */
+    /* `renderCommitToken` is a plain local -- NOT a ref -- created fresh on
+       every call of this function, including a call React later throws away
+       (StrictMode / Suspense / concurrent double-invoke). It is not written
+       anywhere; it is only ever compared by identity. Effects defined in
+       this same call close over this exact object, so it stands in for
+       "which commit are we in" without ever touching a ref in the render
+       body. This repo mounts via plain `createRoot` with no StrictMode
+       wrapper today (grep-verified), so a double-invoked render can't
+       happen yet -- but nothing here depends on that being true.
+
+       The day effect below, when it actually runs (i.e. the day genuinely
+       changed -- React only invokes an effect whose deps changed), stamps
+       `dayChangeTokenRef.current = renderCommitToken`. The topic effect
+       then asks "is the token the day effect just stamped IDENTICAL to the
+       token of the commit I am running in right now?" A same-commit
+       day+topic change: yes, same object, same call. A day change followed,
+       in a LATER separate commit, by a topic-only change: no -- the token
+       the day effect stamped belongs to that earlier commit's object, and
+       this commit made its own new one. A plain dayKey string comparison
+       cannot tell these two cases apart (the key just differs from before,
+       either way); identity of a per-commit object can. */
+    var renderCommitToken = {};
+    var dayChangeTokenRef = React.useRef(null);
+    /* Task 6 fix round (spec 2026-09-16 §2.1): the aggregated site view's
+       siteId/siteName can arrive AFTER the day scope first publishes --
+       sitesList starts empty and fills async, so timeline.js republishes the
+       context once the project name resolves (askDayResetKey's "named yet"
+       bit). That republish is not a day change: the date and the author are
+       the same, only a previously-unknown site got a name. Clearing here
+       would drop the reader's conversation on nothing more than a network
+       response landing late, so this one transition is read as enrichment,
+       not a switch, and is the only exception to "date/siteId/authorFolder
+       change clears" -- a siteId changing between two REAL values (or
+       disappearing) still clears exactly as before. */
+    var prevScopeRef = React.useRef(null);
     React.useEffect(function () {
+      var prevScope = prevScopeRef.current;
+      prevScopeRef.current = { date: context.date, siteId: context.siteId, authorFolder: context.authorFolder };
       if (!resetMountedRef.current) { resetMountedRef.current = true; return; }
-      genRef.current += 1;
-      setMsgs([]);
-      /* Always consumed here, sent or not: a question left in the ref would
-         otherwise fire on some later, unrelated context change. It is only
-         sent when the new context is the unscoped one "Ask across
-         everything" asked for -- a host that applied something else did not
-         honour the widen. */
+      var enrichedSiteOnly = !!(prevScope && prevScope.date === context.date
+        && prevScope.authorFolder === context.authorFolder && !prevScope.siteId && context.siteId);
+      /* Consumed here on EVERY republish this effect handles, enrichment
+         included, sent or not: a question left in the ref would otherwise
+         fire on some later, unrelated context change. It is only sent when
+         the new context is the unscoped one "Ask across everything" asked
+         for -- a host that applied something else did not honour the
+         widen. This has to happen before the enrichment return below:
+         enrichment does not clear the conversation, but a pending widen
+         must not be allowed to survive it and fire on a later, unrelated
+         change either -- otherwise the reader's "Ask across everything"
+         can silently do nothing until then. */
       var pending = resendRef.current;
       resendRef.current = null;
       deferredResendRef.current = null;
+      if (enrichedSiteOnly) {
+        if (pending && !hasScope(context)) {
+          if (busy) deferredResendRef.current = pending;
+          else send(pending, { noHistory: true });
+        }
+        return;
+      }
+      dayChangeTokenRef.current = renderCommitToken;
+      genRef.current += 1;
+      setMsgs([]);
       if (pending && !hasScope(context)) {
         if (busy) deferredResendRef.current = pending;
-        else send(pending);
+        else send(pending, { noHistory: true });
       }
-    }, [context.date, context.siteId, context.authorFolder, context.topicRowId]);
+    }, [context.date, context.siteId, context.authorFolder]);
+
+    /* A topic change alone KEEPS the messages and says so in one line. The
+       generation still bumps, so an answer already in flight for the old
+       topic is dropped rather than appended under the new chip.
+       Declared after the day effect ON PURPOSE, and the ordering is now
+       load-bearing (not just a defensive habit): React runs effects from
+       the same commit in declaration order, so the day effect above
+       stamps `dayChangeTokenRef.current` BEFORE this effect reads it, only
+       if the day effect is declared first. Swap the order and, in a commit
+       that changed both day and topic, this effect would run first and
+       read whatever token the day effect stamped in some earlier commit
+       (or null) -- never the current one -- so it would wrongly conclude
+       "the day did not also change" and append a divider that must not
+       appear. */
+    var topicMountedRef = React.useRef(false);
+    React.useEffect(function () {
+      if (!topicMountedRef.current) { topicMountedRef.current = true; return; }
+      genRef.current += 1;
+      if (dayChangeTokenRef.current === renderCommitToken) return;
+      var title = (context.topicTitle || '').trim();
+      setMsgs(function (m) {
+        return m.length ? m.concat([{
+          role: 'divider',
+          text: present(context.topicRowId)
+            ? 'Now asking about: ' + (title || 'this topic')
+            : 'Now asking about the whole day',
+        }]) : m;
+      });
+    }, [context.topicRowId]);
 
     /* A widen that landed while an older request was still in flight: send it
        once that request settles, from a render that has the new context. */
@@ -703,28 +834,10 @@
       if (busy || !deferredResendRef.current) return;
       var pending = deferredResendRef.current;
       deferredResendRef.current = null;
-      send(pending);
+      /* This deferred send only ever fires a widen -- see the comment on
+         `send`'s signature. */
+      send(pending, { noHistory: true });
     }, [busy]);
-
-    /* "Ask about this topic" — bring the one Ask into view and put the cursor
-       in it. Smooth scroll only when the reader has not asked for reduced
-       motion. The nonce lives in the page Provider and never resets, while
-       this component remounts on every day change or refetch: act only on a
-       change seen by THIS mount, never on the value it was mounted with. */
-    var seenFocusNonceRef = React.useRef(props.focusNonce);
-    React.useEffect(function () {
-      if (props.focusNonce === seenFocusNonceRef.current) return;
-      seenFocusNonceRef.current = props.focusNonce;
-      if (!props.focusNonce) return;
-      var root = rootRef.current;
-      var input = inputRef.current;
-      var reduce = !!(window.matchMedia
-        && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-      if (root && root.scrollIntoView) {
-        root.scrollIntoView({ block: 'center', behavior: reduce ? 'auto' : 'smooth' });
-      }
-      if (input && input.focus) input.focus({ preventScroll: true });
-    }, [props.focusNonce]);
 
     /* Attach a corroboration result to the answer it belongs to.
 
@@ -746,12 +859,32 @@
       });
     }
 
-    function send(question) {
+    /* `opts.noHistory`: the "Ask across everything" resend path (both the
+       immediate send below and the deferred one fired once a busy request
+       settles) is a SCOPE CHANGE -- it is what widening the scope to
+       "everything" IS -- and decision 5 clears history on every scope
+       change. The ordinary `msgs`-clearing effect (:767-800) already does
+       that for a date/site/owner change a person drives from the host, but
+       this resend fires ITS OWN request from inside that same effect,
+       before the `setMsgs([])` it just queued has taken effect on the
+       `msgs` this closure still holds (React state updates apply on the
+       NEXT render, not synchronously) -- so the ordinary `historyFromMessages
+       (msgs)` below would still see the pre-clear, old-scope turn and send
+       it as history on the new, unscoped request. That is exactly the
+       leak decision 5 forbids: the prior site-scoped turn's referents
+       ("here", "the same site") would ride along into a request whose
+       site/date fields have already been dropped. Passing `noHistory: true`
+       from every resend call site (not relying on state that has not
+       updated yet) is what actually prevents it. */
+    function send(question, opts) {
       if (!question || busy) return;
       var userMsg = { role: 'user', text: question };
       setMsgs(function (m) { return m.concat([userMsg]); });
       setQ('');
       setBusy(true);
+      /* A new question always re-opens the overlay: closing it (dock only)
+         hides the conversation, not the ability to ask another one. */
+      setCollapsed(false);
 
       /* The alerts route (routing spec 3.5). Answered here rather than by
          the agent because every signal is already on the client and none of
@@ -786,7 +919,15 @@
 
       /* Captured at send time: the context may change while this is in flight. */
       var scopedRequest = hasScope(context);
-      var body = requestBodyFor(context, question);
+      /* Captured from `msgs` BEFORE this turn's own user message is appended
+         above -- history is what came before this question, never including
+         it. `msgs` here is the render's own closed-over value, same as
+         `context` a line below: a later change to either does not reach a
+         request already under way. `opts.noHistory` overrides this to `[]`
+         (which `requestBodyFor` then omits from the wire) for the widen
+         resend -- see the comment on `send`'s signature above. */
+      var history = (opts && opts.noHistory) ? [] : historyFromMessages(msgs);
+      var body = requestBodyFor(context, question, history);
       body.user = user;   /* undefined is dropped on the wire */
       var gen = genRef.current;
       function isStale() { return gen !== genRef.current; }
@@ -830,6 +971,14 @@
           scopeResponse: { applied_scope: res.applied_scope },
           scoped:        scopedRequest,
           question:      question,
+          /* What the backend actually searched for, once it resolves
+             history-dependent references ("it", "the same site") into a
+             standalone question. Rendered only when present and different
+             from what was typed -- absent on today's backend (history is
+             not wired up yet on that side) and equal-to-typed on the common
+             case where there was nothing to resolve, both of which say
+             nothing worth a line. */
+          asked:         res.asked,
         }]); });
 
         /* The second pass. Fired after the answer is already on screen and
@@ -846,14 +995,31 @@
           .catch(function () { if (!isStale()) patchCorrob(mid, { _failed: true }); });
       }).catch(function (err) {
         if (isStale()) return;
-        /* A timeout is not an unreachable agent, and saying so sent the reader
-           at the backend while it was answering correctly. Name the two cases
-           apart: one is "it is slow", the other is "it is not there". */
+        /* One reassuring line for every failure class -- a timeout, any HTTP
+           status, or a bare network error (spec §4.8). The two-message split
+           this replaced named the cause on screen ("took too long" vs
+           "could not reach"), and a reader cannot act on that distinction
+           any more than on this one: either way the question was not lost
+           and asking again is the only available move. Naming the cause
+           only invites the next person to re-add a second line "to be
+           helpful", so the copy below says nothing about why.
+
+           `err.timeout` / `err.status` are kept and read here -- not to pick
+           the words shown, only to label what reached the console, so a
+           report of "Ask is failing" can be told apart from a report of
+           "Ask is slow" without exposing that difference to the reader. */
+        if (err && err.timeout) {
+          console.warn('[AskChat] request timed out', err);
+        } else if (err && err.status) {
+          console.warn('[AskChat] request failed with HTTP ' + err.status, err);
+        } else {
+          console.warn('[AskChat] request failed (network)', err);
+        }
         setMsgs(function (m) { return m.concat([{
           role:  'assistant',
-          text:  (err && err.timeout)
-                   ? 'The agent took too long to answer. It may still be working — try asking again.'
-                   : 'Could not reach the agent. ' + (err && err.message || ''),
+          text:  'FieldSight is busy at the moment. Your question has not been '
+               + 'lost — please try again shortly. If it keeps happening, '
+               + 'contact the FieldSight team.',
           error: true,
         }]); });
       }).then(function () {
@@ -876,26 +1042,42 @@
     }
     var chips = chipsFor(context, lastAnswer ? lastAnswer.scopeResponse : undefined);
 
-    var className = 'fs-ask-chat' + (props.compact ? ' fs-ask-chat--compact' : '');
+    var className = 'fs-ask-chat'
+      + (props.compact ? ' fs-ask-chat--compact' : '')
+      + (dock ? ' fs-ask-chat--dock' : '');
 
     return React.createElement('div', { className: className, ref: rootRef },
 
-      /* Suggestions row — only shown while history is empty. */
-      suggestions && suggestions.length > 0 && msgs.length === 0
+      /* Suggestions row — only shown while history is empty, and in dock
+         mode only while the input is focused (spec 2026-09-16 §5): `focused`
+         narrows the shipped rule and never widens it, so the palette mount
+         (dock === false) keeps showing suggestions on an empty log without
+         focus, exactly as it does today. */
+      suggestions && suggestions.length > 0 && msgs.length === 0 && (!dock || focused)
         ? React.createElement('div', { className: 'fs-ask-chat__suggestions' },
             suggestions.map(function (s, i) {
               return React.createElement('button', {
                 key: i, type: 'button',
                 className: 'fs-ask-chat__suggestion',
                 onClick:   function () { send(s); },
+                /* Without this, the input's blur (triggered by the mousedown
+                   moving focus) hides this row before the click lands, and
+                   the buttons become unclickable — a real trap, not a
+                   nicety. preventDefault on mousedown stops focus moving at
+                   all, so no blur ever fires. */
+                onMouseDown: function (e) { e.preventDefault(); },
                 disabled:  busy,
               }, s);
             })
           )
         : null,
 
-      /* Message log */
-      React.createElement('div', {
+      /* Message log — an OVERLAY in dock mode, rendered only when it has
+         something to show and never as a normal flow child, so the bar's
+         own height never changes and nothing below it ever reflows (spec
+         2026-09-16 §5, the no-reflow seam). Unchanged inline log otherwise. */
+      (function () {
+        var messagesDiv = React.createElement('div', {
         className: 'fs-ask-chat__messages',
         ref:       listRef,
       },
@@ -918,6 +1100,13 @@
                (it HTML-escapes first, then emits only a fixed tag set, so
                dangerouslySetInnerHTML carries no LLM-supplied markup). User
                messages are the person's own typed question → keep plain. */
+            /* A topic switch outside the assistant chain below: it is its own
+               branch, never nested inside the origin/answer/corroboration
+               ordering those tests slice on (spec 2026-09-16 §5). */
+            m.role === 'divider'
+              ? React.createElement('div', { className: 'fs-ask-chat__divider-text' }, m.text)
+              : null,
+
             /* FIRST, above the answer — not after it, and not at the end of the
                prose. The reader asked about a period; if that period is empty
                they learn it before they read a word about another day.
@@ -941,14 +1130,37 @@
                   }, line);
                 })
               : null,
+            /* What the backend actually searched for, once "it" / "the same
+               site" / etc. were resolved against the history this turn sent.
+               Only when it says something the reader did not already know:
+               present, and different from what they typed -- an equal value
+               would just repeat their own question back at them. */
+            m.role === 'assistant' && m.asked && m.asked !== m.question
+              ? React.createElement('div', { className: 'fs-ask-chat__asked' },
+                  'Searched for: ' + m.asked)
+              : null,
             m.role === 'assistant' ? renderWebOrigin(m) : null,
-            m.role === 'assistant' && window.FieldSight.renderMarkdown
-              ? React.createElement('div', {
-                  className: 'fs-ask-chat__msg-text fs-ask-chat__msg-text--md',
-                  dangerouslySetInnerHTML: { __html: window.FieldSight.renderMarkdown(m.text) },
-                })
-              : React.createElement('div', { className: 'fs-ask-chat__msg-text' },
-                  m.text),
+            /* `question_admission` already returns the sentence explaining a
+               refusal (a name, a commercially sensitive topic, ...); nothing
+               rendered it, so the reader saw the web section simply absent
+               and read a guard doing its job as an outage. */
+            m.role === 'assistant' && m.web && m.web.refused
+              ? React.createElement('div', { className: 'fs-ask-chat__web-refused' }, m.web.refused)
+              : null,
+            /* The plain-text fallback below is also what renders the user's
+               own question; a divider already rendered its one line above
+               and must not get a second copy of it here (m.role !== 'divider'
+               guard — not in the plan's illustrative snippet, found by
+               running D-j/D-k: the old else-branch had no role guard at all). */
+            m.role === 'divider'
+              ? null
+              : (m.role === 'assistant' && window.FieldSight.renderMarkdown
+                  ? React.createElement('div', {
+                      className: 'fs-ask-chat__msg-text fs-ask-chat__msg-text--md',
+                      dangerouslySetInnerHTML: { __html: window.FieldSight.renderMarkdown(m.text) },
+                    })
+                  : React.createElement('div', { className: 'fs-ask-chat__msg-text' },
+                      m.text)),
             m.role === 'assistant' ? renderCitations(m.citations) : null,
             /* A scoped answer that found nothing: offer the same question
                across everything. The host clears the context; the reset
@@ -1003,7 +1215,23 @@
           React.createElement('span', { className: 'fs-ask-chat__pending-label' },
             'Looking through your records…'),
         ) : null,
-      ),
+      );
+        if (!dock) return messagesDiv;
+        var closeBtn = React.createElement('button', {
+          type: 'button',
+          className: 'fs-ask-chat__overlay-close',
+          'aria-label': 'Hide the conversation',
+          onClick: function () { setCollapsed(true); },
+        }, 'Hide');
+        /* `busy` is dropped from this condition: `send()` always pushes the
+           user's message into `msgs` before it sets `busy`, on every path
+           (the normal request, the initialQuestion auto-send, and the
+           alerts short-circuit), so `busy` never becomes true while `msgs`
+           is still empty -- `msgs.length > 0` already covers it. */
+        return msgs.length > 0 && !collapsed
+          ? React.createElement('div', { className: 'fs-ask-chat__overlay' }, closeBtn, messagesDiv)
+          : null;
+      })(),
 
       chips.length
         ? React.createElement('div', {
@@ -1058,6 +1286,14 @@
           placeholder: props.placeholder || placeholderFor(context),
           value:     q,
           onChange:  function (e) { setQ(e.target.value); },
+          /* Dock only in effect (suggestions and the overlay's open/closed
+             state don't exist outside `dock`), harmless to set elsewhere.
+             Focus alone must NOT reopen a Hidden overlay -- only sending a
+             new question does (see `send()`). Otherwise clicking back into
+             the input after "Hide" pops the old conversation straight back
+             over the topic list, which is the thing Hide was for. */
+          onFocus:   function () { setFocused(true); },
+          onBlur:    function () { setFocused(false); },
           disabled:  busy,
         }),
         React.createElement('button', {

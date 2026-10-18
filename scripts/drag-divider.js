@@ -14,8 +14,8 @@
         value={width}
         onChange={setWidth}
         min={360}
-        max={560}
-        storageKey="fs.appshell.middleWidth.v2"
+        max={896}
+        storageKey="fs.appshell.middleWidth.v3"
         ariaLabel="Resize middle column"
      />
 

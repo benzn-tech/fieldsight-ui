@@ -10,9 +10,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
   <link rel="stylesheet" href="styles/tokens.css?v=1" />
-  <link rel="stylesheet" href="styles/app-shell.css?v=3" />
+  <link rel="stylesheet" href="styles/app-shell.css?v=4" />
   <link rel="stylesheet" href="styles/components.css?v=7" />
-  <link rel="stylesheet" href="styles/composites.css?v=21" />
+  <link rel="stylesheet" href="styles/composites.css?v=23" />
 
   <style>
     html, body { overflow: auto; height: auto; }
@@ -112,7 +112,7 @@
   <script type="text/babel" src="scripts/composites/tooltip.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/toast.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/modal-overlay.js?v=1"></script>
-  <script type="text/babel" src="scripts/composites/email-preview-modal.js?v=7"></script>
+  <script type="text/babel" src="scripts/composites/email-preview-modal.js?v=12"></script>
   <script type="text/babel" src="scripts/composites/session-report-modal.js?v=5"></script>
   <script type="text/babel" src="scripts/composites/recording-delete-modal.js?v=1"></script>
   <script type="text/babel" src="scripts/composites/safety-create-modal.js?v=3"></script>
@@ -155,6 +155,8 @@
             ErrorBanner, OverAllocationBanner, Tooltip,
             SafetyCreateModal, QualityCreateModal, SearchPalette,
             OnboardingOverlay, DemoTour,
+            /* feat/handoff-table — the hand-off as a three-column table */
+            EmailPreviewModal,
             /* Sprint 9 — new L5 composites */
             BarStack, SparkLine, TrendPill,
             HealthScore, RollupTable,
@@ -1374,6 +1376,211 @@
             <Row label="note">
               <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
                 DemoTour is page-level — activate via <code>?demo=1</code> on app-shell-preview.html.
+              </span>
+            </Row>
+          </Section>
+
+          {/* feat/handoff-sync (2026-09-18 plan, two same-day fix rounds) —
+              one flat table on both surfaces: every action row, then every
+              topic row, nothing interleaved (§1.2). Substitution is PER
+              SESSION, not per day (§1.3): a session's own usable brief
+              (loaded, >= 1 task) replaces THAT session's own action items
+              only — a sibling session with no usable brief keeps its own
+              items untouched, and a topic with no session_id at all can
+              never be substituted. `rowsSource` on the model is 'brief' /
+              'action_items' / 'mixed' accordingly; the fourth fixture below
+              is a 'mixed' table.
+
+              Fix round 2: a topic row's PHOTOS travel with it now — they
+              used to vanish silently, because `groups` (the only thing the
+              photo section reads) was pushed only `if (open.length)`, and a
+              topic row is exactly a topic with zero open items. The fifth
+              fixture below is the reproduction: a site-observation topic,
+              photos, no task. An all-done topic (every item `status:'done'`)
+              is the one case that still drops its photos on purpose — it is
+              neither an action row nor a §1.5 topic row, and the model's own
+              stated purpose is a hand-off of work REMAINING, not a
+              transcript of something already closed out.
+
+              An unstated owner or due date on an action row is the em dash
+              "—"; a topic row (one whose extraction produced no action items
+              at all) is "N/A" in both cells and greyed in the HTML flavour —
+              N/A is not the em dash (§0/§1.4/§1.5). The third fixture below
+              exists to show a topic row next to an action row in the same
+              table, and a speaker label rendering as "—" rather than as a
+              name. */}
+          <Section title="feat/handoff-sync · EmailPreviewModal (hand-off table)">
+            <Row label="open">
+              <ModalTrigger
+                label="Hand-off — from action items"
+                Modal={EmailPreviewModal}
+                props={{
+                  open: true,
+                  date: '2026-03-01',
+                  siteName: 'SB1108 Ellesmere',
+                  session: { title: 'Morning walk' },
+                  topics: [
+                    { topic_id: 1, topic_title: 'Wall tolerance', time_range: '09:00 – 09:20',
+                      action_items: [
+                        { action: 'Redo the west wall to line', responsible: 'John', deadline: 'Wed', status: 'open' },
+                        { action: 'Chase the beam producer statement', status: 'open' },
+                      ],
+                      related_photos: [] },
+                    { topic_id: 2, topic_title: 'Slab pour', time_range: '10:05 – 10:30',
+                      action_items: [
+                        { action: 'Book the pre-pour inspection', responsible: 'Priya Sharma', status: 'open' },
+                      ],
+                      related_photos: [] },
+                  ],
+                }}
+              />
+              <ModalTrigger
+                label="Hand-off — from a session brief"
+                Modal={EmailPreviewModal}
+                props={{
+                  open: true,
+                  date: '2026-03-01',
+                  siteName: 'SB1108 Ellesmere',
+                  topics: [
+                    { topic_id: 1, session_id: 's1', topic_title: 'Wall tolerance', time_range: '09:00 – 09:20',
+                      action_items: [{ action: 'Redo the west wall to line', status: 'open' }],
+                      related_photos: [] },
+                  ],
+                  briefs: [
+                    { sessionId: 's1', brief: { status: 'ready', tasks: [
+                      { text: 'Redo the west wall to line before the next pour', at: '09:12:00', assignee: 'John', due: 'Wed' },
+                      { text: 'Chase the beam producer statement', at: '09:18:00', assignee: null, due: null },
+                      { text: 'Confirm the crane booking window', assignee: 'Priya Sharma', due: '2026-03-04' },
+                    ] } },
+                  ],
+                }}
+              />
+              <ModalTrigger
+                label="Hand-off — topic row sunk below action rows"
+                Modal={EmailPreviewModal}
+                props={{
+                  open: true,
+                  date: '2026-03-01',
+                  siteName: 'SB1108 Ellesmere',
+                  topics: [
+                    { topic_id: 1, topic_title: 'Wall tolerance', time_range: '09:00 – 09:20',
+                      action_items: [
+                        { action: 'Redo the west wall to line', responsible: 'spk_0', deadline: 'Wed', status: 'open' },
+                      ],
+                      related_photos: [] },
+                    { topic_id: 2, topic_title: 'Voiceprint test', time_range: '11:00 – 11:15',
+                      summary: 'Recorded outdoors in site noise. The purpose was to check recall against the pipeline.',
+                      action_items: [],
+                      related_photos: [] },
+                  ],
+                }}
+              />
+              <ModalTrigger
+                label="Hand-off — two sessions, one briefed (mixed source)"
+                Modal={EmailPreviewModal}
+                props={{
+                  open: true,
+                  date: '2026-03-01',
+                  siteName: 'SB1108 Ellesmere',
+                  // Fix round, 2026-09-18: substitution is per SESSION, not
+                  // per day. s1 has a usable brief and its row is replaced;
+                  // s2's brief never loaded (a failed/pending fetch simply
+                  // never reaches this prop), so its OWN action item stays.
+                  // rowsSource on the model is 'mixed' for this fixture.
+                  topics: [
+                    { topic_id: 1, session_id: 's1', topic_title: 'Wall tolerance', time_range: '09:00 – 09:20',
+                      action_items: [{ action: 'Redo the west wall to line', responsible: 'John', deadline: 'Wed', status: 'open' }],
+                      related_photos: [] },
+                    { topic_id: 2, session_id: 's2', topic_title: 'Slab pour', time_range: '10:05 – 10:30',
+                      action_items: [{ action: 'Order mesh for the slab', responsible: 'Ana', deadline: 'Fri', status: 'open' }],
+                      related_photos: [] },
+                  ],
+                  briefs: [
+                    { sessionId: 's1', brief: { status: 'ready', tasks: [
+                      { text: 'Redo the west wall to line before the next pour', at: '09:12:00', assignee: 'John', due: 'Wed' },
+                    ] } },
+                  ],
+                }}
+              />
+              <ModalTrigger
+                label="Hand-off — a topic row carrying a photo"
+                Modal={EmailPreviewModal}
+                props={{
+                  open: true,
+                  date: '2026-03-01',
+                  siteName: 'SB1108 Ellesmere',
+                  // Fix round 2, 2026-09-18: a topic row (zero action items)
+                  // used to lose its photos entirely — `groups` was only
+                  // pushed `if (open.length)`. A site-observation topic like
+                  // this one, with photos and no task, is the ordinary case
+                  // that reproduced the bug.
+                  topics: [
+                    { topic_id: 1, topic_title: 'Site conditions', time_range: '08:40 – 08:52',
+                      summary: 'Standing water near the east entrance, roughly 3m across.',
+                      action_items: [],
+                      related_photos: ['site1.jpg', 'site2.jpg'] },
+                  ],
+                }}
+              />
+              <ModalTrigger
+                label="Hand-off — Part 2: covered topic (no dup) + back-filled item"
+                Modal={EmailPreviewModal}
+                props={{
+                  open: true,
+                  date: '2026-09-11',
+                  siteName: 'Ormiston College',
+                  // §7/§9, from the real 2026-09-11 session this plan is
+                  // reasoning about. Topic 1 is COVERED (the brief task's
+                  // `at` 13:40:43 falls inside the topic's own 13:40 – 13:41
+                  // range) — it produced no action item, but it never sinks
+                  // to the bottom as a topic row either, because the brief
+                  // already said the same thing as a real row. Its photo
+                  // still travels below the table (§7.2/§3): coverage only
+                  // suppresses the DUPLICATE PROSE, not the evidence.
+                  // Topic 2's extraction item has a due date the brief never
+                  // mentioned (its best overlap with either brief task is
+                  // low) — that item is back-filled after the brief's own
+                  // rows, which is how the 2026-09-11 email lost it before.
+                  topics: [
+                    { topic_id: 1, session_id: 's1',
+                      topic_title: 'Ormiston College 360 Inspections', time_range: '13:40 – 13:41',
+                      summary: 'Speaker hopes to visit the MPI site with DeAndre.',
+                      action_items: [],
+                      related_photos: ['mpi-site.jpg'] },
+                    { topic_id: 2, session_id: 's1', topic_title: 'Port Com QA', time_range: '10:00 – 10:20',
+                      action_items: [
+                        { action: 'PS4 for the Port Com SR study to be signed', deadline: '2027-01-31', status: 'open' },
+                      ],
+                      related_photos: [] },
+                  ],
+                  briefs: [
+                    { sessionId: 's1', brief: { status: 'ready', tasks: [
+                      { text: 'Start QA pour checks and create report on Port Com concrete once 28-day cure ends', at: '10:05:00', assignee: 'Sam' },
+                      { text: 'Visit MPI site with DeAndre to see comprehensive open-space usage pattern', at: '13:40:43' },
+                    ] } },
+                  ],
+                }}
+              />
+            </Row>
+            <Row label="note">
+              <span style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
+                Photos need a real <code>userFolder</code> + media API, so none are fetched here —
+                the fifth fixture's photo group renders with its title and a "loading photo…"
+                placeholder for each of the two photos, which is exactly what a topic row's photo
+                section looked like BEFORE the fix (except before the fix it did not render at
+                all). The photo row itself is exercised for real on /timeline. The third fixture's
+                ASSIGNED cell for "Redo the west wall to line" reads "—", not "spk_0" — a raw
+                speaker label is not a name (§1.4) — and the "Voiceprint test" row below it reads
+                "N/A" / "N/A", greyed. The fourth fixture's table reads "Redo the west wall to line
+                before the next pour" (s1, substituted by its brief) followed by "Order mesh for
+                the slab" (s2, kept — its brief never loaded) — a sibling session's success never
+                drops another session's own commitment. The sixth fixture is Part 2 (§7): its table
+                reads "Start QA pour checks…" then "Visit MPI site with DeAndre…" (both brief rows)
+                then "PS4 for the Port Com SR study to be signed" (back-filled — its due date
+                survived even though the brief never mentioned it). "Ormiston College 360
+                Inspections" never appears as a topic row — the brief task at 13:40:43 falls inside
+                its own 13:40 – 13:41 range, so it is covered — but its photo still renders in the
+                photo section below the table, under its own title.
               </span>
             </Row>
           </Section>

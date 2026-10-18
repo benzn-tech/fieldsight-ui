@@ -27,10 +27,10 @@ function cssMiddle(prop) {
   return Number(m[1]);
 }
 
-test('middle column constants are 420 / 360 / 560', () => {
-  assert.strictEqual(jsConst('MIDDLE_WIDTH_DEFAULT'), 420);
+test('middle column constants are 560 / 360 / 896', () => {
+  assert.strictEqual(jsConst('MIDDLE_WIDTH_DEFAULT'), 560);
   assert.strictEqual(jsConst('MIDDLE_WIDTH_MIN'), 360);
-  assert.strictEqual(jsConst('MIDDLE_WIDTH_MAX'), 560);
+  assert.strictEqual(jsConst('MIDDLE_WIDTH_MAX'), 896);
 });
 
 test('default lies within [min, max]', () => {
@@ -43,10 +43,10 @@ test('CSS limits equal the JS limits', () => {
   assert.strictEqual(cssMiddle('max-width'), jsConst('MIDDLE_WIDTH_MAX'));
 });
 
-test('storage key is versioned .v2 so old saved widths are ignored', () => {
+test('storage key is versioned .v3 so old saved widths are ignored', () => {
   const m = js.match(/middleWidth:\s*'([^']+)'/);
   assert.ok(m);
-  assert.ok(m[1].endsWith('.v2'), 'key was ' + m[1]);
+  assert.ok(m[1].endsWith('.v3'), 'key was ' + m[1]);
 });
 
 test('initial read is clamped (DragDivider.read does not clamp)', () => {

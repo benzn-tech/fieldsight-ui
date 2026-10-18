@@ -3660,6 +3660,24 @@
   color: var(--text-tertiary);
   margin-bottom: 4px;
 }
+/* Task 11 (docs/superpowers/sdd/2026-09-17-ask-conversation-memory): what the
+   backend actually searched for once history resolved a "it"/"the same
+   site" reference. Same treatment as the scope line it sits beside -- a
+   quiet fact above the answer, not a correction (that is `fs-ask-chat__
+   basis--widened`'s job). */
+.fs-ask-chat__asked {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+  font-style: italic;
+}
+/* `question_admission`'s refusal sentence -- rendered so a guard doing its
+   job does not read as the web section having silently gone missing. */
+.fs-ask-chat__web-refused {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+}
 .fs-ask-chat__widen {
   font: inherit;
   font-size: 12px;
@@ -3675,7 +3693,72 @@
 @media (pointer: coarse) {
   .fs-ask-chat__widen { min-height: 44px; }
 }
-.fs-topic-detail__ask { margin-top: 8px; }
+
+/* `.fs-ask-dock` — the dock's wrapper element (scripts/pages/timeline.js,
+   TimelineAskDock) is deliberately UNSTYLED, and this block is here so that a
+   reader who greps for the class finds that on purpose rather than a gap.
+   Its box comes from `.middle-column__footer` (styles/app-shell.css) and
+   everything inside it from `.fs-ask-chat--dock` below; a rule here would only
+   be a second place to look. The class is kept because spec §8's manual
+   checklist uses it as the DevTools hook for confirming the bar is a SIBLING
+   of the scroll area, not a child of it. Do not give it layout. */
+
+/* The docked Ask (docs/specs/2026-09-16-ask-dock.md).
+   The conversation is an OVERLAY: absolutely positioned against the dock and
+   rendered only when there is something in it, so the topic list above never
+   moves and never reflows. A flow child here would push the list up and
+   restore the complaint this spec exists to answer. */
+.fs-ask-chat--dock {
+  position: relative;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0;
+  padding: 10px 20px;
+  gap: 6px;
+  background: var(--surface-panel);
+}
+.fs-ask-chat--dock .fs-ask-chat__overlay {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 50vh;
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-bottom: 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-lg);
+}
+.fs-ask-chat--dock .fs-ask-chat__messages {
+  max-height: none;
+  padding: 8px 12px 12px;
+}
+.fs-ask-chat__overlay-close {
+  align-self: flex-end;
+  font: inherit;
+  font-size: 12px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.fs-ask-chat__overlay-close:hover { color: var(--text-primary); }
+.fs-ask-chat__msg--divider {
+  align-self: center;
+  max-width: 100%;
+}
+.fs-ask-chat__divider-text {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: center;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
 /* Visually hidden, still read by screen readers. */
 .fs-sr-only {
   position: absolute;
@@ -11863,19 +11946,51 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-email-preview__subject,
 .fs-email-preview__intro { margin: 0 0 12px; }
 
-.fs-email-preview__group {
-  margin: 0 0 18px;
-  padding: 0 0 14px;
-  border-bottom: 1px solid var(--border-subtle);
-}
-.fs-email-preview__group:last-of-type { border-bottom: 0; }
-
-.fs-email-preview__topic { font-weight: var(--font-weight-semibold); }
 .fs-email-preview__time  { font-weight: 400; color: var(--text-tertiary); }
 
-.fs-email-preview__items { margin: 4px 0 8px; padding-left: 20px; }
-.fs-email-preview__items li { margin: 0 0 3px; overflow-wrap: anywhere; }
+/* The hand-off is a three-column table: AGENDA ITEM / ASSIGNED / DUE DATE.
+   The preview renders the same three columns the clipboard payload does —
+   a preview in a different shape from the payload is a preview of something
+   else. (The old `__items` bullet list went with actionLine, and `__group` /
+   `__topic` went with the group-per-block markup the table replaced.)
 
+   2026-09-18 handoff-sync: the table is now ONE FLAT list — every action
+   row, then every topic row, nothing interleaved. `__topic-row` used to be
+   a bold heading that spanned the table; it is now an ordinary 3-cell row
+   whose ASSIGNED/DUE DATE cells read "N/A" (greyed, not a heading) — N/A is
+   not the em dash an unowned action shows (§0/§1.5 of the plan). Photos are
+   grouped under `__photo-section` / `__photo-group` BELOW the table now,
+   not inside it. */
+.fs-email-preview__table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4px 0 8px;
+}
+.fs-email-preview__table th {
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  border-bottom: 2px solid var(--border-strong, var(--border-subtle));
+  white-space: nowrap;
+}
+.fs-email-preview__table td {
+  padding: 6px 10px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-wrap: anywhere;
+}
+/* A topic row (no action items at all) is greyed, matching the HTML email
+   flavour's inline `color:#666` (§1.5) — an ordinary row, not a heading. */
+.fs-email-preview__topic-row td { color: var(--text-tertiary); }
+
+.fs-email-preview__photo-section { margin-top: 12px; }
+.fs-email-preview__photo-group { margin-bottom: 12px; }
+.fs-email-preview__photo-group-title {
+  margin: 0 0 6px;
+  font-weight: var(--font-weight-semibold);
+}
 .fs-email-preview__photos { display: flex; flex-wrap: wrap; gap: 8px; }
 .fs-email-preview__photo {
   max-width: 200px; height: auto;
