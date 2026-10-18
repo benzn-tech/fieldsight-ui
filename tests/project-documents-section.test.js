@@ -91,3 +91,56 @@ test('the component showcase renders it', () => {
   assert.match(preview, /scripts\/composites\/project-documents-section\.js/);
   assert.match(preview, /<ProjectDocumentsShowcase \/>/);
 });
+
+/* Behaviour: the component rendered with React stubbed to a plain tree, the first state
+   preset to a loaded list, and the real api module (statusOf etc.). */
+function renderWith(listState) {
+  global.window = { FieldSight: {}, FS: { api: { useMocks: false, orgBaseUrl: 'https://x/prod/api' } } };
+  let first = true;
+  global.React = {
+    createElement: function (type, props) { return { type, props: props || {}, kids: [].slice.call(arguments, 2) }; },
+    useState: function (init) {
+      if (first) { first = false; return [listState, function () {}]; }
+      return [typeof init === 'function' ? init() : init, function () {}];
+    },
+    useEffect: function () {},
+    useRef: function () { return { current: null }; },
+  };
+  delete require.cache[require.resolve('../scripts/api/project-documents.js')];
+  require('../scripts/api/project-documents.js');
+  delete require.cache[require.resolve('../scripts/composites/project-documents-section.js')];
+  require('../scripts/composites/project-documents-section.js');
+  return global.window.FieldSight.ProjectDocumentsSection({ siteId: 's1' });
+}
+function buttons(n, out) {
+  out = out || [];
+  if (n == null || typeof n !== 'object') return out;
+  if (Array.isArray(n)) { n.forEach(function (k) { buttons(k, out); }); return out; }
+  if (n.type === 'button') out.push(n.kids.join(''));
+  (n.kids || []).forEach(function (k) { buttons(k, out); });
+  return out;
+}
+const NOW_ISO = new Date().toISOString();
+function doc(id, status, extra) {
+  return Object.assign({ id: id, seriesId: 'ser-' + id, revision: 2, title: 'Doc ' + id,
+    filename: id + '.pdf', status: status, reason: null, uploadedByName: 'G M',
+    createdAt: NOW_ISO, requestedAt: NOW_ISO }, extra || {});
+}
+
+test('an archived project (canWrite false from the server) lists with no write controls', () => {
+  const tree = renderWith({ status: 'ok', canWrite: false,
+    documents: [doc('a', 'indexed'), doc('b', 'error', { reason: 'x' }), doc('c', 'unreadable')] });
+  const labels = buttons(tree);
+  for (const write of ['Upload document', 'New revision', 'Rename', 'Delete', 'Retry']) {
+    assert.ok(!labels.includes(write), write + ' rendered without canWrite');
+  }
+  assert.ok(labels.includes('Doc a') && labels.includes('History'), labels.join(','));
+});
+
+test('Retry is never offered for a document that cannot be read (server refuses it)', () => {
+  const tree = renderWith({ status: 'ok', canWrite: true,
+    documents: [doc('c', 'unreadable', { reason: 'protected' }), doc('b', 'error', { reason: 'x' })] });
+  const labels = buttons(tree);
+  assert.strictEqual(labels.filter(function (l) { return l === 'Retry'; }).length, 1);   // b only
+  assert.ok(labels.includes('Upload document'));
+});

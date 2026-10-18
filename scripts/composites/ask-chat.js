@@ -408,18 +408,23 @@
     var docs = (m && m.documents) || [];
     if (!docs.length) return null;
     var PD = window.FS && window.FS.api && window.FS.api.projectDocuments;
-    if (!PD || !PD.isLive || !PD.isLive()) return null;
+    /* The backend cited documents, so the claims they back must stay labelled (rule 3)
+       even where the org API is off here: the block still renders, only opening the
+       original needs the org API, so the buttons are disabled instead. */
+    var live = !!(PD && PD.isLive && PD.isLive());
     return React.createElement('div', { className: 'fs-ask-docs' },
       React.createElement('div', { className: 'fs-ask-docs__label' },
-        'From project documents — what should be, not what happened on site'),
+        m.zh ? '来自项目文档 — 规定应如何，不是现场发生了什么'
+             : 'From project documents — what should be, not what happened on site'),
       React.createElement('div', { className: 'fs-ask-docs__list' },
         docs.map(function (d, i) {
-          var label = window.FS.api.projectDocuments.citeLabel(d) || 'Document';
+          var label = (PD && PD.citeLabel && PD.citeLabel(d)) || d.title || 'Document';
+          var openable = live && !!(d.site_id && d.document_id);
           return React.createElement('button', {
             key: i, type: 'button', className: 'fs-ask-docs__item',
-            disabled: !(d.site_id && d.document_id),
+            disabled: !openable,
             onClick: function () {
-              if (!d.site_id || !d.document_id) return;
+              if (!openable) return;
               PD.open(d.site_id, d.document_id, d.page).catch(function (err) {
                 if (window.FS.toast) window.FS.toast.show({ message: (err && err.message) || 'Could not open the document.', tone: 'error' });
               });

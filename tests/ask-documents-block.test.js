@@ -31,10 +31,10 @@ test('the block renders below the answer and after the recording sources', () =>
 
 test('no documents, no block; each entry opens the original at its page', () => {
   const start = askChat.indexOf('function renderDocumentOrigin');
-  const block = askChat.slice(start, start + 1400);
+  const block = askChat.slice(start, start + 2200);
   assert.ok(block.length > 400);
   assert.match(block, /if \(!docs\.length\) return null;/);
-  assert.match(block, /projectDocuments\.citeLabel\(d\)/);
+  assert.match(block, /PD\.citeLabel\(d\)/);
   assert.match(block, /\.open\(d\.site_id, d\.document_id, d\.page\)/);
 });
 
@@ -79,9 +79,33 @@ test('absent, null or empty documents render nothing (old backends)', () => {
   assert.strictEqual(r({ documents: [] }), null);
 });
 
-test('the org kill switch hides the block (mocks, or no org base)', () => {
-  assert.strictEqual(loadBlock({ useMocks: true })({ documents: [DOC] }), null);
-  assert.strictEqual(loadBlock({ orgBaseUrl: '' })({ documents: [DOC] }), null);
+test('org API off (mocks, or no org base): still labelled, nothing opens (rule 3)', () => {
+  for (const api of [{ useMocks: true }, { orgBaseUrl: '' }]) {
+    const tree = loadBlock(api)({ documents: [DOC] });
+    assert.ok(tree, 'document-derived claims must stay labelled');
+    assert.strictEqual(tree.props.className, 'fs-ask-docs');
+    assert.match(flat(tree), /what should be, not what happened on site/);
+    assert.match(flat(tree), /Concrete spec/);
+    const btn = tree.kids[1].kids[0][0];
+    assert.strictEqual(btn.props.disabled, true);
+    let opened = false;
+    global.window.FS.api.projectDocuments.open = () => { opened = true; return Promise.resolve(); };
+    btn.props.onClick();
+    assert.strictEqual(opened, false);
+  }
+});
+
+test('a Chinese question gets the Chinese label, the same distinction', () => {
+  const tree = loadBlock()({ zh: true, documents: [DOC] });
+  assert.match(flat(tree), /来自项目文档 — 规定应如何，不是现场发生了什么/);
+  assert.doesNotMatch(flat(tree), /what should be/);
+});
+
+test('live: an entry opens; an entry without ids does not', () => {
+  const tree = loadBlock()({ documents: [DOC, { title: 'Loose', page: 1 }] });
+  const btns = tree.kids[1].kids[0];
+  assert.strictEqual(btns[0].props.disabled, false);
+  assert.strictEqual(btns[1].props.disabled, true);
 });
 
 test('clicking an entry opens the original at its page', () => {

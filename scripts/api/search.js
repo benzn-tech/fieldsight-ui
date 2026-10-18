@@ -26,7 +26,10 @@
     var body = { question: q };
     /* Project documents (backend spec 2026-10-16, R7): their own group in the palette.
        The backend answers without a `documents` key when the feature is off. */
-    body.include_documents = true;
+    /* Only where the palette can show them: the group (and opening one) needs the org
+       API, so with it off (mocks, no org base) the backend is not asked to search them. */
+    var PD = window.FS.api.projectDocuments;
+    if (PD && PD.isLive && PD.isLive()) body.include_documents = true;
     if (opts.from) body.date_from = opts.from;
     if (opts.to)   body.date_to   = opts.to;
     /* Project-scoped search: when a project is selected in the top bar, scope

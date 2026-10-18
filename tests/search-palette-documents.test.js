@@ -11,14 +11,24 @@ const fs = require('node:fs');
 
 const palette = fs.readFileSync(require.resolve('../scripts/composites/search-palette.js'), 'utf8');
 
-test('search asks for documents beside the topics', async () => {
+async function sentBody(live) {
   let sent;
   global.window = { FS: { api: { useMocks: false, orgBaseUrl: 'https://x/prod/api',
     request: async (p, o) => { sent = o.body; return { results: [] }; } } } };
+  if (live !== undefined) global.window.FS.api.projectDocuments = { isLive: () => live };
   delete require.cache[require.resolve('../scripts/api/search.js')];
   require('../scripts/api/search.js');
   await global.window.FS.api.search.topics({ q: 'formwork tolerance', site: null });
-  assert.strictEqual(sent.include_documents, true);
+  return sent;
+}
+
+test('search asks for documents beside the topics when the org API is live', async () => {
+  assert.strictEqual((await sentBody(true)).include_documents, true);
+});
+
+test('no opt-in where the org API is off or the documents module is absent', async () => {
+  assert.ok(!('include_documents' in (await sentBody(false))));
+  assert.ok(!('include_documents' in (await sentBody(undefined))));
 });
 
 test('documents have their own group, after Topics', () => {
