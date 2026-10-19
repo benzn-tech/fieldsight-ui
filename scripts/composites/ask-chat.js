@@ -1291,10 +1291,14 @@
         if (isStale()) return;
         var answerText = res.answer || '';
         /* Not on a web-derived answer: corroborating the web against the web
-           is a loop that reads as confirmation. */
+           is a loop that reads as confirmation. Nor on a result that already
+           carries a web status: the web was already tried this turn (e.g. the
+           backend's "I couldn't search the web just now", spec
+           fieldsight-pipeline 2026-10-19-ask-explicit-web-failure). */
         var wantsCorrob = !!(((window.FS || {}).api || {}).externalCorroboration)
                           && !!answerText
-                          && !res.from_web;
+                          && !res.from_web
+                          && !(res.web && typeof res.web.status === 'string');
         /* A per-message id, because the corroboration arrives later and has to
            find its own answer again. Position is not an identity here: two
            questions can be in flight, and matching on text attaches the block
