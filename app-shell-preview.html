@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="styles/tokens.css?v=8" />
   <link rel="stylesheet" href="styles/app-shell.css?v=17" />
   <link rel="stylesheet" href="styles/components.css?v=15" />
-  <link rel="stylesheet" href="styles/composites.css?v=143" />
+  <link rel="stylesheet" href="styles/composites.css?v=144" />
 
   <style>
     /* Ensure full-bleed with no scroll */
@@ -130,7 +130,7 @@
   <!-- Time-range control (spec §7) — changing it RE-FETCHES, it is not a filter -->
   <script type="text/babel" src="scripts/composites/programme-window-picker.js?v=1"></script>
   <!-- Sprint 8.6 — SearchPalette (global search overlay, ⌘K / Ctrl+K) -->
-  <script type="text/babel" src="scripts/composites/search-palette.js?v=9"></script>
+  <script type="text/babel" src="scripts/composites/search-palette.js?v=10"></script>
   <!-- Sprint 8.0.3 — ErrorBanner (used by all page providers on fetch failure) -->
   <script type="text/babel" src="scripts/composites/error-banner.js?v=1"></script>
   <!-- Keeps one page's crash from unmounting the whole app. Must load BEFORE
@@ -140,7 +140,7 @@
   <script type="text/babel" src="scripts/composites/page-error-boundary.js?v=2"></script>
   <!-- Sprint 8.1.4 — Toast notification stack (vanilla JS, no React) -->
   <script src="scripts/composites/toast.js?v=1"></script>
-  <script type="text/babel" src="scripts/composites/notification-bell.js?v=5"></script>
+  <script type="text/babel" src="scripts/composites/notification-bell.js?v=6"></script>
   <!-- Before pages/today.js and pages/timeline.js, which mount it. -->
   <script src="scripts/composites/pending-notes-banner.js?v=1"></script>
   <!-- After modal-overlay.js (it renders one) and notification-bell.js (which
@@ -261,7 +261,7 @@
   <script src="scripts/api/name-proposals.js?v=2"></script>
   <!-- Same constraint: after api/index.js. -->
   <script src="scripts/api/photo-notice.js?v=1"></script>
-  <script src="scripts/api/checklist-reports.js?v=1"></script>
+  <script src="scripts/api/checklist-reports.js?v=2"></script>
   <script src="scripts/api/recording-deletion.js?v=3"></script>
   <script src="scripts/api/audio.js?v=1"></script>
   <script src="scripts/api/video.js?v=1"></script>
@@ -271,7 +271,7 @@
   <!-- FS.events — content:edited after a save (spec 2026-09-15 §5). After api/index.js. -->
   <script src="scripts/api/events.js?v=1"></script>
   <script src="scripts/api/ask.js?v=4"></script>
-  <script src="scripts/api/search.js?v=2"></script>
+  <script src="scripts/api/search.js?v=4"></script>
   <script src="scripts/api/reports.js?v=1"></script>
   <script src="scripts/api/media.js?v=3"></script>
   <!-- report-view-model must load AFTER api/index.js: FS.api is assigned
@@ -366,7 +366,9 @@
   <!-- Sprint 4.10 — Today-Programme adapter (today's programme tasks for caller) -->
   <script src="scripts/api/today-programme-adapter.js?v=4"></script>
   <!-- Sprint 10 B.0 — Template store (LocalStorage-backed template API) -->
-  <script src="scripts/api/template-store.js?v=3"></script>
+  <script src="scripts/api/template-store.js?v=4"></script>
+  <script src="scripts/api/template-digitise.js?v=1"></script>
+  <script src="scripts/api/project-documents.js?v=2"></script>
   <!-- Report generation jobs: owns the polling, survives a reload, feeds the bell.
        Plain script and BEFORE app-shell, which is text/babel and therefore runs
        later -- the bell reads window.FS.reportJobs on first render. -->
@@ -384,9 +386,10 @@
   <script type="text/babel" src="scripts/mock-data.js?v=4"></script>
   <script type="text/babel" src="scripts/pages/_page-registry.js?v=2"></script>
   <script type="text/babel" src="scripts/pages/today.js?v=65"></script>
-  <script type="text/babel" src="scripts/pages/timeline.js?v=73"></script>
+  <script type="text/babel" src="scripts/pages/timeline.js?v=74"></script>
   <script type="text/babel" src="scripts/pages/reports.js?v=6"></script>
-  <script type="text/babel" src="scripts/pages/sites.js?v=14"></script>
+  <script type="text/babel" src="scripts/composites/project-documents-section.js?v=1"></script>
+  <script type="text/babel" src="scripts/pages/sites.js?v=15"></script>
   <script type="text/babel" src="scripts/pages/activity.js?v=5"></script>
   <script type="text/babel" src="scripts/pages/tasks.js?v=21"></script>
   <script type="text/babel" src="scripts/pages/evidence.js?v=20"></script>
@@ -400,7 +403,8 @@
   <!-- Sprint 7.3 + 7.6 — /settings page (density toggle added in 7.6) -->
   <script type="text/babel" src="scripts/pages/settings.js?v=15"></script>
   <!-- Sprint 10 B.2 — Template upload modal composite -->
-  <script type="text/babel" src="scripts/composites/template-upload-modal.js?v=2"></script>
+  <script type="text/babel" src="scripts/composites/template-digitise-review.js?v=1"></script>
+  <script type="text/babel" src="scripts/composites/template-upload-modal.js?v=3"></script>
   <!-- Sprint 10 B.1+B.3 — /library page (template library + skip-edit preview) -->
   <script src="scripts/fuzzy-search.js?v=1"></script>
   <script type="text/babel" src="scripts/pages/library.js?v=11"></script>
