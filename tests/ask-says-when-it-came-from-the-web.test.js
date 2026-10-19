@@ -65,6 +65,12 @@ test('a web answer is never corroborated against the web', () => {
   assert.match(line, /!res\.from_web/);
 });
 
+test('a result that already tried the web is not corroborated again', () => {
+  const line = askChat.slice(askChat.indexOf('var wantsCorrob'),
+                             askChat.indexOf('var wantsCorrob') + 320);
+  assert.match(line, /!\(res\.web && typeof res\.web\.status === 'string'\)/);
+});
+
 test('the block is visually separated, not just labelled', () => {
   assert.match(css, /\.fs-ask-web \{/);
   const rule = css.slice(css.indexOf('.fs-ask-web {'), css.indexOf('.fs-ask-web__label'));
