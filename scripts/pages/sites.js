@@ -1087,6 +1087,12 @@
             ),
       ),
 
+      /* Project documents (backend spec 2026-10-16). Renders nothing when the server
+         has the feature off; loaded lazily so a page without the script still works. */
+      window.FieldSight.ProjectDocumentsSection
+        ? React.createElement(window.FieldSight.ProjectDocumentsSection, { siteId: sel.site_id, key: 'docs-' + sel.site_id })
+        : null,
+
       /* Users on site */
       React.createElement('div', { className: 'fs-sites-detail__section' },
         React.createElement('div', { className: 'fs-sites-detail__section-label' },
