@@ -399,6 +399,40 @@
     return { text: text, foldable: true, level: k ? 'warn' : 'ok' };
   }
 
+  /* Project documents (backend spec 2026-10-16, rule 3). Below the answer and the
+     recording Sources: these are what the project's documents REQUIRE, never what
+     happened on site, and the label says both halves. Old backends send no
+     `documents` and get no block; neither does a page where the org API is off
+     (mocks, no org base) -- an original can only be opened through it. */
+  function renderDocumentOrigin(m) {
+    var docs = (m && m.documents) || [];
+    if (!docs.length) return null;
+    var PD = window.FS && window.FS.api && window.FS.api.projectDocuments;
+    /* The backend cited documents, so the claims they back must stay labelled (rule 3)
+       even where the org API is off here: the block still renders, only opening the
+       original needs the org API, so the buttons are disabled instead. */
+    var live = !!(PD && PD.isLive && PD.isLive());
+    return React.createElement('div', { className: 'fs-ask-docs' },
+      React.createElement('div', { className: 'fs-ask-docs__label' },
+        m.zh ? '来自项目文档 — 规定应如何，不是现场发生了什么'
+             : 'From project documents — what should be, not what happened on site'),
+      React.createElement('div', { className: 'fs-ask-docs__list' },
+        docs.map(function (d, i) {
+          var label = (PD && PD.citeLabel && PD.citeLabel(d)) || d.title || 'Document';
+          var openable = live && !!(d.site_id && d.document_id);
+          return React.createElement('button', {
+            key: i, type: 'button', className: 'fs-ask-docs__item',
+            disabled: !openable,
+            onClick: function () {
+              if (!openable) return;
+              PD.open(d.site_id, d.document_id, d.page).catch(function (err) {
+                if (window.FS.toast) window.FS.toast.show({ message: (err && err.message) || 'Could not open the document.', tone: 'error' });
+              });
+            },
+          }, label);
+        })));
+  }
+
   function renderCorroboration(res) {
     if (!res) return null;
 
@@ -1320,7 +1354,10 @@
           fromWeb:   !!res.from_web,
           grounded:  !!res.grounded,
           web:       res.web || null,
-          corrob:    wantsCorrob ? { _pending: true } : null,
+          /* Project documents the answer cited (backend rule 3): what should be, kept
+             apart from the recordings and the web. Absent when none were cited. */
+          documents:   res.documents || null,
+          corrob:   wantsCorrob ? { _pending: true } : null,
           /* Captured from the question at send time, not read off the answer:
              the model's reply language is not reliable (measured on prod, a
              Chinese question came back in English 2 runs out of 3), and the
@@ -1609,6 +1646,10 @@
                   body:        renderCitations(m.citations, !m.grounded, true),
                 })
               : null,
+            /* Project documents: their own block right after the records fold,
+               never inside it -- a different provenance (what should be, not
+               what happened on site), so it stays visible when records fold. */
+            m.role === 'assistant' ? renderDocumentOrigin(m) : null,
             /* The web fold (spec 2026-10-17 §3), closed by default, after the
                records. Its summary carries the status line, the source domains
                and any conflict count; its body the conflicts list, the web
@@ -1820,7 +1861,7 @@
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.AskChat = AskChat;
   window.FieldSight._corroborationHasNothingToShow = hasNothingToShow;
-  window.FieldSight._askWebStatus = { line: webStatusLine, render: renderWebStatus, origin: renderWebOrigin, citations: renderCitations };
+  window.FieldSight._askWebStatus = { line: webStatusLine, render: renderWebStatus, origin: renderWebOrigin, citations: renderCitations, docs: renderDocumentOrigin };
   /* Pure fold helpers, exported for tests (tests/ask-answer-first-folds.test.js). */
   window.FieldSight._askFolds = { records: recordsFoldSummary, web: webFoldSummary, corrob: corrobFoldSummary };
   window.FieldSight._corroborationSourceDomain = sourceDomain;
