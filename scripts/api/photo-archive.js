@@ -58,7 +58,13 @@
                                      date: opts.date, filename: j.filename });
           var res = await media.getUrl(key);
           if (!res || !res.url) throw new Error('no presigned url');
-          var r = await doFetch(res.url);
+          /* no-store, or every photo lands in _MISSING. The thumbnails on the
+             page already loaded this SAME presigned URL through an <img> with
+             no crossOrigin, so Chrome cached a response without CORS headers,
+             and a default-mode fetch is served that copy and refused ("Failed
+             to fetch"). Measured on prod 2026-10-20: 34/34 photos missing from
+             the zip; the same URL with cache: 'no-store' returned 200. */
+          var r = await doFetch(res.url, { cache: 'no-store' });
           if (!r || !r.ok) throw new Error('HTTP ' + ((r && r.status) || '?'));
           return { j: j, bytes: new Uint8Array(await r.arrayBuffer()) };
         } catch (err) {
