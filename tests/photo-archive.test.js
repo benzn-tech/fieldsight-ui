@@ -57,6 +57,17 @@ test('a photo that fails to fetch is REPORTED, never silently dropped', async ()
   assert.ok(r.paths.some(x => x.startsWith('_MISSING/')), r.paths.join('\n'));
 });
 
+test('photos are fetched past the cache the thumbnails filled', async () => {
+  // A default-mode fetch is served the <img> tag's cached copy, which has no
+  // CORS headers, and every photo fails (prod 2026-10-20: 34/34 _MISSING).
+  const seen = [];
+  const r = await buildArchive({ photos: [p()], date: '2026-09-02',
+    userDisplayName: 'Ben Lin',
+    fetchImpl: async (url, init) => { seen.push(init && init.cache); return okFetch(); } });
+  assert.deepStrictEqual(seen, ['no-store']);
+  assert.strictEqual(r.missing.length, 0);
+});
+
 test('the failure note names the file and the reason', async () => {
   const r = await buildArchive({ photos: [p()], date: '2026-09-02',
     userDisplayName: 'Ben Lin',
