@@ -19,7 +19,9 @@
   var h = React.createElement;
   function api() { return window.FS.api.projectDocuments; }
   function toast(message, tone) { if (window.FS && window.FS.toast) window.FS.toast.show({ message: message, tone: tone }); }
-  function fmtDate(s) { var d = s ? new Date(s) : null; return d && !isNaN(d) ? d.toLocaleDateString() : ''; }
+  /* UTC createdAt → '22 Oct 2026' in NZ time, whatever the browser's zone or locale
+     (the browser-locale default read '10/22/2026'). */
+  function fmtDate(s) { return s ? window.FS.api.nzDate(s) : ''; }
   var BTN = 'fs-btn fs-btn--sm ';
   function docVisibility() { return typeof document !== 'undefined' && document.visibilityState ? document.visibilityState : 'visible'; }
 

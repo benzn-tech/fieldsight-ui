@@ -991,16 +991,16 @@
   }
 
   /* Epoch SECONDS (the backend is Python) -> the short day the scope chips
-     use ('Thu 3 Sep'), as a calendar day in `tz` -- the browser's own zone
-     when omitted, the zone the question was asked from (api/ask.js sends
-     the same one as `tz`). null when there is no time to show. */
+     use ('Thu 3 Sep'), as a calendar day in `tz` -- New Zealand when omitted
+     (owner rule 2026-10-22: the UI shows NZ time whatever the browser's zone;
+     it used to be the browser's own zone). null when there is no time to show. */
   function answeredDay(at, tz) {
     if (typeof at !== 'number' || !isFinite(at)) return null;
     var d = new Date(at * 1000);
     var iso;
     try {
       var o = { year: 'numeric', month: '2-digit', day: '2-digit' };
-      if (tz) o.timeZone = tz;
+      o.timeZone = tz || 'Pacific/Auckland';
       iso = new Intl.DateTimeFormat('en-CA', o).format(d);   /* en-CA -> YYYY-MM-DD */
     } catch (e) {
       iso = d.toISOString().slice(0, 10);

@@ -46,7 +46,7 @@ test('the project page mounts it between the reports and the people', () => {
 
 test('both files are loaded by the app and styled', () => {
   assert.match(html, /scripts\/api\/project-documents\.js\?v=\d+/);
-  assert.match(html, /scripts\/composites\/project-documents-section\.js\?v=1/);
+  assert.match(html, /scripts\/composites\/project-documents-section\.js\?v=\d+/);
   assert.match(css, /\.fs-project-docs \{/);
 });
 
@@ -95,7 +95,10 @@ test('the component showcase renders it', () => {
 /* Behaviour: the component rendered with React stubbed to a plain tree, the first state
    preset to a loaded list, and the real api module (statusOf etc.). */
 function renderWith(listState) {
-  global.window = { FieldSight: {}, FS: { api: { useMocks: false, orgBaseUrl: 'https://x/prod/api' } } };
+  /* The real FS.api namespace (dates are shown through its NZ helpers), live org. */
+  global.window = { FieldSight: {}, FS_ENV: { useMocks: false, orgBaseUrl: 'https://x/prod/api' } };
+  delete require.cache[require.resolve('../scripts/api/index.js')];
+  require('../scripts/api/index.js');
   let first = true;
   global.React = {
     createElement: function (type, props) { return { type, props: props || {}, kids: [].slice.call(arguments, 2) }; },

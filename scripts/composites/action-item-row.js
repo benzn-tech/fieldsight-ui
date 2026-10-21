@@ -292,7 +292,8 @@
           closerCaption
             ? React.createElement('span', {
                 className: 'fs-action-item-row__meta-item fs-action-item-row__meta-item--audit',
-                title:     closer.at ? new Date(closer.at).toString() : undefined,
+                /* Full NZ date and time; was the browser-zone Date#toString. */
+                title:     closer.at ? window.FS.api.nzDateTime(closer.at) : undefined,
               }, closerCaption)
             : null,
 
