@@ -9100,6 +9100,31 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color:      var(--text-tertiary);
 }
 
+/* Recent conversations (FS_ASK_THREADS): an open row and its Delete, side
+   by side -- siblings, because a button cannot hold a button. */
+.fs-search-palette__conv {
+  display:     flex;
+  align-items: center;
+}
+.fs-search-palette__conv .fs-search-palette__conv-open {
+  flex:      1;
+  min-width: 0;
+}
+.fs-search-palette__conv-delete {
+  flex-shrink:   0;
+  background:    transparent;
+  border:        none;
+  cursor:        pointer;
+  font-size:     16px;
+  line-height:   1;
+  color:         var(--text-tertiary);
+  padding:       6px 12px;
+  border-radius: var(--radius-sm, 4px);
+  transition:    color 100ms ease;
+}
+.fs-search-palette__conv-delete:hover,
+.fs-search-palette__conv-delete:focus-visible { color: var(--text-primary); }
+
 /* Inline Ask hand-off (F1) — replaces the results list when the "Ask
    FieldSight" row is selected; AskChat renders in place, no navigation.
    AskChat brings its own styling — this wrapper just adds palette-
