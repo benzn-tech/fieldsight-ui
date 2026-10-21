@@ -172,6 +172,13 @@
        answer that carries `web_offer`. Off unless the env says otherwise:
        prod (`main`) must keep sending exactly today's request. */
     askWebOffer: env.askWebOffer !== undefined ? !!env.askWebOffer : false,
+    /* Ask keeps the palette's conversations server-side (Amplify
+       FS_ASK_THREADS; spec 2026-10-22 ask-conversation-history §7). On, the
+       palette lists "Recent conversations" and its AskChat sends
+       `new_thread` / `thread_id`. Off unless the env says otherwise: the
+       module that talks to the routes is FS.api.askThreads (api/ask-threads.js),
+       this is only the switch. */
+    askThreadsOn: env.askThreads !== undefined ? !!env.askThreads : false,
     /* D5 (visibility spec) — legacy report-gateway read fallback (/timeline,
        /dates, /site-users). Default ON during Phase 2 rollout; flip to false
        (env.legacyReadFallback = false) to retire the legacy read paths once
