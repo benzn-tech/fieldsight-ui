@@ -146,16 +146,66 @@
     return (contentType === EXT_TYPES.pdf && page) ? url + '#page=' + page : url;
   }
 
-  /* The tab is opened BEFORE the first await: a window.open after one is no longer in
-     the click's user gesture and the popup blocker eats it. */
+  /* Does the browser show this type in a tab, or save it? A PDF and plain text are
+     shown; a Word file is saved -- and a tab opened for it stays on about:blank
+     forever, because the tab committed the blank page before the file arrived.
+     Unknown ('') counts as shown: that is what open() always did. text/* includes
+     Markdown, which Chromium renders as text (the server sends it inline). */
+  function opensInTab(contentType) {
+    return !contentType || contentType === EXT_TYPES.pdf || /^text\//.test(contentType);
+  }
+
+  /* Save the file without leaving the page. The presigned URL is cross-origin, so the
+     `download` attribute is ignored and this is an ordinary navigation of this tab --
+     which, for a type the browser cannot show, becomes a download and the page stays.
+     Only ever called for such a type (opensInTab false). */
+  function saveInPlace(host, url, filename) {
+    var doc = host.document;
+    var a = doc.createElement('a');
+    a.href = url;
+    a.download = filename || '';
+    a.rel = 'noopener';
+    a.style.display = 'none';
+    doc.body.appendChild(a);
+    a.click();
+    doc.body.removeChild(a);
+  }
+
+  /* opts.contentType / opts.filename: what the row or search hit already knows about
+     the file, so the choice "tab or save" is made inside the click.
+
+     A tab is opened BEFORE the first await: a window.open after one is no longer in
+     the click's user gesture and the popup blocker eats it. A Word file opens no tab
+     at all and is saved in place once its URL arrives. */
   async function open(siteId, docId, page, opts) {
     opts = opts || {};
     var host = opts.window || window;
+    var known = opts.contentType || EXT_TYPES[extOf(opts.filename)] || '';
+    if (!opensInTab(known)) {
+      var got = await call(base(siteId) + '/' + enc(docId) + '/file');
+      if (got.off) throw new Error('Project documents are not available.');
+      /* The server disagrees and says the browser would SHOW it: navigating this tab
+         would replace FieldSight with the file, so use a tab even at the risk of the
+         popup blocker. */
+      if (got.contentType && opensInTab(got.contentType)) {
+        host.open(got.url, '_blank', 'noopener');
+      } else {
+        saveInPlace(host, got.url, got.filename);
+      }
+      return got.url;
+    }
     var tab = host.open('about:blank', '_blank');
     try {
       var res = await call(base(siteId) + '/' + enc(docId) + '/file');
       if (res.off) throw new Error('Project documents are not available.');
       var href = pageHref(res.url, res.contentType, page);
+      if (tab && !opensInTab(res.contentType)) {
+        /* The type was not known at the click and it is one the browser saves: the
+           tab would stay blank. Close it and save from here instead. */
+        tab.close();
+        saveInPlace(host, res.url, res.filename);
+        return res.url;
+      }
       if (tab) {
         try { tab.opener = null; } catch (e) { /* cross-origin already */ }
         tab.location.href = href;
@@ -212,6 +262,7 @@
         siteId: r.site_id,
         documentId: r.document_id,
         page: r.page_from || null,
+        contentType: r.content_type || '',
       };
     });
   }
@@ -222,7 +273,7 @@
     isLive: orgLive,
     EXT_TYPES: EXT_TYPES, MAX_BYTES: MAX_BYTES, STUCK_MS: STUCK_MS, REFRESH_MS: REFRESH_MS,
     typeFor: typeFor, checkFile: checkFile, list: list, history: history, upload: upload,
-    rename: rename, remove: remove, retry: retry, open: open, pageHref: pageHref,
+    rename: rename, remove: remove, retry: retry, open: open, opensInTab: opensInTab, pageHref: pageHref,
     pageLabel: pageLabel, citeLabel: citeLabel, statusOf: statusOf, shouldPoll: shouldPoll, toPaletteItems: toPaletteItems,
   };
 })();

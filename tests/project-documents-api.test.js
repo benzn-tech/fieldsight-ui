@@ -142,9 +142,92 @@ test('labels and palette rows', () => {
   assert.strictEqual(PD.citeLabel({ title: 'Spec', heading: '3.2 Formwork', page: 4, page_to: 4 }),
     'Spec · 3.2 Formwork · p. 4');
   const items = PD.toPaletteItems([{ document_id: 'd1', site_id: 's1', site_name: 'Tower',
-    title: 'Spec', heading: '3.2 Formwork', page_from: 4, page_to: 5 }]);
+    title: 'Spec', heading: '3.2 Formwork', page_from: 4, page_to: 5, content_type: DOCX }]);
   assert.deepStrictEqual(items, [{ type: 'document', id: 'doc_0_d1', title: 'Spec',
-    subtitle: '3.2 Formwork · pp. 4–5 · Tower', siteId: 's1', documentId: 'd1', page: 4 }]);
+    subtitle: '3.2 Formwork · pp. 4–5 · Tower', siteId: 's1', documentId: 'd1', page: 4,
+    contentType: DOCX }]);
+});
+
+/* ── A Word document is saved in place, never a tab left on about:blank ──────────
+   The presigned URL is served inline; a browser cannot show a .docx, so a tab opened
+   for it committed about:blank and stayed there while the file downloaded. */
+
+function fakeHost(order) {
+  const anchors = [];
+  const doc = {
+    createElement(tag) {
+      const a = { tag, style: {}, click() { order.push('click:' + a.href + ':' + a.download); } };
+      anchors.push(a);
+      return a;
+    },
+    body: { appendChild() { order.push('append'); }, removeChild() { order.push('remove'); } },
+  };
+  const tab = { location: { href: '' }, close() { order.push('close'); } };
+  return { anchors, tab, host: { document: doc, open(u) { order.push('open:' + u); return tab; } } };
+}
+
+test('THE: a Word document opens no tab and is saved in place', async () => {
+  const order = [];
+  const { host } = fakeHost(order);
+  const PD = load(() => { order.push('request'); return { url: 'https://s3/w', contentType: DOCX, filename: 'Spec.docx' }; });
+  const out = await PD.open('s1', 'd1', null, { window: host, contentType: DOCX });
+  assert.deepStrictEqual(order, ['request', 'append', 'click:https://s3/w:Spec.docx', 'remove']);
+  assert.strictEqual(out, 'https://s3/w');
+});
+
+test('the filename alone is enough to know it is a Word file', async () => {
+  const order = [];
+  const { host } = fakeHost(order);
+  const PD = load(() => ({ url: 'https://s3/w', contentType: DOCX, filename: 'Spec.docx' }));
+  await PD.open('s1', 'd1', null, { window: host, filename: 'Spec.DOCX' });
+  assert.ok(!order.some((o) => o.startsWith('open:')), order.join(' '));
+});
+
+test('a PDF still opens its tab inside the click, before anything is awaited', async () => {
+  const order = [];
+  const { host, tab } = fakeHost(order);
+  const PD = load(() => { order.push('request'); return { url: 'https://s3/p', contentType: 'application/pdf' }; });
+  await PD.open('s1', 'd1', 3, { window: host, contentType: 'application/pdf' });
+  assert.deepStrictEqual(order, ['open:about:blank', 'request']);
+  assert.strictEqual(tab.location.href, 'https://s3/p#page=3');
+});
+
+test('plain text and Markdown are shown in a tab (the browser displays them inline)', () => {
+  const PD = load(() => ({}));
+  assert.strictEqual(PD.opensInTab('text/plain'), true);
+  assert.strictEqual(PD.opensInTab('text/markdown'), true);
+  assert.strictEqual(PD.opensInTab('application/pdf'), true);
+  assert.strictEqual(PD.opensInTab(DOCX), false);
+  assert.strictEqual(PD.opensInTab(''), true);   // unknown: the old behaviour
+});
+
+test('type unknown at the click and Word on arrival: the blank tab is closed and the file saved', async () => {
+  const order = [];
+  const { host } = fakeHost(order);
+  const PD = load(() => { order.push('request'); return { url: 'https://s3/w', contentType: DOCX, filename: 'a.docx' }; });
+  await PD.open('s1', 'd1', null, { window: host });
+  assert.deepStrictEqual(order, ['open:about:blank', 'request', 'close', 'append', 'click:https://s3/w:a.docx', 'remove']);
+});
+
+test('expected Word but the server says PDF: a tab, never navigating FieldSight away', async () => {
+  const order = [];
+  const { host } = fakeHost(order);
+  const PD = load(() => ({ url: 'https://s3/p', contentType: 'application/pdf' }));
+  await PD.open('s1', 'd1', null, { window: host, contentType: DOCX });
+  assert.deepStrictEqual(order, ['open:https://s3/p']);
+});
+
+test('a Word document that cannot be fetched says why and saves nothing', async () => {
+  const order = [];
+  const { host } = fakeHost(order);
+  const PD = load(() => { throw new Error('boom'); });
+  await assert.rejects(PD.open('s1', 'd1', null, { window: host, contentType: DOCX }), /boom/);
+  assert.deepStrictEqual(order, []);
+});
+
+test('the Documents section passes what the row knows about the file', () => {
+  const s = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'scripts', 'composites', 'project-documents-section.js'), 'utf8');
+  assert.match(s, /api\(\)\.open\(siteId, d\.id, null, \{ contentType: d\.contentType, filename: d\.filename \}\)/);
 });
 
 test('kill switch: no org base URL, or mocks on, is off and asks nothing', async () => {

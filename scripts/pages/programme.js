@@ -1723,7 +1723,7 @@
             : null,
 
           ctx.canWrite && ctx.view === 'gantt' && ctx.baselineData
-            ? React.createElement('label', { className: 'fs-programme__toolbar-check', title: 'Compare against saved baseline (' + (ctx.baselineData.saved_at ? ctx.baselineData.saved_at.slice(0, 10) : '') + ')' },
+            ? React.createElement('label', { className: 'fs-programme__toolbar-check', title: 'Compare against saved baseline (' + (ctx.baselineData.saved_at ? window.FS.api.nzDateTime(ctx.baselineData.saved_at) : '') + ')' },
                 React.createElement('input', {
                   type:     'checkbox',
                   checked:  ctx.showBaseline,

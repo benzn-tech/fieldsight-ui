@@ -78,12 +78,12 @@
 
   /* ── Helpers ───────────────────────────────────────────────────────── */
 
+  /* A version's created_at is a UTC timestamp: its first ten characters are the
+     UTC day, which read "21 Oct" for a template saved at 10:30 on 22 Oct in
+     Auckland. Shown as the NZ day (owner rule 2026-10-22). */
   function fmtDate(iso) {
     if (!iso) return '';
-    var p = iso.slice(0, 10).split('-').map(Number);
-    var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
-    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    return d.getUTCDate() + ' ' + months[d.getUTCMonth()] + ' ' + p[0];
+    return window.FS.api.nzDate(iso);
   }
 
   /* How many sections a row should claim. The server counts it (one query for
