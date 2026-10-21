@@ -120,7 +120,8 @@
       });
     }
     function onOpen(d) {
-      api().open(siteId, d.id).catch(function (err) { toast((err && err.message) || 'Could not open the document.', 'error'); });
+      /* The type decides tab (PDF, text) or save in place (Word) inside the click. */
+      api().open(siteId, d.id, null, { contentType: d.contentType, filename: d.filename }).catch(function (err) { toast((err && err.message) || 'Could not open the document.', 'error'); });
     }
     function onHistory(d) {
       if (hist && hist.seriesId === d.seriesId) { setHist(null); return; }

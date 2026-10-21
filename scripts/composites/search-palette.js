@@ -498,7 +498,8 @@
       if (!item) return;
       if (item.type === 'document') {
         saveRecent(trimmedQuery);
-        window.FS.api.projectDocuments.open(item.siteId, item.documentId, item.page)
+        /* contentType: a Word file is saved in place, not opened in a blank tab. */
+        window.FS.api.projectDocuments.open(item.siteId, item.documentId, item.page, { contentType: item.contentType })
           .catch(function (err) {
             if (window.FS.toast) window.FS.toast.show({ message: (err && err.message) || 'Could not open the document.', tone: 'error' });
           });

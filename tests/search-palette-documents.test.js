@@ -46,7 +46,7 @@ test('the rows come from the search answer and are cleared with it', () => {
 test('choosing a document opens the original at its page', () => {
   const sel = palette.slice(palette.indexOf('function doSelect'));
   assert.match(sel.slice(0, 900), /item\.type === 'document'/);
-  assert.match(sel.slice(0, 900), /projectDocuments\.open\(item\.siteId, item\.documentId, item\.page\)/);
+  assert.match(sel.slice(0, 900), /projectDocuments\.open\(item\.siteId, item\.documentId, item\.page, \{ contentType: item\.contentType \}\)/);
 });
 
 test('"No results" waits for the documents too', () => {
