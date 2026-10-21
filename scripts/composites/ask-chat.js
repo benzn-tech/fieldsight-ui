@@ -975,7 +975,7 @@
     var busy    = refBusy[0];
     var setBusy = refBusy[1];
     /* What an async Ask turn (FS_ASK_ASYNC) last said it is doing:
-       null | 'pending' | 'searching_web'. Stays null on the one-request path,
+       null | 'pending' | 'searching_records' | 'searching_web' | 'writing'. Stays null on the one-request path,
        which reports no progress, so the pending line reads as it always has. */
     var refProgress = React.useState(null);
     var progress    = refProgress[0];
@@ -1757,6 +1757,8 @@
           reaskOf != null ? 'Searching the web…'
             : progress === 'searching_web' ? 'Checking the web…'
             : progress === 'pending'   ? 'Searching your records…'
+            : progress === 'searching_records' ? 'Searching your records…'
+            : progress === 'writing'   ? 'Writing the answer…'
             : 'Looking through your records…') : null,
       );
         if (!dock) return messagesDiv;
