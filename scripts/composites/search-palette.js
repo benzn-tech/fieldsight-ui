@@ -243,8 +243,13 @@
        search is re-run by design, a conversation is re-read. null = no
        section: the flag is off, the list has not landed, or it failed. A
        failure is NOT an empty list: hiding the section says "not known", an
-       empty one would say "you have none". */
-    var threadsOn = !!window.FS.api.askThreadsOn;
+       empty one would say "you have none".
+
+       The switch is FS_ASK_THREADS AND FS_ASK_ASYNC: only the async turn
+       (/ask/start) stores a thread -- the sync /api/ask path drops the
+       fields -- so with async off an Ask would be kept nowhere, and must
+       stay a recent search as it is today. */
+    var threadsOn = !!window.FS.api.askThreadsOn && !!window.FS.api.askAsync;
     var refConvs = React.useState(null);
     var convs = refConvs[0]; var setConvs = refConvs[1];
 
@@ -257,18 +262,26 @@
       _loadCache();
     }, []);
 
-    /* Recent conversations, once per open. No request with the flag off. */
-    React.useEffect(function () {
+    /* Recent conversations: on open, and again on "Back to search" (a
+       question asked in this open is a conversation by then). No request
+       with the switch off. `aliveRef` drops a list landing after close. */
+    var aliveRef = React.useRef(true);
+    var convSeq  = React.useRef(0);
+    function loadConvs() {
       var T = window.FS.api.askThreads;
       if (!threadsOn || !T) return;
-      var live = true;
+      var mine = ++convSeq.current;
       T.list().then(function (list) {
-        if (live) setConvs((list || []).slice(0, 5));
+        if (aliveRef.current && mine === convSeq.current) setConvs((list || []).slice(0, 5));
       }).catch(function (err) {
         console.warn('[SearchPalette] recent conversations unavailable', err);
-        if (live) setConvs(null);
+        if (aliveRef.current && mine === convSeq.current) setConvs(null);
       });
-      return function () { live = false; };
+    }
+    React.useEffect(function () {
+      aliveRef.current = true;
+      loadConvs();
+      return function () { aliveRef.current = false; };
     }, []);
 
     /* Re-run client search + kick a debounced server topic search on query
@@ -595,7 +608,7 @@
                 React.createElement('button', {
                   type:         'button',
                   className:    'fs-search-palette__ask-back',
-                  onClick:      function () { setAskMode(null); },
+                  onClick:      function () { setAskMode(null); loadConvs(); },
                 },
                   NavIcon && React.createElement(NavIcon, {
                     name:  'chevron-left',

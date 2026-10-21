@@ -90,6 +90,10 @@ function mountPalette(opts) {
     askThreads: T,
   };
   if (opts.flag !== undefined) api.askThreadsOn = opts.flag;
+  /* Threads are stored only on the async turn (the sync /api/ask path drops
+     the fields), so the palette's switch is askThreadsOn && askAsync. On
+     unless a test says otherwise. */
+  api.askAsync = opts.async !== undefined ? opts.async : true;
   global.window = {
     FieldSight: { AskChat: AskChatStub },
     FS: { api: api, Router: { navigate(u) { h.nav.push(u); } },
@@ -286,6 +290,69 @@ test('P6 list failure hides the section and keeps Recent searches', async () => 
   } finally {
     console.warn = warn;
   }
+});
+
+test('P8 threads on but async off: the switch is off -- no list, Ask still saved to recents, no threads prop', async () => {
+  for (const combo of [{ flag: true, async: false }, { flag: false, async: true }]) {
+    const h = mountPalette(Object.assign({ session: { 'fs.search.recent': JSON.stringify(['slab pour']) },
+                                           list: () => Promise.resolve(rows(3)) }, combo));
+    h.render();
+    await settle(h);
+    assert.strictEqual(h.calls.list, 0, 'list requested for ' + JSON.stringify(combo));
+    assert.deepStrictEqual(h.groupLabels(), ['Recent searches']);
+    h.type('when did we pour');
+    h.askRow().props.onClick();
+    h.rerender();
+    assert.deepStrictEqual(JSON.parse(h.store['fs.search.recent']), ['when did we pour', 'slab pour'],
+      'the question vanished for ' + JSON.stringify(combo));
+    assert.ok(!h.askChat().props.threads);
+    h.unmount();
+  }
+  /* Both on: the switch is on. */
+  const h = mountPalette({ flag: true, async: true, list: () => Promise.resolve(rows(1)) });
+  h.render();
+  await settle(h);
+  assert.strictEqual(h.calls.list, 1);
+  h.type('q');
+  h.askRow().props.onClick();
+  h.rerender();
+  assert.strictEqual(h.askChat().props.threads, true);
+  assert.strictEqual(h.store['fs.search.recent'], undefined);
+  h.unmount();
+});
+
+test('P9 Back to search refreshes the list, so a conversation started in this open appears', async () => {
+  let served = [];
+  const h = mountPalette({ flag: true, list: () => Promise.resolve(served.slice()) });
+  h.render();
+  await settle(h);
+  assert.strictEqual(h.calls.list, 1);
+  assert.strictEqual(h.convRows().length, 0);
+  h.type('when did we pour');
+  h.askRow().props.onClick();
+  h.rerender();
+  /* The inline AskChat stores the turn server-side... */
+  served = [{ thread_id: TID, title: 'when did we pour', updated_at: 1761000000, turns: 1 }];
+  h.byClass('fs-search-palette__ask-back')[0].props.onClick();
+  h.type('');
+  await settle(h);
+  assert.strictEqual(h.calls.list, 2, 'Back to search did not refresh the list');
+  assert.strictEqual(h.convRows().length, 1);
+  assert.ok(h.text(h.convRows()[0]).includes('when did we pour'));
+  h.unmount();
+});
+
+test('P9b Back to search with the switch off makes no request', async () => {
+  const h = mountPalette({ flag: true, async: false });
+  h.render();
+  await settle(h);
+  h.type('q');
+  h.askRow().props.onClick();
+  h.rerender();
+  h.byClass('fs-search-palette__ask-back')[0].props.onClick();
+  await settle(h);
+  assert.strictEqual(h.calls.list, 0);
+  h.unmount();
 });
 
 /* ---- D7: the docked Timeline AskChat never stores --------------------------- */
