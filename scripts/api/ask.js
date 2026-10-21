@@ -1,7 +1,7 @@
 /* ==========================================================================
    FieldSight API · Ask Agent — BACKEND-CONTEXT §4.12
    --------------------------------------------------------------------------
-   POST /api/ask  body { question, date?, user?, site_id?, author_folder?, topic_row_id?, scoped?, tz?, scope?, topic_id?, history?, offer_web?, web_intent? }
+   POST /api/ask  body { question, date?, user?, site_id?, author_folder?, topic_row_id?, scoped?, tz?, scope?, topic_id?, history?, offer_web?, web_intent?, thread_id?, new_thread? }
      → { answer, citations, model, ... }
 
    Stateless on the server (BACKEND-CONTEXT §10) — multi-turn must be
@@ -35,6 +35,9 @@
      own 504 is what arrives when the backend really is stuck: a client that
      gives up first turns a server-side fact into a client-side mystery. */
   var MODEL_CALL_TIMEOUT_MS = 35000;
+
+  /* A thread id as the backend mints it (secrets.token_hex(16)). */
+  var THREAD_ID_RE = /^[0-9a-f]{32}$/;
 
   /* ---- async turn (FS_ASK_ASYNC) ------------------------------------------
      POST /ask/start  (same body as /ask)  -> { turn_id } | { error }
@@ -254,6 +257,17 @@
          body. */
       if (opts.offer_web === true)  body.offer_web  = true;
       if (opts.web_intent === true) body.web_intent = true;
+      /* Conversation history (spec 2026-10-22 ask-conversation-history §4/§7).
+         Same whitelist trap again: the caller (AskChat with `threads`) sets
+         these, and only the palette's AskChat ever does. `new_thread` only as
+         `true`; `thread_id` only in the shape the backend accepts (32 lowercase
+         hex) -- anything else is a 400 there, and a stale or mangled id must
+         not turn a question into a failed turn. Absent for every other caller,
+         so their body stays byte-identical. */
+      if (typeof opts.thread_id === 'string' && THREAD_ID_RE.test(opts.thread_id)) {
+        body.thread_id = opts.thread_id;
+      }
+      if (opts.new_thread === true) body.new_thread = true;
       /* Read at call time, not load time: index.js builds FS.api after env.js. */
       if (window.FS.api.askAsync) return _askAsyncTurn(body, askBaseUrl, hooks);
       return window.FS.api.request('/ask', {

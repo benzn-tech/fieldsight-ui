@@ -3753,6 +3753,15 @@
   margin-bottom: 4px;
   font-style: italic;
 }
+/* Conversation history (spec 2026-10-22 ask-conversation-history §7): a
+   stored answer's date, and a withheld turn's sentence. Quiet facts, like the
+   scope line -- the withheld row is not an error, the reader did nothing. */
+.fs-ask-chat__answered {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+}
+.fs-ask-chat__msg--withheld .fs-ask-chat__msg-text { color: var(--text-tertiary); font-style: italic; }
 /* `question_admission`'s refusal sentence -- rendered so a guard doing its
    job does not read as the web section having silently gone missing. */
 .fs-ask-chat__web-refused {
@@ -9090,6 +9099,31 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   font-size:  var(--fs-text-sm, 13px);
   color:      var(--text-tertiary);
 }
+
+/* Recent conversations (FS_ASK_THREADS): an open row and its Delete, side
+   by side -- siblings, because a button cannot hold a button. */
+.fs-search-palette__conv {
+  display:     flex;
+  align-items: center;
+}
+.fs-search-palette__conv .fs-search-palette__conv-open {
+  flex:      1;
+  min-width: 0;
+}
+.fs-search-palette__conv-delete {
+  flex-shrink:   0;
+  background:    transparent;
+  border:        none;
+  cursor:        pointer;
+  font-size:     16px;
+  line-height:   1;
+  color:         var(--text-tertiary);
+  padding:       6px 12px;
+  border-radius: var(--radius-sm, 4px);
+  transition:    color 100ms ease;
+}
+.fs-search-palette__conv-delete:hover,
+.fs-search-palette__conv-delete:focus-visible { color: var(--text-primary); }
 
 /* Inline Ask hand-off (F1) — replaces the results list when the "Ask
    FieldSight" row is selected; AskChat renders in place, no navigation.
