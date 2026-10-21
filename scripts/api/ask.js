@@ -39,7 +39,9 @@
   /* ---- async turn (FS_ASK_ASYNC) ------------------------------------------
      POST /ask/start  (same body as /ask)  -> { turn_id } | { error }
      GET  /ask/result?turn=&since=         -> long-polls up to ~20s, then
-          { status: 'pending' | 'searching_web' }
+          { status: 'pending' | 'searching_records' | 'searching_web' | 'writing' }
+            (the middle two and `writing` come from the orchestrator,
+             ASK_AGENTIC; backend ask_voice_turn._SCREEN_STATES)
           { status: 'done', result: <exactly what POST /ask resolves to> }
           { status: 'error', error } | { status: 'cancelled' }
      POST /ask/cancel { turn_id }          -> 204
@@ -90,6 +92,10 @@
       })).catch(function () { /* nothing to do */ });
     } catch (e) { /* never let a cancel break the caller */ }
   }
+
+  /* Every non-terminal status a turn reports. One the backend adds without
+     this list learning it reads as a failure and cancels a healthy turn. */
+  var PROGRESS_STATUSES = ['pending', 'searching_records', 'searching_web', 'writing'];
 
   async function _askAsyncTurn(body, askBaseUrl, hooks) {
     hooks = hooks || {};
@@ -160,7 +166,7 @@
          (_notFound / _accessDenied). */
       var status = (res && typeof res.status === 'string') ? res.status : null;
       if (status === 'done' && res.result) return res.result;
-      if (status === 'pending' || status === 'searching_web') {
+      if (PROGRESS_STATUSES.indexOf(status) !== -1) {
         progress(status);
         since = status;
         continue;

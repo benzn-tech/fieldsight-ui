@@ -221,3 +221,34 @@ test('ask-chat passes isStale + onProgress and labels the two stages', () => {
   assert.match(src, /Checking the web…/);
   assert.match(src, /Looking through your records…/);
 });
+
+/* The orchestrator (ASK_AGENTIC) reports two more stages on a screen turn:
+   `searching_records` and `writing` (backend ask_voice_turn._SCREEN_STATES).
+   Treated as unknown, the first poll cancelled a healthy turn and rendered
+   "FieldSight is busy" (TEST, 2026-10-21). */
+test('flag on: the orchestrator stages are progress, not a failure', async () => {
+  const { ask, seen } = loadAsk(true, {
+    '/ask/start': [{ turn_id: 'abc' }],
+    '/ask/result': [
+      { status: 'searching_records' },
+      { status: 'searching_web' },
+      { status: 'writing' },
+      { status: 'done', result: ANSWER },
+    ],
+  });
+  const progress = [];
+  const res = await ask({ question: 'q', tz: null },
+                        { onProgress: function (s) { progress.push(s); } });
+  assert.deepStrictEqual(res, ANSWER);
+  const polls = seen.filter(function (s) { return s.path === '/ask/result'; });
+  assert.deepStrictEqual(polls.map(function (p) { return p.opts.params.since; }),
+                         ['pending', 'searching_records', 'searching_web', 'writing']);
+  assert.deepStrictEqual(progress, ['pending', 'searching_records', 'searching_web', 'writing']);
+  assert.ok(!seen.some(function (s) { return s.path === '/ask/cancel'; }));
+});
+
+test('ask-chat labels the orchestrator stages', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'scripts/composites/ask-chat.js'), 'utf8');
+  assert.match(src, /progress === 'searching_records' \? 'Searching your records…'/);
+  assert.match(src, /progress === 'writing'\s+\? 'Writing the answer…'/);
+});
