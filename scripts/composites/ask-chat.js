@@ -37,6 +37,14 @@
      alertsProvider  optional programme alerts route (unchanged)
      initialQuestion optional string — auto-sends once on mount (Search's
                      "Ask FieldSight" hand-off).
+     threads         boolean — keep this conversation server-side (spec
+                     2026-10-22 ask-conversation-history §7): the first
+                     question sends `new_thread: true`, later ones the
+                     `thread_id` that `result.thread` handed back. Set by the
+                     search palette only; without it no thread field is sent.
+     initialThread   {thread_id, scope, turns} — a stored conversation
+                     (GET /api/org/ask/threads/{id}). Its turns are the log on
+                     mount; nothing is asked.
 
    Exported to:
      window.FieldSight.AskChat
@@ -821,14 +829,18 @@
      pairs with that answer and the next turn sees (Q, web answer), not
      (Q, "Your site records don't cover that."). An offer nobody took --
      including a partial records answer that carried the button -- is the
-     answer the reader got, and pairs as a normal turn. */
+     answer the reader got, and pairs as a normal turn.
+
+     A stored turn the server withheld (`m.withheld`, spec 2026-10-22 §6) is
+     not a turn either: the reader no longer has its answer, so the model
+     must not be told they did. */
   function historyFromMessages(msgs) {
     var out = [];
     var pendingQuestion = null;
     (msgs || []).forEach(function (m) {
       if (m.role === 'user') {
         pendingQuestion = m.text;
-      } else if (m.role === 'assistant' && !m.error && !m.webAccepted && pendingQuestion != null) {
+      } else if (m.role === 'assistant' && !m.error && !m.withheld && !m.webAccepted && pendingQuestion != null) {
         out.push({ question: pendingQuestion, answer: m.text });
         pendingQuestion = null;
       }
@@ -855,6 +867,145 @@
     var cut = t.slice(0, TOPIC_CHIP_MAX + 1);
     var sp = cut.lastIndexOf(' ');
     return (sp > 0 ? cut.slice(0, sp) : t.slice(0, TOPIC_CHIP_MAX)).trim() + '…';
+  }
+
+  /* ---- conversation history (spec 2026-10-22 ask-conversation-history) -----
+
+     A stored turn is the `result` /ask/result returned, kept as it was, so it
+     renders through the SAME builder a live answer does: messageFromResult.
+     Everything that is not in the result -- the language, the web offer, the
+     history that turn sent, whether it was scoped -- is a request-side fact,
+     passed in: live from `send()`, stored from the turn's `request` and the
+     thread's `scope`. */
+
+  /* Copy is fixed by the spec (§6). */
+  var WITHHELD_TEXT = 'A record behind this answer is no longer available to you.';
+  var NEW_THREAD_TEXT = 'Started a new conversation';
+
+  /* `facts`: { offerWeb, sentHistory, scoped, wantsCorrob }. */
+  function messageFromResult(question, res, facts) {
+    res = res || {};
+    facts = facts || {};
+    return {
+      /* A per-message id, because the corroboration arrives later and has to
+         find its own answer again. Position is not an identity here: two
+         questions can be in flight, and matching on text attaches the block
+         to the wrong one as soon as somebody asks the same thing twice. */
+      id:        ++_midSeq,
+      role:      'assistant',
+      text:      res.answer || '',
+      citations: res.citations || [],
+      model:     res.model,
+      /* What the backend actually searched. Absent on the legacy path and
+         on older deploys, which formatAnswerBasis renders as no line. */
+      basis:     res.basis || null,
+      /* The records could not answer this and the web could. Carried as
+         its own field, never folded into `text`: a reader who cannot tell
+         what came out of their own meetings from what came off the
+         internet has no reason to suspect they need to check. */
+      fromWeb:   !!res.from_web,
+      grounded:  !!res.grounded,
+      web:       res.web || null,
+      /* Project documents the answer cited (backend rule 3): what should be, kept
+         apart from the recordings and the web. Absent when none were cited. */
+      documents:   res.documents || null,
+      corrob:   facts.wantsCorrob ? { _pending: true } : null,
+      /* Captured from the question, not read off the answer: the model's
+         reply language is not reliable (measured on prod, a Chinese question
+         came back in English 2 runs out of 3), and the basis line must not
+         inherit that coin flip. */
+      zh:        askedInChinese(question),
+      /* What the backend says it enforced. Stored as a response-shaped
+         object so the chips and scope lines read exactly what came back;
+         `applied_scope` undefined = a backend that predates scoping. */
+      scopeResponse: { applied_scope: res.applied_scope },
+      scoped:        !!facts.scoped,
+      question:      question,
+      /* What the backend actually searched for, once it resolves
+         history-dependent references ("it", "the same site") into a
+         standalone question. Rendered only when present and different
+         from what was typed -- absent on today's backend (history is
+         not wired up yet on that side) and equal-to-typed on the common
+         case where there was nothing to resolve, both of which say
+         nothing worth a line. */
+      asked:         res.asked,
+      /* The backend offered the web instead of running it (spec
+         2026-10-16 ask-screen-web-offer §3): renders "Search the web".
+         Only honoured when the request offered it -- prod never sends
+         `offer_web`, so it should never see one, and must not render a
+         button if it somehow did. */
+      webOffer:      !!facts.offerWeb && !!res.web_offer,
+      /* The exact history this turn sent, for the offer's re-ask. */
+      sentHistory:   facts.sentHistory || [],
+    };
+  }
+
+  /* A stored thread -> the log. Each turn is its question and its answer,
+     marked `stored` (it carries "Answered {date}" and "Ask again"). Two
+     shapes need more than that:
+     - withheld (§6): the question stays, the answer is the fixed sentence,
+       and it is no turn of history;
+     - a taken web offer: live, "Search the web" re-asks the SAME question
+       with web_intent and adds no second bubble, but the store keeps it as
+       its own turn. A web_intent turn right after an offer for the same
+       question is that re-ask, so it renders as it did live.
+     The history a stored turn sent is not stored, only its length, so it is
+     rebuilt from the turns before it -- what the reader saw then. */
+  function messagesFromThread(thread) {
+    var out = [];
+    var scoped = !!(thread && thread.scope && thread.scope.scoped === true);
+    ((thread && thread.turns) || []).forEach(function (t) {
+      if (!t || typeof t.question !== 'string') return;
+      var req = t.request || {};
+      var prev = out[out.length - 1];
+      var takenOffer = req.web_intent === true && prev && prev.role === 'assistant'
+        && prev.webOffer && prev.question === t.question;
+      if (takenOffer) prev.webAccepted = true;
+      else out.push({ role: 'user', text: t.question });
+      if (t.withheld || !t.result) {
+        out.push({ id: ++_midSeq, role: 'assistant', text: WITHHELD_TEXT,
+                   withheld: true, stored: true, question: t.question });
+        return;
+      }
+      var n = typeof req.history_len === 'number' ? req.history_len : 0;
+      var prior = historyFromMessages(out);
+      var m = messageFromResult(t.question, t.result, {
+        offerWeb:    req.offer_web === true,
+        sentHistory: n > 0 ? prior.slice(-n) : [],
+        scoped:      scoped,
+      });
+      m.stored = true;
+      m.answeredAt = t.at;
+      out.push(m);
+    });
+    return out;
+  }
+
+  /* The seeded log for one thread object, built once: AskChat's initial
+     state is computed on every render (the value form of useState), and a
+     rebuild would mint new message ids each time. */
+  var _seed = { thread: null, msgs: null };
+  function seedFor(thread) {
+    if (_seed.thread !== thread) _seed = { thread: thread, msgs: messagesFromThread(thread) };
+    return _seed.msgs;
+  }
+
+  /* Epoch SECONDS (the backend is Python) -> the short day the scope chips
+     use ('Thu 3 Sep'), as a calendar day in `tz` -- the browser's own zone
+     when omitted, the zone the question was asked from (api/ask.js sends
+     the same one as `tz`). null when there is no time to show. */
+  function answeredDay(at, tz) {
+    if (typeof at !== 'number' || !isFinite(at)) return null;
+    var d = new Date(at * 1000);
+    var iso;
+    try {
+      var o = { year: 'numeric', month: '2-digit', day: '2-digit' };
+      if (tz) o.timeZone = tz;
+      iso = new Intl.DateTimeFormat('en-CA', o).format(d);   /* en-CA -> YYYY-MM-DD */
+    } catch (e) {
+      iso = d.toISOString().slice(0, 10);
+    }
+    return shortDay(iso);
   }
 
   /* null  = no answer yet: the chip shows the request, unmarked.
@@ -962,8 +1113,10 @@
     var user    = props.user;
     var context = props.context || {};
 
-    /* messages: [{ role: 'user'|'assistant', text, citations?, model? }] */
-    var refMsgs = React.useState([]);
+    /* messages: [{ role: 'user'|'assistant', text, citations?, model? }]
+       A stored conversation (`initialThread`) is the log from the first
+       render: seeded, not asked. */
+    var refMsgs = React.useState(props.initialThread ? seedFor(props.initialThread) : []);
     var msgs    = refMsgs[0];
     var setMsgs = refMsgs[1];
 
@@ -1025,6 +1178,10 @@
        initialQuestion effect and would wipe the question that effect just
        added (palette hand-off). */
     var resetMountedRef = React.useRef(false);
+    /* The server-side conversation this log is (`threads` only): null until
+       the first answer hands one back in `result.thread`, then whatever id
+       the latest answer named. Read by `send()`; a scope change drops it. */
+    var threadRef = React.useRef((props.initialThread && props.initialThread.thread_id) || null);
 
     /* Task C — one-shot hand-off from Search's "Ask FieldSight" row. Runs
        once on mount only ([] deps). AUTO-SENDS: the user already typed and
@@ -1122,6 +1279,9 @@
       dayChangeTokenRef.current = renderCommitToken;
       genRef.current += 1;
       setMsgs([]);
+      /* A cleared log is a new conversation (spec 2026-10-22 §7: changing
+         the scope starts a new thread). */
+      threadRef.current = null;
       if (pending && !hasScope(context)) {
         if (busy) deferredResendRef.current = pending;
         else send(pending, { noHistory: true });
@@ -1313,6 +1473,14 @@
         ? requestBodyFor(context, question, history, { offerWeb: true, webIntent: webReask })
         : requestBodyFor(context, question, history);
       body.user = user;   /* undefined is dropped on the wire */
+      /* Conversation history (spec 2026-10-22 §4/§7). Only with `threads`
+         (the palette): without it no thread field exists and the body is
+         exactly today's -- the docked Timeline Ask clears its log on every
+         day change and must not fill the caller's five slots. */
+      if (props.threads) {
+        if (threadRef.current) body.thread_id = threadRef.current;
+        else body.new_thread = true;
+      }
       var gen = genRef.current;
       function isStale() { return gen !== genRef.current; }
       /* The hooks are read only by the async-turn path; the one-request path
@@ -1333,59 +1501,32 @@
                           && !!answerText
                           && !res.from_web
                           && !(res.web && typeof res.web.status === 'string');
-        /* A per-message id, because the corroboration arrives later and has to
-           find its own answer again. Position is not an identity here: two
-           questions can be in flight, and matching on text attaches the block
-           to the wrong one as soon as somebody asks the same thing twice. */
-        var mid = ++_midSeq;
-        setMsgs(function (m) { return placeReply(m, reaskOfId, {
-          id:        mid,
-          role:      'assistant',
-          text:      answerText,
-          citations: res.citations || [],
-          model:     res.model,
-          /* What the backend actually searched. Absent on the legacy path and
-             on older deploys, which formatAnswerBasis renders as no line. */
-          basis:     res.basis || null,
-          /* The records could not answer this and the web could. Carried as
-             its own field, never folded into `text`: a reader who cannot tell
-             what came out of their own meetings from what came off the
-             internet has no reason to suspect they need to check. */
-          fromWeb:   !!res.from_web,
-          grounded:  !!res.grounded,
-          web:       res.web || null,
-          /* Project documents the answer cited (backend rule 3): what should be, kept
-             apart from the recordings and the web. Absent when none were cited. */
-          documents:   res.documents || null,
-          corrob:   wantsCorrob ? { _pending: true } : null,
-          /* Captured from the question at send time, not read off the answer:
-             the model's reply language is not reliable (measured on prod, a
-             Chinese question came back in English 2 runs out of 3), and the
-             basis line must not inherit that coin flip. */
-          zh:        askedInChinese(question),
-          /* What the backend says it enforced. Stored as a response-shaped
-             object so the chips and scope lines read exactly what came back;
-             `applied_scope` undefined = a backend that predates scoping. */
-          scopeResponse: { applied_scope: res.applied_scope },
-          scoped:        scopedRequest,
-          question:      question,
-          /* What the backend actually searched for, once it resolves
-             history-dependent references ("it", "the same site") into a
-             standalone question. Rendered only when present and different
-             from what was typed -- absent on today's backend (history is
-             not wired up yet on that side) and equal-to-typed on the common
-             case where there was nothing to resolve, both of which say
-             nothing worth a line. */
-          asked:         res.asked,
-          /* The backend offered the web instead of running it (spec
-             2026-10-16 ask-screen-web-offer §3): renders "Search the web".
-             Only honoured with the flag on -- prod never sends `offer_web`,
-             so it should never see one, and must not render a button if it
-             somehow did. */
-          webOffer:      offerWeb && !!res.web_offer,
-          /* The exact history this turn sent, for the offer's re-ask. */
-          sentHistory:   history,
-        }); });
+        /* The same builder a stored turn goes through, so a conversation
+           reopened from history reads exactly as it did live. The facts are
+           the ones captured at send time. */
+        var reply = messageFromResult(question, res, {
+          offerWeb:    offerWeb,
+          sentHistory: history,
+          scoped:      scopedRequest,
+          wantsCorrob: wantsCorrob,
+        });
+        var mid = reply.id;
+        /* The thread this answer was stored in. A different id than the one
+           sent means the old thread was evicted, expired or full and the
+           server started a new one: switch to it, and say so where the new
+           conversation begins -- above the question that started it. */
+        var switched = false;
+        if (props.threads && res.thread && typeof res.thread.thread_id === 'string') {
+          switched = !!threadRef.current && threadRef.current !== res.thread.thread_id;
+          threadRef.current = res.thread.thread_id;
+        }
+        setMsgs(function (m) {
+          var next = placeReply(m, reaskOfId, reply);
+          if (!switched) return next;
+          var at = next.indexOf(userMsg || reply);
+          if (at === -1) return next;
+          return next.slice(0, at).concat([{ role: 'divider', text: NEW_THREAD_TEXT }], next.slice(at));
+        });
 
         /* The second pass. Fired after the answer is already on screen and
            awaited by nothing the answer depends on -- /ask spends its whole
@@ -1551,7 +1692,8 @@
                — not the last line of the answer. */
             'data-role': m.role,
             className: 'fs-ask-chat__msg fs-ask-chat__msg--' + m.role
-              + (m.error ? ' fs-ask-chat__msg--error' : ''),
+              + (m.error ? ' fs-ask-chat__msg--error' : '')
+              + (m.withheld ? ' fs-ask-chat__msg--withheld' : ''),
           },
             /* Assistant replies are markdown → render via the safe renderer
                (it HTML-escapes first, then emits only a fixed tag set, so
@@ -1615,6 +1757,12 @@
                     })
                   : React.createElement('div', { className: 'fs-ask-chat__msg-text' },
                       m.text)),
+            /* A stored answer is a copy from another day (spec 2026-10-22
+               D4): it says which, right under the answer it dates. */
+            m.role === 'assistant' && m.stored && answeredDay(m.answeredAt)
+              ? React.createElement('div', { className: 'fs-ask-chat__answered' },
+                  'Answered ' + answeredDay(m.answeredAt))
+              : null,
             /* The web offer (FS_ASK_WEB_OFFER; spec 2026-10-16
                ask-screen-web-offer §5). The button IS the offer: the answer
                text asks no question a typed "yes" could accept. Gone once
@@ -1735,6 +1883,17 @@
             m.route === 'alerts'
               ? React.createElement('div', { className: 'fs-ask-chat__model' },
                   'from the programme, not the reports')
+              : null,
+            /* Every stored turn, withheld or not (spec 2026-10-22 D4/§6):
+               the question again, as a new turn of this conversation --
+               a fresh answer, paid for, never a replay of the stored one. */
+            m.role === 'assistant' && m.stored
+              ? React.createElement('button', {
+                  type: 'button',
+                  className: 'fs-ask-chat__widen fs-ask-chat__ask-again',
+                  disabled: busy,
+                  onClick: function () { send(m.question); },
+                }, 'Ask again')
               : null,
           );
           /* The offer's re-ask is in flight: its placeholder follows the
@@ -1862,6 +2021,11 @@
 
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.AskChat = AskChat;
+  /* Conversation history builders, exported for tests
+     (tests/ask-chat-threads.test.js) and the palette's row dates. */
+  AskChat._messageFromResult = messageFromResult;
+  AskChat._messagesFromThread = messagesFromThread;
+  AskChat._answeredDay = answeredDay;
   window.FieldSight._corroborationHasNothingToShow = hasNothingToShow;
   window.FieldSight._askWebStatus = { line: webStatusLine, render: renderWebStatus, origin: renderWebOrigin, citations: renderCitations, docs: renderDocumentOrigin };
   /* Pure fold helpers, exported for tests (tests/ask-answer-first-folds.test.js). */
