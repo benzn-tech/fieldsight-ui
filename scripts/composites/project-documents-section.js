@@ -19,7 +19,9 @@
   var h = React.createElement;
   function api() { return window.FS.api.projectDocuments; }
   function toast(message, tone) { if (window.FS && window.FS.toast) window.FS.toast.show({ message: message, tone: tone }); }
-  function fmtDate(s) { var d = s ? new Date(s) : null; return d && !isNaN(d) ? d.toLocaleDateString() : ''; }
+  /* UTC createdAt → '22 Oct 2026' in NZ time, whatever the browser's zone or locale
+     (the browser-locale default read '10/22/2026'). */
+  function fmtDate(s) { return s ? window.FS.api.nzDate(s) : ''; }
   var BTN = 'fs-btn fs-btn--sm ';
   function docVisibility() { return typeof document !== 'undefined' && document.visibilityState ? document.visibilityState : 'visible'; }
 
@@ -118,7 +120,8 @@
       });
     }
     function onOpen(d) {
-      api().open(siteId, d.id).catch(function (err) { toast((err && err.message) || 'Could not open the document.', 'error'); });
+      /* The type decides tab (PDF, text) or save in place (Word) inside the click. */
+      api().open(siteId, d.id, null, { contentType: d.contentType, filename: d.filename }).catch(function (err) { toast((err && err.message) || 'Could not open the document.', 'error'); });
     }
     function onHistory(d) {
       if (hist && hist.seriesId === d.seriesId) { setHist(null); return; }

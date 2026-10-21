@@ -123,6 +123,121 @@
     }
   }
 
+  /* ── NZ display time (owner rule 2026-10-22) ────────────────────────────
+     The server stores and returns UTC; every date or time the UI SHOWS a
+     person is New Zealand time (Pacific/Auckland), whatever the browser's
+     own zone or locale. These are the one place that conversion happens:
+
+       nzDate('2026-10-21T21:30:00Z')      → '22 Oct 2026'
+       nzDateTime('2026-10-21T21:30:00Z')  → '22 Oct 2026, 10:30'
+       nzTime('2026-10-21T21:30:00Z')      → '10:30'
+       nzDay('2026-10-21T21:30:00Z')       → '2026-10-22'   (NZ calendar day)
+
+     Input: an ISO timestamp with Z or an offset ('T' or Postgres' ' '
+     separator), a Date, or epoch MILLISECONDS — converted to Auckland time.
+
+     A timestamp with NO offset is NOT converted: the one such field the
+     server sends is a session's started_at/ended_at, which is the device's
+     NZ wall clock parsed out of the filename (session_scope.session_start),
+     never a UTC instant. Same rule as todo-history.js formatWhen. Shifting
+     what cannot be proven to be UTC is the bug this helper exists to stop.
+
+     A bare 'YYYY-MM-DD' is a calendar day (report dates, S3 day folders),
+     already a NZ business day: it is formatted by string surgery and NEVER
+     goes through Date, because shifting a pure date by a zone is the same
+     bug in the other direction (BUG-19). nzTime of a bare date is ''.
+
+     Unparseable input comes back unchanged, so a reader sees the raw value
+     rather than a plausible-looking wrong one. Built from numeric parts and
+     our own month names: ICU's en-NZ short month is 'Sept', and some
+     engines emit hour '24' at midnight. */
+  var NZ_TZ = 'Pacific/Auckland';
+  var NZ_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var PURE_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+  var nzFmt = null;
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  function toInstant(v) {
+    if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
+    if (typeof v === 'number') return isFinite(v) ? new Date(v) : null;
+    var d = new Date(String(v).trim().replace(' ', 'T'));
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  var NAIVE = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(:\d{2}(\.\d+)?)?$/;
+  var ZONED = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}(:?\d{2})?)$/i;
+
+  /* { y, m, d, hh, mm } of the instant on the Auckland wall clock. */
+  function nzParts(date) {
+    try {
+      if (!nzFmt) {
+        nzFmt = new Intl.DateTimeFormat('en-NZ', {
+          timeZone: NZ_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+          hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+        });
+      }
+      var p = {};
+      nzFmt.formatToParts(date).forEach(function (x) { p[x.type] = x.value; });
+      return { y: +p.year, m: +p.month, d: +p.day, hh: (+p.hour) % 24, mm: +p.minute };
+    } catch (e) {
+      /* Engine without time-zone data: same fallback as todayNZDT. */
+      var f = new Date(date.getTime() + 13 * 60 * 60 * 1000);
+      return { y: f.getUTCFullYear(), m: f.getUTCMonth() + 1, d: f.getUTCDate(),
+               hh: f.getUTCHours(), mm: f.getUTCMinutes() };
+    }
+  }
+
+  /* Normalised view of any input: { day:{y,m,d}, time:'HH:MM'|null } or null. */
+  function nzView(v) {
+    if (v === null || v === undefined || v === '') return null;
+    if (typeof v === 'string') {
+      var s = v.trim();
+      var m = PURE_DATE.exec(s);
+      if (m) {
+        if (+m[2] < 1 || +m[2] > 12) return null;
+        return { day: { y: +m[1], m: +m[2], d: +m[3] }, time: null };
+      }
+      var n = NAIVE.exec(s);
+      if (n) {
+        if (+n[2] < 1 || +n[2] > 12) return null;
+        return { day: { y: +n[1], m: +n[2], d: +n[3] }, time: n[4] + ':' + n[5] };
+      }
+      if (!ZONED.test(s)) return null;
+    }
+    var inst = toInstant(v);
+    if (!inst) return null;
+    var p = nzParts(inst);
+    return { day: { y: p.y, m: p.m, d: p.d }, time: pad2(p.hh) + ':' + pad2(p.mm) };
+  }
+
+  function raw(v) { return (v === null || v === undefined) ? '' : String(v); }
+  function dayText(day) { return day.d + ' ' + NZ_MONTHS[day.m - 1] + ' ' + day.y; }
+
+  function nzDate(v) {
+    var x = nzView(v);
+    return x ? dayText(x.day) : raw(v);
+  }
+
+  function nzDateTime(v) {
+    var x = nzView(v);
+    if (!x) return raw(v);
+    return x.time ? dayText(x.day) + ', ' + x.time : dayText(x.day);
+  }
+
+  function nzTime(v) {
+    var x = nzView(v);
+    if (!x) return raw(v);
+    return x.time || '';
+  }
+
+  function nzDay(v) {
+    var x = nzView(v);
+    if (!x) return '';
+    return x.day.y + '-' + pad2(x.day.m) + '-' + pad2(x.day.d);
+  }
+
   /* Detect HTML-content-type 404 trap (BACKEND-CONTEXT §8.2 / BUG-20). */
   function isJsonResponse(res) {
     var ct = (res.headers.get && res.headers.get('content-type')) || '';
@@ -161,6 +276,24 @@
        says otherwise -- an older deploy, or a stack whose backend has no
        /ask/corroborate route, must render exactly what it renders today. */
     externalCorroboration: env.externalCorroboration !== undefined ? !!env.externalCorroboration : false,
+    /* Ask as an async turn (POST /ask/start, poll GET /ask/result) instead of
+       one POST /ask held open against API Gateway's 29s ceiling. Off unless
+       the env says otherwise (Amplify FS_ASK_ASYNC): a stack whose backend
+       has no /ask/start must keep sending exactly today's request. */
+    askAsync: env.askAsync !== undefined ? !!env.askAsync : false,
+    /* Ask offers the web instead of running it unasked (Amplify
+       FS_ASK_WEB_OFFER; spec 2026-10-16 ask-screen-web-offer §5). On, Ask
+       sends `offer_web: true` and renders a "Search the web" button under an
+       answer that carries `web_offer`. Off unless the env says otherwise:
+       prod (`main`) must keep sending exactly today's request. */
+    askWebOffer: env.askWebOffer !== undefined ? !!env.askWebOffer : false,
+    /* Ask keeps the palette's conversations server-side (Amplify
+       FS_ASK_THREADS; spec 2026-10-22 ask-conversation-history §7). On, the
+       palette lists "Recent conversations" and its AskChat sends
+       `new_thread` / `thread_id`. Off unless the env says otherwise: the
+       module that talks to the routes is FS.api.askThreads (api/ask-threads.js),
+       this is only the switch. */
+    askThreadsOn: env.askThreads !== undefined ? !!env.askThreads : false,
     /* D5 (visibility spec) — legacy report-gateway read fallback (/timeline,
        /dates, /site-users). Default ON during Phase 2 rollout; flip to false
        (env.legacyReadFallback = false) to retire the legacy read paths once
@@ -175,6 +308,10 @@
     mockPresignedUrl: mockPresignedUrl,
     addDaysISO: addDaysISO,
     todayNZDT: todayNZDT,
+    nzDate: nzDate,
+    nzDateTime: nzDateTime,
+    nzTime: nzTime,
+    nzDay: nzDay,
     isJsonResponse: isJsonResponse,
   };
 

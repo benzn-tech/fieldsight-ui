@@ -85,11 +85,11 @@
     return d.getUTCDate() + ' ' + months[d.getUTCMonth()] + ' ' + p[0];
   }
 
+  /* generated_at is a UTC timestamp; shown in NZ time like every other time in
+     the UI (owner rule 2026-10-22) -- it used to read "2026-10-21 21:30 UTC". */
   function fmtGeneratedAt(iso) {
     if (!iso) return '';
-    var d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    return d.toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+    return window.FS.api.nzDateTime(iso);
   }
 
   /* Trigger a download for a presigned URL. We must NOT cache the URL
@@ -161,19 +161,21 @@
   }
 
   /* The archive-level buttons' fallback: your LATEST period -- yesterday, the
-     last completed week (ending Sunday), the previous month. Local calendar. */
+     last completed week (ending Sunday), the previous month. NZ calendar: `now`
+     is an instant, and its day is the Auckland day whatever the browser's zone
+     (report dates are NZ business days). Day arithmetic in UTC (BUG-19). */
   function defaultPeriodEnd(type, now) {
-    var d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var p = window.FS.api.nzDay(now).split('-').map(Number);
+    var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
     if (type === 'weekly') {
-      var back = d.getDay() === 0 ? 7 : d.getDay();
-      d.setDate(d.getDate() - back);
+      var back = d.getUTCDay() === 0 ? 7 : d.getUTCDay();
+      d.setUTCDate(d.getUTCDate() - back);
     } else if (type === 'monthly') {
-      d = new Date(d.getFullYear(), d.getMonth(), 0);
+      d = new Date(Date.UTC(p[0], p[1] - 1, 0));
     } else {
-      d.setDate(d.getDate() - 1);
+      d.setUTCDate(d.getUTCDate() - 1);
     }
-    var mm = String(d.getMonth() + 1), dd = String(d.getDate());
-    return d.getFullYear() + '-' + (mm.length < 2 ? '0' + mm : mm) + '-' + (dd.length < 2 ? '0' + dd : dd);
+    return d.toISOString().slice(0, 10);
   }
 
   /* A REGENERATE OUTLIVES THE PANEL THAT STARTED IT.
@@ -387,7 +389,7 @@
 
   /* Filter rows down to the current calendar month (YYYY-MM). */
   function thisMonthRows(rows) {
-    var prefix = (new Date()).toISOString().slice(0, 7);   /* e.g. "2026-05" */
+    var prefix = window.FS.api.todayNZDT().slice(0, 7);   /* e.g. "2026-05", NZ month */
     return rows.filter(function (r) {
       return r.date && r.date.slice(0, 7) === prefix;
     });

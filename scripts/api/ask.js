@@ -1,7 +1,7 @@
 /* ==========================================================================
    FieldSight API · Ask Agent — BACKEND-CONTEXT §4.12
    --------------------------------------------------------------------------
-   POST /api/ask  body { question, date?, user?, site_id?, author_folder?, topic_row_id?, scoped?, tz?, scope?, topic_id? }
+   POST /api/ask  body { question, date?, user?, site_id?, author_folder?, topic_row_id?, scoped?, tz?, scope?, topic_id?, history?, offer_web?, web_intent?, thread_id?, new_thread? }
      → { answer, citations, model, ... }
 
    Stateless on the server (BACKEND-CONTEXT §10) — multi-turn must be
@@ -36,7 +36,158 @@
      gives up first turns a server-side fact into a client-side mystery. */
   var MODEL_CALL_TIMEOUT_MS = 35000;
 
-  async function ask(opts) {
+  /* A thread id as the backend mints it (secrets.token_hex(16)). */
+  var THREAD_ID_RE = /^[0-9a-f]{32}$/;
+
+  /* ---- async turn (FS_ASK_ASYNC) ------------------------------------------
+     POST /ask/start  (same body as /ask)  -> { turn_id } | { error }
+     GET  /ask/result?turn=&since=         -> long-polls up to ~20s, then
+          { status: 'pending' | 'searching_records' | 'searching_web' | 'writing' }
+            (the middle two and `writing` come from the orchestrator,
+             ASK_AGENTIC; backend ask_voice_turn._SCREEN_STATES)
+          { status: 'done', result: <exactly what POST /ask resolves to> }
+          { status: 'error', error } | { status: 'cancelled' }
+     POST /ask/cancel { turn_id }          -> 204
+
+     The answer no longer has to fit inside one request held open against API
+     Gateway's 29s ceiling: the worker runs on its own budget (45s) and the
+     browser polls for it.
+
+     Start waits longer than _fetch's 10s default because ApiFunction holds
+     its AskAgent invoke for up to 8s before it answers. Each poll waits up to
+     35s (a ~20s long-poll plus gateway slack), capped by what is left of the
+     60s total, so "give up after 60s" stays true even for a poll begun late. */
+  var ASYNC_START_TIMEOUT_MS  = 15000;
+  var ASYNC_POLL_TIMEOUT_MS   = 35000;
+  var ASYNC_GIVE_UP_MS        = 60000;
+  var ASYNC_CANCEL_TIMEOUT_MS = 5000;
+
+  /* The caller withdrew the question (new context, or its signal fired).
+     Thrown rather than left pending: ask-chat clears `busy` in a trailing
+     .then, so a promise that never settles would leave the dots on forever. */
+  function _withdrawnError() {
+    var e = new Error('The question was withdrawn.');
+    e.name = 'AbortError';
+    return e;
+  }
+
+  /* Same shape _fetch gives its own deadline, so ask-chat's console label for
+     a slow Ask reads the same on either path. */
+  function _gaveUpError() {
+    var e = new Error('The request timed out after ' +
+                      Math.round(ASYNC_GIVE_UP_MS / 1000) + 's.');
+    e.name = 'TimeoutError';
+    e.timeout = true;
+    return e;
+  }
+
+  /* Fire-and-forget. A 204 carries no JSON content-type, so request()
+     resolves it as { _notFound } -- the result is meaningless either way and
+     is ignored; a failed cancel only means the worker finishes unheard. */
+  function _cancelTurn(turnId, baseUrl) {
+    try {
+      Promise.resolve(window.FS.api.request('/ask/cancel', {
+        method:    'POST',
+        baseUrl:   baseUrl,
+        body:      { turn_id: turnId },
+        timeoutMs: ASYNC_CANCEL_TIMEOUT_MS,
+        retry:     false,
+      })).catch(function () { /* nothing to do */ });
+    } catch (e) { /* never let a cancel break the caller */ }
+  }
+
+  /* Every non-terminal status a turn reports. One the backend adds without
+     this list learning it reads as a failure and cancels a healthy turn. */
+  var PROGRESS_STATUSES = ['pending', 'searching_records', 'searching_web', 'writing'];
+
+  async function _askAsyncTurn(body, askBaseUrl, hooks) {
+    hooks = hooks || {};
+    var signal = hooks.signal;
+    function withdrawn() {
+      return !!(signal && signal.aborted)
+          || (typeof hooks.isStale === 'function' && !!hooks.isStale());
+    }
+    function progress(status) {
+      if (typeof hooks.onProgress !== 'function') return;
+      try { hooks.onProgress(status); } catch (e) { /* display only */ }
+    }
+
+    var deadline = Date.now() + ASYNC_GIVE_UP_MS;
+    var start = await window.FS.api.request('/ask/start', {
+      method:    'POST',
+      baseUrl:   askBaseUrl,
+      body:      body,
+      timeoutMs: ASYNC_START_TIMEOUT_MS,
+      retry:     false,
+      signal:    signal,
+    });
+    /* A backend without the route: ask the old way, once. ONLY here -- a 404
+       from /ask/result means the turn is gone, and re-asking would run the
+       question a second time. */
+    if (start && start._notFound) {
+      return window.FS.api.request('/ask', {
+        method: 'POST',
+        baseUrl: askBaseUrl,
+        body: body,
+        timeoutMs: MODEL_CALL_TIMEOUT_MS,
+        retry: false,
+      });
+    }
+    /* { error } / _accessDenied: handed back exactly as received, which is
+       what the old route does with a resolved body. */
+    if (!start || !start.turn_id) return start;
+
+    var turnId = start.turn_id;
+    if (withdrawn()) { _cancelTurn(turnId, askBaseUrl); throw _withdrawnError(); }
+    /* The first poll can hold for ~20s before it says anything; the turn is
+       already pending, so say so now. */
+    progress('pending');
+
+    var since = 'pending';
+    for (;;) {
+      var remaining = deadline - Date.now();
+      if (remaining <= 0) { _cancelTurn(turnId, askBaseUrl); throw _gaveUpError(); }
+      var res;
+      try {
+        res = await window.FS.api.request('/ask/result', {
+          method:    'GET',
+          baseUrl:   askBaseUrl,
+          params:    { turn: turnId, since: since },
+          timeoutMs: Math.min(ASYNC_POLL_TIMEOUT_MS, remaining),
+          retry:     false,
+          signal:    signal,
+        });
+      } catch (err) {
+        _cancelTurn(turnId, askBaseUrl);
+        if (withdrawn()) throw _withdrawnError();
+        if (err && err.timeout && Date.now() >= deadline - 50) throw _gaveUpError();
+        throw err;
+      }
+      if (withdrawn()) { _cancelTurn(turnId, askBaseUrl); throw _withdrawnError(); }
+
+      /* A string status is the turn's; a number is an envelope's HTTP status
+         (_notFound / _accessDenied). */
+      var status = (res && typeof res.status === 'string') ? res.status : null;
+      if (status === 'done' && res.result) return res.result;
+      if (PROGRESS_STATUSES.indexOf(status) !== -1) {
+        progress(status);
+        since = status;
+        continue;
+      }
+      /* error, cancelled, a 404 (turn gone), a 403, or a shape this code does
+         not know: all of them are the old path's failure -- a rejection, which
+         ask-chat renders as its one "FieldSight is busy" line. Resolving
+         { error } instead would render as an empty answer bubble. */
+      if (status !== 'error' && status !== 'cancelled') _cancelTurn(turnId, askBaseUrl);
+      var failure = new Error((res && (res.error || (res.raw && res.raw.error)))
+                              || ('Ask turn ended: ' + (status || (res && res.status) || 'unknown')));
+      failure.askStatus = status;
+      if (res && typeof res.status === 'number') failure.status = res.status;
+      throw failure;
+    }
+  }
+
+  async function ask(opts, hooks) {
     opts = opts || {};
     if (!window.FS.api.useMocks) {
       /* Route /ask to the org gateway's report base (the TEST fieldsight-api),
@@ -97,6 +248,28 @@
          Ask did before this existed. */
       var tz = ('tz' in opts) ? opts.tz : _browserZone();
       if (tz) body.tz = tz;
+      /* Web offer (spec 2026-10-16 ask-screen-web-offer §2/§5). Same
+         whitelist trap as `history` above: the caller (requestBodyFor) sets
+         these, and a field missing from this list would vanish silently.
+         Forwarded only as `true` -- the backend honours only JSON true, and
+         absent keeps every caller that never sets them byte-identical. Set
+         before the transport is chosen, so /ask and /ask/start carry the same
+         body. */
+      if (opts.offer_web === true)  body.offer_web  = true;
+      if (opts.web_intent === true) body.web_intent = true;
+      /* Conversation history (spec 2026-10-22 ask-conversation-history §4/§7).
+         Same whitelist trap again: the caller (AskChat with `threads`) sets
+         these, and only the palette's AskChat ever does. `new_thread` only as
+         `true`; `thread_id` only in the shape the backend accepts (32 lowercase
+         hex) -- anything else is a 400 there, and a stale or mangled id must
+         not turn a question into a failed turn. Absent for every other caller,
+         so their body stays byte-identical. */
+      if (typeof opts.thread_id === 'string' && THREAD_ID_RE.test(opts.thread_id)) {
+        body.thread_id = opts.thread_id;
+      }
+      if (opts.new_thread === true) body.new_thread = true;
+      /* Read at call time, not load time: index.js builds FS.api after env.js. */
+      if (window.FS.api.askAsync) return _askAsyncTurn(body, askBaseUrl, hooks);
       return window.FS.api.request('/ask', {
         method: 'POST',
         baseUrl: askBaseUrl,

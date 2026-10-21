@@ -299,6 +299,7 @@
       type: type || 'text', className: 'fs-settings__input', value: value || '',
       disabled: !!opts.disabled,
       inputMode: opts.inputMode,
+      placeholder: opts.placeholder,
       onChange: function (e) { onChange(e.target.value); },
     });
   }
@@ -497,8 +498,19 @@
         fFieldRow('Project value (NZD)',
           fMoney(form.project_value_nzd, function (v) { set('project_value_nzd', v); }, { disabled: unsaved }),
           unsaved ? UNSAVED_HINT : null),
+        /* NOT type="date" while it is disabled. A native date input is drawn by
+           the BROWSER in the browser's own locale, so an empty one showed the
+           placeholder `年/月/日` to anyone whose Chrome is set to Chinese -- the
+           document's `lang` does not change that in Chrome, and there is no
+           root index.html here to set one on anyway. A control that is disabled
+           and stores nothing has no reason to be a date picker at all, so in
+           live mode it is plain text with an explicit English format. The real
+           picker comes back in mock mode, where the field does hold a value.
+           Same shape as the Coordinates pair above: text + placeholder. */
         fFieldRow('Planned completion',
-          fText(form.planned_completion, function (v) { set('planned_completion', v); }, 'date', { disabled: unsaved }),
+          fText(form.planned_completion, function (v) { set('planned_completion', v); },
+                unsaved ? 'text' : 'date',
+                { disabled: unsaved, placeholder: unsaved ? 'YYYY-MM-DD' : undefined }),
           unsaved ? UNSAVED_HINT : null),
         React.createElement('div', { className: 'fs-settings__actions' },
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: props.onClose }, 'Cancel'),

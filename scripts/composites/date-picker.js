@@ -346,7 +346,10 @@
 
     /* Visible month for the modal — driven by selected date but
        independent so prev/next nav works inside the modal. */
-    var initial = parseISO(isRange ? (props.from || rangeSel.from) : date) || new Date();
+    /* Fallback: today's NZ month. A bare new Date() read with getUTC* is the UTC
+       month, which on the morning of the 1st in Auckland is still last month. */
+    var initial = parseISO(isRange ? (props.from || rangeSel.from) : date)
+      || parseISO(window.FS.api.todayNZDT && window.FS.api.todayNZDT()) || new Date();
     var refMonth = React.useState({
       year: initial.getUTCFullYear(), month0: initial.getUTCMonth(),
     });

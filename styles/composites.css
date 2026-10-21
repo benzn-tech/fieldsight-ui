@@ -3753,6 +3753,15 @@
   margin-bottom: 4px;
   font-style: italic;
 }
+/* Conversation history (spec 2026-10-22 ask-conversation-history §7): a
+   stored answer's date, and a withheld turn's sentence. Quiet facts, like the
+   scope line -- the withheld row is not an error, the reader did nothing. */
+.fs-ask-chat__answered {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+}
+.fs-ask-chat__msg--withheld .fs-ask-chat__msg-text { color: var(--text-tertiary); font-style: italic; }
 /* `question_admission`'s refusal sentence -- rendered so a guard doing its
    job does not read as the web section having silently gone missing. */
 .fs-ask-chat__web-refused {
@@ -3772,6 +3781,9 @@
   cursor: pointer;
 }
 .fs-ask-chat__widen:focus-visible { outline: 2px solid var(--border-focus, var(--border-strong)); outline-offset: 2px; }
+/* "Search the web" (FS_ASK_WEB_OFFER) wears the widen pill; this only adds
+   the in-flight state, which it shares with the suggestion chips. */
+.fs-ask-chat__web-offer:disabled { opacity: 0.5; cursor: default; }
 @media (pointer: coarse) {
   .fs-ask-chat__widen { min-height: 44px; }
 }
@@ -9088,6 +9100,31 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color:      var(--text-tertiary);
 }
 
+/* Recent conversations (FS_ASK_THREADS): an open row and its Delete, side
+   by side -- siblings, because a button cannot hold a button. */
+.fs-search-palette__conv {
+  display:     flex;
+  align-items: center;
+}
+.fs-search-palette__conv .fs-search-palette__conv-open {
+  flex:      1;
+  min-width: 0;
+}
+.fs-search-palette__conv-delete {
+  flex-shrink:   0;
+  background:    transparent;
+  border:        none;
+  cursor:        pointer;
+  font-size:     16px;
+  line-height:   1;
+  color:         var(--text-tertiary);
+  padding:       6px 12px;
+  border-radius: var(--radius-sm, 4px);
+  transition:    color 100ms ease;
+}
+.fs-search-palette__conv-delete:hover,
+.fs-search-palette__conv-delete:focus-visible { color: var(--text-primary); }
+
 /* Inline Ask hand-off (F1) — replaces the results list when the "Ask
    FieldSight" row is selected; AskChat renders in place, no navigation.
    AskChat brings its own styling — this wrapper just adds palette-
@@ -13776,13 +13813,15 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 }
 
 /* ── Ask · answered from the open web ─────────────────────────────────────
-   Sits ABOVE the answer, unlike the corroboration block which sits below it.
-   Corroboration annotates an answer that came from the customer's own
-   recordings; this one says the answer did NOT. A reader who meets that fact
-   after the prose has already read it as their own record. */
+   The LABEL sits ABOVE the answer, unlike the corroboration block which sits
+   below it. Corroboration annotates an answer that came from the customer's
+   own recordings; this one says the answer did NOT. A reader who meets that
+   fact after the prose has already read it as their own record.
+   The block itself (web prose + source links) is the body of the web fold
+   below the answer (spec 2026-10-17 ask-answer-first-folds §3). */
 
 .fs-ask-web {
-  margin-bottom: 10px;
+  margin: 0;
   padding: 8px 10px;
   border-left: 3px solid var(--color-accent-700, #C9762B);
   background: var(--surface-panel-muted);
@@ -13798,6 +13837,14 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   text-transform: uppercase;
   color: var(--text-secondary);
   font-family: var(--font-mono);
+}
+
+/* The label on its own above the answer: the same left rule as the block it
+   heads, so the two read as one source even with the fold closed. */
+.fs-ask-web__label--lead {
+  margin-bottom: 6px;
+  padding: 2px 0 2px 8px;
+  border-left: 3px solid var(--color-accent-700, #C9762B);
 }
 
 .fs-ask-web__answer {
@@ -13839,6 +13886,87 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-ask-webstatus__line--ok { color: var(--text-secondary); }
 .fs-ask-webstatus__line--warn { color: var(--color-warning-700, #b45309); font-weight: 600; }
 [data-theme="dark"] .fs-ask-webstatus__line--warn { color: var(--color-warning-300, #fcd34d); }
+
+/* ── Ask · folds (spec 2026-10-17 ask-answer-first-folds) ─────────────────
+   The answer comes first; records, web details and the corroboration check
+   fold below it. A fold is a native button over a body that stays in the DOM
+   with the `hidden` attribute, so `[hidden]` must win over the body's own
+   display rule -- a class rule setting `display` beats the UA's [hidden]
+   otherwise. Semantic tokens only: no palette-scale foreground here (the
+   records label keeps its existing accent rule above, which is not copied). */
+.fs-ask-fold {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fs-ask-fold__summary {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 6px 4px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm, 4px);
+  text-align: left;
+  cursor: pointer;
+}
+.fs-ask-fold__summary:not(.fs-ask-fold__summary--static):hover {
+  color: var(--text-primary);
+  background: var(--surface-panel);
+}
+.fs-ask-fold__summary:not(.fs-ask-fold__summary--static):hover .fs-ask-fold__text {
+  text-decoration: underline;
+}
+.fs-ask-fold__summary:focus-visible {
+  outline: 2px solid var(--border-focus, currentColor);
+  outline-offset: 1px;
+}
+.fs-ask-fold__summary--static { cursor: default; }
+.fs-ask-fold__chevron {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+  color: var(--text-tertiary);
+  transition: transform 120ms ease;
+}
+.fs-ask-fold--open > .fs-ask-fold__summary .fs-ask-fold__chevron { transform: rotate(90deg); }
+.fs-ask-fold__text { min-width: 0; overflow-wrap: anywhere; }
+.fs-ask-fold__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fs-ask-fold__body[hidden] { display: none; }
+.fs-ask-fold__body > .fs-ask-chat__citations { margin-top: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .fs-ask-fold__chevron { transition: none; }
+}
+/* A printed answer keeps its sources: a collapsed body prints expanded. */
+@media print {
+  .fs-ask-fold__body[hidden] { display: block; }
+  .fs-ask-fold__chevron { display: none; }
+}
+/* The records summary carries the old heading class; the whole line now sits
+   in it and it is the only visible control on a closed fold, so it reads at
+   body size in the summary font, on a semantic colour (the records label's
+   accent-600 is ~1.6:1 on the bubble in light mode). Later than, and as
+   specific as, `.fs-ask-chat__citations--records .fs-ask-chat__citations-label`. */
+.fs-ask-fold__text.fs-ask-chat__citations-label {
+  margin-bottom: 0;
+  font-size: 12px;
+  font-family: inherit;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-secondary);
+}
+/* ── end Ask · folds ── */
 
 /* ---- Today: weather for the active site (today-weather-card.js) ---- */
 .fs-today-weather { margin-bottom: 12px; }

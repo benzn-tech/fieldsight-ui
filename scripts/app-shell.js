@@ -765,12 +765,15 @@ const MIDDLE_WIDTH_MIN     = 360;
 const MIDDLE_WIDTH_MAX     = 896;
 
 /* ---------- Date subtitle helper ------------------------------------------ */
+/* Today on the Auckland calendar, not the browser's (owner rule 2026-10-22).
+   Weekday by UTC arithmetic on the NZ day (BUG-19: never new Date('YYYY-MM-DD')). */
 function formatTodayDate() {
-  var d = new Date();
+  var p = window.FS.api.todayNZDT().split('-').map(Number);
+  var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
   var days   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   var months = ['Jan','Feb','Mar','Apr','May','Jun',
                 'Jul','Aug','Sep','Oct','Nov','Dec'];
-  return days[d.getDay()] + ' · ' + d.getDate() + ' ' + months[d.getMonth()];
+  return days[d.getUTCDay()] + ' · ' + p[2] + ' ' + months[p[1] - 1];
 }
 
 /* The share / copy-link helper used to live here. Its button was replaced
@@ -1101,10 +1104,11 @@ function RightDetail({ route, selectedItem, onClose }) {
   var page = window.FieldSight.getPageForRoute && window.FieldSight.getPageForRoute(route);
   if (page && page.Right) {
     return React.createElement('div', {
-      className: 'right-detail',
-      /* alignItems/justifyContent reset the empty-state centering (.right-detail
-         in app-shell.css) so a populated Right panel fills the full pane width. */
-      style: { background: 'var(--surface-panel)', height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start' },
+      /* right-detail--page resets the empty-state centering so a populated
+         Right panel fills the full pane width. Layout stays in CSS: an inline
+         display here overrode the mobile pane swap. */
+      className: 'right-detail right-detail--page',
+      style: { background: 'var(--surface-panel)' },
     },
       /* Sprint 8.4.1 — back button visible only on mobile via CSS */
       React.createElement(MobileBack, { onClose: onClose }),
@@ -1244,10 +1248,8 @@ function AppShell({ showDevSwitcher = false }) {
     if (region) region.textContent = 'Navigated to ' + title;
     var main = document.getElementById('fs-main-content');
     if (main) {
-      var d = new Date();
-      main.setAttribute('data-print-date',
-        d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
-        + '-' + String(d.getDate()).padStart(2, '0'));
+      /* The printed page's date is the NZ day (owner rule 2026-10-22). */
+      main.setAttribute('data-print-date', window.FS.api.todayNZDT());
     }
   }, [route]);
 

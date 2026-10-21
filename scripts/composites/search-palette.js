@@ -22,6 +22,9 @@
      Escape               — close
 
    Recent searches stored in sessionStorage (max 5).
+   Recent conversations (FS_ASK_THREADS): the caller's stored Ask threads
+   from FS.api.askThreads (max 5), above Recent searches; with it on, an Ask
+   is no longer saved as a recent search.
 
    Exported to: window.FieldSight.SearchPalette
    ========================================================================== */
@@ -234,6 +237,22 @@
     var refTFor   = React.useState('');
     var topicsFor = refTFor[0]; var setTopicsFor = refTFor[1];
 
+    /* Recent conversations (FS_ASK_THREADS; spec 2026-10-22
+       ask-conversation-history D1/§7): the caller's stored Ask threads, kept
+       server-side and shown apart from the keyword "Recent searches" -- a
+       search is re-run by design, a conversation is re-read. null = no
+       section: the flag is off, the list has not landed, or it failed. A
+       failure is NOT an empty list: hiding the section says "not known", an
+       empty one would say "you have none".
+
+       The switch is FS_ASK_THREADS AND FS_ASK_ASYNC: only the async turn
+       (/ask/start) stores a thread -- the sync /api/ask path drops the
+       fields -- so with async off an Ask would be kept nowhere, and must
+       stay a recent search as it is today. */
+    var threadsOn = !!window.FS.api.askThreadsOn && !!window.FS.api.askAsync;
+    var refConvs = React.useState(null);
+    var convs = refConvs[0]; var setConvs = refConvs[1];
+
     var inputRef = React.useRef(null);
     var listRef  = React.useRef(null);
 
@@ -241,6 +260,28 @@
     React.useEffect(function () {
       if (inputRef.current) inputRef.current.focus();
       _loadCache();
+    }, []);
+
+    /* Recent conversations: on open, and again on "Back to search" (a
+       question asked in this open is a conversation by then). No request
+       with the switch off. `aliveRef` drops a list landing after close. */
+    var aliveRef = React.useRef(true);
+    var convSeq  = React.useRef(0);
+    function loadConvs() {
+      var T = window.FS.api.askThreads;
+      if (!threadsOn || !T) return;
+      var mine = ++convSeq.current;
+      T.list().then(function (list) {
+        if (aliveRef.current && mine === convSeq.current) setConvs((list || []).slice(0, 5));
+      }).catch(function (err) {
+        console.warn('[SearchPalette] recent conversations unavailable', err);
+        if (aliveRef.current && mine === convSeq.current) setConvs(null);
+      });
+    }
+    React.useEffect(function () {
+      aliveRef.current = true;
+      loadConvs();
+      return function () { aliveRef.current = false; };
     }, []);
 
     /* Re-run client search + kick a debounced server topic search on query
@@ -386,7 +427,10 @@
        global. */
     function doAsk(q) {
       if (!q) return;
-      saveRecent(q);
+      /* With conversations on, an Ask is kept as a conversation (server-side,
+         re-read without a model call), not as a recent search that re-runs
+         it. Off, it is saved exactly as before. */
+      if (!threadsOn) saveRecent(q);
 
       if (!(window.FieldSight && window.FieldSight.AskChat)) {
         try { sessionStorage.setItem('fs.ask.prefill', q); } catch (_) {}
@@ -407,11 +451,55 @@
       setAskMode({ question: q });
     }
 
+    function toast(message) {
+      if (window.FS.toast) window.FS.toast.show({ message: message, tone: 'error' });
+    }
+
+    /* Open a stored conversation: fetched (org-api re-checks every record
+       behind it against the caller's access NOW), then shown in the inline
+       AskChat as stored turns -- nothing is asked again. Gone since the list
+       was read (deleted elsewhere, evicted, expired): the row goes too. */
+    function openConversation(row) {
+      window.FS.api.askThreads.get(row.thread_id).then(function (thread) {
+        if (!thread) {
+          setConvs(function (c) {
+            return c ? c.filter(function (x) { return x.thread_id !== row.thread_id; }) : c;
+          });
+          toast('That conversation is no longer available.');
+          return;
+        }
+        setAskMode({ question: row.title || '', thread: thread });
+      }).catch(function (err) {
+        console.warn('[SearchPalette] could not open the conversation', err);
+        toast('Could not open the conversation. Please try again.');
+      });
+    }
+
+    /* The row goes at once; a refused delete puts the list back. */
+    function deleteConversation(row) {
+      var before = convs;
+      setConvs(function (c) {
+        return c ? c.filter(function (x) { return x.thread_id !== row.thread_id; }) : c;
+      });
+      window.FS.api.askThreads.remove(row.thread_id).catch(function (err) {
+        console.warn('[SearchPalette] could not delete the conversation', err);
+        setConvs(before);
+        toast('Could not delete the conversation. Please try again.');
+      });
+    }
+
+    /* "Thu 3 Sep" -- AskChat's own day format, from epoch seconds. */
+    function convDay(at) {
+      var A = window.FieldSight && window.FieldSight.AskChat;
+      return (A && typeof A._answeredDay === 'function') ? A._answeredDay(at) : null;
+    }
+
     function doSelect(item) {
       if (!item) return;
       if (item.type === 'document') {
         saveRecent(trimmedQuery);
-        window.FS.api.projectDocuments.open(item.siteId, item.documentId, item.page)
+        /* contentType: a Word file is saved in place, not opened in a blank tab. */
+        window.FS.api.projectDocuments.open(item.siteId, item.documentId, item.page, { contentType: item.contentType })
           .catch(function (err) {
             if (window.FS.toast) window.FS.toast.show({ message: (err && err.message) || 'Could not open the document.', tone: 'error' });
           });
@@ -521,7 +609,7 @@
                 React.createElement('button', {
                   type:         'button',
                   className:    'fs-search-palette__ask-back',
-                  onClick:      function () { setAskMode(null); },
+                  onClick:      function () { setAskMode(null); loadConvs(); },
                 },
                   NavIcon && React.createElement(NavIcon, {
                     name:  'chevron-left',
@@ -537,10 +625,14 @@
                      Ask from search (different question, same mounted
                      panel) remounts AskChat instead of reusing the old
                      instance; initialQuestion is mount-only and wouldn't
-                     otherwise re-send. */
-                  key:             askMode.question,
+                     otherwise re-send. A stored conversation keys on its
+                     thread and sends nothing: its turns are the log. */
+                  key:             askMode.thread ? askMode.thread.thread_id : askMode.question,
                   compact:         true,
-                  initialQuestion: askMode.question,
+                  initialQuestion: askMode.thread ? undefined : askMode.question,
+                  /* The only AskChat that keeps conversations (spec D7). */
+                  threads:         threadsOn,
+                  initialThread:   askMode.thread || undefined,
                 }),
               )
             :
@@ -592,9 +684,60 @@
                 );
               })
 
-            /* Recent searches (shown when input is empty) */
-            : !query.trim() && recent.length > 0
-            ? React.createElement('div', { className: 'fs-search-palette__group' },
+            /* Recent conversations, then recent searches (shown when input
+               is empty). Two groups, never one list: a row above opens a
+               stored conversation, a row below re-runs a search. */
+            : !query.trim() && ((convs && convs.length > 0) || recent.length > 0)
+            ? [
+              convs && convs.length > 0
+                ? React.createElement('div', { className: 'fs-search-palette__group', key: '__convs__' },
+                    React.createElement('div', {
+                      className: 'fs-search-palette__group-label',
+                      role:      'presentation',
+                    }, 'Recent conversations'),
+                    convs.map(function (c) {
+                      var day = convDay(c.updated_at);
+                      /* Open and Delete are siblings, not one inside the
+                         other: a button cannot contain a button. */
+                      return React.createElement('div', {
+                        key:       c.thread_id,
+                        className: 'fs-search-palette__conv',
+                      },
+                        React.createElement('button', {
+                          type:      'button',
+                          className: 'fs-search-palette__result fs-search-palette__conv-open',
+                          onClick:   function () { openConversation(c); },
+                        },
+                          NavIcon && React.createElement(NavIcon, {
+                            name:  'message-circle',
+                            size:  15,
+                            color: 'var(--text-tertiary)',
+                          }),
+                          React.createElement('div', { className: 'fs-search-palette__result-body' },
+                            React.createElement('span', {
+                              className: 'fs-search-palette__result-title',
+                            }, c.title),
+                            day
+                              ? React.createElement('span', { className: 'fs-search-palette__result-sub' }, day)
+                              : null,
+                          ),
+                        ),
+                        React.createElement('button', {
+                          type:         'button',
+                          className:    'fs-search-palette__conv-delete',
+                          'aria-label': 'Delete conversation: ' + (c.title || ''),
+                          title:        'Delete',
+                          onClick:      function (e) {
+                            if (e && e.stopPropagation) e.stopPropagation();
+                            deleteConversation(c);
+                          },
+                        }, '\xd7'),
+                      );
+                    }),
+                  )
+                : null,
+              recent.length > 0
+              ? React.createElement('div', { className: 'fs-search-palette__group', key: '__recent__' },
                 React.createElement('div', {
                   className: 'fs-search-palette__group-label',
                   role:      'presentation',
@@ -619,6 +762,8 @@
                   );
                 }),
               )
+              : null,
+            ]
 
             /* Empty prompt (only when the query itself is empty — a non-empty
                query with zero client matches but pending/found server topics

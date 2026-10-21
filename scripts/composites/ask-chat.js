@@ -37,6 +37,14 @@
      alertsProvider  optional programme alerts route (unchanged)
      initialQuestion optional string — auto-sends once on mount (Search's
                      "Ask FieldSight" hand-off).
+     threads         boolean — keep this conversation server-side (spec
+                     2026-10-22 ask-conversation-history §7): the first
+                     question sends `new_thread: true`, later ones the
+                     `thread_id` that `result.thread` handed back. Set by the
+                     search palette only; without it no thread field is sent.
+     initialThread   {thread_id, scope, turns} — a stored conversation
+                     (GET /api/org/ask/threads/{id}). Its turns are the log on
+                     mount; nothing is asked.
 
    Exported to:
      window.FieldSight.AskChat
@@ -217,22 +225,34 @@
     return null; /* not_needed or unknown */
   }
 
+  function webConflicts(web) {
+    return ((web && web.conflicts) || []).filter(function (c) { return typeof c === 'string' && c; });
+  }
+
+  /* The records-vs-standard list. Its own function because it renders in two
+     places: inside renderWebStatus (kept whole for its tests and any caller)
+     and inside the web fold's body, where the status line is the fold's own
+     summary and must not be said twice. */
+  function renderWebConflicts(web) {
+    var conflicts = webConflicts(web);
+    if (!conflicts.length) return null;
+    return React.createElement('div', { className: 'fs-ask-webstatus__conflicts' },
+      React.createElement('div', { className: 'fs-ask-webstatus__conflicts-head' },
+        '⚠ Records and the standard disagree'),
+      React.createElement('ul', { className: 'fs-ask-webstatus__conflicts-list' },
+        conflicts.map(function (c, i) {
+          return React.createElement('li', { key: i }, c);
+        })));
+  }
+
   function renderWebStatus(m) {
     var web = m && m.web;
     if (!web) return null;
     var line = webStatusLine(web);
-    var conflicts = (web.conflicts || []).filter(function (c) { return typeof c === 'string' && c; });
+    var conflicts = webConflicts(web);
     if (!line && !conflicts.length) return null;
     return React.createElement('div', { className: 'fs-ask-webstatus' },
-      conflicts.length
-        ? React.createElement('div', { className: 'fs-ask-webstatus__conflicts' },
-            React.createElement('div', { className: 'fs-ask-webstatus__conflicts-head' },
-              '⚠ Records and the standard disagree'),
-            React.createElement('ul', { className: 'fs-ask-webstatus__conflicts-list' },
-              conflicts.map(function (c, i) {
-                return React.createElement('li', { key: i }, c);
-              })))
-        : null,
+      renderWebConflicts(web),
       line
         ? React.createElement('div', {
             className: 'fs-ask-webstatus__line fs-ask-webstatus__line--' + line.level,
@@ -243,17 +263,22 @@
 
   /* The line that keeps the two sources apart.
 
-     It sits ABOVE the answer for the same reason the basis line does: by the
-     time a reader reaches a footnote they have already read the answer as if it
-     came from their own recordings. The separation has to arrive first.
+     The LABEL sits ABOVE the answer for the same reason the widened basis line
+     does: by the time a reader reaches a footnote they have already read the
+     answer as if it came from their own recordings. The separation has to
+     arrive first. Called with one argument this renders that label and nothing
+     else. With `part === 'details'` it renders the rest -- the web prose and
+     the source links -- for the web fold BELOW the answer (spec 2026-10-17
+     §2/§3): the owner read the web facts twice, once here above the answer
+     and once in it, before this split.
 
      `sources` carries `domain` because this vendor returns Google grounding
      redirects -- parsing the URL would attribute every source to
      `vertexaisearch.cloud.google.com`, which is the opposite of naming a
      publisher.
 
-     `web.answer` is the web prose itself. It renders inside this block, under
-     the label, so provenance never blurs into the grounded answer above it.
+     `web.answer` is the web prose itself. It renders inside the details
+     block, in the web fold, so provenance never blurs into the answer above.
      But it renders ONLY when it differs (trimmed) from `m.text`: today
      `res.answer` IS the web answer, so the two fields hold the same string
      and printing both would show the prose twice. Once the backend change in
@@ -261,7 +286,7 @@
      becomes the grounded answer and `web.answer` stays the web prose -- they
      diverge and this starts rendering, with no frontend change needed at
      that point. See tests/ask-web-prose-inside-block.test.js. */
-  function renderWebOrigin(m) {
+  function renderWebOrigin(m, part) {
     if (!m.fromWeb) return null;
     var web = m.web || {};
     var sources = web.sources || [];
@@ -269,11 +294,14 @@
     var webAnswer = typeof web.answer === 'string' ? web.answer.trim() : '';
     var messageText = typeof m.text === 'string' ? m.text.trim() : '';
     var showAnswer = !!webAnswer && webAnswer !== messageText;
-    return React.createElement('div', { className: 'fs-ask-web' },
-      React.createElement('div', { className: 'fs-ask-web__label' },
+    if (part !== 'details') {
+      return React.createElement('div', { className: 'fs-ask-web__label fs-ask-web__label--lead' },
         web.status === 'unverified'
           ? 'Model knowledge — not verified online'
-          : 'From the open web — not from your recordings'),
+          : 'From the open web — not from your recordings');
+    }
+    if (!showAnswer && !sources.length) return null;
+    return React.createElement('div', { className: 'fs-ask-web' },
       showAnswer
         ? React.createElement('div', { className: 'fs-ask-web__answer' }, web.answer)
         : null,
@@ -288,6 +316,129 @@
             }))
         : null
     );
+  }
+
+  /* The web fold's one line (spec 2026-10-17 §3), or null when there is no
+     fold. In order of precedence:
+       - a refusal with no `status`: the refused sentence itself, as a plain
+         line. A guard doing its job must not read as an outage, so it is
+         never hidden behind a button;
+       - a status line: its text, then the first three DISTINCT source domains
+         in source order, then +N for the rest;
+       - no status but fromWeb (an older backend): "From the open web · N
+         sources · <domains>";
+       - then " · N conflicts" appended. A conflict makes the row warn: a
+         disagreement folded away must not read as all-clear.
+     `foldable`: whether the body has anything under the line -- a summary
+     with nothing to expand is a plain line, not a button. */
+  function webSourceDomains(sources) {
+    var seen = [];
+    (sources || []).forEach(function (s) {
+      var d = sourceDomain(s);
+      if (d && seen.indexOf(d) === -1) seen.push(d);
+    });
+    if (!seen.length) return '';
+    return ' · ' + seen.slice(0, 3).join(', ') + (seen.length > 3 ? ' +' + (seen.length - 3) : '');
+  }
+
+  function webFoldSummary(m) {
+    if (!m || (!m.web && !m.fromWeb)) return null;
+    var web = m.web || {};
+    var line = webStatusLine(web);
+    var conflicts = webConflicts(web);
+    /* With `status` present the backend no longer refuses by content
+       (`too_long` replaces it); the status line says it instead. */
+    var refused = m.web && m.web.refused
+      && typeof m.web.status !== 'string' ? String(m.web.refused) : null;
+    if (!m.fromWeb && !line && !conflicts.length && !refused) return null;
+    var sources = web.sources || [];
+    var out;
+    if (refused) {
+      out = { text: refused, level: 'muted', textClass: 'fs-ask-chat__web-refused' };
+    } else if (line) {
+      out = { text: line.text + webSourceDomains(sources), level: line.level };
+    } else if (m.fromWeb) {
+      out = { text: 'From the open web · ' + sources.length + ' source'
+                    + (sources.length === 1 ? '' : 's') + webSourceDomains(sources),
+              level: 'muted' };
+    } else {
+      out = { text: 'Records and the standard disagree', level: 'warn' };
+    }
+    if (conflicts.length) {
+      out.text += ' · ' + conflicts.length + ' conflict' + (conflicts.length === 1 ? '' : 's');
+      out.level = 'warn';
+      /* A refusal row that also carries conflicts must still read as a warning. */
+      if (out.textClass) out.textClass += ' fs-ask-webstatus__line--warn';
+    }
+    if (!out.textClass) out.textClass = 'fs-ask-webstatus__line fs-ask-webstatus__line--' + out.level;
+    /* The body: the conflicts list, then the web prose and source links. */
+    out.foldable = !!(conflicts.length || renderWebOrigin(m, 'details'));
+    return out;
+  }
+
+  /* The corroboration fold's one line (spec 2026-10-17 §3a). Pending and
+     failed show as they always have, and a row that only carries a status --
+     timed out, broke, or never searched -- is a plain line with the sentence
+     that says which: "Checked on the web · 0 claims" would assert a search
+     that did not happen. Otherwise the claim count, then the disagreements,
+     then whatever was not checked. Truncation carries no count, so it says
+     only what it knows. */
+  function corrobFoldSummary(res) {
+    if (!res) return null;
+    if (res._pending) return { text: 'Checking the web…', foldable: false, level: 'muted' };
+    if (res._failed) return { text: 'Web check unavailable', foldable: false, level: 'muted' };
+    if (hasNothingToShow(res)) return null;
+    var items = res.corroborations || [];
+    var dropped = res.dropped || [];
+    if (!items.length && !dropped.length && !res.truncated) {
+      return {
+        text: res.timed_out ? 'Web check timed out'
+            : res.failed    ? 'The web check could not be completed'
+            : 'Couldn’t check the web for this answer',
+        foldable: false, level: 'muted',
+      };
+    }
+    var k = items.filter(function (c) { return c && c.state === 'conflicts'; }).length;
+    var text = 'Checked on the web · ' + items.length + ' claim' + (items.length === 1 ? '' : 's');
+    if (k) text += ' · ' + k + ' disagree';
+    if (dropped.length) text += ' · ' + dropped.length + ' not checked';
+    if (res.truncated) text += ' · only the first ' + items.length + ' checked';
+    if (res.timed_out) text += ' · timed out';
+    return { text: text, foldable: true, level: k ? 'warn' : 'ok' };
+  }
+
+  /* Project documents (backend spec 2026-10-16, rule 3). Below the answer and the
+     recording Sources: these are what the project's documents REQUIRE, never what
+     happened on site, and the label says both halves. Old backends send no
+     `documents` and get no block; neither does a page where the org API is off
+     (mocks, no org base) -- an original can only be opened through it. */
+  function renderDocumentOrigin(m) {
+    var docs = (m && m.documents) || [];
+    if (!docs.length) return null;
+    var PD = window.FS && window.FS.api && window.FS.api.projectDocuments;
+    /* The backend cited documents, so the claims they back must stay labelled (rule 3)
+       even where the org API is off here: the block still renders, only opening the
+       original needs the org API, so the buttons are disabled instead. */
+    var live = !!(PD && PD.isLive && PD.isLive());
+    return React.createElement('div', { className: 'fs-ask-docs' },
+      React.createElement('div', { className: 'fs-ask-docs__label' },
+        m.zh ? '来自项目文档 — 规定应如何，不是现场发生了什么'
+             : 'From project documents — what should be, not what happened on site'),
+      React.createElement('div', { className: 'fs-ask-docs__list' },
+        docs.map(function (d, i) {
+          var label = (PD && PD.citeLabel && PD.citeLabel(d)) || d.title || 'Document';
+          var openable = live && !!(d.site_id && d.document_id);
+          return React.createElement('button', {
+            key: i, type: 'button', className: 'fs-ask-docs__item',
+            disabled: !openable,
+            onClick: function () {
+              if (!openable) return;
+              PD.open(d.site_id, d.document_id, d.page).catch(function (err) {
+                if (window.FS.toast) window.FS.toast.show({ message: (err && err.message) || 'Could not open the document.', tone: 'error' });
+              });
+            },
+          }, label);
+        })));
   }
 
   function renderCorroboration(res) {
@@ -436,15 +587,22 @@
      (user, 2026-09-02).
 
      The question, not the browser locale — the locale is the device's language
-     and this is the asker's. Same rule the backend's metric renderer uses. */
+     and this is the asker's. Same rule the backend's metric renderer uses.
+
+     `count` (optional, spec 2026-10-17 §4): the number of excerpts the reply
+     actually SHOWS, which replaces `basis.chunks` in the tail. The offer turn
+     measured on TEST said "5 excerpts" over a reply that showed none -- the
+     backend's count is what it searched, not what the reader can check.
+     0 drops the tail entirely; absent keeps the old output exactly. */
   var CJK = /[㐀-䶿一-鿿豈-﫿]/;
   function askedInChinese(question) { return CJK.test(question || ''); }
 
-  function formatAnswerBasis(basis, zh) {
+  function formatAnswerBasis(basis, zh, count) {
     if (!basis || !basis.chunks) return null;
     var dates = basis.dates || [];
-    var n = basis.chunks;
-    var tail = zh ? ' · ' + n + ' 段摘录'
+    var n = typeof count === 'number' ? count : basis.chunks;
+    var tail = !n ? ''
+             : zh ? ' · ' + n + ' 段摘录'
                   : ' · ' + n + ' excerpt' + (n === 1 ? '' : 's');
     if (basis.widened) {
       return zh
@@ -478,14 +636,17 @@
      [2] — a worse mix-up than the one that used to throw these away. So on
      this path the heading names them as records explicitly, and the card
      marker is a bullet, never a bracketed number, so it can never be read as
-     an inline reference into the answer text above or below it. */
-  function renderCitations(citations, fromWeb) {
+     an inline reference into the answer text above or below it.
+
+     `omitLabel`: inside the records fold the heading is the fold's own
+     summary row (recordsFoldSummary), so the body does not say it twice. */
+  function renderCitations(citations, fromWeb, omitLabel) {
     if (!citations || !citations.length) return null;
     return React.createElement('div', {
       className: 'fs-ask-chat__citations'
         + (fromWeb ? ' fs-ask-chat__citations--records' : ''),
     },
-      React.createElement('div', { className: 'fs-ask-chat__citations-label' },
+      omitLabel ? null : React.createElement('div', { className: 'fs-ask-chat__citations-label' },
         fromWeb
           ? 'What we found in your records · ' + citations.length
           : 'Sources · ' + citations.length),
@@ -544,6 +705,60 @@
     );
   }
 
+  /* ---- folds: the answer first, the details under it ----------------------
+
+     Spec docs/specs/2026-10-17-ask-answer-first-folds.md. The owner scrolled
+     past a basis line and five record cards before reaching a word of the
+     answer. Above the answer now sits only one-line context that changes how
+     it must be read; everything else is a fold below it.
+
+     A fold is a native <button aria-expanded aria-controls> over a body that
+     stays IN the DOM with the `hidden` attribute when collapsed -- not
+     removed, not visually hidden: `hidden` takes the citation cards (which
+     are role=button tabIndex=0) out of the tab order, and the print rule in
+     composites.css brings a collapsed body back on paper.
+
+     `foldable: false` renders the summary as a plain line: a row that only
+     carries a status has nothing to expand into. */
+  function renderFold(o) {
+    var cls = 'fs-ask-fold fs-ask-fold--' + o.kind + (o.extraClass ? ' ' + o.extraClass : '');
+    var textCls = 'fs-ask-fold__text' + (o.textClass ? ' ' + o.textClass : '');
+    if (!o.foldable) {
+      return React.createElement('div', { className: cls },
+        React.createElement('div', {
+          className: 'fs-ask-fold__summary fs-ask-fold__summary--static ' + textCls,
+        }, o.summary));
+    }
+    return React.createElement('div', { className: cls + (o.open ? ' fs-ask-fold--open' : '') },
+      React.createElement('button', {
+        type:            'button',
+        className:       'fs-ask-fold__summary',
+        'aria-expanded': !!o.open,
+        'aria-controls': o.bodyId,
+        onClick:         o.onToggle,
+      },
+        React.createElement('span', { className: 'fs-ask-fold__chevron', 'aria-hidden': 'true' }, '›'),
+        React.createElement('span', { className: textCls }, o.summary)),
+      React.createElement('div', {
+        id:        o.bodyId,
+        className: 'fs-ask-fold__body',
+        hidden:    !o.open,
+      }, o.body));
+  }
+
+  /* The records fold's one line (spec §4). Grounded: "Sources · 5 · <basis>",
+     the basis WITHOUT its own excerpt tail (the count is already said), and
+     without it at all when widened -- that sentence already sits above the
+     answer. Not grounded: the records-named heading the web branch has always
+     used, so the bullets below cannot be read as the web prose's [n]. */
+  function recordsFoldSummary(m) {
+    var n = (m.citations || []).length;
+    if (!n) return null;
+    if (!m.grounded) return 'What we found in your records · ' + n;
+    var basis = m.basis && !m.basis.widened ? formatAnswerBasis(m.basis, m.zh, 0) : null;
+    return 'Sources · ' + n + (basis ? ' · ' + basis : '');
+  }
+
   /* ---- scope: what this Ask is narrowed to --------------------------------
 
      The host owns the context ({date, siteId, siteName, authorFolder,
@@ -582,7 +797,11 @@
      of that would just be a second number to keep in sync with the first,
      and the caller here builds `history` from the visible log, which is
      already the right size for a reader to have typed. */
-  function requestBodyFor(context, question, history) {
+  /* `web` (optional): { offerWeb, webIntent } -- the web-offer opt-in (spec
+     2026-10-16 ask-screen-web-offer §2). Each key goes on the body only when
+     exactly `true`, so a caller that passes nothing (every caller before
+     FS_ASK_WEB_OFFER) builds the same body as before. */
+  function requestBodyFor(context, question, history, web) {
     var c = context || {};
     var body = { question: question };
     if (present(c.date))         body.date          = c.date;
@@ -593,6 +812,8 @@
       body.scoped = true;
     }
     if (history && history.length) body.history = history;
+    if (web && web.offerWeb === true)  body.offer_web  = true;
+    if (web && web.webIntent === true) body.web_intent = true;
     return body;
   }
 
@@ -601,14 +822,25 @@
      request renders the one reassuring line (see `send()`'s catch below),
      and feeding that back to the model as if it had answered would teach
      it that the agent said "FieldSight is busy" on a prior turn -- noise,
-     not memory. `m.error` is exactly the flag that failure path sets. */
+     not memory. `m.error` is exactly the flag that failure path sets.
+
+     An offer whose "Search the web" button was taken (`webAccepted`) is not a
+     turn either: the web answer inserted right after it is, so the question
+     pairs with that answer and the next turn sees (Q, web answer), not
+     (Q, "Your site records don't cover that."). An offer nobody took --
+     including a partial records answer that carried the button -- is the
+     answer the reader got, and pairs as a normal turn.
+
+     A stored turn the server withheld (`m.withheld`, spec 2026-10-22 §6) is
+     not a turn either: the reader no longer has its answer, so the model
+     must not be told they did. */
   function historyFromMessages(msgs) {
     var out = [];
     var pendingQuestion = null;
     (msgs || []).forEach(function (m) {
       if (m.role === 'user') {
         pendingQuestion = m.text;
-      } else if (m.role === 'assistant' && !m.error && pendingQuestion != null) {
+      } else if (m.role === 'assistant' && !m.error && !m.withheld && !m.webAccepted && pendingQuestion != null) {
         out.push({ question: pendingQuestion, answer: m.text });
         pendingQuestion = null;
       }
@@ -635,6 +867,145 @@
     var cut = t.slice(0, TOPIC_CHIP_MAX + 1);
     var sp = cut.lastIndexOf(' ');
     return (sp > 0 ? cut.slice(0, sp) : t.slice(0, TOPIC_CHIP_MAX)).trim() + '…';
+  }
+
+  /* ---- conversation history (spec 2026-10-22 ask-conversation-history) -----
+
+     A stored turn is the `result` /ask/result returned, kept as it was, so it
+     renders through the SAME builder a live answer does: messageFromResult.
+     Everything that is not in the result -- the language, the web offer, the
+     history that turn sent, whether it was scoped -- is a request-side fact,
+     passed in: live from `send()`, stored from the turn's `request` and the
+     thread's `scope`. */
+
+  /* Copy is fixed by the spec (§6). */
+  var WITHHELD_TEXT = 'A record behind this answer is no longer available to you.';
+  var NEW_THREAD_TEXT = 'Started a new conversation';
+
+  /* `facts`: { offerWeb, sentHistory, scoped, wantsCorrob }. */
+  function messageFromResult(question, res, facts) {
+    res = res || {};
+    facts = facts || {};
+    return {
+      /* A per-message id, because the corroboration arrives later and has to
+         find its own answer again. Position is not an identity here: two
+         questions can be in flight, and matching on text attaches the block
+         to the wrong one as soon as somebody asks the same thing twice. */
+      id:        ++_midSeq,
+      role:      'assistant',
+      text:      res.answer || '',
+      citations: res.citations || [],
+      model:     res.model,
+      /* What the backend actually searched. Absent on the legacy path and
+         on older deploys, which formatAnswerBasis renders as no line. */
+      basis:     res.basis || null,
+      /* The records could not answer this and the web could. Carried as
+         its own field, never folded into `text`: a reader who cannot tell
+         what came out of their own meetings from what came off the
+         internet has no reason to suspect they need to check. */
+      fromWeb:   !!res.from_web,
+      grounded:  !!res.grounded,
+      web:       res.web || null,
+      /* Project documents the answer cited (backend rule 3): what should be, kept
+         apart from the recordings and the web. Absent when none were cited. */
+      documents:   res.documents || null,
+      corrob:   facts.wantsCorrob ? { _pending: true } : null,
+      /* Captured from the question, not read off the answer: the model's
+         reply language is not reliable (measured on prod, a Chinese question
+         came back in English 2 runs out of 3), and the basis line must not
+         inherit that coin flip. */
+      zh:        askedInChinese(question),
+      /* What the backend says it enforced. Stored as a response-shaped
+         object so the chips and scope lines read exactly what came back;
+         `applied_scope` undefined = a backend that predates scoping. */
+      scopeResponse: { applied_scope: res.applied_scope },
+      scoped:        !!facts.scoped,
+      question:      question,
+      /* What the backend actually searched for, once it resolves
+         history-dependent references ("it", "the same site") into a
+         standalone question. Rendered only when present and different
+         from what was typed -- absent on today's backend (history is
+         not wired up yet on that side) and equal-to-typed on the common
+         case where there was nothing to resolve, both of which say
+         nothing worth a line. */
+      asked:         res.asked,
+      /* The backend offered the web instead of running it (spec
+         2026-10-16 ask-screen-web-offer §3): renders "Search the web".
+         Only honoured when the request offered it -- prod never sends
+         `offer_web`, so it should never see one, and must not render a
+         button if it somehow did. */
+      webOffer:      !!facts.offerWeb && !!res.web_offer,
+      /* The exact history this turn sent, for the offer's re-ask. */
+      sentHistory:   facts.sentHistory || [],
+    };
+  }
+
+  /* A stored thread -> the log. Each turn is its question and its answer,
+     marked `stored` (it carries "Answered {date}" and "Ask again"). Two
+     shapes need more than that:
+     - withheld (§6): the question stays, the answer is the fixed sentence,
+       and it is no turn of history;
+     - a taken web offer: live, "Search the web" re-asks the SAME question
+       with web_intent and adds no second bubble, but the store keeps it as
+       its own turn. A web_intent turn right after an offer for the same
+       question is that re-ask, so it renders as it did live.
+     The history a stored turn sent is not stored, only its length, so it is
+     rebuilt from the turns before it -- what the reader saw then. */
+  function messagesFromThread(thread) {
+    var out = [];
+    var scoped = !!(thread && thread.scope && thread.scope.scoped === true);
+    ((thread && thread.turns) || []).forEach(function (t) {
+      if (!t || typeof t.question !== 'string') return;
+      var req = t.request || {};
+      var prev = out[out.length - 1];
+      var takenOffer = req.web_intent === true && prev && prev.role === 'assistant'
+        && prev.webOffer && prev.question === t.question;
+      if (takenOffer) prev.webAccepted = true;
+      else out.push({ role: 'user', text: t.question });
+      if (t.withheld || !t.result) {
+        out.push({ id: ++_midSeq, role: 'assistant', text: WITHHELD_TEXT,
+                   withheld: true, stored: true, question: t.question });
+        return;
+      }
+      var n = typeof req.history_len === 'number' ? req.history_len : 0;
+      var prior = historyFromMessages(out);
+      var m = messageFromResult(t.question, t.result, {
+        offerWeb:    req.offer_web === true,
+        sentHistory: n > 0 ? prior.slice(-n) : [],
+        scoped:      scoped,
+      });
+      m.stored = true;
+      m.answeredAt = t.at;
+      out.push(m);
+    });
+    return out;
+  }
+
+  /* The seeded log for one thread object, built once: AskChat's initial
+     state is computed on every render (the value form of useState), and a
+     rebuild would mint new message ids each time. */
+  var _seed = { thread: null, msgs: null };
+  function seedFor(thread) {
+    if (_seed.thread !== thread) _seed = { thread: thread, msgs: messagesFromThread(thread) };
+    return _seed.msgs;
+  }
+
+  /* Epoch SECONDS (the backend is Python) -> the short day the scope chips
+     use ('Thu 3 Sep'), as a calendar day in `tz` -- New Zealand when omitted
+     (owner rule 2026-10-22: the UI shows NZ time whatever the browser's zone;
+     it used to be the browser's own zone). null when there is no time to show. */
+  function answeredDay(at, tz) {
+    if (typeof at !== 'number' || !isFinite(at)) return null;
+    var d = new Date(at * 1000);
+    var iso;
+    try {
+      var o = { year: 'numeric', month: '2-digit', day: '2-digit' };
+      o.timeZone = tz || 'Pacific/Auckland';
+      iso = new Intl.DateTimeFormat('en-CA', o).format(d);   /* en-CA -> YYYY-MM-DD */
+    } catch (e) {
+      iso = d.toISOString().slice(0, 10);
+    }
+    return shortDay(iso);
   }
 
   /* null  = no answer yet: the chip shows the request, unmarked.
@@ -742,8 +1113,10 @@
     var user    = props.user;
     var context = props.context || {};
 
-    /* messages: [{ role: 'user'|'assistant', text, citations?, model? }] */
-    var refMsgs = React.useState([]);
+    /* messages: [{ role: 'user'|'assistant', text, citations?, model? }]
+       A stored conversation (`initialThread`) is the log from the first
+       render: seeded, not asked. */
+    var refMsgs = React.useState(props.initialThread ? seedFor(props.initialThread) : []);
     var msgs    = refMsgs[0];
     var setMsgs = refMsgs[1];
 
@@ -754,6 +1127,12 @@
     var refBusy = React.useState(false);
     var busy    = refBusy[0];
     var setBusy = refBusy[1];
+    /* What an async Ask turn (FS_ASK_ASYNC) last said it is doing:
+       null | 'pending' | 'searching_records' | 'searching_web' | 'writing'. Stays null on the one-request path,
+       which reports no progress, so the pending line reads as it always has. */
+    var refProgress = React.useState(null);
+    var progress    = refProgress[0];
+    var setProgress = refProgress[1];
 
     /* Dock-only state (docs/specs/2026-09-16-ask-dock.md §5). Declared
        unconditionally, same as every other hook here, so the hook order
@@ -765,6 +1144,19 @@
     var refCollapsed = React.useState(false);
     var collapsed    = refCollapsed[0];
     var setCollapsed = refCollapsed[1];
+    /* The id of the offer message whose "Search the web" re-ask is in flight
+       (FS_ASK_WEB_OFFER), else null. Its own state rather than `progress`:
+       the async hook reports 'pending' for that turn too, and "Searching your
+       records…" is the wrong line for a search the reader sent to the web. */
+    var refReaskOf = React.useState(null);
+    var reaskOf    = refReaskOf[0];
+    var setReaskOf = refReaskOf[1];
+    /* Fold open/closed, per message and per fold: { key: bool }. A key that
+       is absent means "the default for this fold" (spec §4/§5), so a new
+       message always starts from its defaults and nothing is persisted. */
+    var refFolds = React.useState({});
+    var folds    = refFolds[0];
+    var setFolds = refFolds[1];
 
     var listRef = React.useRef(null);
     var rootRef  = React.useRef(null);
@@ -786,6 +1178,10 @@
        initialQuestion effect and would wipe the question that effect just
        added (palette hand-off). */
     var resetMountedRef = React.useRef(false);
+    /* The server-side conversation this log is (`threads` only): null until
+       the first answer hands one back in `result.thread`, then whatever id
+       the latest answer named. Read by `send()`; a scope change drops it. */
+    var threadRef = React.useRef((props.initialThread && props.initialThread.thread_id) || null);
 
     /* Task C — one-shot hand-off from Search's "Ask FieldSight" row. Runs
        once on mount only ([] deps). AUTO-SENDS: the user already typed and
@@ -883,6 +1279,9 @@
       dayChangeTokenRef.current = renderCommitToken;
       genRef.current += 1;
       setMsgs([]);
+      /* A cleared log is a new conversation (spec 2026-10-22 §7: changing
+         the scope starts a new thread). */
+      threadRef.current = null;
       if (pending && !hasScope(context)) {
         if (busy) deferredResendRef.current = pending;
         else send(pending, { noHistory: true });
@@ -949,7 +1348,48 @@
       });
     }
 
-    /* `opts.noHistory`: the "Ask across everything" resend path (both the
+    /* Mark an offer message taken (true) or give its button back (false).
+       By id, like patchCorrob; a miss is a no-op. */
+    function patchWebAccepted(mid, value) {
+      setMsgs(function (m) {
+        var hit = false;
+        var next = m.map(function (msg) {
+          if (msg.id !== mid) return msg;
+          hit = true;
+          return Object.assign({}, msg, { webAccepted: value });
+        });
+        return hit ? next : m;
+      });
+    }
+
+    /* Where a reply lands. An ordinary turn appends. A web re-ask goes right
+       after the offer it answers -- the reader may have asked something else
+       before clicking an older offer, and historyFromMessages pairs by
+       order. If the offer is gone (the log was reset), the reply is dropped
+       rather than resurrected into a conversation that no longer has it. */
+    function placeReply(m, afterId, reply) {
+      if (afterId == null) return m.concat([reply]);
+      for (var k = 0; k < m.length; k++) {
+        if (m[k].id === afterId) return m.slice(0, k + 1).concat([reply], m.slice(k + 1));
+      }
+      return m;
+    }
+
+    /* "Search the web" on an offer (spec 2026-10-16 ask-screen-web-offer §5):
+       no second user bubble, the original question verbatim, and the exact
+       history the offer's own turn sent -- carried on the message, never
+       rebuilt from `msgs`, so the rewrite step sees what it saw the first
+       time. */
+    function acceptWebOffer(m) {
+      if (busy || m.webAccepted) return;
+      patchWebAccepted(m.id, true);
+      send(m.question, { webReaskOf: m.id, history: m.sentHistory || [] });
+    }
+
+    /* `opts.webReaskOf` (with `opts.history`): the offer button's re-ask --
+       see acceptWebOffer above.
+
+       `opts.noHistory`: the "Ask across everything" resend path (both the
        immediate send below and the deferred one fired once a busy request
        settles) is a SCOPE CHANGE -- it is what widening the scope to
        "everything" IS -- and decision 5 clears history on every scope
@@ -968,10 +1408,18 @@
        updated yet) is what actually prevents it. */
     function send(question, opts) {
       if (!question || busy) return;
-      var userMsg = { role: 'user', text: question };
-      setMsgs(function (m) { return m.concat([userMsg]); });
-      setQ('');
+      var reaskOfId = (opts && opts.webReaskOf != null) ? opts.webReaskOf : null;
+      var webReask  = reaskOfId != null;
+      /* A web re-ask asks nothing new: the question is already on screen, and
+         whatever the reader is typing meanwhile stays in the box. */
+      if (!webReask) {
+        var userMsg = { role: 'user', text: question };
+        setMsgs(function (m) { return m.concat([userMsg]); });
+        setQ('');
+      }
       setBusy(true);
+      setProgress(null);
+      setReaskOf(reaskOfId);
       /* A new question always re-opens the overlay: closing it (dock only)
          hides the conversation, not the ability to ask another one. */
       setCollapsed(false);
@@ -989,7 +1437,7 @@
          The answer says which path it took. A route the reader cannot see is
          a route they cannot correct. */
       var alerts = window.FS.api.programmeAlerts;
-      if (alerts && props.alertsProvider && alerts.isAlertsQuestion(question)) {
+      if (!webReask && alerts && props.alertsProvider && alerts.isAlertsQuestion(question)) {
         var built = null;
         try {
           built = alerts.buildAlerts(props.alertsProvider() || {});
@@ -1016,61 +1464,69 @@
          request already under way. `opts.noHistory` overrides this to `[]`
          (which `requestBodyFor` then omits from the wire) for the widen
          resend -- see the comment on `send`'s signature above. */
-      var history = (opts && opts.noHistory) ? [] : historyFromMessages(msgs);
-      var body = requestBodyFor(context, question, history);
+      var history = webReask ? (opts.history || [])
+                  : (opts && opts.noHistory) ? [] : historyFromMessages(msgs);
+      /* FS_ASK_WEB_OFFER. Off: no web keys, the body is exactly today's. The
+         re-ask always carries both (it only exists because an offer did). */
+      var offerWeb = !!(((window.FS || {}).api || {}).askWebOffer);
+      var body = (offerWeb || webReask)
+        ? requestBodyFor(context, question, history, { offerWeb: true, webIntent: webReask })
+        : requestBodyFor(context, question, history);
       body.user = user;   /* undefined is dropped on the wire */
+      /* Conversation history (spec 2026-10-22 §4/§7). Only with `threads`
+         (the palette): without it no thread field exists and the body is
+         exactly today's -- the docked Timeline Ask clears its log on every
+         day change and must not fill the caller's five slots. */
+      if (props.threads) {
+        if (threadRef.current) body.thread_id = threadRef.current;
+        else body.new_thread = true;
+      }
       var gen = genRef.current;
       function isStale() { return gen !== genRef.current; }
-      window.FS.api.ask.ask(body).then(function (res) {
+      /* The hooks are read only by the async-turn path; the one-request path
+         ignores them. `isStale` lets that path cancel a turn whose context the
+         reader has already left. */
+      window.FS.api.ask.ask(body, {
+        isStale:    isStale,
+        onProgress: function (status) { if (!isStale()) setProgress(status); },
+      }).then(function (res) {
         if (isStale()) return;
         var answerText = res.answer || '';
         /* Not on a web-derived answer: corroborating the web against the web
-           is a loop that reads as confirmation. */
+           is a loop that reads as confirmation. Nor on a result that already
+           carries a web status: the web was already tried this turn (e.g. the
+           backend's "I couldn't search the web just now", spec
+           fieldsight-pipeline 2026-10-19-ask-explicit-web-failure). */
         var wantsCorrob = !!(((window.FS || {}).api || {}).externalCorroboration)
                           && !!answerText
-                          && !res.from_web;
-        /* A per-message id, because the corroboration arrives later and has to
-           find its own answer again. Position is not an identity here: two
-           questions can be in flight, and matching on text attaches the block
-           to the wrong one as soon as somebody asks the same thing twice. */
-        var mid = ++_midSeq;
-        setMsgs(function (m) { return m.concat([{
-          id:        mid,
-          role:      'assistant',
-          text:      answerText,
-          citations: res.citations || [],
-          model:     res.model,
-          /* What the backend actually searched. Absent on the legacy path and
-             on older deploys, which formatAnswerBasis renders as no line. */
-          basis:     res.basis || null,
-          /* The records could not answer this and the web could. Carried as
-             its own field, never folded into `text`: a reader who cannot tell
-             what came out of their own meetings from what came off the
-             internet has no reason to suspect they need to check. */
-          fromWeb:   !!res.from_web,
-          grounded:  !!res.grounded,
-          web:       res.web || null,
-          corrob:    wantsCorrob ? { _pending: true } : null,
-          /* Captured from the question at send time, not read off the answer:
-             the model's reply language is not reliable (measured on prod, a
-             Chinese question came back in English 2 runs out of 3), and the
-             basis line must not inherit that coin flip. */
-          zh:        askedInChinese(question),
-          /* What the backend says it enforced. Stored as a response-shaped
-             object so the chips and scope lines read exactly what came back;
-             `applied_scope` undefined = a backend that predates scoping. */
-          scopeResponse: { applied_scope: res.applied_scope },
-          scoped:        scopedRequest,
-          question:      question,
-          /* What the backend actually searched for, once it resolves
-             history-dependent references ("it", "the same site") into a
-             standalone question. Rendered only when present and different
-             from what was typed -- absent on today's backend (history is
-             not wired up yet on that side) and equal-to-typed on the common
-             case where there was nothing to resolve, both of which say
-             nothing worth a line. */
-          asked:         res.asked,
-        }]); });
+                          && !res.from_web
+                          && !(res.web && typeof res.web.status === 'string');
+        /* The same builder a stored turn goes through, so a conversation
+           reopened from history reads exactly as it did live. The facts are
+           the ones captured at send time. */
+        var reply = messageFromResult(question, res, {
+          offerWeb:    offerWeb,
+          sentHistory: history,
+          scoped:      scopedRequest,
+          wantsCorrob: wantsCorrob,
+        });
+        var mid = reply.id;
+        /* The thread this answer was stored in. A different id than the one
+           sent means the old thread was evicted, expired or full and the
+           server started a new one: switch to it, and say so where the new
+           conversation begins -- above the question that started it. */
+        var switched = false;
+        if (props.threads && res.thread && typeof res.thread.thread_id === 'string') {
+          switched = !!threadRef.current && threadRef.current !== res.thread.thread_id;
+          threadRef.current = res.thread.thread_id;
+        }
+        setMsgs(function (m) {
+          var next = placeReply(m, reaskOfId, reply);
+          if (!switched) return next;
+          var at = next.indexOf(userMsg || reply);
+          if (at === -1) return next;
+          return next.slice(0, at).concat([{ role: 'divider', text: NEW_THREAD_TEXT }], next.slice(at));
+        });
 
         /* The second pass. Fired after the answer is already on screen and
            awaited by nothing the answer depends on -- /ask spends its whole
@@ -1106,16 +1562,22 @@
         } else {
           console.warn('[AskChat] request failed (network)', err);
         }
-        setMsgs(function (m) { return m.concat([{
+        setMsgs(function (m) { return placeReply(m, reaskOfId, {
           role:  'assistant',
           text:  'FieldSight is busy at the moment. Your question has not been '
                + 'lost — please try again shortly. If it keeps happening, '
                + 'contact the FieldSight team.',
           error: true,
-        }]); });
+        }); });
+        /* No web answer followed the offer, so it is not taken: the button
+           comes back for another try, and the offer pairs with its question
+           in history again. */
+        if (webReask) patchWebAccepted(reaskOfId, false);
       }).then(function () {
         /* Even for a stale response: the request is over either way. */
         setBusy(false);
+        setProgress(null);
+        setReaskOf(null);
       });
     }
 
@@ -1132,6 +1594,49 @@
       if (msgs[li].scopeResponse) { lastAnswer = msgs[li]; break; }
     }
     var chips = chipsFor(context, lastAnswer ? lastAnswer.scopeResponse : undefined);
+
+    /* The "thinking" row. One builder for both places it appears: the foot of
+       the log (every ordinary turn) and right under an offer message whose
+       "Search the web" re-ask is in flight. */
+    function pendingRow(label, key) {
+      return React.createElement('div', {
+        key:          key,
+        className: 'fs-ask-chat__msg fs-ask-chat__msg--assistant fs-ask-chat__msg--pending',
+        role:         'status',
+        'aria-live':  'polite',
+      },
+        React.createElement('span', { className: 'fs-ask-chat__pending-dots', 'aria-hidden': 'true' },
+          React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
+          React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
+          React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
+        ),
+        React.createElement('span', { className: 'fs-ask-chat__pending-label' }, label),
+      );
+    }
+    var reaskInline = busy && reaskOf != null
+      && msgs.some(function (x) { return x.id === reaskOf; });
+
+    /* A message's fold. Keyed by message id; a row without one (an error row,
+       the alerts route) falls back to its index, namespaced so the two can
+       never collide. The body id comes from the same key, and message ids are
+       module-unique, so two mounts on one page never share an aria target. */
+    function fold(m, i, kind, o) {
+      var key = (m.id != null ? 'id' + m.id : 'i' + i) + '-' + kind;
+      var has = function (f) { return Object.prototype.hasOwnProperty.call(f, key); };
+      var open = has(folds) ? folds[key] : !!o.defaultOpen;
+      return renderFold(Object.assign({}, o, {
+        kind:     kind,
+        bodyId:   'fs-ask-fold-' + key,
+        open:     open,
+        onToggle: function () {
+          setFolds(function (f) {
+            var next = Object.assign({}, f);
+            next[key] = !(has(f) ? f[key] : !!o.defaultOpen);
+            return next;
+          });
+        },
+      }));
+    }
 
     var className = 'fs-ask-chat'
       + (props.compact ? ' fs-ask-chat--compact' : '')
@@ -1178,14 +1683,17 @@
           : null,
 
         msgs.map(function (m, i) {
-          return React.createElement('div', {
+          /* The excerpts this reply SHOWS -- the count the basis line states. */
+          var shown = (m.citations || []).length;
+          var row = React.createElement('div', {
             key: i,
             /* Marks the anchor the scroll effect looks for. The question is
                where reading starts, so it is the thing that gets put at the top
                — not the last line of the answer. */
             'data-role': m.role,
             className: 'fs-ask-chat__msg fs-ask-chat__msg--' + m.role
-              + (m.error ? ' fs-ask-chat__msg--error' : ''),
+              + (m.error ? ' fs-ask-chat__msg--error' : '')
+              + (m.withheld ? ' fs-ask-chat__msg--withheld' : ''),
           },
             /* Assistant replies are markdown → render via the safe renderer
                (it HTML-escapes first, then emits only a fixed tag set, so
@@ -1198,18 +1706,18 @@
               ? React.createElement('div', { className: 'fs-ask-chat__divider-text' }, m.text)
               : null,
 
-            /* FIRST, above the answer — not after it, and not at the end of the
-               prose. The reader asked about a period; if that period is empty
-               they learn it before they read a word about another day.
-               A version of this sat under the answer and it was wrong for the
-               same reason the model's closing caveat was: by the time you reach
-               it you have already read three sentences about a date you did not
-               ask about (user, 2026-08-31). */
-            m.role === 'assistant' && formatAnswerBasis(m.basis, m.zh)
+            /* FIRST, above the answer -- but only when WIDENED (spec
+               2026-10-17 §4). The reader asked about a period; if that period
+               is empty they learn it before they read a word about another
+               day (user, 2026-08-31). It renders even with no citations,
+               because that is exactly when the reader must know first; its
+               tail counts the cards shown, and is dropped when there are none.
+               Every other basis line moved into the records fold's summary:
+               the answer's first sentence now says what it is based on. */
+            m.role === 'assistant' && formatAnswerBasis(m.basis, m.zh, shown) && m.basis.widened
               ? React.createElement('div', {
-                  className: 'fs-ask-chat__basis'
-                    + (m.basis && m.basis.widened ? ' fs-ask-chat__basis--widened' : ''),
-                }, formatAnswerBasis(m.basis, m.zh))
+                  className: 'fs-ask-chat__basis fs-ask-chat__basis--widened',
+                }, formatAnswerBasis(m.basis, m.zh, shown))
               : null,
             /* What the scope turned out to be. Above the answer for the same
                reason as the basis line: the reader learns the answer is not
@@ -1230,27 +1738,11 @@
               ? React.createElement('div', { className: 'fs-ask-chat__asked' },
                   'Searched for: ' + m.asked)
               : null,
-            /* Records first, web after (spec 2026-09-22): a union, not
-               either/or. On a fromWeb message these are the customer's own
-               record excerpts the verdict judged insufficient -- rendered
-               here, ABOVE the "From the open web" label and the web prose,
-               so the reading order matches the plan's own name for it. See
-               renderCitations for why this block's heading and card marker
-               must not look like the web answer's own [1]/[2] source list. */
-            m.role === 'assistant' && m.fromWeb
-              ? renderCitations(m.citations, !m.grounded) : null,
-            m.role === 'assistant' ? renderWebStatus(m) : null,
+            /* The one-line provenance label, and only the label, above the
+               answer (spec 2026-10-17 §2): "a caveat reached after three
+               sentences has already been read past". The status, the web
+               prose and its sources fold below the answer. */
             m.role === 'assistant' ? renderWebOrigin(m) : null,
-            /* `question_admission` already returns the sentence explaining a
-               refusal (a name, a commercially sensitive topic, ...); nothing
-               rendered it, so the reader saw the web section simply absent
-               and read a guard doing its job as an outage. */
-            /* With `status` present the backend no longer refuses by content
-               (`too_long` replaces it); the status line above says it instead. */
-            m.role === 'assistant' && m.web && m.web.refused
-              && typeof m.web.status !== 'string'
-              ? React.createElement('div', { className: 'fs-ask-chat__web-refused' }, m.web.refused)
-              : null,
             /* The plain-text fallback below is also what renders the user's
                own question; a divider already rendered its one line above
                and must not get a second copy of it here (m.role !== 'divider'
@@ -1265,9 +1757,68 @@
                     })
                   : React.createElement('div', { className: 'fs-ask-chat__msg-text' },
                       m.text)),
-            /* Already rendered above (records-first) for fromWeb messages --
-               this is the grounded path's own "Sources" block only. */
-            m.role === 'assistant' && !m.fromWeb ? renderCitations(m.citations) : null,
+            /* A stored answer is a copy from another day (spec 2026-10-22
+               D4): it says which, right under the answer it dates. */
+            m.role === 'assistant' && m.stored && answeredDay(m.answeredAt)
+              ? React.createElement('div', { className: 'fs-ask-chat__answered' },
+                  'Answered ' + answeredDay(m.answeredAt))
+              : null,
+            /* The web offer (FS_ASK_WEB_OFFER; spec 2026-10-16
+               ask-screen-web-offer §5). The button IS the offer: the answer
+               text asks no question a typed "yes" could accept. Gone once
+               taken (the web answer lands right under this message); back if
+               that re-ask fails. Disabled while any question is in flight,
+               because `send` refuses then anyway. */
+            m.role === 'assistant' && m.webOffer && !m.webAccepted && !m.error
+              ? React.createElement('button', {
+                  type: 'button',
+                  className: 'fs-ask-chat__widen fs-ask-chat__web-offer',
+                  disabled: busy,
+                  onClick: function () { acceptWebOffer(m); },
+                }, 'Search the web')
+              : null,
+            /* The records fold (spec 2026-10-17 §4), BELOW the answer for
+               every kind of message. Still a union, not either/or (spec
+               2026-09-22): a web answer keeps its records, only the position
+               moved. Open with numbered [n] cards when `m.grounded` -- the
+               answer cites them inline, including a `mixed` web answer;
+               collapsed with bullets otherwise, so the cards can never be read
+               as the web prose's own [1]/[2] (see renderCitations). */
+            m.role === 'assistant' && shown
+              ? fold(m, i, 'records', {
+                  summary:     recordsFoldSummary(m),
+                  textClass:   'fs-ask-chat__citations-label',
+                  extraClass:  m.grounded ? '' : 'fs-ask-chat__citations--records',
+                  defaultOpen: !!m.grounded,
+                  foldable:    true,
+                  body:        renderCitations(m.citations, !m.grounded, true),
+                })
+              : null,
+            /* Project documents: their own block right after the records fold,
+               never inside it -- a different provenance (what should be, not
+               what happened on site), so it stays visible when records fold. */
+            m.role === 'assistant' ? renderDocumentOrigin(m) : null,
+            /* The web fold (spec 2026-10-17 §3), closed by default, after the
+               records. Its summary carries the status line, the source domains
+               and any conflict count; its body the conflicts list, the web
+               prose (only when it differs from the answer) and the links.
+               `question_admission`'s refusal sentence renders here as a plain
+               line -- nothing rendered it once, and the reader read a guard
+               doing its job as an outage. */
+            m.role === 'assistant' && webFoldSummary(m)
+              ? (function (ws) {
+                  return fold(m, i, 'web', {
+                    summary:     ws.text,
+                    textClass:   ws.textClass,
+                    foldable:    ws.foldable,
+                    defaultOpen: false,
+                    body:        [
+                      React.createElement(React.Fragment, { key: 'c' }, renderWebConflicts(m.web)),
+                      React.createElement(React.Fragment, { key: 'o' }, renderWebOrigin(m, 'details')),
+                    ],
+                  });
+                })(webFoldSummary(m))
+              : null,
             /* A scoped answer whose records did not answer it: offer the same
                question across everything. The host clears the context; the
                reset effect re-sends once the new (empty) context has rendered.
@@ -1304,8 +1855,23 @@
 
             /* Below the citations, deliberately: citations point back into the
                customer's own recordings, and this points out of them. Reading
-               order carries the same separation the styling does. */
-            m.role === 'assistant' ? renderCorroboration(m.corrob) : null,
+               order carries the same separation the styling does.
+               Pending and failed render exactly as they always have; anything
+               else is its own fold (spec 2026-10-17 §3a), closed, with today's
+               block unchanged as its body. */
+            m.role === 'assistant' && m.corrob && (m.corrob._pending || m.corrob._failed)
+              ? renderCorroboration(m.corrob)
+              : (m.role === 'assistant' && corrobFoldSummary(m.corrob)
+                  ? (function (cs) {
+                      return fold(m, i, 'corrob', {
+                        summary:     cs.text,
+                        textClass:   'fs-ask-webstatus__line fs-ask-webstatus__line--' + cs.level,
+                        foldable:    cs.foldable,
+                        defaultOpen: false,
+                        body:        cs.foldable ? renderCorroboration(m.corrob) : null,
+                      });
+                    })(corrobFoldSummary(m.corrob))
+                  : null),
             /* Customers must never learn which model/vendor answers Ask
                (owner's ruling). `m.model` is deliberately never rendered —
                the backend is being changed in parallel to stop sending it
@@ -1318,25 +1884,41 @@
               ? React.createElement('div', { className: 'fs-ask-chat__model' },
                   'from the programme, not the reports')
               : null,
+            /* Every stored turn, withheld or not (spec 2026-10-22 D4/§6):
+               the question again, as a new turn of this conversation --
+               a fresh answer, paid for, never a replay of the stored one. */
+            m.role === 'assistant' && m.stored
+              ? React.createElement('button', {
+                  type: 'button',
+                  className: 'fs-ask-chat__widen fs-ask-chat__ask-again',
+                  disabled: busy,
+                  onClick: function () { send(m.question); },
+                }, 'Ask again')
+              : null,
           );
+          /* The offer's re-ask is in flight: its placeholder follows the
+             offer, where the web answer will be inserted. Every other row
+             renders exactly as before. */
+          return reaskInline && m.id === reaskOf
+            ? React.createElement(React.Fragment, { key: i },
+                row, pendingRow('Searching the web…', 'web-reask-pending'))
+            : row;
         }),
 
         /* The wait is p90 8.6s — long enough that three silent dots read as a
            stall. The dots say "alive"; the line says what it is doing, so a
            reader who looks away and back knows the request did not die. */
-        busy ? React.createElement('div', {
-          className: 'fs-ask-chat__msg fs-ask-chat__msg--assistant fs-ask-chat__msg--pending',
-          role:         'status',
-          'aria-live':  'polite',
-        },
-          React.createElement('span', { className: 'fs-ask-chat__pending-dots', 'aria-hidden': 'true' },
-            React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
-            React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
-            React.createElement('span', { className: 'fs-ask-chat__pending-dot' }),
-          ),
-          React.createElement('span', { className: 'fs-ask-chat__pending-label' },
-            'Looking through your records…'),
-        ) : null,
+        /* A web re-ask's placeholder is drawn under its offer message (in
+           the map above), not here. */
+        busy && !reaskInline ? pendingRow(
+          /* An async turn says which stage it is in; the one-request path
+             never reports one and keeps the original line. */
+          reaskOf != null ? 'Searching the web…'
+            : progress === 'searching_web' ? 'Checking the web…'
+            : progress === 'pending'   ? 'Searching your records…'
+            : progress === 'searching_records' ? 'Searching your records…'
+            : progress === 'writing'   ? 'Writing the answer…'
+            : 'Looking through your records…') : null,
       );
         if (!dock) return messagesDiv;
         var closeBtn = React.createElement('button', {
@@ -1439,8 +2021,15 @@
 
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.AskChat = AskChat;
+  /* Conversation history builders, exported for tests
+     (tests/ask-chat-threads.test.js) and the palette's row dates. */
+  AskChat._messageFromResult = messageFromResult;
+  AskChat._messagesFromThread = messagesFromThread;
+  AskChat._answeredDay = answeredDay;
   window.FieldSight._corroborationHasNothingToShow = hasNothingToShow;
-  window.FieldSight._askWebStatus = { line: webStatusLine, render: renderWebStatus, origin: renderWebOrigin, citations: renderCitations };
+  window.FieldSight._askWebStatus = { line: webStatusLine, render: renderWebStatus, origin: renderWebOrigin, citations: renderCitations, docs: renderDocumentOrigin };
+  /* Pure fold helpers, exported for tests (tests/ask-answer-first-folds.test.js). */
+  window.FieldSight._askFolds = { records: recordsFoldSummary, web: webFoldSummary, corrob: corrobFoldSummary };
   window.FieldSight._corroborationSourceDomain = sourceDomain;
   /* Exported so the wording can be pinned by a test without rendering React,
      and so SP-Ask's spoken variant can be written against the same dict. */

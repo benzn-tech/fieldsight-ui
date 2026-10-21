@@ -65,6 +65,12 @@ test('a web answer is never corroborated against the web', () => {
   assert.match(line, /!res\.from_web/);
 });
 
+test('a result that already tried the web is not corroborated again', () => {
+  const line = askChat.slice(askChat.indexOf('var wantsCorrob'),
+                             askChat.indexOf('var wantsCorrob') + 320);
+  assert.match(line, /!\(res\.web && typeof res\.web\.status === 'string'\)/);
+});
+
 test('the block is visually separated, not just labelled', () => {
   assert.match(css, /\.fs-ask-web \{/);
   const rule = css.slice(css.indexOf('.fs-ask-web {'), css.indexOf('.fs-ask-web__label'));
@@ -178,7 +184,11 @@ const WEB_ANSWER = {
          sources: [{ url: 'https://example.com/spec', title: 'Spec sheet' }] },
 };
 
-test('records render, labelled as records, ABOVE the web block, never as "Sources"', async () => {
+/* Rewritten 2026-10-17 (spec ask-answer-first-folds §2/§7): the 2026-09-22
+   rule "records first, web after" put five cards between the reader and the
+   answer. The union stays -- records are still rendered, never discarded --
+   but they now come AFTER the answer, in the records fold. */
+test('records render, labelled as records, AFTER the answer, never as "Sources"', async () => {
   const h = mountAsk();
   h.render({ user: 'Ben', context: {} });
   await h.ask('What cover does the spec require?');
@@ -195,6 +205,11 @@ test('records render, labelled as records, ABOVE the web block, never as "Source
 
   const webOrigin = h.byClass('fs-ask-web')[0];
   assert.ok(webOrigin, 'the web block itself must still render');
+  const answer = h.byClass('fs-ask-chat__msg-text').slice(-1)[0];
+  assert.ok(h.indexOf(answer) < h.indexOf(recordBlocks[0]),
+    'records must render after the answer, not before it');
+  /* Records still come before the web details: the web block is now the body
+     of the web fold, which follows the records fold. */
   assert.ok(h.indexOf(recordBlocks[0]) < h.indexOf(webOrigin),
     'records must render before the web block, not after');
 

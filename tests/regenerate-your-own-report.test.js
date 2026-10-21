@@ -34,6 +34,15 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
+/* The page reads the NZ day of `now` through FS.api (owner rule 2026-10-22). */
+global.window = global.window || {};
+require('../scripts/api/index.js');
+const NZ_API = global.window.FS.api;
+
+/* 00:00 UTC on that day = 12:00/13:00 the same day in Auckland, whatever zone
+   the machine running the tests is in. */
+function nzNoon(y, m, d) { return new Date(Date.UTC(y, m, d)); }
+
 const PAGE = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'pages', 'reports.js'), 'utf8')
   .replace(/\r\n/g, '\n');
 
@@ -96,18 +105,24 @@ test('an account with no folder is offered nothing', () => {
 /* ---- the archive-level buttons pick your own latest period ---------------------------- */
 
 test('daily defaults to yesterday', () => {
-  assert.strictEqual(defaultPeriodEnd('daily', new Date(2026, 8, 15, 10)), '2026-09-14');
-  assert.strictEqual(defaultPeriodEnd('daily', new Date(2026, 9, 1, 10)), '2026-09-30');
+  assert.strictEqual(defaultPeriodEnd('daily', nzNoon(2026, 8, 15)), '2026-09-14');
+  assert.strictEqual(defaultPeriodEnd('daily', nzNoon(2026, 9, 1)), '2026-09-30');
+});
+
+test("the day is the Auckland day, not the browser's or UTC's", () => {
+  /* 08:30 on 1 Oct in Auckland is still 30 Sep in UTC and in the Americas. */
+  assert.strictEqual(defaultPeriodEnd('daily', new Date('2026-09-30T19:30:00Z')), '2026-09-30');
+  assert.strictEqual(defaultPeriodEnd('monthly', new Date('2026-09-30T19:30:00Z')), '2026-09-30');
 });
 
 test('weekly defaults to the Sunday that ended the last completed week', () => {
-  assert.strictEqual(defaultPeriodEnd('weekly', new Date(2026, 8, 15, 10)), '2026-09-13'); // Tue -> Sun 13
-  assert.strictEqual(defaultPeriodEnd('weekly', new Date(2026, 8, 13, 10)), '2026-09-06'); // Sun -> previous Sun
+  assert.strictEqual(defaultPeriodEnd('weekly', nzNoon(2026, 8, 15)), '2026-09-13'); // Tue -> Sun 13
+  assert.strictEqual(defaultPeriodEnd('weekly', nzNoon(2026, 8, 13)), '2026-09-06'); // Sun -> previous Sun
 });
 
 test('monthly defaults to the last day of the previous month', () => {
-  assert.strictEqual(defaultPeriodEnd('monthly', new Date(2026, 8, 15, 10)), '2026-08-31');
-  assert.strictEqual(defaultPeriodEnd('monthly', new Date(2026, 2, 1, 10)), '2026-02-28');
+  assert.strictEqual(defaultPeriodEnd('monthly', nzNoon(2026, 8, 15)), '2026-08-31');
+  assert.strictEqual(defaultPeriodEnd('monthly', nzNoon(2026, 2, 1)), '2026-02-28');
 });
 
 /* ---- when it is done ------------------------------------------------------------------ */
@@ -147,6 +162,7 @@ function loadReports(overrides) {
     FieldSight: { fixtures: {} },
     FS: {
       api: Object.assign({
+        nzDay: NZ_API.nzDay, todayNZDT: NZ_API.todayNZDT,
         useMocks: false,
         timelineSource: 'aurora',
         orgBaseUrl: 'https://org.example/prod/api',
@@ -192,7 +208,7 @@ test('THE generate button regenerates your latest report of that type, not yeste
     { key: 'reports/2026-09-23/Ben_UCPK2/daily_report.json', type: 'daily', date: '2026-09-23' },
     { key: 'reports/2026-09-11/Ben_UCPK2/daily_report.json', type: 'daily', date: '2026-09-11' },
   ];
-  assert.strictEqual(regenerateTarget('daily', rows, ME, new Date(2026, 8, 28)), '2026-09-23');
+  assert.strictEqual(regenerateTarget('daily', rows, ME, nzNoon(2026, 8, 28)), '2026-09-23');
 });
 
 test("somebody else's newer report is not yours to aim at", () => {
@@ -201,12 +217,12 @@ test("somebody else's newer report is not yours to aim at", () => {
     { key: 'reports/2026-09-20/Ben_UCPK2/daily_report.json', type: 'daily', date: '2026-09-20' },
     { key: 'reports/2026-09-25/summary_report.json', type: 'daily', date: '2026-09-25' },
   ];
-  assert.strictEqual(regenerateTarget('daily', rows, ME, new Date(2026, 8, 28)), '2026-09-20');
+  assert.strictEqual(regenerateTarget('daily', rows, ME, nzNoon(2026, 8, 28)), '2026-09-20');
 });
 
 test('with no report of that type yet, it falls back to the latest period', () => {
   const rows = [{ key: 'reports/2026-09-20/Ben_UCPK2/daily_report.json', type: 'daily', date: '2026-09-20' }];
-  const now = new Date(2026, 8, 28);
+  const now = nzNoon(2026, 8, 28);
   assert.strictEqual(regenerateTarget('weekly', rows, ME, now), defaultPeriodEnd('weekly', now));
   assert.strictEqual(regenerateTarget('daily', [], ME, now), '2026-09-27');
 });

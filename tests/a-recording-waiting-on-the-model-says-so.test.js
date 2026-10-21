@@ -280,9 +280,9 @@ test('both pages mount the banners, the Timeline only for the caller\'s own day,
   const HTML = read('app-shell-preview.html');
   assert.match(TL, /Middle:   TimelineWithPendingNotes,/);
   assert.match(TL, /enabled: isOwnDayView\(caller, params, callerFolder\(\)\),/);
-  assert.match(TL, /return !!\(scope\.user && me && scope\.user === me\);/);
+  assert.match(TL, /scope\.resolveSelf \|\| \(scope\.user && me && scope\.user === me\)/);
   assert.match(TL, /TimelineMiddleColumn\(Object\.assign\(\{\}, props, \{ reloadTick: tk\[0\] \}\)\)/);
-  assert.match(TL, /\}, \[date, user, retryCount, props\.reloadTick\]\);/);
+  assert.match(TL, /\}, \[date, requestUser, retryCount, props\.reloadTick\]\);/);
   assert.match(TD, /Middle:   TodayWithPendingNotes,/);
   assert.match(TD, /if \(ctx && ctx\.reload\) ctx\.reload\(\);/);
   assert.match(TD, /reload: function \(\) \{ setRetry\(function \(n\) \{ return n \+ 1; \}\); \} \};/);

@@ -7,6 +7,16 @@ frontend:
         - cp -R scripts styles assets dist/
         - cp *.html dist/
         - cp app-shell-preview.html dist/index.html
+        # Compile the JSX here instead of on every visitor's device (see
+        # tools/precompile.js). Same @babel/standalone version and options the
+        # page used in the browser; React switches to its production build.
+        # Set FS_PRECOMPILE=false in the Amplify console to ship the old
+        # in-browser-Babel artifact without a code change.
+        - >-
+          if [ "${FS_PRECOMPILE:-true}" = "true" ]; then
+          npm install --no-save --no-package-lock --no-audit --no-fund @babel/standalone@7.29.0 &&
+          node tools/precompile.js dist;
+          else echo "precompile skipped (FS_PRECOMPILE=${FS_PRECOMPILE})"; fi
         # Stamp every asset URL with this build's commit, in the ARTIFACT only.
         #
         # The 168 `?v=N` numbers in the HTML are maintained by hand, so shipping
@@ -29,8 +39,8 @@ frontend:
           sed -i "s/?v=[0-9A-Za-z._-]\+/?v=${STAMP}/g" dist/*.html;
           echo "cache-stamped dist/*.html with ?v=${STAMP}"
         - >-
-          printf 'window.FS_ENV = { baseUrl: "%s", useMocks: %s, writeMocks: %s, orgBaseUrl: "%s", orgWrites: %s, timelineSource: "%s", threadReview: %s, externalCorroboration: %s, navDailyV2: %s, legacyReadFallback: %s };\n'
-          "${FS_BASEURL:-/api}" "${FS_USEMOCKS:-true}" "${FS_WRITEMOCKS:-true}" "${FS_ORG_BASEURL:-}" "${FS_ORGWRITES:-false}" "${FS_TIMELINE_SOURCE:-report}" "${FS_THREAD_REVIEW:-false}" "${FS_EXTERNAL_CORROBORATION:-false}" "${FS_NAV_DAILY_V2:-false}" "${FS_LEGACY_READ_FALLBACK:-true}"
+          printf 'window.FS_ENV = { baseUrl: "%s", useMocks: %s, writeMocks: %s, orgBaseUrl: "%s", orgWrites: %s, timelineSource: "%s", threadReview: %s, askWebOffer: %s, askThreads: %s, externalCorroboration: %s, askAsync: %s, navDailyV2: %s, legacyReadFallback: %s };\n'
+          "${FS_BASEURL:-/api}" "${FS_USEMOCKS:-true}" "${FS_WRITEMOCKS:-true}" "${FS_ORG_BASEURL:-}" "${FS_ORGWRITES:-false}" "${FS_TIMELINE_SOURCE:-report}" "${FS_THREAD_REVIEW:-false}" "${FS_ASK_WEB_OFFER:-false}" "${FS_ASK_THREADS:-false}" "${FS_EXTERNAL_CORROBORATION:-false}" "${FS_ASK_ASYNC:-false}" "${FS_NAV_DAILY_V2:-false}" "${FS_LEGACY_READ_FALLBACK:-true}"
           > dist/env.js
   artifacts:
     baseDirectory: dist
