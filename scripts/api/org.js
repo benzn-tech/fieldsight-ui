@@ -417,6 +417,47 @@
     return { cognito_sub: sub, archived_at: action === 'archive' ? new Date().toISOString() : null };
   }
 
+  /* Resend invitation (POST /members/{sub}/resend-invite). Cognito re-sends
+     the invite email with a fresh temporary password, but only while the
+     person has not set a password yet; the org-api answers 409 with a
+     sentence otherwise. 403/404 arrive from orgRequest as envelopes, not
+     throws, so they are turned into errors here -- an envelope read as data
+     would show "Invitation sent" for a request that did nothing. */
+  async function resendInvite(sub) {
+    if (orgWrite()) {
+      var res = await api.orgRequest('/members/' + encodeURIComponent(sub) + '/resend-invite',
+                                     { method: 'POST' });
+      if (res && (res._accessDenied || res._notFound)) {
+        var msg = res._accessDenied ? res.error : (res.raw && res.raw.error);
+        var err = new Error(msg || ('HTTP ' + res.status));
+        err.status = res.status; err.body = res.raw || { error: msg };
+        throw err;
+      }
+      return res;
+    }
+    await api.delay(400);
+    return { resent: true, email: null, user_status: 'FORCE_CHANGE_PASSWORD' };
+  }
+
+  /* Same gate as POST /members on the backend: admin or platform_admin. */
+  function canResendInvite(user) {
+    return !!user && (user.role === 'admin' || user.role === 'platform_admin');
+  }
+
+  /* The toast for a resend. */
+  function resendInviteMessage(result, err) {
+    if (!err) {
+      return 'Invitation re-sent' + (result && result.email ? ' to ' + result.email : '')
+        + ' — ask them to check their junk folder for no-reply@verificationemail.com';
+    }
+    var status = err.status;
+    var text = (err.body && err.body.error) || err.message || '';
+    if (status === 409) return text || 'This person has already accepted the invitation';
+    if (status === 403) return 'Only company admins can resend invitations';
+    if (status === 404) return text || 'Member not found';
+    return 'Could not resend the invitation';
+  }
+
   // -------- assets (presign) --------
   async function uploadUrl(kind, contentType) {
     if (orgWrite()) return api.orgRequest('/upload-url', { method: 'POST', body: { kind: kind, content_type: contentType } });
@@ -1644,6 +1685,8 @@
     confirmThreadSuggestion: confirmThreadSuggestion,
     rejectThreadSuggestion: rejectThreadSuggestion,
     getSiteMembers: getSiteMembers,
+    resendInvite: resendInvite, canResendInvite: canResendInvite,
+    resendInviteMessage: resendInviteMessage,
     addExternalMember: addExternalMember, canAddExternalMember: canAddExternalMember,
     externalMemberErrorMessage: externalMemberErrorMessage, externalBadgeText: externalBadgeText,
     EXTERNAL_ROLES: EXTERNAL_ROLES,
