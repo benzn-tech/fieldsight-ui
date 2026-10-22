@@ -982,6 +982,9 @@
     var modalOpen    = refModalOpen[0];
     var setModalOpen = refModalOpen[1];
 
+    var refResending = React.useState(false);
+    var resending    = refResending[0];
+    var setResending = refResending[1];
     var refArchiving = React.useState(false);
     var archiving    = refArchiving[0];
     var setArchiving = refArchiving[1];
@@ -1107,6 +1110,28 @@
       });
     }
 
+    /* Resend invitation -- for someone who never got (or lost) the invite
+       email. Same gate as the backend (admin / platform_admin), live-only,
+       never on yourself or an archived row. Shown for every active member:
+       the list does not carry the login's status, so the backend decides and
+       says "already accepted" for someone who has set a password. */
+    var canResend = orgLive() && window.FS.api.org.canResendInvite(caller)
+      && !u.archived && u.device_id !== callerSub;
+
+    function onResendInvite() {
+      if (resending) return;
+      setResending(true);
+      var org = window.FS.api.org;
+      org.resendInvite(u.device_id).then(function (res) {
+        setResending(false);
+        if (window.FS.toast) window.FS.toast.show({ message: org.resendInviteMessage(res), tone: 'success' });
+      }).catch(function (err) {
+        setResending(false);
+        var tone = (err && err.status === 409) ? 'info' : 'error';
+        if (window.FS.toast) window.FS.toast.show({ message: org.resendInviteMessage(null, err), tone: tone });
+      });
+    }
+
     function onArchiveMember() {
       if (archiving) return;
       setArchiving(true);
@@ -1228,6 +1253,13 @@
           className: 'fs-team-detail__action-btn fs-team-detail__action-btn--primary',
           onClick:   function () { setModalOpen(true); },
         }, 'Reassign to another site') : null,
+        canResend ? React.createElement('button', {
+          type:      'button',
+          className: 'fs-team-detail__action-btn',
+          disabled:  resending,
+          onClick:   onResendInvite,
+          title:     'Email the invitation again (only works if they have not set a password yet)',
+        }, resending ? 'Sending…' : 'Resend invite') : null,
         (canArchive && u.archived) ? React.createElement('button', {
           type:      'button',
           className: 'fs-team-detail__action-btn',
