@@ -514,7 +514,12 @@
   function AddMemberModal(props) {
     var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
     var live  = orgLive();
-    var roles = roleOptions(); var mockSites = siteOptions();
+    /* A gm may invite with gm-or-lower roles only (backend 403s admin /
+       platform_admin for a gm): drop those options for a gm caller. */
+    var orgApi = window.FS && window.FS.api && window.FS.api.org;
+    var roles = (orgApi && orgApi.inviteRoleOptions)
+      ? orgApi.inviteRoleOptions(props.caller, roleOptions()) : roleOptions();
+    var mockSites = siteOptions();
     /* Live: the primary-site dropdown must come from the REAL org sites —
        fixture site_ids don't exist in the org sites table, so sending one as
        a membership is an invalid FK. Fetch them; default to no primary site
@@ -761,6 +766,7 @@
       ),
 
       addOpen ? React.createElement(AddMemberModal, {
+        caller:    ctx.caller,
         onClose:   function () { setAddOpen(false); },
         onCreated: function (user) { ctx.addUser(user); },
       }) : null,
@@ -1111,7 +1117,7 @@
     }
 
     /* Resend invitation -- for someone who never got (or lost) the invite
-       email. Same gate as the backend (admin / platform_admin), live-only,
+       email. Same gate as the backend (admin / gm / platform_admin), live-only,
        never on yourself or an archived row. Shown for every active member:
        the list does not carry the login's status, so the backend decides and
        says "already accepted" for someone who has set a password. */

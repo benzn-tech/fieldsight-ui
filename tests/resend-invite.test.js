@@ -71,16 +71,17 @@ test('messages: success names the address and the sender; 409 shows the server s
   assert.match(ok, /re-sent to a@b\.co/);
   assert.match(ok, /no-reply@verificationemail\.com/);
   assert.match(org.resendInviteMessage(null, httpErr(409, 'already accepted -- use Forgot password')), /Forgot password/);
-  assert.strictEqual(org.resendInviteMessage(null, httpErr(403, 'x')), 'Only company admins can resend invitations');
+  assert.strictEqual(org.resendInviteMessage(null, httpErr(403, 'x')), 'Only admins and general managers can resend invitations');
   assert.strictEqual(org.resendInviteMessage(null, httpErr(404, 'member not found in your company')), 'member not found in your company');
   assert.strictEqual(org.resendInviteMessage(null, new Error('boom')), 'Could not resend the invitation');
 });
 
-test('only admin and platform_admin may resend (same gate as the backend)', () => {
+test('admin, gm and platform_admin may resend (same gate as the backend)', () => {
   const org = loadOrg(true);
   assert.strictEqual(org.canResendInvite({ role: 'admin' }), true);
+  assert.strictEqual(org.canResendInvite({ role: 'gm' }), true);
   assert.strictEqual(org.canResendInvite({ role: 'platform_admin' }), true);
-  for (const r of ['gm', 'project_manager', 'pm', 'site_manager', 'worker', undefined]) {
+  for (const r of ['regional_manager', 'project_manager', 'pm', 'site_manager', 'worker', undefined]) {
     assert.strictEqual(org.canResendInvite({ role: r }), false, String(r));
   }
   assert.strictEqual(org.canResendInvite(null), false);
@@ -92,4 +93,30 @@ test('team page: button is gated (live, admin, not archived, not self) and calls
   assert.match(t, /canResend \? React\.createElement\('button'/);
   assert.match(t, /org\.resendInvite\(u\.device_id\)/);
   assert.match(t, /'Resend invite'/);
+});
+
+const LIVE_ROLES = [
+  { v: 'admin', l: 'Admin' }, { v: 'gm', l: 'General Manager' },
+  { v: 'pm', l: 'Project Manager' }, { v: 'site_manager', l: 'Site Manager' },
+  { v: 'worker', l: 'Worker' },
+];
+
+test('Add member: a gm is not offered admin or platform_admin', () => {
+  const org = loadOrg(true);
+  const opts = [...LIVE_ROLES, { v: 'platform_admin', l: 'Platform admin' }];
+  const got = org.inviteRoleOptions({ role: 'gm' }, opts).map((o) => o.v);
+  assert.deepStrictEqual(got, ['gm', 'pm', 'site_manager', 'worker']);
+});
+
+test('Add member: admin and platform_admin keep the full list', () => {
+  const org = loadOrg(true);
+  for (const caller of [{ role: 'admin', isAdmin: true }, { role: 'platform_admin', isAdmin: true }]) {
+    assert.deepStrictEqual(org.inviteRoleOptions(caller, LIVE_ROLES), LIVE_ROLES, caller.role);
+  }
+});
+
+test('Add member modal: role options go through inviteRoleOptions with the caller', () => {
+  const t = src('pages/team.js');
+  assert.match(t, /orgApi\.inviteRoleOptions\(props\.caller, roleOptions\(\)\)/);
+  assert.match(t, /React\.createElement\(AddMemberModal, \{\s*caller:\s*ctx\.caller,/);
 });

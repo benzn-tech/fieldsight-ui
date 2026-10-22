@@ -439,9 +439,21 @@
     return { resent: true, email: null, user_status: 'FORCE_CHANGE_PASSWORD' };
   }
 
-  /* Same gate as POST /members on the backend: admin or platform_admin. */
+  /* Same gate as POST /members on the backend: admin, gm or platform_admin
+     (gm added 2026-10-22). */
   function canResendInvite(user) {
-    return !!user && (user.role === 'admin' || user.role === 'platform_admin');
+    return !!user && (user.role === 'admin' || user.role === 'gm' || user.role === 'platform_admin');
+  }
+
+  /* The roles a caller may set when inviting (POST /members). A gm may grant
+     gm and below only -- the backend answers 403 for admin/platform_admin --
+     so the Add member form does not offer them to a gm. Everyone else keeps
+     the list unchanged (the backend still gates admin/platform_admin).
+     `options` is the form's [{v, l}] list. */
+  function inviteRoleOptions(caller, options) {
+    options = options || [];
+    if (!caller || caller.role !== 'gm' || caller.isAdmin) return options;
+    return options.filter(function (o) { return o.v !== 'admin' && o.v !== 'platform_admin'; });
   }
 
   /* The toast for a resend. */
@@ -453,7 +465,7 @@
     var status = err.status;
     var text = (err.body && err.body.error) || err.message || '';
     if (status === 409) return text || 'This person has already accepted the invitation';
-    if (status === 403) return 'Only company admins can resend invitations';
+    if (status === 403) return 'Only admins and general managers can resend invitations';
     if (status === 404) return text || 'Member not found';
     return 'Could not resend the invitation';
   }
@@ -1686,6 +1698,7 @@
     rejectThreadSuggestion: rejectThreadSuggestion,
     getSiteMembers: getSiteMembers,
     resendInvite: resendInvite, canResendInvite: canResendInvite,
+    inviteRoleOptions: inviteRoleOptions,
     resendInviteMessage: resendInviteMessage,
     addExternalMember: addExternalMember, canAddExternalMember: canAddExternalMember,
     externalMemberErrorMessage: externalMemberErrorMessage, externalBadgeText: externalBadgeText,
