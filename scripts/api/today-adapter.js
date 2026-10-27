@@ -463,6 +463,9 @@
           assignee:    a.responsible || '—',
           status:      status.status,
           statusTone:  status.statusTone,
+          /* A status heard in the recording, pending a person's decision
+             (backend spec 2026-10-27): {id, status, quote} or null. */
+          statusSuggestion: a.status_suggestion || null,
           priority:    priorityLabel(a.priority),
           /* feat/today-rolling-open-items — raw deadline text (or null),
              distinct from dueTime below (which is always a display
