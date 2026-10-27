@@ -137,6 +137,59 @@
     return null;
   }
 
+  /* Status suggestions from speech (backend spec 2026-10-27). */
+  var SUGGESTION_LABEL = { done: 'Done', closed: 'Closed (not needed)',
+                           blocked: 'Blocked', in_progress: 'In progress' };
+  function suggestionLabel(s) {
+    return (s && SUGGESTION_LABEL[s.status]) || null;
+  }
+
+  /* "Heard: Done — “Sarah sent it, that's done”  [Accept] [Dismiss]".
+     Props: actionItemId, suggestion {id, status, quote}, onResolved({decision,
+     state, status}). Renders nothing for an unknown status, and nothing once
+     decided. A refusal keeps the chip and toasts the server's reason. */
+  function StatusSuggestionChip(props) {
+    var s = props.suggestion;
+    var busyRef = React.useState(false);
+    var busy = busyRef[0], setBusy = busyRef[1];
+    var goneRef = React.useState(false);
+    var gone = goneRef[0], setGone = goneRef[1];
+    var label = suggestionLabel(s);
+    if (!label || gone) return null;
+
+    function decide(decision, e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      if (busy) return;
+      setBusy(true);
+      window.FS.api.actions.decideStatusSuggestion(props.actionItemId, s.id, decision)
+        .then(function (env) {
+          if (env && env.ok) {
+            setGone(true);
+            if (props.onResolved) {
+              props.onResolved({ decision: decision, state: env.state, status: env.status });
+            }
+            return;
+          }
+          setBusy(false);
+          var toast = window.FS && window.FS.toast;
+          if (toast) {
+            toast.show({ message: (env && env.message) || 'Could not save this.',
+                         tone: 'error', duration: 5000 });
+          }
+        });
+    }
+
+    var h = React.createElement;
+    return h('div', { className: 'fs-status-suggestion', role: 'group',
+                      'aria-label': 'Status heard in the recording' },
+      h('span', { className: 'fs-status-suggestion__label' }, 'Heard: ' + label),
+      s.quote ? h('q', { className: 'fs-status-suggestion__quote' }, s.quote) : null,
+      h('button', { type: 'button', className: 'fs-status-suggestion__btn fs-status-suggestion__btn--accept',
+                    disabled: busy, onClick: function (e) { decide('accept', e); } }, 'Accept'),
+      h('button', { type: 'button', className: 'fs-status-suggestion__btn',
+                    disabled: busy, onClick: function (e) { decide('dismiss', e); } }, 'Dismiss'));
+  }
+
   function ActionItemRow(props) {
     var Badge   = window.FieldSight.Badge;
     var date          = props.date;
@@ -352,10 +405,26 @@
         : null,
     );
 
-    if (!withHistory) return row;
+    /* Outside the <label>: a click on Accept/Dismiss must not toggle the
+       checkbox. Accepting `done` ticks the row here; any other status shows on
+       the next load (the row has no status display beyond done/closed). */
+    var chip = (action.status_suggestion && action.id)
+      ? React.createElement(StatusSuggestionChip, {
+          actionItemId: action.id,
+          suggestion:   action.status_suggestion,
+          onResolved:   function (r) {
+            if (r.decision === 'accept' && r.status === 'done') setChecked(true);
+          },
+        })
+      : null;
+    if (!withHistory) {
+      return chip ? React.createElement('div', { className: 'fs-action-item-row-wrap' }, row, chip)
+                  : row;
+    }
     var TodoHistory = window.FieldSight.TodoHistory;
     return React.createElement('div', { className: 'fs-action-item-row-wrap' },
       row,
+      chip,
       TodoHistory ? React.createElement(TodoHistory, {
         open:         historyOpen,        /* no request while collapsed */
         actionItemId: action.id,
@@ -370,6 +439,7 @@
 
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.ActionItemRow = ActionItemRow;
+  window.FieldSight.StatusSuggestionChip = StatusSuggestionChip;
 
   /* Expose the pure helpers to Node's test runner only (CommonJS). No-op in
      the browser (this file is a plain <script>, `module` is undefined) —
@@ -380,6 +450,7 @@
       formatCloserCaption:  formatCloserCaption,
       isColumnDone:         isColumnDone,
       historyEnabled:       historyEnabled,
+      suggestionLabel:      suggestionLabel,
     };
   }
 })();

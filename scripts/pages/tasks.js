@@ -1184,6 +1184,22 @@
                  show without inventing a field that isn't there. */
             ),
 
+            /* A status heard in the recording. Accepting is the audited
+               PATCH server-side, so the row is patched with the status the
+               server applied; either decision clears the chip. */
+            row.status_suggestion && row.actionItemId && fs.StatusSuggestionChip
+              ? React.createElement(fs.StatusSuggestionChip, {
+                  key:          row.status_suggestion.id,
+                  actionItemId: row.actionItemId,
+                  suggestion:   row.status_suggestion,
+                  onResolved:   function (r) {
+                    var patchOut = { status_suggestion: null };
+                    if (r.decision === 'accept' && r.status) patchOut.status = r.status;
+                    if (ctx && ctx.patchRow) ctx.patchRow(row.id, patchOut);
+                  },
+                })
+              : null,
+
             /* Actions */
             React.createElement('div', { className: 'fs-tasks-detail__actions' },
               !isRowDone(row) && row.actionItemId

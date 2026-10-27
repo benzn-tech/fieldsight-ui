@@ -3014,6 +3014,26 @@
 
       renderDetailRows(rows),
 
+      /* A status heard in the recording (backend spec 2026-10-27). Accept is
+         the audited PATCH server-side; re-derive the badge from the status it
+         applied with the SAME helper adapt() uses. */
+      item.kind === 'task' && item.statusSuggestion && item.actionItemId && fs.StatusSuggestionChip
+        ? React.createElement(fs.StatusSuggestionChip, {
+            key:          item.statusSuggestion.id,
+            actionItemId: item.actionItemId,
+            suggestion:   item.statusSuggestion,
+            onResolved:   function (r) {
+              var patchOut = { statusSuggestion: null };
+              if (r.decision === 'accept' && r.status && window.FS.api.deriveStatus) {
+                var derived = window.FS.api.deriveStatus(r.status, false);
+                patchOut.status     = derived.status;
+                patchOut.statusTone = derived.statusTone;
+              }
+              if (ctx && ctx.patchTask) ctx.patchTask(item.id, patchOut);
+            },
+          })
+        : null,
+
       /* spec 2026-09-15 §2 — Today host, beneath the field rows (mirrors
          Tasks' History tab). open = this panel is showing that item.
          date/folder are the report OWNER's (item.date / item.folder). */
