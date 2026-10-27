@@ -1113,6 +1113,8 @@
                        deriveStatus()'s label ('Done' only when the column
                        is done). There is no second store to consult. */
                     if (item.status === 'Done') return; /* done — drop */
+                    /* closed = no longer needed: off the list too, not done. */
+                    if (item.status === 'Closed') return;
 
                     item.date       = item.date || date;
                     /* topic_id restarts at 0 in every report, so
@@ -1642,6 +1644,9 @@
     { value: 'in_progress', label: 'In progress' },
     { value: 'blocked',     label: 'Blocked' },
     { value: 'done',        label: 'Done' },
+    /* `closed` = no longer needs doing (cancelled, superseded, duplicate) --
+       off the list, but NOT done (owner, 2026-10-27). */
+    { value: 'closed',      label: 'Closed (not needed)' },
   ];
 
   /* Reverse today-adapter.js deriveStatus()'s label formatting so the

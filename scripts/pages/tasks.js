@@ -61,9 +61,17 @@
   /* Done-ness is the task's own action_items.status (`row.status`, threaded
      raw by tasks-aggregator.js) and nothing else. The legacy DynamoDB tick
      overlay no longer exists, so there is no second store to union with. */
+  /* "Done" here means OFF THE LIST: done or closed (no longer needed).
+     Every caller asks "is this still owed?" -- open/overdue buckets, sort,
+     batch eligibility, the check-off affordances. The badge and label below
+     still tell the two apart (isRowClosed). */
   function isRowDone(row) {
     if (!row) return false;
-    return window.FS.api.actions.isActionResolved(row.status);
+    return window.FS.api.actions.isActionFinished(row.status);
+  }
+
+  function isRowClosed(row) {
+    return !!row && row.status === 'closed';
   }
 
   function isOverdue(row, today) {
@@ -695,8 +703,10 @@
                 actionItemId: row.actionItemId,
                 title:       row.action,
                 assignee:    row.responsible || '—',
-                status:      rowDone ? 'Done' : (isOverdue(row, today) ? 'Overdue' : 'Open'),
-                statusTone:  rowDone ? 'success'
+                status:      isRowClosed(row) ? 'Closed'
+                            : rowDone ? 'Done' : (isOverdue(row, today) ? 'Overdue' : 'Open'),
+                statusTone:  isRowClosed(row) ? 'neutral'
+                            : rowDone ? 'success'
                             : (isOverdue(row, today) ? 'danger' : 'info'),
                 priority:    row.priority
                               ? row.priority.charAt(0).toUpperCase() + row.priority.slice(1)
@@ -808,6 +818,9 @@
     { value: 'in_progress', label: 'In progress' },
     { value: 'blocked',     label: 'Blocked' },
     { value: 'done',        label: 'Done' },
+    /* `closed` = no longer needs doing (cancelled, superseded, duplicate) --
+       off the list, but NOT done (owner, 2026-10-27). */
+    { value: 'closed',      label: 'Closed (not needed)' },
   ];
 
   /* ---------- TasksRightDetail ---------------------------------------- */
@@ -1067,7 +1080,9 @@
     var statusBadge;
     /* The row's own status column, so this badge cannot contradict the
        Status editor three rows below it (which writes/reads the column). */
-    if (isRowDone(row)) {
+    if (isRowClosed(row)) {
+      statusBadge = React.createElement(Badge, { tone: 'neutral', size: 'sm', prefixDot: true }, 'Closed');
+    } else if (isRowDone(row)) {
       statusBadge = React.createElement(Badge, { tone: 'success', size: 'sm', prefixDot: true }, 'Done');
     } else if (overdue) {
       statusBadge = React.createElement(Badge, { tone: 'danger', size: 'sm', prefixDot: true }, 'Overdue');
@@ -1212,6 +1227,7 @@
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
       computeBuckets: computeBuckets, isOverdue: isOverdue, isRowDone: isRowDone,
+      isRowClosed: isRowClosed,
       actionItemHistoryProps: actionItemHistoryProps,
     };
   }
