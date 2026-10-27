@@ -195,6 +195,9 @@
         if (u && u.primary_site) b = byId[u.primary_site] || null;
       }
       if (!b) return;
+      /* closed = no longer needs doing: neither done nor owed, so it is left
+         out of the completion denominator rather than counted as a miss. */
+      if (r.status === 'closed') return;
       b.action_total += 1;
       var checked = !!(r.audit && r.audit.checked);
       if (checked) {

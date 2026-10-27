@@ -412,7 +412,8 @@
      column-only (status === 'done'); the render site injects a predicate
      that also honours a tick made earlier in the same session. */
   function defaultActionDone(a) {
-    return !!(a && a.status === 'done');
+    /* done, or closed (no longer needed): either way not an open item. */
+    return !!(a && (a.status === 'done' || a.status === 'closed'));
   }
 
   /* Resolve an action item's free-text deadline to a display string, reusing

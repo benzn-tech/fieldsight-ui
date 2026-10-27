@@ -289,6 +289,13 @@
             ? React.createElement('span', { className: 'fs-action-item-row__meta-item' },
                 'Due ' + deadlineDisplay)
             : null,
+          /* closed = no longer needed (owner, 2026-10-27). Not ticked --
+             it is not a completion -- so the row says why it is not owed. */
+          (!checked && action.status === 'closed')
+            ? React.createElement('span', {
+                className: 'fs-action-item-row__meta-item fs-action-item-row__meta-item--closed',
+              }, 'Closed \u00b7 not needed')
+            : null,
           closerCaption
             ? React.createElement('span', {
                 className: 'fs-action-item-row__meta-item fs-action-item-row__meta-item--audit',
