@@ -926,6 +926,45 @@
 }
 
 .fs-action-item-row__meta-item--audit { color: var(--color-success-700); }
+.fs-action-item-row__meta-item--closed { color: var(--text-secondary); }
+
+/* A status heard in the recording (backend spec 2026-10-27): a proposal, not
+   a fact, so it reads as a quiet strip under the row with the person's two
+   choices — never as a status badge. */
+.fs-status-suggestion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 0 10px 6px 36px;
+  padding: 6px 10px;
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel-muted);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.fs-status-suggestion__label { font-weight: 600; color: var(--text-primary); }
+.fs-status-suggestion__quote {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-style: italic;
+  word-break: break-word;
+}
+.fs-status-suggestion__btn {
+  padding: 2px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.fs-status-suggestion__btn--accept {
+  border-color: var(--color-accent-500);
+  color: var(--color-accent-700);
+}
+.fs-status-suggestion__btn:disabled { opacity: 0.6; cursor: default; }
 
 /* "Said 3x" — the same commitment reached us from several recordings on this
    day, so the list shows one row instead of three.
