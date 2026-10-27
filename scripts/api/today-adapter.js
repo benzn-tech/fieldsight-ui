@@ -104,7 +104,8 @@
      already shipped in this codebase (quality.js statusTone(),
      timeline.js MEETING_STATUS_TONE, programme-task-card.js) — all of
      them use 'danger' for blocked. Matched here for consistency. */
-  var STATUS_TONE = { done: 'success', in_progress: 'info', blocked: 'danger', open: 'info' };
+  var STATUS_TONE = { done: 'success', in_progress: 'info', blocked: 'danger', open: 'info',
+                      closed: 'neutral' };
   function deriveStatus(columnStatus) {
     var s = columnStatus || 'open';
     var label = s === 'in_progress' ? 'In progress' : s.charAt(0).toUpperCase() + s.slice(1);

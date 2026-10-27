@@ -36,6 +36,9 @@ global.window = {
         isActionResolved: function (columnStatus) {
           return columnStatus === 'done';
         },
+        isActionFinished: function (columnStatus) {
+          return columnStatus === 'done' || columnStatus === 'closed';
+        },
       },
     },
   },
