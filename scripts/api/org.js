@@ -439,6 +439,22 @@
     return { resent: true, email: null, user_status: 'FORCE_CHANGE_PASSWORD' };
   }
 
+  /* The Team list after "Add member" succeeds. POST /members is idempotent on
+     the email: re-adding someone who is already listed returns that same
+     person (same sub), so prepending blindly showed them twice until a reload
+     (prod, 2026-10-28). Replace the existing row in place; prepend only a
+     genuinely new person. */
+  function withAddedMember(users, user) {
+    var list = users || [];
+    if (!user) return list;
+    var hit = false;
+    var out = list.map(function (u) {
+      if (u && user.device_id && u.device_id === user.device_id) { hit = true; return user; }
+      return u;
+    });
+    return hit ? out : [user].concat(list);
+  }
+
   /* Same gate as POST /members on the backend: admin, gm or platform_admin
      (gm added 2026-10-22). */
   function canResendInvite(user) {
@@ -1698,6 +1714,7 @@
     rejectThreadSuggestion: rejectThreadSuggestion,
     getSiteMembers: getSiteMembers,
     resendInvite: resendInvite, canResendInvite: canResendInvite,
+    withAddedMember: withAddedMember,
     inviteRoleOptions: inviteRoleOptions,
     resendInviteMessage: resendInviteMessage,
     addExternalMember: addExternalMember, canAddExternalMember: canAddExternalMember,
