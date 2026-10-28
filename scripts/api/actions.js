@@ -295,6 +295,14 @@
     return columnStatus === 'done';
   }
 
+  /* Off the list: done (the work was done) OR closed (it no longer needs
+     doing). Use this, not isActionResolved, wherever the question is "is
+     this still owed?" -- open lists, overdue, open-item counts. A closed item
+     is never shown as ticked: closed is not a completion. */
+  function isActionFinished(columnStatus) {
+    return columnStatus === 'done' || columnStatus === 'closed';
+  }
+
   /* editable-content-correction — PATCH one free-text content field
      (topic title/summary, action_items.text/responsible, findings.*,
      safety_observations.observation) by its durable Aurora id. AURORA org
@@ -479,6 +487,7 @@
     /* The ONE check-off entry point every surface must use. */
     resolveActionItem:  resolveActionItem,
     isActionResolved:   isActionResolved,
+    isActionFinished:   isActionFinished,
     itemState:          itemState,
     ticksFor:           ticksFor,
     orgCheckoffLive:    orgCheckoffLive,
@@ -514,6 +523,7 @@
       orgCheckoffLive:   orgCheckoffLive,
       resolveActionItem: resolveActionItem,
       isActionResolved:  isActionResolved,
+      isActionFinished:  isActionFinished,
       itemState:         itemState,
       ticksFor:          ticksFor,
       normaliseCheckoff: normaliseCheckoff,

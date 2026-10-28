@@ -367,7 +367,7 @@
       var sid = t.session_id;
       if (!sid) return;
       var open = (t.action_items || []).filter(function (a, idx) {
-        if (a && a.status) return a.status !== 'done';
+        if (a && a.status) return a.status !== 'done' && a.status !== 'closed';
         return !isDone(a, t.topic_id, idx);
       });
       if (!open.length) return;
@@ -426,7 +426,8 @@
 
     topics.forEach(function (t) {
       var open = (t.action_items || []).filter(function (a, idx) {
-        if (a && a.status) return a.status !== 'done';
+        /* closed = no longer needed: not an open to-do either. */
+        if (a && a.status) return a.status !== 'done' && a.status !== 'closed';
         return !isDone(a, t.topic_id, idx);
       });
       var hasOwnItems = (t.action_items || []).length > 0;
