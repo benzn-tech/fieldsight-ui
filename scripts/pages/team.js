@@ -13,7 +13,7 @@
    Right detail (7.2):
      • Large Avatar + name + role badge + scope pill
      • Field rows: Projects (editable: role per project, remove,
-       add) · Device ID
+       add) · User ID
      • Footer: "View their reports" → /timeline, "View their tasks" → /tasks?user=
 
    Sprint 9 Track B additions:
@@ -357,7 +357,7 @@
     function addUser(user) {
       setState(function (s) {
         if (s.status !== 'ok') return s;
-        var users = [user].concat(s.users || []);
+        var users = window.FS.api.org.withAddedMember(s.users, user);
         var groups = groupUsersBySite(users);
         return Object.assign({}, s, {
           users: users, groups: groups,
@@ -1206,7 +1206,7 @@
         ),
         React.createElement(ProjectsField, { user: u, canEdit: canEditProjects }),
         React.createElement('div', { className: 'fs-team-detail__field' },
-          React.createElement('div', { className: 'fs-team-detail__field-label' }, 'Device ID'),
+          React.createElement('div', { className: 'fs-team-detail__field-label' }, 'User ID'),
           React.createElement('div', { className: 'fs-team-detail__field-value fs-team-detail__field-value--mono' },
             u.device_id || '—'),
         ),
