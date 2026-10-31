@@ -18,4 +18,8 @@ jobs:
         with:
           node-version: '24'
       - name: node --test
+        # The ask tests assert an IANA zone id; a bare runner reports "UTC".
+        # Every user is in New Zealand, so test in their zone.
+        env:
+          TZ: Pacific/Auckland
         run: node --test "tests/**/*.test.js"
