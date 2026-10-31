@@ -13,7 +13,7 @@
    Right detail (7.2):
      • Large Avatar + name + role badge + scope pill
      • Field rows: Projects (editable: role per project, remove,
-       add) · User ID
+       add) · User ID · Email · Joined · Sign-in · Last seen
      • Footer: "View their reports" → /timeline, "View their tasks" → /tasks?user=
 
    Sprint 9 Track B additions:
@@ -397,7 +397,7 @@
 
       Promise.resolve(writeP).then(function (res) {
         if (res && (res._accessDenied || res._notFound)) {
-          if (toast) toast.show({ message: (res.error) || 'Could not update position', tone: 'error', duration: 5000 });
+          if (toast) toast.show({ message: (res.error) || 'Could not update company access', tone: 'error', duration: 5000 });
           return;   // do NOT change the UI — the write did not persist
         }
         setState(function (s) {
@@ -405,9 +405,9 @@
           var patched = (s.users || []).map(function (u) { return u.device_id === deviceId ? Object.assign({}, u, { role: role }) : u; });
           return Object.assign({}, s, { users: patched, groups: groupUsersBySite(patched), totals: Object.assign({}, s.totals, { roles: countDistinctRoles(patched) }) });
         });
-        if (toast) toast.show({ message: 'Position updated', tone: 'success' });
+        if (toast) toast.show({ message: 'Company access updated', tone: 'success' });
       }).catch(function () {
-        if (toast) toast.show({ message: 'Could not update position', tone: 'error', duration: 5000 });
+        if (toast) toast.show({ message: 'Could not update company access', tone: 'error', duration: 5000 });
       });
     }
 
@@ -495,12 +495,14 @@
        the org slug (set by _toPageMember), so these values line up
        directly with the select's current value. Mock path unchanged. */
     if (orgLive()) {
+      /* Admin last: the most powerful tier is never the first thing a
+         hurried click lands on. */
       return [
-        { v: 'admin',        l: 'Admin' },
-        { v: 'gm',           l: 'General Manager' },
-        { v: 'pm',           l: 'Project Manager' },
-        { v: 'site_manager', l: 'Site Manager' },
         { v: 'worker',       l: 'Worker' },
+        { v: 'site_manager', l: 'Site Manager' },
+        { v: 'pm',           l: 'Project Manager' },
+        { v: 'gm',           l: 'General Manager' },
+        { v: 'admin',        l: 'Admin' },
       ];
     }
     var R = (window.FS && window.FS.ROLES) || {};
@@ -596,7 +598,7 @@
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--sm', onClick: function () { if (avatarRef.current) avatarRef.current.click(); } }, 'Upload picture')
         )),
         fFieldRow('Email', fText(form.email, function (v) { set('email', v); }, 'email')),
-        fFieldRow('Position / role', fSelect(form.role, roles, function (v) { set('role', v); })),
+        fFieldRow('Company access', fSelect(form.role, roles, function (v) { set('role', v); })),
         fFieldRow('Projects', fCheckList(form.site_ids, sites, toggleSite)),
         React.createElement('div', { className: 'fs-settings__actions' },
           React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: props.onClose }, 'Cancel'),
@@ -1118,11 +1120,12 @@
 
     /* Resend invitation -- for someone who never got (or lost) the invite
        email. Same gate as the backend (admin / gm / platform_admin), live-only,
-       never on yourself or an archived row. Shown for every active member:
-       the list does not carry the login's status, so the backend decides and
-       says "already accepted" for someone who has set a password. */
+       never on yourself or an archived row, and hidden once the login's status
+       says they have signed in (unknown status keeps it; the backend still
+       says "already accepted" for someone who has set a password). */
+    var facts = window.FS.api.org.memberAccessFacts(u);
     var canResend = orgLive() && window.FS.api.org.canResendInvite(caller)
-      && !u.archived && u.device_id !== callerSub;
+      && !u.archived && u.device_id !== callerSub && facts.canResend;
 
     function onResendInvite() {
       if (resending) return;
@@ -1196,13 +1199,18 @@
       /* Field rows */
       React.createElement('div', { className: 'fs-team-detail__fields' },
         React.createElement('div', { className: 'fs-team-detail__field' },
-          React.createElement('div', { className: 'fs-team-detail__field-label' }, 'Position'),
+          /* users.global_role: REACH across the company. The per-project role
+             under Projects is AUTHORITY on that project; the higher of the
+             two applies there (acl.visible_user_scope). */
+          React.createElement('div', { className: 'fs-team-detail__field-label' }, 'Company access'),
           React.createElement('div', { className: 'fs-team-detail__field-value' },
             React.createElement('select', {
               className: 'fs-settings__select', value: u.role, style: { maxWidth: '240px' },
               onChange: function (e) { if (ctx && ctx.changeRole) ctx.changeRole(u.device_id, e.target.value); },
             }, roleOptions().map(function (o) { return React.createElement('option', { key: o.v, value: o.v }, o.l); })),
           ),
+          React.createElement('div', { className: 'fs-field__hint' },
+            'Admin and General Manager see every project in the company. Everyone else sees only the projects below, and their role on each project sets what they see there.'),
         ),
         React.createElement(ProjectsField, { user: u, canEdit: canEditProjects }),
         React.createElement('div', { className: 'fs-team-detail__field' },
@@ -1210,6 +1218,12 @@
           React.createElement('div', { className: 'fs-team-detail__field-value fs-team-detail__field-value--mono' },
             u.device_id || '—'),
         ),
+        [['Email', facts.email], ['Joined', facts.joined], ['Sign-in', facts.signIn], ['Last seen', facts.lastSeen]]
+          .map(function (row) {
+            return React.createElement('div', { key: row[0], className: 'fs-team-detail__field' },
+              React.createElement('div', { className: 'fs-team-detail__field-label' }, row[0]),
+              React.createElement('div', { className: 'fs-team-detail__field-value' }, row[1]));
+          }),
         React.createElement('div', { className: 'fs-team-detail__field' },
           React.createElement('div', { className: 'fs-team-detail__field-label' }, 'Recording folder'),
           editingFolder

@@ -87,9 +87,9 @@ test('admin, gm and platform_admin may resend (same gate as the backend)', () =>
   assert.strictEqual(org.canResendInvite(null), false);
 });
 
-test('team page: button is gated (live, admin, not archived, not self) and calls the api', () => {
+test('team page: button is gated (live, admin, not archived, not self, not yet signed in) and calls the api', () => {
   const t = src('pages/team.js');
-  assert.match(t, /var canResend = orgLive\(\) && window\.FS\.api\.org\.canResendInvite\(caller\)\s*&& !u\.archived && u\.device_id !== callerSub;/);
+  assert.match(t, /var canResend = orgLive\(\) && window\.FS\.api\.org\.canResendInvite\(caller\)\s*&& !u\.archived && u\.device_id !== callerSub && facts\.canResend;/);
   assert.match(t, /canResend \? React\.createElement\('button'/);
   assert.match(t, /org\.resendInvite\(u\.device_id\)/);
   assert.match(t, /'Resend invite'/);

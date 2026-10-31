@@ -457,6 +457,37 @@
 
   /* Same gate as POST /members on the backend: admin, gm or platform_admin
      (gm added 2026-10-22). */
+  /* The read-only rows of the Team detail panel: Email, Joined, Sign-in, Last
+     seen. login_status is the Cognito UserStatus the members list carries
+     (null when the lookup failed); last_seen_at is stamped by /me and only
+     exists from the day that shipped, so a signed-in member without one reads
+     "Not recorded yet", not "Never". Dates are NZ time via api.nzDate*. */
+  var LOGIN_STATUS_TEXT = {
+    FORCE_CHANGE_PASSWORD: 'Invited — has not signed in yet',
+    UNCONFIRMED: 'Invited — has not signed in yet',
+    CONFIRMED: 'Signed in',
+    RESET_REQUIRED: 'Password reset required',
+  };
+  function memberAccessFacts(u) {
+    u = u || {};
+    var a = (window.FS && window.FS.api) || {};
+    var status = u.login_status || null;
+    var invited = status === 'FORCE_CHANGE_PASSWORD' || status === 'UNCONFIRMED';
+    var lastSeen = u.last_seen_at
+      ? (a.nzDateTime ? a.nzDateTime(u.last_seen_at) : u.last_seen_at)
+      : (invited ? 'Never' : (status ? 'Not recorded yet' : '—'));
+    return {
+      email: u.email || '—',
+      joined: u.created_at ? (a.nzDate ? a.nzDate(u.created_at) : u.created_at) : '—',
+      signIn: status ? (LOGIN_STATUS_TEXT[status] || status) : '—',
+      lastSeen: lastSeen,
+      invited: invited,
+      /* Resend only works before the first sign-in; an unknown status keeps
+         the button and lets the backend decide. */
+      canResend: !status || invited,
+    };
+  }
+
   function canResendInvite(user) {
     return !!user && (user.role === 'admin' || user.role === 'gm' || user.role === 'platform_admin');
   }
@@ -1715,6 +1746,7 @@
     getSiteMembers: getSiteMembers,
     resendInvite: resendInvite, canResendInvite: canResendInvite,
     withAddedMember: withAddedMember,
+    memberAccessFacts: memberAccessFacts,
     inviteRoleOptions: inviteRoleOptions,
     resendInviteMessage: resendInviteMessage,
     addExternalMember: addExternalMember, canAddExternalMember: canAddExternalMember,
