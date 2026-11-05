@@ -169,7 +169,10 @@
     function resolvePreset(preset) {
       if (preset === 'all') {
         window.FS.api.window.getSpan().then(function (span) {
-          commit({ preset: 'all', from: span.earliest, to: span.latest });
+          /* resolve('all') extends `to` to today -- span.latest alone ended
+             'All' on the last day with content, hiding today's new items. */
+          var r = window.FS.api.window.resolve('all', null, span);
+          commit({ preset: 'all', from: r.from, to: r.to });
         }).catch(function () {
           commit({ preset: 'all', from: null, to: null });
         });

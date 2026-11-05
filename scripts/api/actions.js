@@ -122,6 +122,44 @@
     return res;
   };
 
+  /* Status suggestions from speech (backend spec 2026-10-27): the extractor
+     heard that an item was done / no longer needed / blocked / started, and
+     the read payload carries it as `status_suggestion {id, status, quote}`.
+     A person decides: POST /api/org/action-items/{id}/status-suggestion
+     {suggestion_id, decision: 'accept'|'dismiss'}. Accept IS the audited
+     PATCH server-side (same ACL); dismiss changes nothing and never comes
+     back for the same item+status.
+
+     ALWAYS RESOLVES a normalised envelope (same contract as
+     resolveActionItem below): { ok: true, state, status } or
+     { ok: false, reason, message, status }. */
+  async function decideStatusSuggestion(actionItemId, suggestionId, decision) {
+    if (!actionItemId || !suggestionId) {
+      return { ok: false, reason: 'no_id', message: 'This suggestion has no task record.' };
+    }
+    if (!orgCheckoffLive()) {
+      return { ok: false, reason: 'unavailable', message: 'Suggestions cannot be saved offline.' };
+    }
+    var res;
+    try {
+      res = await window.FS.api.orgRequest(
+        '/action-items/' + encodeURIComponent(actionItemId) + '/status-suggestion',
+        { method: 'POST', body: { suggestion_id: suggestionId, decision: decision } });
+    } catch (e) {
+      return { ok: false, reason: 'error', message: (e && e.message) || 'Could not save this.' };
+    }
+    if (res && res._accessDenied) {
+      return { ok: false, reason: 'denied', status: 403,
+               message: 'Only an admin, this site\'s PM/site manager, or the assignee can change this task.' };
+    }
+    if (res && res._notFound) {
+      return { ok: false, reason: 'not_found', status: 404,
+               message: 'This suggestion is no longer open.' };
+    }
+    if (decision === 'accept') dropTicksFor(actionItemId);
+    return { ok: true, state: res && res.state, status: res && res.status };
+  }
+
   /* ======================================================================
      ONE authorised check-off entry point
      ----------------------------------------------------------------------
@@ -488,6 +526,7 @@
     resolveActionItem:  resolveActionItem,
     isActionResolved:   isActionResolved,
     isActionFinished:   isActionFinished,
+    decideStatusSuggestion: decideStatusSuggestion,
     itemState:          itemState,
     ticksFor:           ticksFor,
     orgCheckoffLive:    orgCheckoffLive,

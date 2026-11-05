@@ -280,6 +280,9 @@
             /* feat/editable-tasks-ui — raw action_items.status column, see
                the row-shape doc's `status` entry above. */
             status:         a.status || null,
+            /* A status heard in the recording, pending a person's decision
+               (backend spec 2026-10-27): {id, status, quote} or null. */
+            status_suggestion: a.status_suggestion || null,
             deadline:       a.deadline || null,
             topic_title:    t.topic_title,
             topic_category: t.category,
