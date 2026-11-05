@@ -27,6 +27,15 @@
        `waking: true` and FS.wakingNotice (if loaded) is asked to say so in
        words. A 500 is NOT folded in: that is an application fault, and
        dressing it as "please wait" would hide a real bug.
+     • Never repeat a WRITE that met a waking backend. A 504 means the
+       gateway stopped waiting, not that the Lambda stopped working, so
+       re-sending a POST on one can create the same row twice — and the first
+       morning after the cluster is allowed to sleep is when that would fire
+       across the whole app at once. A GET may be repeated freely and earns
+       two extra rungs (8s/16s) when every failure looks like a resume; a
+       non-GET stops at the first one and surfaces `waking: true` so the
+       caller can re-enable its control and let the person decide.
+       `retry: true` opts a genuinely idempotent write back in.
 
    Exported to:
      window.FS.api.request(path, opts)
@@ -40,9 +49,11 @@
          retry:     boolean — false to attempt once (default: retry 5xx and
                     network faults on a 1s/2s/4s ladder). Use false when a
                     retry re-runs work the first attempt is still doing.
-         retryDelaysMs: number[] — override the ladder (also sets how many
-                    attempts there are: delays.length + 1). Exists so a test
-                    can exercise the exhausted path without sleeping 7 s.
+                    true opts a NON-GET back into wake retries; see below.
+         retryDelaysMs:     number[] — override the ladder.
+         wakeExtraDelaysMs: number[] — override the extra rungs a wake-shaped
+                    GET earns. Both exist so a test can reach the exhausted
+                    path without sleeping 7 s (or 31 s) per case.
        }
        → resolves to either:
             the JSON body, or
@@ -67,6 +78,12 @@
      wait", which is worse than a blunt error because it stops anyone
      reporting it. */
   var WAKE_STATUSES = [502, 503, 504];
+
+  /* Two more rungs, for a GET whose every failure looks like a resume. The
+     1s/2s/4s ladder plus a 10 s timeout already spans ~45 s; these take it to
+     ~75 s, which covers a deep resume. They are NOT added to the ordinary 5xx
+     path: a genuinely broken endpoint must not take 75 s to say so. */
+  var WAKE_EXTRA_DELAYS_MS = [8000, 16000];
 
   function isWakeStatus(status) {
     return WAKE_STATUSES.indexOf(status) !== -1;
@@ -166,27 +183,43 @@
 
   /* Retry wrapper: retries on 5xx or network-level errors.
      4xx responses are returned immediately (caller decides). */
-  async function fetchWithRetry(url, fetchOpts, timeoutMs, retry, delays) {
+  async function fetchWithRetry(url, fetchOpts, timeoutMs, retry, delays, wakeDelays) {
     /* `retry: false` is for requests where a second attempt is not free.
        /ask spends a RAG search and a model call per try, so retrying a slow
        answer buys a duplicate of the same work, four times the tokens, and a
        user who waits 47s to be told the agent was unreachable while four
        copies of their question are still being answered. */
     var ladder = (delays && delays.length) ? delays : RETRY_DELAYS_MS;
-    var maxAttempts = retry === false ? 1 : ladder.length + 1;
+    var extra  = (wakeDelays && wakeDelays.length) ? wakeDelays : WAKE_EXTRA_DELAYS_MS;
+    /* A GET may be repeated freely; nothing else may. A 504 means the GATEWAY
+       stopped waiting -- it is not a statement that the Lambda stopped
+       working -- so re-sending a POST on one can create the row a second
+       time. The first morning after the cluster is allowed to sleep is
+       exactly when that would fire across the whole app at once. A caller
+       whose endpoint really is idempotent can still opt in with retry:true. */
+    var idempotent = (fetchOpts.method || 'GET').toUpperCase() === 'GET';
+    var mayRepeatOnWake = idempotent || retry === true;
     var lastErr;
     /* Does the WHOLE run look like a backend that is waking up? Starts true
        and is falsified by the first failure that does not fit, so a run that
        times out twice and then 500s is not reported as a wake. */
     var wakeShaped = true;
-    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+    var attempt = 0;
+    /* Not a `for` over a fixed count any more: a GET whose failures all look
+       like a resume earns the extra 8s/16s rungs, taking coverage to ~75s --
+       long enough for a deep resume, while an ordinary 5xx still gives up on
+       the 1/2/4 ladder rather than making a broken endpoint take 75s to say
+       so. */
+    while (true) {
+      var wokeThisTry = false;
       try {
         var res = await fetchWithTimeout(url, fetchOpts, timeoutMs);
         if (res.status < 500) return res;          /* 1xx-4xx — no retry */
         lastErr = new Error('HTTP ' + res.status);
         lastErr.status = res.status;
         lastErr._response = res;                   /* carry body for callers */
-        if (!isWakeStatus(res.status)) wakeShaped = false;
+        wokeThisTry = isWakeStatus(res.status);
+        if (!wokeThisTry) wakeShaped = false;
       } catch (err) {
         lastErr = err;
         /* AbortError from caller signal should not be retried. */
@@ -195,11 +228,19 @@
         }
         /* Our own deadline counts as wake-shaped; anything else (DNS, CORS,
            offline) does not, because those do not get better by waiting. */
-        if (!err.timeout) wakeShaped = false;
+        wokeThisTry = !!err.timeout;
+        if (!wokeThisTry) wakeShaped = false;
       }
-      if (attempt < maxAttempts - 1) {
-        await sleep(ladder[attempt]);
-      }
+      attempt += 1;
+
+      if (retry === false) break;
+      /* A write that met a waking backend stops here and hands the decision
+         back to the person, who can see what they were doing. */
+      if (wokeThisTry && !mayRepeatOnWake) break;
+
+      var budget = (wakeShaped && mayRepeatOnWake) ? ladder.concat(extra) : ladder;
+      if (attempt > budget.length) break;
+      await sleep(budget[attempt - 1]);
     }
     /* All attempts exhausted — surface the last 5xx response if available,
        otherwise throw the transport error. Either way, carry the verdict:
@@ -258,7 +299,7 @@
                  ? (opts.body instanceof FormData ? opts.body : JSON.stringify(opts.body))
                  : undefined,
       signal:  opts.signal,
-    }, timeoutMs, opts.retry, opts.retryDelaysMs);
+    }, timeoutMs, opts.retry, opts.retryDelaysMs, opts.wakeExtraDelaysMs);
   }
 
   async function request(path, opts) {

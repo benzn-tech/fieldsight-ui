@@ -40,6 +40,11 @@ const path = require('node:path');
    override that exists for exactly this. The ladder LENGTH is kept at 3 so the
    attempt count stays the shipped one. */
 const FAST = [1, 1, 1];
+/* The wake extension (8s/16s) is overridden for the same reason: a
+   wake-shaped GET now runs SIX attempts, and at the shipped delays that is
+   31 s of sleeping per case. */
+const FAST_WAKE = [1, 1];
+const OPTS = { allowAnon: true, retryDelaysMs: FAST, wakeExtraDelaysMs: FAST_WAKE };
 
 let fetchCalls;
 
@@ -136,12 +141,13 @@ async function expectThrow(fn) {
 
 /* ---- the exhausted wake-shaped run -------------------------------------- */
 
-test('four timeouts are reported as a waking backend, not an error', async () => {
+test('a GET that only ever times out is reported as a waking backend', async () => {
   const { request, notice } = setup([timeoutError()]);
   const err = await expectThrow(() =>
-    request('/timeline', { allowAnon: true, retryDelaysMs: FAST }));
+    request('/timeline', OPTS));
 
-  assert.equal(fetchCalls, 4, 'the shipped ladder is 3 retries after the first try');
+  assert.equal(fetchCalls, 6,
+    'a wake-shaped GET earns the two extra rungs on top of the 1/2/4 ladder');
   assert.equal(err.waking, true);
   assert.equal(notice.isShown(), true);
 });
@@ -149,7 +155,7 @@ test('four timeouts are reported as a waking backend, not an error', async () =>
 test('four 504s are reported as a waking backend', async () => {
   const { request, notice } = setup([jsonResponse(504, { message: 'Endpoint request timed out' })]);
   const err = await expectThrow(() =>
-    request('/timeline', { allowAnon: true, retryDelaysMs: FAST }));
+    request('/timeline', OPTS));
 
   assert.equal(err.waking, true);
   assert.equal(err.status, 504);
@@ -160,7 +166,7 @@ test('503 and 502 count too', async () => {
   for (const status of [502, 503]) {
     const { request } = setup([jsonResponse(status, {})]);
     const err = await expectThrow(() =>
-      request('/timeline', { allowAnon: true, retryDelaysMs: FAST }));
+      request('/timeline', OPTS));
     assert.equal(err.waking, true, `${status} should read as a wake`);
   }
 });
@@ -170,7 +176,7 @@ test('503 and 502 count too', async () => {
 test('a run of 500s stays a plain error', async () => {
   const { request, notice } = setup([jsonResponse(500, { error: 'boom' })]);
   const err = await expectThrow(() =>
-    request('/timeline', { allowAnon: true, retryDelaysMs: FAST }));
+    request('/timeline', OPTS));
 
   assert.equal(err.waking, undefined, 'a 500 is an application fault, not a cold start');
   assert.equal(err.message, 'boom', 'and it keeps the message the server sent');
@@ -184,7 +190,7 @@ test('a single non-wake failure falsifies the whole run', async () => {
     timeoutError(), timeoutError(), jsonResponse(500, { error: 'boom' }), jsonResponse(500, { error: 'boom' }),
   ]);
   const err = await expectThrow(() =>
-    request('/timeline', { allowAnon: true, retryDelaysMs: FAST }));
+    request('/timeline', OPTS));
 
   assert.equal(err.waking, undefined);
   assert.equal(notice.isShown(), false);
@@ -195,7 +201,7 @@ test('a network fault that is not our deadline is not a wake', async () => {
      wait for one is advice that cannot work. */
   const { request, notice } = setup([new TypeError('Failed to fetch')]);
   const err = await expectThrow(() =>
-    request('/timeline', { allowAnon: true, retryDelaysMs: FAST }));
+    request('/timeline', OPTS));
 
   assert.equal(err.waking, undefined);
   assert.equal(notice.isShown(), false);
@@ -207,7 +213,7 @@ test('a 504 that recovers inside the ladder shows nothing', async () => {
   const { request, notice } = setup([
     jsonResponse(504, {}), jsonResponse(200, { ok: 1 }),
   ]);
-  const body = await request('/timeline', { allowAnon: true, retryDelaysMs: FAST });
+  const body = await request('/timeline', OPTS);
 
   assert.deepEqual(body, { ok: 1 });
   assert.equal(fetchCalls, 2);
@@ -217,11 +223,11 @@ test('a 504 that recovers inside the ladder shows nothing', async () => {
 test('the next answer retracts the notice, whatever its status', async () => {
   /* A 403 is an answer: the backend is up. The notice must not outlive it. */
   const { request, notice } = setup([jsonResponse(504, {})]);
-  await expectThrow(() => request('/a', { allowAnon: true, retryDelaysMs: FAST }));
+  await expectThrow(() => request('/a', OPTS));
   assert.equal(notice.isShown(), true);
 
   global.fetch = scriptedFetch([jsonResponse(403, { error: 'nope' })]);
-  const out = await request('/b', { allowAnon: true, retryDelaysMs: FAST });
+  const out = await request('/b', OPTS);
   assert.equal(out._accessDenied, true);
   assert.equal(notice.isShown(), false);
 });
@@ -233,7 +239,7 @@ test('the verdict rides on the thrown error, never on a returned envelope', asyn
      block stops running and the object flows on as if it were data. */
   const { request } = setup([jsonResponse(504, {})]);
   const err = await expectThrow(() =>
-    request('/timeline', { allowAnon: true, retryDelaysMs: FAST }));
+    request('/timeline', OPTS));
 
   assert.ok(err instanceof Error, 'must remain a thrown Error');
   assert.equal(err._waking, undefined, 'no envelope key');
@@ -244,7 +250,7 @@ test('the verdict rides on the thrown error, never on a returned envelope', asyn
 test('_fetch works with no notice module loaded', async () => {
   const { request } = setup([jsonResponse(504, {})], { withNotice: false });
   const err = await expectThrow(() =>
-    request('/timeline', { allowAnon: true, retryDelaysMs: FAST }));
+    request('/timeline', OPTS));
 
   assert.equal(err.waking, true, 'still classified');
 });
