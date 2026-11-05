@@ -39,6 +39,13 @@
      a page that mounts five components each calling getSpan() still only
      triggers one GET /api/dates. */
   var spanPromise = null;
+  var spanAt = 0;
+
+  /* The span EXPIRES. It used to live for the page's lifetime, so a tab left
+     open from yesterday never saw today: 'All' ended on the last day that
+     existed at page load, and the Tasks fan-out (which filters on this same
+     dates map) never fetched today's report. Same TTL as _cache.js. */
+  var SPAN_TTL_MS = 180000;
 
   /* CONTENT, not reports. This span is the bound of the 'All' preset, so a
      day that holds 56 photos and no extraction topics was outside every
@@ -64,7 +71,8 @@
   }
 
   function getSpan() {
-    if (!spanPromise) {
+    if (!spanPromise || Date.now() - spanAt > SPAN_TTL_MS) {
+      spanAt = Date.now();
       spanPromise = window.FS.api.dates.getDates({ months: MONTHS_LOOKBACK })
         .then(function (res) {
           return computeSpan((res && res.dates) || {});
@@ -117,7 +125,8 @@
 
   /* Node test runner only; no-op in the browser. */
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { computeSpan: computeSpan, resolve: resolve };
+    module.exports = { computeSpan: computeSpan, resolve: resolve, getSpan: getSpan,
+                       SPAN_TTL_MS: SPAN_TTL_MS };
   }
 
 })();
