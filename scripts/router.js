@@ -45,6 +45,14 @@
       }
     },
 
+    /** Move to a path without adding a history entry, so Back does not return
+        to a route that only ever redirects. replaceState fires no hashchange,
+        hence the explicit notify. */
+    replace(path) {
+      history.replaceState(null, '', '#' + path);
+      notify();
+    },
+
     /** Subscribe to route changes. Callback called immediately with current route. */
     subscribe(callback) {
       subscribers.add(callback);
