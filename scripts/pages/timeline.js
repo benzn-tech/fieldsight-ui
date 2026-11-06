@@ -3572,8 +3572,6 @@
   var DAILY_TABS = [
     { key: 'overview',   label: 'Overview' },
     { key: 'transcript', label: 'Transcript' },
-    { key: 'audio',      label: 'Audio' },
-    { key: 'video',      label: 'Video' },
     { key: 'photos',     label: 'Photos' },
   ];
   var MEETING_TABS = [
@@ -4687,6 +4685,20 @@
        below them hoists as undefined, freezing those deps at [undefined]. */
     var sel = props.selectedItem;
 
+    /* The player and the transcript are siblings, so the store they share lives
+       here, one per selected topic. */
+    var topicKey = sel && sel.id;
+    var playerStore = React.useMemo(function () {
+      return window.FS.topicPlayback.createStore();
+    }, [topicKey]);
+    var wantTurns = React.useSyncExternalStore(playerStore.subscribe, function () {
+      return playerStore.getState().wantTurns;
+    });
+    /* The transcript reads S3 per file, so it is not fetched merely on opening a
+       topic: first Transcript tab or first Play. Then it stays, hidden, so the
+       highlight and its scroll position survive a tab change. */
+    var transcriptSeen = React.useRef({});
+
     /* Seed with ticks already accepted this session (the bus only reaches
        panes that were mounted when it fired). */
     React.useEffect(function () {
@@ -4751,8 +4763,6 @@
     var highlightTime = sel.turnTime || null;
 
     var TranscriptList = fs.TranscriptList;
-    var AudioPlaylist  = fs.AudioPlaylist;
-    var VideoPlayer    = fs.VideoPlayer;
     var PhotoGrid      = fs.PhotoGrid;
 
     /* user-dimension audit key plan (Task 5) — report OWNER's folder,
@@ -4813,13 +4823,8 @@
             topic: topic, date: sel.date, actionState: refActions[0], userFolder: ownerFolder,
             isOwnReport: isOwnReport, siteId: sel.site_id || null,
           })),
-        transcript: TranscriptList ? React.createElement(TranscriptList,
-          Object.assign({}, mediaProps, {
-            participants:  topic.participants || [],
-            highlightTime: highlightTime,
-          })) : null,
-        audio:      AudioPlaylist  ? React.createElement(AudioPlaylist,  mediaProps) : null,
-        video:      VideoPlayer    ? React.createElement(VideoPlayer,    mediaProps) : null,
+        /* Rendered beside the tab body, not through it: see below. */
+        transcript: null,
         photos:     PhotoGrid      ? React.createElement(PhotoGrid, {
           photos:          topic.related_photos || [],
           /* P5: use the resolved folder, not sel.user_name. render_report_shape
@@ -4891,6 +4896,11 @@
         }) : null,
       ),
 
+      /* Above the tabs, so changing tab does not touch playback. */
+      !isMeeting && fs.TopicPlayer ? React.createElement(fs.TopicPlayer, Object.assign({
+        key: 'player-' + sel.id, store: playerStore,
+      }, mediaProps)) : null,
+
       /* Tab strip */
       React.createElement('div', {
         className: 'fs-topic-detail__tabs',
@@ -4911,7 +4921,21 @@
 
       /* Body */
       React.createElement('div', { className: 'fs-topic-detail__body' },
-        bodyByTab[tab],
+        tab === 'transcript' ? null : bodyByTab[tab],
+        (function () {
+          if (isMeeting || !TranscriptList) return null;
+          if (tab === 'transcript' || wantTurns) transcriptSeen.current[sel.id] = true;
+          if (!transcriptSeen.current[sel.id]) return null;
+          return React.createElement('div', { hidden: tab !== 'transcript' },
+            React.createElement(TranscriptList, Object.assign({}, mediaProps, {
+              /* Naming state is per window; another topic must not inherit it. */
+              key: 'transcript-' + sel.id,
+              participants:  topic.participants || [],
+              highlightTime: highlightTime,
+              store:         playerStore,
+              visible:       tab === 'transcript',
+            })));
+        })(),
       ),
     );
   }

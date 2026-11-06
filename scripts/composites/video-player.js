@@ -21,6 +21,10 @@
      user    folder-name string
      start   HH:MM[:SS]
      end     HH:MM[:SS]
+     videos     (optional) the list, when the host has already fetched it
+     onClock    (optional) (clockSec) => void, as it plays
+     seekClock  (optional) { sec, nonce }: go to this moment
+     onNoMoment (optional) (request) => void: no video holds that moment
 
    Exported to:
      window.FieldSight.VideoPlayer
@@ -47,7 +51,15 @@
 
     var videoEl = React.useRef(null);
 
+    /* A requested offset, waiting for that file's metadata. */
+    var pendingSeek = React.useRef(null);
+
     React.useEffect(function () {
+      if (props.videos) {
+        setState({ status: 'ok', videos: props.videos });
+        setIdx(0);
+        return undefined;
+      }
       var cancelled = false;
       setState({ status: 'loading', videos: [] });
       setIdx(0);
@@ -66,11 +78,33 @@
 
     var current = state.videos[idx] || null;
 
+    React.useEffect(function () {
+      var req = props.seekClock;
+      if (!req || state.status !== 'ok') return;
+      var at = window.FS.topicPlayback.videoTarget(state.videos, req.sec);
+      if (!at) { if (props.onNoMoment) props.onNoMoment(req); return; }
+      pendingSeek.current = { offset: at.offset, request: req };
+      if (at.index !== idx) { setIdx(at.index); return; }
+      applySeek();
+    }, [props.seekClock && props.seekClock.nonce, state.status]);
+
+    function applySeek() {
+      var el = videoEl.current, w = pendingSeek.current;
+      if (!el || !w || !el.duration) return;
+      pendingSeek.current = null;
+      /* Files do not cover every moment. Say so rather than play the wrong one. */
+      if (w.offset > el.duration) { if (props.onNoMoment) props.onNoMoment(w.request); return; }
+      el.currentTime = w.offset;
+      var p = el.play();
+      if (p && p.catch) p.catch(function () { /* native controls remain */ });
+    }
+
     /* Seek to offset_sec once metadata is loaded; resets when current
        video changes. */
     function onLoadedMetadata() {
       var el = videoEl.current;
       if (!el || !current) return;
+      if (pendingSeek.current) { applySeek(); return; }
       try {
         if (current.offset_sec && el.duration && current.offset_sec < el.duration) {
           el.currentTime = current.offset_sec;
@@ -101,6 +135,15 @@
         playsInline: true,
         className:  'fs-video-player__media',
         onLoadedMetadata: onLoadedMetadata,
+        onTimeUpdate: props.onClock ? function () {
+          var el = videoEl.current;
+          if (el && current && typeof current.video_start_sec === 'number') {
+            props.onClock(current.video_start_sec + el.currentTime);
+          }
+        } : undefined,
+        onEnded: props.videos ? function () {
+          setIdx(function (i) { return i < state.videos.length - 1 ? i + 1 : i; });
+        } : undefined,
       }),
 
       React.createElement('div', { className: 'fs-video-player__meta' },
