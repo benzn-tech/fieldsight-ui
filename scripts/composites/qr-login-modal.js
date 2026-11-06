@@ -68,9 +68,9 @@
     var expired = state.expiresAt && left <= 0;
 
     return e('div', { className: 'fs-qr-login' },
-      e('h2', { className: 'fs-qr-login__title' }, 'Log in a terminal'),
+      e('h2', { className: 'fs-qr-login__title' }, 'Sign in to a recorder'),
       e('p', { className: 'fs-qr-login__hint' },
-        'On the terminal, tap “Scan QR to Sign in” and point it at this code. Expires in 90 seconds.'),
+        'On the recorder, tap “Scan QR to Sign in” and point it at this code. The code expires in 90 seconds.'),
       state.loading ? e('div', { className: 'fs-qr-login__status' }, 'Generating…') :
       state.error   ? e('div', { className: 'fs-qr-login__status fs-qr-login__status--error' }, state.error) :
         e('div', { className: 'fs-qr-login__code' },
