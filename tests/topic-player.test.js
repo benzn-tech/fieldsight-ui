@@ -209,6 +209,16 @@ test('one audio element, stopped explicitly, with state from media events', () =
   assert.doesNotMatch(src, /\b(el|current)\.paused/);
 });
 
+test('found on real recordings: the tabs hold still, and the Due calendar stays in the panel', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'styles', 'composites.css'), 'utf8').replace(/\r\n/g, '\n');
+  const line = css.slice(css.indexOf('.fs-topic-player__line {'));
+  const rule = line.slice(0, line.indexOf('}'));
+  const clamp = Number(rule.match(/-webkit-line-clamp: (\d+)/)[1]);
+  const height = Number(rule.match(/line-height: ([\d.]+)/)[1]);
+  assert.strictEqual(Number(rule.match(/min-height: ([\d.]+)em/)[1]), clamp * height, 'reserves every line the clamp can show');
+  assert.match(css, /assignee-label--due ~ \.fs-date-field \.fs-date-field__popover \{\s*left: auto;\s*right: 0;/);
+});
+
 test('new scripts load, pure modules before the player and the page', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'app-shell-preview.html'), 'utf8');
   const at = (s) => html.indexOf(s);
