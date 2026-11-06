@@ -2564,7 +2564,9 @@
 .fs-topic-player__line {
   flex: 1 1 100%;
   min-width: 0;
-  min-height: 1.4em;
+  /* Two lines reserved, the most the clamp shows: a silent stretch between turns
+     must not move the tabs under the pointer. */
+  min-height: 2.8em;
   font-size: 12.5px;
   line-height: 1.4;
   color: var(--text-secondary);
@@ -3342,6 +3344,13 @@
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   padding: 12px;
+}
+
+/* The Due field ends a row at the right of the narrow detail panel. Opening
+   rightward put a third of the calendar past the panel edge, clipped. */
+.fs-topic-detail__assignee-label--due ~ .fs-date-field .fs-date-field__popover {
+  left: auto;
+  right: 0;
 }
 
 .fs-date-field__popover-footer {
