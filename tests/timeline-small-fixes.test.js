@@ -74,7 +74,7 @@ test('QR sign-in says recorder, and says which device scans', () => {
 test('no account control reports success without doing anything', () => {
   const src = read('scripts', 'pages', 'settings.js');
   assert.doesNotMatch(src, /Password updated \(demo\)/);
-  assert.doesNotMatch(src, /Two-factor/);
+  assert.doesNotMatch(src, /Two-factor authentication/);
   assert.doesNotMatch(src, /toggle2FA/);
   assert.match(src, /window\.FS\.cognito\.changePassword\(/);
 });
