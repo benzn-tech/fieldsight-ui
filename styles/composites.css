@@ -7804,6 +7804,46 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   transition: color var(--duration-fast) var(--easing-out), border-color var(--duration-fast) var(--easing-out);
 }
 .fs-settings__tab:hover { color: var(--text-primary); }
+
+/* Settings window: sections left, content right. The fixed height keeps the
+   window from jumping as sections change; the content scrolls. */
+.fs-modal__body:has(> .fs-settings-window) { padding: 0; overflow: hidden; }
+.fs-settings-window {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  height: min(640px, calc(100vh - 140px));
+}
+.fs-settings-window .fs-settings__tabs {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 2px;
+  margin: 0;
+  padding: var(--space-3);
+  border-bottom: none;
+  border-right: 1px solid var(--border-subtle);
+}
+.fs-settings-window .fs-settings__tab {
+  border-bottom: none;
+  border-radius: var(--radius-md);
+  margin: 0;
+  padding: 8px 10px;
+  text-align: left;
+}
+.fs-settings-window .fs-settings__tab:hover { background: var(--surface-panel-muted); }
+.fs-settings-window .fs-settings__tab--active { background: var(--surface-panel-muted); }
+.fs-settings-window__body { overflow-y: auto; padding: 0 var(--space-5); }
+.fs-settings__back { align-self: flex-start; display: block; margin-bottom: var(--space-3); }
+@media (max-width: 640px) {
+  .fs-settings-window { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .fs-settings-window .fs-settings__tabs {
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .fs-settings-window .fs-settings__tab { white-space: nowrap; }
+}
+
 .fs-settings__tab--active { color: var(--text-primary); border-bottom-color: var(--color-accent-700); }
 
 .fs-settings__input {

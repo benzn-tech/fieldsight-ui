@@ -342,7 +342,7 @@ function UserArea({ user, isCollapsed }) {
     menuOpen ? React.createElement('div', { style: menuStyle },
       React.createElement('div', {
         style: menuItemStyle,
-        onClick: function() { setMenuOpen(false); window.location.hash = '#/settings'; },
+        onClick: function() { setMenuOpen(false); openSettings(); },
       }, 'Settings'),
       /* Sign out — live mode only (mock mode has no real session to clear).
          Session API: window.FS.session.isSignedIn() / .clear() (scripts/auth/session.js). */
@@ -368,6 +368,14 @@ function UserArea({ user, isCollapsed }) {
       onClick: function() { setMenuOpen(false); },
     }) : null,
   );
+}
+
+/* ---------- Settings ------------------------------------------------------- */
+/* A window over the current page. The route is only the fallback for a moment
+   when the host is not mounted; it opens the same window. */
+function openSettings() {
+  if (window.FS && window.FS.settings) window.FS.settings.open();
+  else window.location.hash = '#/settings';
 }
 
 /* ---------- Contact FieldSight --------------------------------------------- */
@@ -582,9 +590,9 @@ function LeftNav({ user, currentRoute, isCollapsed, onToggleCollapse, onNavigate
       React.createElement(NavItem, {
         navKey: 'settings',
         label: 'Settings',
-        isActive: currentRoute === '/settings',
+        isActive: false,
         isCollapsed: isCollapsed,
-        onClick: function() { onNavigate('/settings'); },
+        onClick: openSettings,
       }),
     ) : null,
 
