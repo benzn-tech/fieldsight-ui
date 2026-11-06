@@ -133,6 +133,20 @@
   /* Unauthenticated — completes the "forgot password" flow using the code
      delivered by forgotPassword(). Never log/store `code` or `newPassword`;
      they exist only for the duration of this call. */
+  /* Signed-in change: Cognito authorises it from the access token and checks
+     the current password itself. Rejects with the service's error. */
+  async function changePassword(currentPassword, newPassword) {
+    const session = window.FS && window.FS.session;
+    if (session && session.ensureFresh) await session.ensureFresh();
+    const token = session && session.getAccessToken && session.getAccessToken();
+    if (!token) throw new Error('Your session has expired. Sign in again.');
+    return idpCall('ChangePassword', {
+      AccessToken:      token,
+      PreviousPassword: currentPassword,
+      ProposedPassword: newPassword,
+    });
+  }
+
   async function confirmForgotPassword(username, code, newPassword) {
     var cfg = config();
     return idpCall('ConfirmForgotPassword', {
@@ -264,6 +278,7 @@
     refreshTokens:         refreshTokens,
     forgotPassword:        forgotPassword,
     confirmForgotPassword: confirmForgotPassword,
+    changePassword: changePassword,
     config:                config,
   };
 

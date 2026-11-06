@@ -4,7 +4,7 @@
    /settings — tabbed account area:
      • Preferences   — theme + density + default landing (original Sprint 7)
      • Profile       — avatar, name, email, time/date format, timezone
-     • Security      — password change, two-factor authentication (mock)
+     • Security      — password change (Cognito), recorder sign-in
      • Notifications — global email notification preferences
 
    All prefs are localStorage-only (mock prototype); documented as the
@@ -30,7 +30,6 @@
     return u.sub ? PROFILE_KEY + '.' + u.sub : PROFILE_KEY;
   }
   var NOTIF_KEY    = 'fs.settings.notifications';
-  var SECURITY_KEY = 'fs.settings.security';
 
   /* ---------- localStorage helpers -------------------------------------- */
   function readJSON(key)  { try { return JSON.parse(localStorage.getItem(key) || 'null') || {}; } catch (_) { return {}; } }
@@ -119,7 +118,6 @@
       var d = defaultNotifications(); var s = readJSON(NOTIF_KEY);
       return Object.assign(d, s, { events: Object.assign({}, d.events, s.events || {}) });
     });
-    var refSecurity = React.useState(function () { var s = readJSON(SECURITY_KEY); return { twoFactor: !!s.twoFactor }; });
 
     var state = refState[0], setState = refState[1];
 
@@ -214,8 +212,6 @@
         toggleEvent: function (k) { refNotif[1](function (n) { var e = Object.assign({}, n.events); e[k] = !e[k]; return Object.assign({}, n, { events: e }); }); },
         saveNotif: function () { writeJSON(NOTIF_KEY, refNotif[0]); toast('Notification preferences saved'); },
 
-        security: refSecurity[0],
-        toggle2FA: function () { refSecurity[1](function (s) { var next = { twoFactor: !s.twoFactor }; writeJSON(SECURITY_KEY, next); toast(next.twoFactor ? 'Two-factor authentication enabled (demo)' : 'Two-factor authentication disabled (demo)', 'info'); return next; }); },
       };
     }
 
@@ -377,6 +373,66 @@
     );
   }
 
+  /* ---------- Change password ------------------------------------------- */
+  function canChangePassword() {
+    var c = window.FS && window.FS.cognito, sess = window.FS && window.FS.session;
+    return !!(c && c.changePassword && sess && sess.isSignedIn && sess.isSignedIn());
+  }
+
+  /* What the form may submit, or the sentence that says why not. Pure, so the
+     rules are testable. Length and character classes stay Cognito's call: its
+     policy is configured on the pool and repeating it here would drift. */
+  function passwordFormError(current, next, confirm) {
+    if (!current || !next || !confirm) return 'Fill in all three fields.';
+    if (next !== confirm) return 'The new passwords do not match.';
+    if (next === current) return 'Choose a password different from the current one.';
+    return null;
+  }
+
+  /* Cognito's codes, in words. Anything else keeps the service's own message
+     rather than a guess. */
+  function passwordErrorMessage(err) {
+    var code = (err && (err.code || err.name || err.__type)) || '';
+    if (/NotAuthorized/.test(code)) return 'The current password is not correct.';
+    if (/InvalidPassword/.test(code)) return (err && err.message) || 'That password does not meet the requirements.';
+    if (/LimitExceeded|TooManyRequests/.test(code)) return 'Too many attempts. Wait a few minutes and try again.';
+    return (err && err.message) || 'Could not change the password. Try again.';
+  }
+
+  function ChangePasswordForm(props) {
+    var h = React.createElement;
+    var s_cur = React.useState(''), s_new = React.useState(''), s_con = React.useState('');
+    var s_err = React.useState(null), s_busy = React.useState(false);
+    function input(state, autoComplete) {
+      return h('input', { type: 'password', className: 'fs-settings__input', value: state[0], autoComplete: autoComplete,
+        onChange: function (e) { state[1](e.target.value); } });
+    }
+    function submit() {
+      var problem = passwordFormError(s_cur[0], s_new[0], s_con[0]);
+      s_err[1](problem);
+      if (problem || s_busy[0]) return;
+      s_busy[1](true);
+      window.FS.cognito.changePassword(s_cur[0], s_new[0]).then(function () {
+        toast('Password updated');
+        props.onClose();
+      }, function (err) {
+        s_busy[1](false);
+        s_err[1](passwordErrorMessage(err));
+      });
+    }
+    return h('div', { className: 'fs-settings__pw-form' },
+      Field('Current password', input(s_cur, 'current-password')),
+      Field('New password', input(s_new, 'new-password')),
+      Field('Confirm new password', input(s_con, 'new-password')),
+      s_err[0] ? h('p', { className: 'fs-field__hint fs-field__hint--error', role: 'alert' }, s_err[0]) : null,
+      h('div', { className: 'fs-settings__actions' },
+        h('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: props.onClose }, 'Cancel'),
+        h('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--md', disabled: s_busy[0], onClick: submit },
+          s_busy[0] ? 'Updating…' : 'Update password')
+      )
+    );
+  }
+
   /* ---------- Security tab ---------------------------------------------- */
   function SecurityTab(props) {
     var ctx = props.ctx;
@@ -398,28 +454,22 @@
     }
     return React.createElement('section', { className: 'fs-settings__section' },
       React.createElement('div', { className: 'fs-settings__security-card' },
-        row('🔑', 'Password', null, 'Change', function () { setPwOpen(true); }),
-        row('🛡', 'Two-factor authentication', ctx.security.twoFactor ? 'On' : 'Off', 'Change', ctx.toggle2FA),
-        row('🖥', 'Log in a terminal', 'Scan a QR code to sign in on a FieldSight recording terminal.', 'Log in a terminal', function () { setQrOpen(true); })
+        /* No Password row without a live session to change it on (mock mode).
+           Two-factor is not offered at all until the user pool supports it: the
+           row it replaced flipped a browser flag and reported success. */
+        canChangePassword() ? row('🔑', 'Password', null, 'Change', function () { setPwOpen(true); }) : null,
+        row('🖥', 'Sign in to a recorder', 'Show a QR code for your FieldSight recorder to scan.', 'Show QR code', function () { setQrOpen(true); })
       ),
       (pwOpen && Modal) ? React.createElement(Modal, {
         open: true, size: 'sm', title: 'Change password', onClose: function () { setPwOpen(false); },
       },
-        React.createElement('div', { className: 'fs-settings__pw-form' },
-          Field('Current password', React.createElement('input', { type: 'password', className: 'fs-settings__input' })),
-          Field('New password', React.createElement('input', { type: 'password', className: 'fs-settings__input' })),
-          Field('Confirm new password', React.createElement('input', { type: 'password', className: 'fs-settings__input' })),
-          React.createElement('div', { className: 'fs-settings__actions' },
-            React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: function () { setPwOpen(false); } }, 'Cancel'),
-            React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--md', onClick: function () { setPwOpen(false); toast('Password updated (demo)'); } }, 'Update password')
-          )
-        )
+        React.createElement(ChangePasswordForm, { onClose: function () { setPwOpen(false); } })
       ) : null,
-      /* No title passed — QrLoginModal renders its own "Log in a terminal"
+      /* No title passed — QrLoginModal renders its own "Sign in to a recorder"
          h2 + hint + Done button, so ModalOverlay's own header is skipped to
          avoid a double title. */
       (qrOpen && Modal && window.FieldSight.QrLoginModal) ? React.createElement(Modal, {
-        open: true, size: 'sm', ariaLabel: 'Log in a terminal', onClose: function () { setQrOpen(false); },
+        open: true, size: 'sm', ariaLabel: 'Sign in to a recorder', onClose: function () { setQrOpen(false); },
       },
         React.createElement(window.FieldSight.QrLoginModal, { onClose: function () { setQrOpen(false); } })
       ) : null
@@ -549,5 +599,9 @@
     Provider: SettingsProvider,
     layout:   'full-width',
   };
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { passwordFormError: passwordFormError, passwordErrorMessage: passwordErrorMessage };
+  }
 
 })();

@@ -125,7 +125,7 @@
     function onBodyClick(e) {
       var target = e && e.target;
       if (target && target.closest && target.closest(
-        '.fs-action-item-row, .fs-safety-flag-row, button, a, input, label'
+        '.fs-safety-flag-row, button, a, input, label'
       )) {
         return;
       }
