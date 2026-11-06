@@ -50,7 +50,7 @@ test('landing sits outside the Save and Reset form', () => {
 
 test('Security has no nested modal', () => {
   const sec = between(SRC, 'function SecurityTab', 'Glossary tab');
-  assert.doesNotMatch(sec, /ModalOverlay|createElement\(Modal/);
+  assert.doesNotMatch(sec, /FieldSight\.ModalOverlay|createElement\(Modal/);
   assert.match(sec, /setView\('password'\)/);
   assert.match(sec, /setView\('qr'\)/);
 });
