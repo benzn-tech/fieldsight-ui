@@ -892,6 +892,16 @@
   transition: background var(--duration-fast) var(--easing-out);
 }
 .fs-action-item-row:hover { background: var(--surface-panel-muted); }
+.fs-topic-detail__action-item .fs-action-item-row { cursor: default; }
+/* Pads the checkbox's hit area without moving it: a field user in gloves should
+   not need to land on 16px, now that the rest of the row no longer ticks. */
+.fs-action-item-row__check {
+  display: flex;
+  flex-shrink: 0;
+  padding: 4px;
+  margin: -4px;
+  cursor: pointer;
+}
 
 .fs-action-item-row__checkbox {
   margin-top: 3px;
@@ -12890,7 +12900,9 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 /* The queue's home on the timeline. Margin only — the cards carry their own
    frame, and a second border around a list of bordered cards reads as a
    nesting that is not there. */
-.fs-timeline-page__threads { margin: 0 0 20px; }
+.fs-timeline-page__threads { margin: 0 0 12px; }
+.fs-timeline-page__threads > summary { cursor: pointer; }
+.fs-timeline-page__threads[open] > summary { margin-bottom: 8px; }
 
 
 /* =========================================================================
@@ -13197,6 +13209,7 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color: var(--text-secondary);
 }
 .fs-topic-detail__assignee .fs-select { max-width: 190px; }
+.fs-topic-detail__assignee-label--due { margin-left: 8px; }
 
 /* --- Today · the order control -------------------------------------------
    Deliberately the same chip vocabulary as .fs-today__age-filter above: both

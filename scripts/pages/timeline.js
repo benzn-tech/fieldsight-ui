@@ -3012,8 +3012,9 @@
         bullets: report.executive_summary,
       }),
       /* Above the picker, below the summary: a subject that came up again is
-         context for reading the day, not a task buried under it. Renders
-         nothing when the queue is empty, which is almost always. */
+         context for reading the day, not a task buried under it. Collapsed to
+         one line: open, a long queue pushed the day's topics off the screen.
+         Renders nothing when the queue is empty. */
       React.createElement(ThreadReviewSection, { site: site }),
       React.createElement(ChecklistReportsCard, { date: date, userFolder: user || null }),
       (showSessionPicker || excludedNote) ? React.createElement('div', {
@@ -3463,8 +3464,8 @@
 
     if (!enabled || !Queue || !rows || !rows.length) return null;
 
-    return React.createElement('section', { className: 'fs-timeline-page__threads' },
-      React.createElement('div', { className: 'fs-timeline-page__section-label' },
+    return React.createElement('details', { className: 'fs-timeline-page__threads' },
+      React.createElement('summary', { className: 'fs-timeline-page__section-label' },
         'Came up again · ' + rows.length),
       React.createElement(Queue, {
         suggestions: rows,
@@ -4173,6 +4174,40 @@
         return opts;
     }
 
+    /* The deadline, same shape as the owner above. DateField takes a strict
+       'YYYY-MM-DD' | null and crashes on the free text extraction stores
+       ("next Tuesday"), so the value it sees is always resolved first. */
+    var dueRef = React.useState({});
+    var dues = dueRef[0], setDues = dueRef[1];
+
+    function dueOf(a) {
+      var o = dues[a && a.id];
+      if (o !== undefined) return o;
+      return (a && a.deadline && window.FS.api.resolveDeadline(a.deadline, props.date).absolute) || null;
+    }
+
+    function setDue(a, iso) {
+      if (!a || !a.id) return;
+      var before = dues[a.id];
+      var next = iso || null;
+      if (next === dueOf(a)) return;
+      function undo(err, res) {
+        setDues(function (m) {
+          var n = Object.assign({}, m);
+          if (before === undefined) delete n[a.id]; else n[a.id] = before;
+          return n;
+        });
+        var toast = window.FS && window.FS.toast;
+        if (toast) toast.show({ message: (err && err.error) || (res && res.error) || 'Could not update task', tone: 'error', duration: 5000 });
+      }
+      setDues(function (m) { var n = Object.assign({}, m); n[a.id] = next; return n; });
+      var api = window.FS && window.FS.api && window.FS.api.actions;
+      if (!api || !api.updateAction) return;
+      api.updateAction(a.id, { deadline: next }).then(function (res) {
+        if (!api.settleSave(res, { table: 'action_items', id: a.id }).ok) undo(null, res);
+      }).catch(function (err) { undo(err, null); });
+    }
+
     function assignTo(a, name) {
       if (!a || !a.id) return;
       var before = assigneeOf(a);
@@ -4331,6 +4366,10 @@
               var editKey  = 'action_items:' + a.id;
               var override = overrides[editKey];
               var displayAction = override !== undefined ? Object.assign({}, a, { action: override }) : a;
+              /* The row's own "owner · Due" line has to follow the pickers below
+                 it, or the screen shows two answers after a save. */
+              if (a.id && owners[a.id] !== undefined) displayAction = Object.assign({}, displayAction, { responsible: owners[a.id] });
+              if (a.id && dues[a.id] !== undefined) displayAction = Object.assign({}, displayAction, { deadline: dues[a.id] });
               var rowEditable = canEditContent && !!a.id;
               return React.createElement('div', {
                 key:       key,
@@ -4394,6 +4433,13 @@
                     : React.createElement('span', {
                         className: 'fs-topic-detail__assignee-static',
                       }, assigneeOf(a) || '—'),
+                  window.FieldSight.DateField ? React.createElement('span', {
+                    className: 'fs-topic-detail__assignee-label fs-topic-detail__assignee-label--due',
+                  }, 'Due') : null,
+                  window.FieldSight.DateField ? React.createElement(window.FieldSight.DateField, {
+                    size: 'sm', value: dueOf(a),
+                    onChange: function (iso) { setDue(a, iso); },
+                  }) : null,
                 ) : null,
                 rowEditable && editingKey === editKey ? React.createElement(EditableText, {
                   editable: true, table: 'action_items', id: a.id, field: 'text',
