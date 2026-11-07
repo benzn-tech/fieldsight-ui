@@ -78,6 +78,15 @@
 
     var current = state.videos[idx] || null;
 
+    /* Explicit: a playing element removed from the DOM can keep sounding, and the
+       audio player is about to take over. */
+    React.useEffect(function () {
+      return function () {
+        var el = videoEl.current;
+        if (el) { try { el.pause(); el.removeAttribute('src'); el.load(); } catch (_) { /* gone */ } }
+      };
+    }, []);
+
     React.useEffect(function () {
       var req = props.seekClock;
       if (!req || state.status !== 'ok') return;

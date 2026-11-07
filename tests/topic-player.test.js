@@ -209,14 +209,106 @@ test('one audio element, stopped explicitly, with state from media events', () =
   assert.doesNotMatch(src, /\b(el|current)\.paused/);
 });
 
-test('found on real recordings: the tabs hold still, and the Due calendar stays in the panel', () => {
-  const css = fs.readFileSync(path.join(__dirname, '..', 'styles', 'composites.css'), 'utf8').replace(/\r\n/g, '\n');
-  const line = css.slice(css.indexOf('.fs-topic-player__line {'));
-  const rule = line.slice(0, line.indexOf('}'));
-  const clamp = Number(rule.match(/-webkit-line-clamp: (\d+)/)[1]);
-  const height = Number(rule.match(/line-height: ([\d.]+)/)[1]);
-  assert.strictEqual(Number(rule.match(/min-height: ([\d.]+)em/)[1]), clamp * height, 'reserves every line the clamp can show');
-  assert.match(css, /assignee-label--due ~ \.fs-date-field \.fs-date-field__popover \{\s*left: auto;\s*right: 0;/);
+const readCss = () => fs.readFileSync(path.join(__dirname, '..', 'styles', 'composites.css'), 'utf8').replace(/\r\n/g, '\n');
+
+test('the Due calendar stays in the panel', () => {
+  assert.match(readCss(), /assignee-label--due ~ \.fs-date-field \.fs-date-field__popover \{\s*left: auto;\s*right: 0;/);
+});
+
+test('the player has no blank row: the line under it is gone', () => {
+  assert.doesNotMatch(readCss(), /fs-topic-player__line/);
+  assert.doesNotMatch(read('composites', 'topic-player.js'), /fs-topic-player__line|CurrentLine/);
+});
+
+test('video cannot push the tabs off a short window', () => {
+  const css = readCss();
+  assert.match(css, /fs-video-player__media \{[^}]*max-height: min\(240px, \d+vh\)/);
+  const detail = css.slice(css.indexOf('.fs-topic-detail {'));
+  assert.match(detail.slice(0, detail.indexOf('}')), /overflow-y: auto/);
+  const body = css.slice(css.indexOf('.fs-topic-detail__body {'));
+  assert.match(body.slice(0, body.indexOf('}')), /min-height: \d+px/);
+});
+
+test('the way back from video is outside the video branch, and video loads the transcript', () => {
+  const src = read('composites', 'topic-player.js');
+  const row = src.indexOf("className: 'fs-topic-player__controls'");
+  assert.ok(row > 0 && row < src.indexOf("className: 'fs-topic-player__mode'"));
+  assert.ok(src.indexOf('h(VideoPlayer') < row, 'the row follows the video, in both modes');
+  assert.match(src.slice(src.indexOf('function switchMode')), /store\.set\(\{ wantTurns: true \}\)/);
+  assert.match(src, /!timeline\.items\.length\)/, 'video with no audio still shows the video');
+});
+
+test('leaving video stops it, so two recordings never sound together', () => {
+  assert.match(read('composites', 'video-player.js'), /return function \(\) \{\s*var el = videoEl\.current;\s*if \(el\) \{ try \{ el\.pause\(\)/);
+});
+
+/* ---- the waveform ---- */
+function wav({ rate = 1000, channels = 1, samples = [], extra = 0, format = 1, bits = 16 }) {
+  const data = Buffer.alloc(samples.length * 2);
+  samples.forEach((v, i) => data.writeInt16LE(v, i * 2));
+  const head = Buffer.alloc(36 + extra + (extra ? 8 : 0) + 8);
+  head.write('RIFF', 0); head.write('WAVE', 8); head.write('fmt ', 12);
+  head.writeUInt32LE(16, 16); head.writeUInt16LE(format, 20); head.writeUInt16LE(channels, 22);
+  head.writeUInt32LE(rate, 24); head.writeUInt16LE(bits, 34);
+  let o = 36;
+  if (extra) { head.write('LIST', o); head.writeUInt32LE(extra, o + 4); o += 8 + extra; }
+  head.write('data', o); head.writeUInt32LE(data.length, o + 4);
+  return new Uint8Array(Buffer.concat([head, data]));
+}
+const W = require('../scripts/api/topic-wave.js');
+const peaksOf = (bytes, size) => {
+  const r = W.createPeakReader();
+  for (let i = 0; i < bytes.length; i += size) r.feed(bytes.subarray(i, i + size));
+  return r.finish();
+};
+
+test('a peak per 100ms, the loudest sample either way', () => {
+  const s = new Array(300).fill(0);
+  s[50] = 16384; s[150] = -32768;
+  const peaks = peaksOf(wav({ samples: s }), 1 << 20);
+  assert.deepStrictEqual(peaks, [0.5, 1, 0]);
+});
+
+test('the same peaks however the network splits the file, even mid-sample', () => {
+  const s = Array.from({ length: 1000 }, (_, i) => (i * 37) % 2000 - 1000);
+  const bytes = wav({ samples: s, extra: 26 });
+  const whole = peaksOf(bytes, 1 << 20);
+  assert.strictEqual(whole.length, 10);
+  for (const size of [1, 3, 7, 44, 45, 513]) assert.deepStrictEqual(peaksOf(bytes, size), whole, 'pieces of ' + size);
+});
+
+test('stereo is read per frame, not per sample', () => {
+  assert.strictEqual(peaksOf(wav({ channels: 2, samples: new Array(1000).fill(100) }), 64).length, 5);
+});
+
+test('anything but 16-bit PCM is refused rather than drawn wrong', () => {
+  assert.throws(() => peaksOf(wav({ format: 3, samples: [1] }), 4096), /16-bit pcm/);
+  assert.throws(() => peaksOf(wav({ bits: 8, samples: [1] }), 4096), /16-bit pcm/);
+  assert.throws(() => peaksOf(new Uint8Array(64), 64), /not a wav/);
+  assert.throws(() => W.createPeakReader().finish(), /no audio/);
+});
+
+test('bars place each file where it sits on the bar, scaled to the topic', () => {
+  const tl = P.buildTimeline([{ filename: 'a', duration: 1 }, { filename: 'b', duration: 1 }]);
+  const bars = W.barsFor(tl, { b: new Array(10).fill(0.02) }, 4);
+  assert.deepStrictEqual(bars, [0, 0, 1, 1], 'a quiet file still draws; a file not read draws nothing');
+  assert.strictEqual(W.barsFor(tl, {}, 4), null, 'nothing read means no shape, not a flat one');
+  assert.strictEqual(W.barsFor(tl, { a: [1] }, 0), null);
+  assert.strictEqual(W.barsFor(P.buildTimeline([]), { a: [1] }, 4), null);
+});
+
+test('one loud bang does not flatten everything else', () => {
+  const tl = P.buildTimeline([{ filename: 'a', duration: 100 }]);
+  const peaks = new Array(1000).fill(0.1); peaks[500] = 1;
+  const bars = W.barsFor(tl, { a: peaks }, 100);
+  assert.ok(bars[0] > 0.9, 'ordinary speech keeps its height: ' + bars[0]);
+});
+
+test('no invented shape, and motion only while playing', () => {
+  const src = read('composites', 'topic-player.js');
+  assert.doesNotMatch(src, /Math\.random/);
+  assert.match(src, /prefers-reduced-motion/);
+  assert.match(src, /cancelAnimationFrame/);
 });
 
 test('new scripts load, pure modules before the player and the page', () => {
@@ -224,6 +316,7 @@ test('new scripts load, pure modules before the player and the page', () => {
   const at = (s) => html.indexOf(s);
   assert.ok(at('scripts/api/topic-playback.js') > 0);
   assert.ok(at('scripts/api/mask-words.js') > 0);
+  assert.ok(at('scripts/api/topic-wave.js') > 0 && at('scripts/api/topic-wave.js') < at('scripts/composites/topic-player.js'));
   assert.ok(at('scripts/composites/topic-player.js') > 0);
   assert.ok(at('scripts/composites/topic-player.js') < at('scripts/pages/timeline.js'));
 });
