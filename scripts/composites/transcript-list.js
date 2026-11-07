@@ -22,6 +22,10 @@
      participants  string[] (optional) — names to overlay onto labels
      onJump        (segment) => void  — caller wires this to audio/video
                    playback if present
+     store         FS.topicPlayback store (optional). With one, each line can
+                   be played from, the line being spoken is marked and followed,
+                   and loaded turns are reported to the player. Evidence has none.
+     visible       boolean (with store): false while the Transcript tab is hidden.
      highlightTime "HH:MM:SS" string or null — A2-2 Ask citation
                    transcript-line deep link (timeline.js passes
                    selectedItem.turnTime, itself sourced from the
@@ -427,6 +431,27 @@
     var checkingRef = React.useRef(false);
 
     var windowRef = React.useRef('');
+
+    /* --- playback (spec 2026-11-06) --- */
+    var store = props.store || null;
+    var noSubscribe = React.useRef(function () { return function () {}; }).current;
+    var activeIndex = React.useSyncExternalStore(store ? store.subscribe : noSubscribe, function () {
+      return store ? store.getState().activeTurn : null;
+    });
+    var playing = React.useSyncExternalStore(store ? store.subscribe : noSubscribe, function () {
+      return store ? store.getState().playing : false;
+    });
+    /* Lines become playable once the bar has their file. */
+    React.useSyncExternalStore(store ? store.subscribe : noSubscribe, function () {
+      return store ? store.getState().version : 0;
+    });
+    var masks = window.FS.maskWords;
+    var revealed = React.useSyncExternalStore(masks.subscribe, masks.isRevealed);
+    /* Scrolling by hand stops following until asked. A programmatic scroll fires
+       no wheel or touch event, so following cannot turn itself off. */
+    var refFollow = React.useState(true);
+    var follow = refFollow[0], setFollow = refFollow[1];
+    var rowEls = React.useRef({});
 
     /* The org's own member list, used to turn "a name was said in this
        conversation" into a real person with a real spelling. Fetched only once
@@ -851,6 +876,19 @@
       });
     }
 
+    /* Hidden rows have no layout, so this also fires on reveal. */
+    var showing = !store || props.visible !== false;
+    React.useEffect(function () {
+      if (!store || !follow || !showing || activeIndex === null) return;
+      var el = rowEls.current[activeIndex];
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, [activeIndex, follow, showing]);
+
+    /* A naming refetch reloads the turns; the store ignores an identical list. */
+    React.useEffect(function () {
+      if (store && state.segments && state.segments.length) store.set({ turns: state.segments });
+    }, [state.segments]);
+
     if (state.status === 'loading') {
       return React.createElement('div', { className: 'fs-transcript-list__loading' },
         'Loading transcript…');
@@ -939,7 +977,26 @@
       text: state.segments.map(function (x) { return (x && x.text) || ''; }).join(' '),
     }) : [];
 
-    return React.createElement('div', { className: 'fs-transcript-list' },
+    var anyMasked = state.segments.some(function (x) { return x && masks.hasMasked(x.text); });
+    function stopFollowing() { if (store && playing && follow) setFollow(false); }
+
+    return React.createElement('div', {
+      className: 'fs-transcript-list',
+      onWheel: stopFollowing, onTouchMove: stopFollowing,
+    },
+      (store && !follow && playing)
+        ? React.createElement('button', {
+            type: 'button', className: 'fs-transcript-list__follow',
+            onClick: function () { setFollow(true); },
+          }, 'Follow playback')
+        : null,
+      anyMasked
+        ? React.createElement('button', {
+            type: 'button', className: 'fs-settings__link-btn fs-transcript-list__reveal',
+            'aria-pressed': revealed,
+            onClick: function () { masks.setRevealed(!revealed); },
+          }, revealed ? 'Hide strong language' : 'Show original')
+        : null,
 
       React.createElement('div', { className: 'fs-transcript-list__caption' },
         state.counts.segments + ' segments · '
@@ -1007,9 +1064,10 @@
 
         return React.createElement('div', {
           key: i,
-          ref: function (node) { segRefs.current[i] = node; },
+          ref: function (node) { segRefs.current[i] = node; rowEls.current[i] = node; },
           className: 'fs-transcript-list__row'
-            + (flashIndex === i ? ' fs-transcript-list__row--flash' : ''),
+            + (flashIndex === i ? ' fs-transcript-list__row--flash' : '')
+            + (store && activeIndex === i ? ' fs-transcript-list__row--active' : ''),
         },
           React.createElement('div', { className: 'fs-transcript-list__speaker' },
             /* The chip IS the naming trigger. It used to call `props.onJump`,
@@ -1055,7 +1113,15 @@
                 className: 'fs-transcript-list__chip-time',
               }, s.time_label),
             ),
-
+            /* No control when this line's file is not on the bar: it must not
+               play some other moment and present that as the line. */
+            store && store.canSeek(s)
+              ? React.createElement('button', {
+                  type: 'button', className: 'fs-transcript-list__play',
+                  'aria-label': 'Play from ' + s.time_label, title: 'Play from ' + s.time_label,
+                  onClick: function () { setFollow(true); store.seekToTurn(s); },
+                }, '▶')
+              : null,
           ),
 
           openIndex === i
@@ -1077,7 +1143,7 @@
             : null,
 
           React.createElement('div', { className: 'fs-transcript-list__text' },
-            s.text),
+            masks.display(s.text)),
         );
       }),
     );

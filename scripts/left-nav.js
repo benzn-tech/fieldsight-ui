@@ -23,6 +23,7 @@ const NAV_ICONS = {
   sites:      'map-pin',
   team:       'users',
   settings:   'settings',
+  help:       'life-buoy',
   trace:      'list-tree',
 };
 
@@ -341,7 +342,7 @@ function UserArea({ user, isCollapsed }) {
     menuOpen ? React.createElement('div', { style: menuStyle },
       React.createElement('div', {
         style: menuItemStyle,
-        onClick: function() { setMenuOpen(false); window.location.hash = '#/settings'; },
+        onClick: function() { setMenuOpen(false); openSettings(); },
       }, 'Settings'),
       /* Sign out — live mode only (mock mode has no real session to clear).
          Session API: window.FS.session.isSignedIn() / .clear() (scripts/auth/session.js). */
@@ -367,6 +368,46 @@ function UserArea({ user, isCollapsed }) {
       onClick: function() { setMenuOpen(false); },
     }) : null,
   );
+}
+
+/* ---------- Settings ------------------------------------------------------- */
+/* A window over the current page. The route is only the fallback for a moment
+   when the host is not mounted; it opens the same window. */
+function openSettings() {
+  if (window.FS && window.FS.settings) window.FS.settings.open();
+  else window.location.hash = '#/settings';
+}
+
+/* ---------- Contact FieldSight --------------------------------------------- */
+const HELP_EMAIL = 'sales@fieldsightai.com';
+
+/* A pre-addressed email with what we would otherwise have to ask for first.
+   Pure so it can be tested. mailto: never sends anything: the person sees and
+   edits the message in their own mail app. The page path only, with no query
+   string, so a search term or token in the URL cannot leave in an email. */
+function buildHelpMailto(user, route) {
+  const lines = [
+    '',
+    '',
+    '---',
+    'Name: ' + ((user && user.name) || ''),
+    'Page: ' + String(route || '').split('?')[0],
+  ];
+  return 'mailto:' + HELP_EMAIL
+    + '?subject=' + encodeURIComponent('FieldSight help request')
+    + '&body=' + encodeURIComponent(lines.join('\n'));
+}
+
+function contactHelp(user, route) {
+  window.location.href = buildHelpMailto(user, route);
+  /* mailto: fails silently on a computer with no mail app, so the address is
+     always on screen as well. */
+  if (window.FS && window.FS.toast) {
+    window.FS.toast.show({
+      message: 'Opening your email app. You can also write to ' + HELP_EMAIL,
+      tone: 'info', duration: 8000,
+    });
+  }
 }
 
 /* ---------- LeftNav ------------------------------------------------------- */
@@ -534,14 +575,24 @@ function LeftNav({ user, currentRoute, isCollapsed, onToggleCollapse, onNavigate
       }),
     ),
 
-    /* Settings — sticky footer ABOVE UserArea, OUTSIDE scroll area */
+    /* Settings and help — sticky footer ABOVE UserArea, OUTSIDE scroll area.
+       Help is not gated on the settings permission: anyone stuck can ask. */
+    React.createElement('div', { style: settingsAreaStyle },
+      React.createElement(NavItem, {
+        navKey: 'help',
+        label: 'Contact FieldSight',
+        isActive: false,
+        isCollapsed: isCollapsed,
+        onClick: function() { contactHelp(user, currentRoute); },
+      }),
+    ),
     visibleKeys.has('settings') ? React.createElement('div', { style: settingsAreaStyle },
       React.createElement(NavItem, {
         navKey: 'settings',
         label: 'Settings',
-        isActive: currentRoute === '/settings',
+        isActive: false,
         isCollapsed: isCollapsed,
-        onClick: function() { onNavigate('/settings'); },
+        onClick: openSettings,
       }),
     ) : null,
 
@@ -558,5 +609,5 @@ window.FieldSight.NavIcon = NavIcon;
    `module` undefined). navSections is exported rather than the flag helper:
    the thing worth asserting is the list that gets rendered, not the boolean. */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { navSections: navSections, NAV_SECTIONS: NAV_SECTIONS };
+  module.exports = { navSections: navSections, NAV_SECTIONS: NAV_SECTIONS, buildHelpMailto: buildHelpMailto };
 }

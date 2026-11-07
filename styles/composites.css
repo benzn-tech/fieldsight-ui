@@ -892,6 +892,16 @@
   transition: background var(--duration-fast) var(--easing-out);
 }
 .fs-action-item-row:hover { background: var(--surface-panel-muted); }
+.fs-topic-detail__action-item .fs-action-item-row { cursor: default; }
+/* Pads the checkbox's hit area without moving it: a field user in gloves should
+   not need to land on 16px, now that the rest of the row no longer ticks. */
+.fs-action-item-row__check {
+  display: flex;
+  flex-shrink: 0;
+  padding: 4px;
+  margin: -4px;
+  cursor: pointer;
+}
 
 .fs-action-item-row__checkbox {
   margin-top: 3px;
@@ -1844,11 +1854,14 @@
    TopicDetail (right panel) — header, tabs, body
    ========================================================================= */
 
+/* Scrolls as a whole only when the window is too short for the body's minimum:
+   the tabs must stay reachable whatever sits above them. */
 .fs-topic-detail {
   display: flex;
   flex-direction: column;
   height: 100%;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   box-sizing: border-box;
 }
 
@@ -1920,7 +1933,8 @@
 }
 
 .fs-topic-detail__body {
-  flex: 1;
+  flex: 1 0 0;
+  min-height: 180px;
   overflow-y: auto;
   padding: 20px 24px;
   box-sizing: border-box;
@@ -2426,6 +2440,140 @@
 .fs-transcript-list__row--flash {
   border-radius: var(--radius-md);
 }
+.fs-transcript-list__row--active {
+  border-radius: var(--radius-md);
+  background: var(--surface-topic-selected);
+  box-shadow: 0 0 0 4px var(--surface-topic-selected);
+}
+.fs-transcript-list__play {
+  display: block;
+  margin: 4px auto 0;
+  padding: 2px 8px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+.fs-transcript-list__play:hover { color: var(--text-primary); background: var(--surface-panel-muted); }
+.fs-transcript-list__follow {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  align-self: center;
+  padding: 4px 12px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--surface-panel-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+}
+.fs-transcript-list__reveal { align-self: flex-start; }
+
+/* Topic player: above the tabs, outside the scrolling body. */
+.fs-topic-player {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 10px 24px;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-panel-muted);
+}
+.fs-topic-player--quiet { font-size: 12px; color: var(--text-tertiary); }
+.fs-topic-player .fs-video-player { flex: 1 1 100%; min-width: 0; }
+/* Bounded by the window as well: below this the tabs and transcript have no room. */
+.fs-topic-player .fs-video-player__media { display: block; max-height: min(240px, 34vh); }
+.fs-topic-player .fs-video-player__filename,
+.fs-topic-player .fs-video-player__size { display: none; }
+.fs-topic-player__main {
+  flex: 1 1 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.fs-topic-player__controls {
+  flex: 1 1 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.fs-topic-player__play {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: #fff;
+  background: var(--color-accent-700);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.fs-topic-player__play:hover { filter: brightness(1.1); }
+.fs-topic-player__play:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+.fs-topic-player__skip,
+.fs-topic-player__speed,
+.fs-topic-player__mode {
+  flex: none;
+  height: 28px;
+  min-width: 30px;
+  padding: 0 6px;
+  font: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  background: var(--surface-panel);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+.fs-topic-player__skip:hover,
+.fs-topic-player__speed:hover,
+.fs-topic-player__mode:hover { background: var(--surface-panel-elevated); }
+.fs-topic-player__track {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 80px;
+  height: 44px;
+  border-radius: var(--radius-md);
+}
+.fs-topic-player__track:focus-within { outline: 2px solid var(--color-accent-700); outline-offset: 2px; }
+.fs-topic-player__wave { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+/* Invisible but real: pressing, dragging and the keyboard all stay native. */
+.fs-topic-player__seek {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.fs-topic-player__time {
+  flex: none;
+  margin-left: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.fs-topic-player__time b { color: var(--text-primary); font-weight: var(--font-weight-semibold); }
+.fs-topic-player__modes { display: inline-flex; gap: 2px; flex: none; margin-left: auto; }
+.fs-topic-player__time + .fs-topic-player__modes { margin-left: 8px; }
+.fs-topic-player__mode--on { background: var(--surface-topic-selected); font-weight: var(--font-weight-semibold); }
+.fs-topic-player__error { flex: 1 1 100%; font-size: 12px; color: var(--text-danger); }
 
 .fs-transcript-list__chip {
   display: inline-flex;
@@ -3195,6 +3343,13 @@
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   padding: 12px;
+}
+
+/* The Due field ends a row at the right of the narrow detail panel. Opening
+   rightward put a third of the calendar past the panel edge, clipped. */
+.fs-topic-detail__assignee-label--due ~ .fs-date-field .fs-date-field__popover {
+  left: auto;
+  right: 0;
 }
 
 .fs-date-field__popover-footer {
@@ -7794,6 +7949,46 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   transition: color var(--duration-fast) var(--easing-out), border-color var(--duration-fast) var(--easing-out);
 }
 .fs-settings__tab:hover { color: var(--text-primary); }
+
+/* Settings window: sections left, content right. The fixed height keeps the
+   window from jumping as sections change; the content scrolls. */
+.fs-modal__body:has(> .fs-settings-window) { padding: 0; overflow: hidden; }
+.fs-settings-window {
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  height: min(640px, calc(100vh - 140px));
+}
+.fs-settings-window .fs-settings__tabs {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 2px;
+  margin: 0;
+  padding: var(--space-3);
+  border-bottom: none;
+  border-right: 1px solid var(--border-subtle);
+}
+.fs-settings-window .fs-settings__tab {
+  border-bottom: none;
+  border-radius: var(--radius-md);
+  margin: 0;
+  padding: 8px 10px;
+  text-align: left;
+}
+.fs-settings-window .fs-settings__tab:hover { background: var(--surface-panel-muted); }
+.fs-settings-window .fs-settings__tab--active { background: var(--surface-panel-muted); }
+.fs-settings-window__body { overflow-y: auto; padding: 0 var(--space-5); }
+.fs-settings__back { align-self: flex-start; display: block; margin-bottom: var(--space-3); }
+@media (max-width: 640px) {
+  .fs-settings-window { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .fs-settings-window .fs-settings__tabs {
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .fs-settings-window .fs-settings__tab { white-space: nowrap; }
+}
+
 .fs-settings__tab--active { color: var(--text-primary); border-bottom-color: var(--color-accent-700); }
 
 .fs-settings__input {
@@ -12890,7 +13085,9 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 /* The queue's home on the timeline. Margin only — the cards carry their own
    frame, and a second border around a list of bordered cards reads as a
    nesting that is not there. */
-.fs-timeline-page__threads { margin: 0 0 20px; }
+.fs-timeline-page__threads { margin: 0 0 12px; }
+.fs-timeline-page__threads > summary { cursor: pointer; }
+.fs-timeline-page__threads[open] > summary { margin-bottom: 8px; }
 
 
 /* =========================================================================
@@ -13197,6 +13394,7 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   color: var(--text-secondary);
 }
 .fs-topic-detail__assignee .fs-select { max-width: 190px; }
+.fs-topic-detail__assignee-label--due { margin-left: 8px; }
 
 /* --- Today · the order control -------------------------------------------
    Deliberately the same chip vocabulary as .fs-today__age-filter above: both

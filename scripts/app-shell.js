@@ -1292,6 +1292,9 @@ function AppShell({ showDevSwitcher = false }) {
   /* Keyboard shortcuts — ignored when typing in text fields */
   React.useEffect(function() {
     function onKey(e) {
+      /* Settings sits over the page: a key pressed in it must not move the page
+         underneath, or open a second modal that Esc would close along with it. */
+      if (window.FS.settings && window.FS.settings.isOpen && window.FS.settings.isOpen()) return;
       var target = e.target;
       var tag = target && target.tagName;
       var inInput = tag === 'INPUT' || tag === 'TEXTAREA' || (target && target.isContentEditable);
@@ -1549,6 +1552,15 @@ function AppShell({ showDevSwitcher = false }) {
             ),
           ),
         )
+      : null,
+
+    /* Settings is a window over whatever page is showing. */
+    window.FieldSight.SettingsHost
+      ? React.createElement(window.FieldSight.SettingsHost, {
+          route:  route,
+          user:   user,
+          onOpen: function () { setOnboardingOpen(false); },
+        })
       : null,
 
     /* Sprint 8.11.1 — first-run onboarding overlay */

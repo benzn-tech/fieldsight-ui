@@ -1,17 +1,19 @@
 /* ==========================================================================
    FieldSight Settings Page — Sprint 7.3 / 7.6 + account area (Phase A)
    --------------------------------------------------------------------------
-   /settings — tabbed account area:
-     • Preferences   — theme + density + default landing (original Sprint 7)
-     • Profile       — avatar, name, email, time/date format, timezone
-     • Security      — password change, two-factor authentication (mock)
+   A window over the current page, opened with window.FS.settings.open():
+     • Appearance    — theme + density
+     • Profile       — avatar, name, email, time/date format, timezone, landing
+     • Security      — password change (Cognito), recorder sign-in
      • Notifications — global email notification preferences
 
    All prefs are localStorage-only (mock prototype); documented as the
    /api/user/prefs migration target. Auth/security data stays out of
    localStorage where it matters (the real password change is Cognito).
 
-   Registers as window.FieldSight.PAGES['/settings']
+   Registers window.FieldSight.SettingsHost (mounted once by AppShell) and
+   window.FieldSight.PAGES['/settings'], kept so old links still work: the host
+   sees that route, opens the window and replaces the route.
    ========================================================================== */
 
 /* global React, window */
@@ -19,6 +21,7 @@
 (function () {
   'use strict';
 
+  var SETTINGS_ROUTE = '/settings';
   var LANDING_KEY  = 'fs.settings.defaultLanding';
   var PROFILE_KEY  = 'fs.settings.profile';
   /* Live mode: scope the stored profile to the signed-in account — the
@@ -30,7 +33,6 @@
     return u.sub ? PROFILE_KEY + '.' + u.sub : PROFILE_KEY;
   }
   var NOTIF_KEY    = 'fs.settings.notifications';
-  var SECURITY_KEY = 'fs.settings.security';
 
   /* ---------- localStorage helpers -------------------------------------- */
   function readJSON(key)  { try { return JSON.parse(localStorage.getItem(key) || 'null') || {}; } catch (_) { return {}; } }
@@ -47,7 +49,7 @@
 
   /* ---------- option data ----------------------------------------------- */
   var TABS = [
-    { key: 'preferences',   label: 'Preferences' },
+    { key: 'appearance',    label: 'Appearance' },
     { key: 'profile',       label: 'Profile' },
     { key: 'security',      label: 'Security' },
     { key: 'notifications', label: 'Notifications' },
@@ -110,7 +112,6 @@
   var SettingsContext = React.createContext(null);
 
   function SettingsProvider(props) {
-    var refTab      = React.useState('preferences');
     var refState    = React.useState(function () {
       return { themeStored: readThemeStored(), themeResolved: readThemeResolved(), densityStored: readDensityStored(), landingOverride: readLandingOverride() };
     });
@@ -119,7 +120,6 @@
       var d = defaultNotifications(); var s = readJSON(NOTIF_KEY);
       return Object.assign(d, s, { events: Object.assign({}, d.events, s.events || {}) });
     });
-    var refSecurity = React.useState(function () { var s = readJSON(SECURITY_KEY); return { twoFactor: !!s.twoFactor }; });
 
     var state = refState[0], setState = refState[1];
 
@@ -156,7 +156,7 @@
 
     function ctxObj() {
       return {
-        tab: refTab[0], setTab: refTab[1],
+        tab: props.tab, setTab: props.setTab,
         state: state, user: (window.AuthMock && window.AuthMock.currentUser) || {},
         setTheme: function (m) { if (window.FS && window.FS.theme) window.FS.theme.set(m); setState(function (s) { return Object.assign({}, s, { themeStored: readThemeStored(), themeResolved: readThemeResolved() }); }); },
         setDensity: function (m) { if (window.FS && window.FS.density) window.FS.density.set(m); setState(function (s) { return Object.assign({}, s, { densityStored: readDensityStored() }); }); },
@@ -214,8 +214,6 @@
         toggleEvent: function (k) { refNotif[1](function (n) { var e = Object.assign({}, n.events); e[k] = !e[k]; return Object.assign({}, n, { events: e }); }); },
         saveNotif: function () { writeJSON(NOTIF_KEY, refNotif[0]); toast('Notification preferences saved'); },
 
-        security: refSecurity[0],
-        toggle2FA: function () { refSecurity[1](function (s) { var next = { twoFactor: !s.twoFactor }; writeJSON(SECURITY_KEY, next); toast(next.twoFactor ? 'Two-factor authentication enabled (demo)' : 'Two-factor authentication disabled (demo)', 'info'); return next; }); },
       };
     }
 
@@ -224,7 +222,7 @@
 
   /* ---------- Tab strip ------------------------------------------------- */
   function TabStrip(ctx) {
-    return React.createElement('div', { className: 'fs-settings__tabs', role: 'tablist', 'aria-label': 'Settings sections' },
+    return React.createElement('div', { className: 'fs-settings__tabs', role: 'tablist', 'aria-label': 'Settings sections', 'aria-orientation': 'vertical' },
       visibleTabs().map(function (t) {
         var active = ctx.tab === t.key;
         return React.createElement('button', {
@@ -256,12 +254,10 @@
     );
   }
 
-  /* ---------- Preferences tab (original content) ------------------------ */
-  function PreferencesTab(props) {
+  /* ---------- Appearance tab -------------------------------------------- */
+  function AppearanceTab(props) {
     var ctx = props.ctx;
-    var state = ctx.state, user = ctx.user;
-    var visibleItems = window.FS && window.FS.getVisibleNavItems ? window.FS.getVisibleNavItems(user) : [];
-    var roleDefault = window.FS && window.FS.getDefaultLanding ? window.FS.getDefaultLanding(user) : '/today';
+    var state = ctx.state;
     var themeOptions = [
       { value: 'light', label: 'Light', caption: null },
       { value: 'dark', label: 'Dark', caption: null },
@@ -295,20 +291,40 @@
         React.createElement('div', { className: 'fs-settings__section-title' }, 'Display density'),
         React.createElement('div', { className: 'fs-settings__section-desc' }, 'Control how much information fits on screen at once.'),
         radioGroup('fs-density', densityOptions, state.densityStored, ctx.setDensity)
-      ),
+      )
+    );
+  }
+
+  /* ---------- Saved-at-once defaults (below Profile) --------------------- */
+  /* Settings is a window now, not a place, so it cannot be a landing page:
+     choosing it would only open the window and redirect to itself. A value
+     already stored reads as no choice. */
+  function landingChoices(items) {
+    return (items || []).filter(function (item) { return item.path !== SETTINGS_ROUTE; });
+  }
+
+  /* Outside Profile's Save/Reset row on purpose: this saves at once, and Reset
+     does not touch it, so inside the form Reset would seem to fail. */
+  function AccountDefaults(props) {
+    var ctx = props.ctx;
+    var state = ctx.state, user = ctx.user;
+    var visibleItems = landingChoices(window.FS && window.FS.getVisibleNavItems ? window.FS.getVisibleNavItems(user) : []);
+    var roleDefault = window.FS && window.FS.getDefaultLanding ? window.FS.getDefaultLanding(user) : '/today';
+    var override = state.landingOverride === SETTINGS_ROUTE ? null : state.landingOverride;
+    return React.createElement(React.Fragment, null,
       React.createElement('section', { className: 'fs-settings__section' },
         React.createElement('div', { className: 'fs-settings__section-title' }, 'Default landing page'),
-        React.createElement('div', { className: 'fs-settings__section-desc' }, 'Where you land when you open the app or navigate to the root.'),
+        React.createElement('div', { className: 'fs-settings__section-desc' }, 'Where you land when you open the app. Saved automatically.'),
         Field('On open, go to',
-          React.createElement('select', { className: 'fs-settings__select', value: state.landingOverride || '', onChange: function (e) { ctx.setLanding(e.target.value || null); } },
+          React.createElement('select', { className: 'fs-settings__select', value: override || '', onChange: function (e) { ctx.setLanding(e.target.value || null); } },
             React.createElement('option', { value: '' }, 'Use my role\'s default (' + roleDefault + ')'),
             visibleItems.map(function (item) { return React.createElement('option', { key: item.key, value: item.path }, item.label); })
           )
         ),
-        state.landingOverride ? React.createElement('div', { className: 'fs-settings__field-hint' }, 'Override active. Clear the dropdown to restore role default.') : null
+        override ? React.createElement('div', { className: 'fs-settings__field-hint' }, 'Override active. Clear the dropdown to restore role default.') : null
       ),
       React.createElement('section', { className: 'fs-settings__section' },
-        React.createElement('div', { className: 'fs-settings__section-title' }, 'Help'),
+        React.createElement('div', { className: 'fs-settings__section-title' }, 'Welcome tour'),
         React.createElement('div', { className: 'fs-settings__section-desc' }, 'Replay the welcome tour the next time you open the app.'),
         React.createElement('button', { type: 'button', className: 'fs-settings__link-btn', onClick: function () { try { localStorage.removeItem('fs.onboarded'); } catch (_) {} toast('Onboarding will run on next reload', 'info'); } }, 'Reset onboarding')
       )
@@ -344,7 +360,7 @@
       ? React.createElement(Avatar, { name: (p.firstName + ' ' + p.lastName).trim() || 'User', src: p.avatarUrl || undefined, size: 'xl' })
       : React.createElement('div', { className: 'fs-settings__avatar-fallback' }, ((p.firstName[0] || '') + (p.lastName[0] || '')).toUpperCase() || '?');
 
-    return React.createElement('section', { className: 'fs-settings__section' },
+    return React.createElement(React.Fragment, null, React.createElement('section', { className: 'fs-settings__section' },
       React.createElement('div', { className: 'fs-settings__profile' },
         React.createElement('div', { className: 'fs-settings__avatar-col' },
           avatarEl,
@@ -374,16 +390,89 @@
           )
         )
       )
+    ), React.createElement(AccountDefaults, { ctx: ctx }));
+  }
+
+  /* ---------- Change password ------------------------------------------- */
+  function canChangePassword() {
+    var c = window.FS && window.FS.cognito, sess = window.FS && window.FS.session;
+    return !!(c && c.changePassword && sess && sess.isSignedIn && sess.isSignedIn());
+  }
+
+  /* What the form may submit, or the sentence that says why not. Pure, so the
+     rules are testable. Length and character classes stay Cognito's call: its
+     policy is configured on the pool and repeating it here would drift. */
+  function passwordFormError(current, next, confirm) {
+    if (!current || !next || !confirm) return 'Fill in all three fields.';
+    if (next !== confirm) return 'The new passwords do not match.';
+    if (next === current) return 'Choose a password different from the current one.';
+    return null;
+  }
+
+  /* Cognito's codes, in words. Anything else keeps the service's own message
+     rather than a guess. */
+  function passwordErrorMessage(err) {
+    var code = (err && (err.code || err.name || err.__type)) || '';
+    if (/NotAuthorized/.test(code)) return 'The current password is not correct.';
+    if (/InvalidPassword/.test(code)) return (err && err.message) || 'That password does not meet the requirements.';
+    if (/LimitExceeded|TooManyRequests/.test(code)) return 'Too many attempts. Wait a few minutes and try again.';
+    return (err && err.message) || 'Could not change the password. Try again.';
+  }
+
+  function ChangePasswordForm(props) {
+    var h = React.createElement;
+    var s_cur = React.useState(''), s_new = React.useState(''), s_con = React.useState('');
+    var s_err = React.useState(null), s_busy = React.useState(false);
+    function input(state, autoComplete) {
+      return h('input', { type: 'password', className: 'fs-settings__input', value: state[0], autoComplete: autoComplete,
+        onChange: function (e) { state[1](e.target.value); } });
+    }
+    function submit() {
+      var problem = passwordFormError(s_cur[0], s_new[0], s_con[0]);
+      s_err[1](problem);
+      if (problem || s_busy[0]) return;
+      s_busy[1](true);
+      window.FS.cognito.changePassword(s_cur[0], s_new[0]).then(function () {
+        toast('Password updated');
+        props.onClose();
+      }, function (err) {
+        s_busy[1](false);
+        s_err[1](passwordErrorMessage(err));
+      });
+    }
+    return h('div', { className: 'fs-settings__pw-form' },
+      Field('Current password', input(s_cur, 'current-password')),
+      Field('New password', input(s_new, 'new-password')),
+      Field('Confirm new password', input(s_con, 'new-password')),
+      s_err[0] ? h('p', { className: 'fs-field__hint fs-field__hint--error', role: 'alert' }, s_err[0]) : null,
+      h('div', { className: 'fs-settings__actions' },
+        h('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: props.onClose }, 'Cancel'),
+        h('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--md', disabled: s_busy[0], onClick: submit },
+          s_busy[0] ? 'Updating…' : 'Update password')
+      )
     );
   }
 
   /* ---------- Security tab ---------------------------------------------- */
   function SecurityTab(props) {
     var ctx = props.ctx;
-    var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
-    var refPw = React.useState(false); var pwOpen = refPw[0], setPwOpen = refPw[1];
-    /* Web Task 4 (2026-07-30) — QR terminal login: self-service, no role gate. */
-    var refQr = React.useState(false); var qrOpen = refQr[0], setQrOpen = refQr[1];
+    /* A view inside the window, not a second modal: two ModalOverlays both
+       listen for Esc on window, so Esc would close the whole of Settings.
+       Web Task 4 (2026-07-30) — QR terminal login: self-service, no role gate. */
+    var refView = React.useState('list'); var view = refView[0], setView = refView[1];
+    function backToList() { setView('list'); }
+    if (view === 'password') {
+      return React.createElement('section', { className: 'fs-settings__section' },
+        React.createElement('button', { type: 'button', className: 'fs-settings__link-btn fs-settings__back', onClick: backToList }, '← Security'),
+        React.createElement('div', { className: 'fs-settings__section-title' }, 'Change password'),
+        React.createElement(ChangePasswordForm, { onClose: backToList })
+      );
+    }
+    if (view === 'qr' && window.FieldSight.QrLoginModal) {
+      return React.createElement('section', { className: 'fs-settings__section' },
+        React.createElement(window.FieldSight.QrLoginModal, { onClose: backToList })
+      );
+    }
     function row(icon, title, sub, btnLabel, onClick) {
       return React.createElement('div', { className: 'fs-settings__security-row' },
         React.createElement('div', { className: 'fs-settings__security-main' },
@@ -398,31 +487,12 @@
     }
     return React.createElement('section', { className: 'fs-settings__section' },
       React.createElement('div', { className: 'fs-settings__security-card' },
-        row('🔑', 'Password', null, 'Change', function () { setPwOpen(true); }),
-        row('🛡', 'Two-factor authentication', ctx.security.twoFactor ? 'On' : 'Off', 'Change', ctx.toggle2FA),
-        row('🖥', 'Log in a terminal', 'Scan a QR code to sign in on a FieldSight recording terminal.', 'Log in a terminal', function () { setQrOpen(true); })
-      ),
-      (pwOpen && Modal) ? React.createElement(Modal, {
-        open: true, size: 'sm', title: 'Change password', onClose: function () { setPwOpen(false); },
-      },
-        React.createElement('div', { className: 'fs-settings__pw-form' },
-          Field('Current password', React.createElement('input', { type: 'password', className: 'fs-settings__input' })),
-          Field('New password', React.createElement('input', { type: 'password', className: 'fs-settings__input' })),
-          Field('Confirm new password', React.createElement('input', { type: 'password', className: 'fs-settings__input' })),
-          React.createElement('div', { className: 'fs-settings__actions' },
-            React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--secondary fs-btn--md', onClick: function () { setPwOpen(false); } }, 'Cancel'),
-            React.createElement('button', { type: 'button', className: 'fs-btn fs-btn--primary fs-btn--md', onClick: function () { setPwOpen(false); toast('Password updated (demo)'); } }, 'Update password')
-          )
-        )
-      ) : null,
-      /* No title passed — QrLoginModal renders its own "Log in a terminal"
-         h2 + hint + Done button, so ModalOverlay's own header is skipped to
-         avoid a double title. */
-      (qrOpen && Modal && window.FieldSight.QrLoginModal) ? React.createElement(Modal, {
-        open: true, size: 'sm', ariaLabel: 'Log in a terminal', onClose: function () { setQrOpen(false); },
-      },
-        React.createElement(window.FieldSight.QrLoginModal, { onClose: function () { setQrOpen(false); } })
-      ) : null
+        /* No Password row without a live session to change it on (mock mode).
+           Two-factor is not offered at all until the user pool supports it: the
+           row it replaced flipped a browser flag and reported success. */
+        canChangePassword() ? row('🔑', 'Password', null, 'Change', function () { setView('password'); }) : null,
+        row('🖥', 'Sign in to a recorder', 'Show a QR code for your FieldSight recorder to scan.', 'Show QR code', function () { setView('qr'); })
+      )
     );
   }
 
@@ -513,41 +583,98 @@
     );
   }
 
-  /* ---------- Middle column --------------------------------------------- */
-  function SettingsMiddleColumn() {
+  /* ---------- The window ------------------------------------------------ */
+  function SettingsWindow(props) {
     var ctx = React.useContext(SettingsContext);
-    if (!ctx) return null;
+    var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
+    if (!ctx || !Modal) return null;
     var body;
     if (ctx.tab === 'profile') body = React.createElement(ProfileTab, { ctx: ctx });
     else if (ctx.tab === 'security') body = React.createElement(SecurityTab, { ctx: ctx });
     else if (ctx.tab === 'notifications') body = React.createElement(NotificationsTab, { ctx: ctx });
     else if (ctx.tab === 'glossary') body = React.createElement(GlossaryTab, null);
-    else body = React.createElement(PreferencesTab, { ctx: ctx });
+    else body = React.createElement(AppearanceTab, { ctx: ctx });
 
-    return React.createElement('div', { className: 'fs-settings' },
-      React.createElement('div', { className: 'fs-settings__header' },
-        React.createElement('h2', { className: 'fs-settings__title' }, 'Settings'),
-        React.createElement('div', { className: 'fs-settings__subtitle' }, 'Account & app preferences')
-      ),
-      TabStrip(ctx),
-      body
+    return React.createElement(Modal, { open: true, size: 'lg', title: 'Settings', onClose: props.onClose },
+      React.createElement('div', { className: 'fs-settings-window' },
+        TabStrip(ctx),
+        React.createElement('div', { className: 'fs-settings fs-settings-window__body' }, body)
+      )
     );
   }
 
-  /* ---------- Right detail (kept minimal) ------------------------------- */
-  function SettingsRightDetail() {
-    return React.createElement('div', { className: 'fs-settings-summary fs-settings-summary--empty' },
-      'Settings are saved in your browser.');
+  /* Where to go from the old /settings route. Never back to it. */
+  function landingAfterSettings(override, roleDefault) {
+    if (override && override !== SETTINGS_ROUTE) return override;
+    if (roleDefault && roleDefault !== SETTINGS_ROUTE) return roleDefault;
+    return '/today';
+  }
+
+  function canOpenSettings(user) {
+    return !(window.FS && window.FS.canSeeNav) || window.FS.canSeeNav('settings', user);
+  }
+
+  /* Mounted once by AppShell. The provider is not created before first open, so
+     boot makes no /me call for it, and it stays afterwards, so edits in progress
+     survive closing. The overlay itself unmounts: a closed .fs-modal is only
+     transparent and its buttons would stay in the tab order. */
+  function SettingsHost(props) {
+    var refOpen = React.useState(false); var open = refOpen[0], setOpen = refOpen[1];
+    var refUsed = React.useState(false); var used = refUsed[0], setUsed = refUsed[1];
+    var refTab  = React.useState('appearance');
+    var live = React.useRef({});
+    live.current = { user: props.user, onOpen: props.onOpen, open: open };
+
+    function openWindow(tab) {
+      if (!canOpenSettings(live.current.user)) return;
+      if (tab) refTab[1](tab);
+      setUsed(true);
+      setOpen(true);
+      if (live.current.onOpen) live.current.onOpen();
+    }
+
+    React.useEffect(function () {
+      if (!window.FS) window.FS = {};
+      window.FS.settings = {
+        open: openWindow,
+        close: function () { setOpen(false); },
+        isOpen: function () { return !!live.current.open; },
+      };
+      return function () { delete window.FS.settings; };
+    }, []);
+
+    /* Old links. Handled here rather than by the page, whose effects may run
+       before this component has registered window.FS.settings. If this person
+       may not see Settings, AppShell's route guard already moves them. */
+    React.useEffect(function () {
+      if (props.route !== SETTINGS_ROUTE || !canOpenSettings(props.user)) return;
+      openWindow();
+      window.FS.Router.replace(landingAfterSettings(readLandingOverride(),
+        window.FS.getDefaultLanding ? window.FS.getDefaultLanding(props.user) : null));
+    }, [props.route]);
+
+    if (!used) return null;
+    return React.createElement(SettingsProvider, { tab: refTab[0], setTab: refTab[1] },
+      open ? React.createElement(SettingsWindow, { onClose: function () { setOpen(false); } }) : null);
   }
 
   /* ---------- Register -------------------------------------------------- */
   if (!window.FieldSight) window.FieldSight = {};
   if (!window.FieldSight.PAGES) window.FieldSight.PAGES = {};
-  window.FieldSight.PAGES['/settings'] = {
-    Middle:   SettingsMiddleColumn,
-    Right:    SettingsRightDetail,
-    Provider: SettingsProvider,
+  window.FieldSight.SettingsHost = SettingsHost;
+  /* Blank for the moment before SettingsHost replaces this route. No Provider
+     here, or the old route would call /me at boot. */
+  window.FieldSight.PAGES[SETTINGS_ROUTE] = {
+    Middle:   function () { return null; },
+    Right:    function () { return null; },
     layout:   'full-width',
   };
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      passwordFormError: passwordFormError, passwordErrorMessage: passwordErrorMessage,
+      landingAfterSettings: landingAfterSettings, landingChoices: landingChoices,
+    };
+  }
 
 })();
