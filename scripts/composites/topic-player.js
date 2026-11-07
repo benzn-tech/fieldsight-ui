@@ -38,12 +38,121 @@
     return React.useSyncExternalStore(store.subscribe, function () { return read(store.getState()); });
   }
 
-  function CurrentLine(props) {
-    var turn = useStore(props.store, function (s) { return s.activeTurn === null ? null : s.turns[s.activeTurn] || null; });
-    var masks = window.FS.maskWords;
-    React.useSyncExternalStore(masks.subscribe, masks.isRevealed);
-    return React.createElement('div', { className: 'fs-topic-player__line', 'aria-live': 'off' },
-      turn ? masks.display(turn.text) : ' ');
+  var BAR_STEP = 3;   /* 2px bar, 1px gap */
+
+  function token(style, name, fallback) {
+    return (style.getPropertyValue(name) || '').trim() || fallback;
+  }
+
+  /* The bar's picture. A transparent range input lies over it and takes every
+     press, drag and key, so this only ever draws. While playing it reads the
+     position each frame through getPos; otherwise it draws when props change. */
+  function Waveform(props) {
+    var canvasRef = React.useRef(null);
+    var s_width = React.useState(0); var width = s_width[0], setWidth = s_width[1];
+    var latest = React.useRef(props); latest.current = props;
+    var count = Math.floor(width / BAR_STEP);
+    var bars = React.useMemo(function () {
+      return window.FS.topicWave.barsFor(props.timeline, props.peaks, count);
+    }, [props.timeline, props.peaks, count]);
+    var barsRef = React.useRef(bars); barsRef.current = bars;
+
+    function draw(now) {
+      var c = canvasRef.current;
+      var p = latest.current;
+      if (!c || !c.clientWidth) return;
+      var w = c.clientWidth, h = c.clientHeight;
+      var ratio = window.devicePixelRatio || 1;
+      if (c.width !== Math.round(w * ratio) || c.height !== Math.round(h * ratio)) {
+        c.width = Math.round(w * ratio);
+        c.height = Math.round(h * ratio);
+      }
+      var g = c.getContext('2d');
+      if (!g) return;
+      g.setTransform(ratio, 0, 0, ratio, 0, 0);
+      g.clearRect(0, 0, w, h);
+
+      var style = window.getComputedStyle(c);
+      var accent = token(style, '--color-accent-700', '#d97706');
+      var strong = token(style, '--text-secondary', '#888');
+      var quiet = token(style, '--text-tertiary', '#666');
+      var range = token(style, '--surface-topic-selected', 'rgba(128,128,128,.15)');
+
+      var total = p.timeline.total || 1;
+      var head = Math.max(0, Math.min(1, p.getPos() / total)) * w;
+      var left = p.shade ? p.shade.left * w : 0;
+      var right = p.shade ? p.shade.right * w : w;
+      if (p.shade) {
+        g.fillStyle = range;
+        g.fillRect(left, 0, Math.max(0, right - left), h);
+      }
+
+      var mid = h / 2;
+      var list = barsRef.current;
+      if (list) {
+        for (var i = 0; i < list.length; i++) {
+          var x = i * BAR_STEP;
+          var height = Math.max(2, list[i] * (h - 8));
+          /* Bars by the head move, scaled by how loud they really are. */
+          if (now && Math.abs(x - head) < BAR_STEP * 7) {
+            height *= 1 + 0.28 * list[i] * Math.sin(now / 110 + i * 1.4);
+          }
+          var inside = x >= left && x <= right;
+          g.globalAlpha = x <= head ? 1 : (inside ? 0.85 : 0.45);
+          g.fillStyle = x <= head ? accent : (inside ? strong : quiet);
+          g.fillRect(x, mid - height / 2, 2, height);
+        }
+        g.globalAlpha = 1;
+      } else {
+        /* No shape was read: say only where someone spoke. */
+        g.fillStyle = quiet;
+        g.globalAlpha = 0.35;
+        g.fillRect(0, mid - 1, w, 2);
+        g.globalAlpha = 0.7;
+        p.marks.forEach(function (m) { g.fillRect(m.left * w, mid - 6, Math.max(2, m.width * w), 12); });
+        g.globalAlpha = 1;
+        g.fillStyle = accent;
+        g.fillRect(0, mid - 1, head, 2);
+      }
+
+      /* A confirmed name is the only thing that earns a colour. */
+      g.fillStyle = accent;
+      p.marks.forEach(function (m) {
+        if (m.name) g.fillRect(m.left * w, h - 2, Math.max(2, m.width * w), 2);
+      });
+      g.fillRect(Math.min(head, w - 2), 0, 2, h);
+    }
+
+    React.useEffect(function () {
+      var c = canvasRef.current;
+      if (!c) return undefined;
+      setWidth(c.clientWidth);
+      if (typeof window.ResizeObserver !== 'function') return undefined;
+      var ro = new window.ResizeObserver(function () { setWidth(c.clientWidth); });
+      ro.observe(c);
+      return function () { ro.disconnect(); };
+    }, []);
+
+    React.useEffect(function () {
+      if (!props.playing) { draw(0); return undefined; }
+      var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var frame = 0;
+      function loop(now) {
+        draw(still ? 0 : now);
+        frame = window.requestAnimationFrame(loop);
+      }
+      frame = window.requestAnimationFrame(loop);
+      return function () { window.cancelAnimationFrame(frame); };
+    }, [props.playing, bars, props.shown, props.marks, props.shade]);
+
+    return React.createElement('canvas', { ref: canvasRef, className: 'fs-topic-player__wave', 'aria-hidden': true });
+  }
+
+  function PlayIcon(props) {
+    return React.createElement('svg', { viewBox: '0 0 24 24', width: 16, height: 16, 'aria-hidden': true, fill: 'currentColor' },
+      props.playing
+        ? React.createElement('path', { d: 'M7 5h4v14H7zM13 5h4v14h-4z' })
+        : React.createElement('path', { d: 'M8 5l11 7-11 7z' }));
   }
 
   function TopicPlayer(props) {
@@ -60,6 +169,7 @@
     var s_mode = React.useState('audio'); var mode = s_mode[0], setMode = s_mode[1];
     var s_error = React.useState(null); var error = s_error[0], setError = s_error[1];
     var s_seekClock = React.useState(null); var seekClock = s_seekClock[0], setSeekClock = s_seekClock[1];
+    var s_peaks = React.useState({}); var peaks = s_peaks[0], setPeaks = s_peaks[1];
 
     var audioRef = React.useRef(null);
     var fetchedAt = React.useRef(0);
@@ -116,7 +226,28 @@
       }).catch(function () { /* those lines keep no control */ });
     }, [turns, timeline, load.status]);
 
-    React.useEffect(function () { store.set({ version: store.getState().version + 1 }); }, [timeline]);
+    /* The lines ask canSeek, whose answer depends on both of these. */
+    React.useEffect(function () { store.set({ version: store.getState().version + 1 }); }, [timeline, mode]);
+
+    /* The waveform, one file at a time. Waits a moment so clicking down a list of
+       topics downloads nothing; a file that cannot be read just draws no shape. */
+    var fileKey = timeline.items.map(function (i) { return i.filename; }).join('|');
+    React.useEffect(function () {
+      if (!fileKey || !window.AbortController) return undefined;
+      var ctl = new window.AbortController();
+      var timer = window.setTimeout(function () {
+        timelineRef.current.items.reduce(function (chain, item) {
+          return chain.then(function () {
+            if (ctl.signal.aborted) return null;
+            return window.FS.topicWave.fetchPeaks(item.filename, item.url, ctl.signal).then(function (got) {
+              if (ctl.signal.aborted) return;
+              setPeaks(function (old) { var next = Object.assign({}, old); next[item.filename] = got; return next; });
+            }).catch(function () { /* this file draws nothing */ });
+          });
+        }, Promise.resolve());
+      }, 400);
+      return function () { window.clearTimeout(timer); ctl.abort(); };
+    }, [fileKey]);
 
     function publishActive(p) {
       store.set({ activeTurn: P.turnAt(store.getState().turns, timelineRef.current, p) });
@@ -195,6 +326,8 @@
       var state = store.getState();
       var turn = state.activeTurn === null ? null : state.turns[state.activeTurn];
       if (next === 'video') {
+        /* The transcript has to be there to follow the video and to jump from. */
+        store.set({ wantTurns: true });
         if (audioRef.current) audioRef.current.pause();
         var clock = P.clockAt(timeline, pos, turn);
         setSeekClock(clock === null ? null : { sec: clock, nonce: Date.now() });
@@ -233,6 +366,17 @@
       right: P.clockToPos(timeline, rangeEnd) / timeline.total,
     } : null;
     var VideoPlayer = window.FieldSight.VideoPlayer;
+    /* A topic with video and no audio has nothing else to show. */
+    var showVideo = !!VideoPlayer && hasVideo && (mode === 'video' || !timeline.items.length);
+
+    function readPos() {
+      if (drag !== null) return drag;
+      var el = audioRef.current;
+      if (playing && el && !pending.current && loadedIndex.current >= 0) {
+        return P.position(timeline, loadedIndex.current, el.currentTime);
+      }
+      return pos;
+    }
 
     return h('div', { className: 'fs-topic-player' },
       h('audio', {
@@ -280,7 +424,7 @@
         },
       }),
 
-      mode === 'video' && VideoPlayer
+      showVideo
         ? h(VideoPlayer, {
             date: props.date, user: props.user, start: props.start, end: props.end,
             videos: load.videos,
@@ -288,33 +432,15 @@
             onNoMoment: onNoVideoMoment,
             onClock: function (sec) { store.set({ activeTurn: P.turnAtClock(store.getState().turns, sec) }); },
           })
-        : h('div', { className: 'fs-topic-player__bar' },
+        : h('div', { className: 'fs-topic-player__main' },
             h('button', {
               type: 'button', className: 'fs-topic-player__play',
               'aria-label': playing ? 'Pause' : 'Play', onClick: togglePlay,
-            }, playing ? '❚❚' : '▶'),
-            h('button', { type: 'button', className: 'fs-topic-player__skip', 'aria-label': 'Back 10 seconds',
-              onClick: function () { seekPos(pos - 10, playing); } }, '-10'),
-            h('button', { type: 'button', className: 'fs-topic-player__skip', 'aria-label': 'Forward 10 seconds',
-              onClick: function () { seekPos(pos + 10, playing); } }, '+10'),
-            h('button', {
-              type: 'button', className: 'fs-topic-player__speed', 'aria-label': 'Playback speed',
-              onClick: function () {
-                var next = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length];
-                setSpeed(next);
-                if (audioRef.current) setRate(audioRef.current, next);
-              },
-            }, speed + 'x'),
+            }, h(PlayIcon, { playing: playing })),
             h('div', { className: 'fs-topic-player__track' },
-              shade ? h('div', { className: 'fs-topic-player__range', title: 'This topic',
-                style: { left: (shade.left * 100) + '%', width: (Math.max(0, shade.right - shade.left) * 100) + '%' } }) : null,
-              marks.map(function (m, i) {
-                return h('span', {
-                  key: i,
-                  className: 'fs-topic-player__mark' + (m.name ? ' fs-topic-player__mark--named' : ''),
-                  title: m.name || undefined,
-                  style: { left: (m.left * 100) + '%', width: Math.max(0.2, m.width * 100) + '%' },
-                });
+              h(Waveform, {
+                timeline: timeline, peaks: peaks, marks: marks, shade: shade,
+                playing: playing, shown: shown, getPos: readPos,
               }),
               h('input', {
                 type: 'range', className: 'fs-topic-player__seek', 'aria-label': 'Position in this recording',
@@ -323,28 +449,41 @@
                 onPointerUp: function (e) { setDrag(null); seekPos(Number(e.target.value), playing); },
                 onKeyUp: function (e) { setDrag(null); seekPos(Number(e.target.value), playing); },
               })
-            ),
-            h('span', { className: 'fs-topic-player__time' },
-              clock ? h('b', null, clock) : null,
-              ' ' + P.fmtLength(shown) + ' / ' + P.fmtLength(timeline.total))
+            )
           ),
 
-      hasVideo && timeline.items.length ? h('div', { className: 'fs-topic-player__modes', role: 'group', 'aria-label': 'Recording type' },
-        ['audio', 'video'].map(function (m) {
-          return h('button', {
-            key: m, type: 'button', 'aria-pressed': mode === m,
-            className: 'fs-topic-player__mode' + (mode === m ? ' fs-topic-player__mode--on' : ''),
-            onClick: function () { switchMode(m); },
-          }, m === 'audio' ? 'Audio' : 'Video');
-        })
-      ) : null,
+      /* The same row in both modes, so the way back is always where it was. */
+      h('div', { className: 'fs-topic-player__controls' },
+        showVideo ? null : h('button', { type: 'button', className: 'fs-topic-player__skip', 'aria-label': 'Back 10 seconds',
+          onClick: function () { seekPos(pos - 10, playing); } }, '-10'),
+        showVideo ? null : h('button', { type: 'button', className: 'fs-topic-player__skip', 'aria-label': 'Forward 10 seconds',
+          onClick: function () { seekPos(pos + 10, playing); } }, '+10'),
+        showVideo ? null : h('button', {
+          type: 'button', className: 'fs-topic-player__speed', 'aria-label': 'Playback speed',
+          onClick: function () {
+            var next = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length];
+            setSpeed(next);
+            if (audioRef.current) setRate(audioRef.current, next);
+          },
+        }, speed + 'x'),
+        showVideo ? null : h('span', { className: 'fs-topic-player__time' },
+          clock ? h('b', null, clock) : null,
+          ' ' + P.fmtLength(shown) + ' / ' + P.fmtLength(timeline.total)),
+        hasVideo && timeline.items.length ? h('div', { className: 'fs-topic-player__modes', role: 'group', 'aria-label': 'Recording type' },
+          ['audio', 'video'].map(function (m) {
+            return h('button', {
+              key: m, type: 'button', 'aria-pressed': mode === m,
+              className: 'fs-topic-player__mode' + (mode === m ? ' fs-topic-player__mode--on' : ''),
+              onClick: function () { switchMode(m); },
+            }, m === 'audio' ? 'Audio' : 'Video');
+          })
+        ) : null
+      ),
 
       error ? h('div', { className: 'fs-topic-player__error', role: 'alert' }, error,
         ' ', h('button', { type: 'button', className: 'fs-settings__link-btn', onClick: function () {
           retried.current = false; setError(null); seekPos(pos, true);
-        } }, 'Retry')) : null,
-
-      h(CurrentLine, { store: store })
+        } }, 'Retry')) : null
     );
   }
 
