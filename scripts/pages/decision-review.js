@@ -162,7 +162,9 @@
     }
     if (res._accessDenied && res.status === 403) return 'Platform admins only.';
     if (res._accessDenied) return str(res.error) || 'Please sign in again.';
-    if (res._notFound) return 'The decision loop is off on this environment.';
+    /* _fetch.js also returns _notFound for a non-JSON answer of any status (a
+       gateway HTML error page): that is an outage, not the flag. */
+    if (res._notFound) return 'Could not load (HTTP ' + str(res.status) + ').';
     return null;
   }
 
@@ -190,7 +192,9 @@
       Promise.resolve().then(function () {
         return api().label(v.id, label, note);
       }).then(function (res) {
-        var msg = envelopeMessage(res);
+        /* On the label route a 404 is also "no such card". */
+        var msg = (res && res._notFound && res.status === 404)
+          ? 'Card not found, or the decision loop is off.' : envelopeMessage(res);
         if (msg) { setErr(msg); return; }
         props.onLabelled(props.card, res && typeof res === 'object' ? res : {}, label, note);
       }).catch(function (e) {

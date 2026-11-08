@@ -179,6 +179,8 @@ test('404 says the loop is off here; 403 says platform admins only', () => {
   assert.strictEqual(page.envelopeMessage({ _accessDenied: true, status: 403, error: 'platform_admin role required' }),
     'Platform admins only.');
   assert.strictEqual(page.envelopeMessage({ cards: [] }), null);
+  assert.strictEqual(page.envelopeMessage({ _notFound: true, status: 502 }), 'Could not load (HTTP 502).',
+    'a gateway HTML page is an outage, not the flag');
 });
 
 test('a new label moves the counts and precision follows', () => {
