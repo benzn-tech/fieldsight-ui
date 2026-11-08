@@ -1563,6 +1563,17 @@ function AppShell({ showDevSwitcher = false }) {
         })
       : null,
 
+    /* Contact FieldSight is a window too (composites/contact-window.js). The
+       project name is resolved by the host when it opens: the active site
+       lives in MiddleColumn, not here. */
+    window.FieldSight.ContactHost
+      ? React.createElement(window.FieldSight.ContactHost, {
+          route:  route,
+          user:   user,
+          onOpen: function () { setOnboardingOpen(false); },
+        })
+      : null,
+
     /* Sprint 8.11.1 — first-run onboarding overlay */
     onboardingOpen && window.FieldSight.OnboardingOverlay
       ? React.createElement(window.FieldSight.OnboardingOverlay, {

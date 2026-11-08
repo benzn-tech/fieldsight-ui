@@ -14620,3 +14620,29 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 @media (pointer: coarse) {
   .fs-ask-docs__item { font-size: 16px; min-height: 44px; display: flex; align-items: center; }
 }
+
+/* Contact FieldSight window (composites/contact-window.js, spec 2026-11-08).
+   Compact on purpose: at a 474 px tall viewport the md modal body has about
+   350 px, and the whole form should fit without scrolling. */
+.fs-contact { display: flex; flex-direction: column; gap: 12px; }
+.fs-contact__meta { font-size: 13px; color: var(--text-primary); display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.fs-contact__label { color: var(--text-secondary); }
+.fs-contact__text { min-height: 96px; padding: 8px 12px; resize: vertical; }
+.fs-contact__rec, .fs-contact__clip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 32px; }
+.fs-contact__hint, .fs-contact__note, .fs-contact__status { font-size: 12px; color: var(--text-secondary); }
+.fs-contact__dot { display: inline-block; width: 8px; height: 8px; border-radius: var(--radius-full); background: var(--color-danger-500); margin-right: 6px; }
+.fs-contact__stop-icon { display: inline-block; width: 8px; height: 8px; border-radius: 1px; background: var(--color-danger-500); margin-right: 6px; }
+.fs-contact__meter { width: 160px; height: 28px; color: var(--text-warning); }
+.fs-contact__meter--still { display: inline-block; height: 6px; border-radius: var(--radius-full); background: var(--text-warning); }
+.fs-contact__clock { font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.fs-contact__audio { height: 32px; max-width: 100%; flex: 1 1 220px; }
+.fs-contact__notice {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  font-size: 13px; color: var(--text-primary);
+  padding: 8px 10px; border-left: 3px solid var(--text-warning);
+  background: var(--surface-panel-muted); border-radius: var(--radius-sm);
+}
+.fs-contact__actions { display: flex; justify-content: flex-end; gap: 8px; }
+@media (pointer: coarse) {
+  .fs-contact__text { font-size: 16px; }
+}
