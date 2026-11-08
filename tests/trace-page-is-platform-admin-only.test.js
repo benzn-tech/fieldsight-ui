@@ -36,7 +36,7 @@ test('every other nav item is unchanged for a company admin', () => {
 
 test('it is in the nav, with an icon, and the page is loaded', () => {
   const nav = read('scripts', 'left-nav.js');
-  assert.match(nav, /items: \['sites', 'team', 'trace'\]/);
+  assert.match(nav, /items: \['sites', 'team', 'trace'[\],]/);
   assert.match(nav, /trace:\s+'list-tree'/);
   assert.match(read('app-shell-preview.html'), /scripts\/pages\/trace\.js\?v=\d+/);
   assert.strictEqual(FS.NAV_ITEMS.trace.path, '/trace');

@@ -25,6 +25,7 @@ const NAV_ICONS = {
   settings:   'settings',
   help:       'life-buoy',
   trace:      'list-tree',
+  decisionReview: 'list-checks',
 };
 
 const NAV_SECTIONS = [
@@ -64,7 +65,7 @@ const NAV_SECTIONS = [
   {
     key: 'MANAGEMENT',
     label: 'Management',
-    items: ['sites', 'team', 'trace'],
+    items: ['sites', 'team', 'trace', 'decisionReview'],
   },
   {
     key: 'STRATEGIC',

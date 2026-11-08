@@ -404,6 +404,10 @@
        is checked (canSeeNav), not the permission. */
     trace:      { permission: P('settings','view'),   label: 'Trace',      path: '/trace',
                   platformAdminOnly: true },
+    /* The site decision loop's shadow cards (pages/decision-review.js):
+       every company's cards, so platform_admin ONLY, checked the same way. */
+    decisionReview: { permission: P('settings','view'), label: 'Decisions', path: '/decision-review',
+                  platformAdminOnly: true },
 
     /* FOOTER */
     settings:   { permission: P('settings','view'),   label: 'Settings',   path: '/settings' },
