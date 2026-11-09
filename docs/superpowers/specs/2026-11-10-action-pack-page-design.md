@@ -76,6 +76,13 @@ Nothing changes in Tasks until a person applies one action
 - A `.docx` export. The backend answers 400 on purpose in v1
   (`src/lambda_org_api.py:1045-1047`).
 - Rerun with changes, chat refinement, and standing or nightly packs (backend spec §1.3).
+- Before the flag goes `on`: Cancel is shown only when `is_creator` is true, but a company
+  admin or GM may also cancel (`src/lambda_org_api.py:1100-1105`). Under `internal` only the
+  creator can read the pack, so nothing is lost today. At `on`, show Cancel to admins too and
+  let a 403 explain itself (review N2).
+- The Apply-all result rows are text only. Linking a stale row to the stale dialog and giving a
+  failed row its own Retry button (§7.3) is deferred; the per-card buttons cover both after the
+  re-read (review N3).
 
 **Anti-goals**
 
