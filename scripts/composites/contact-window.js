@@ -211,6 +211,28 @@
     });
   }
 
+  function hasUnsentDraft(d) {
+    return !!(d && ((d.text && d.text.trim()) || d.blob));
+  }
+
+  /* The entry point (owner, 2026-11-09): a labelled button fixed bottom-right on
+     every page, replacing the left-nav item. The text label is the point: an icon
+     alone could read as a site feature; this has to say "this reaches us". */
+  function ContactLauncher(props) {
+    var h = React.createElement;
+    var Icon = window.FieldSight && window.FieldSight.NavIcon;
+    return h('button', {
+      type: 'button',
+      className: 'fs-contact-fab',
+      'aria-label': 'Contact the FieldSight team',
+      title: 'Questions, problems or feedback? Message the FieldSight team.',
+      onClick: props.onClick,
+    },
+      Icon ? h(Icon, { name: 'message-circle', size: 18, color: 'currentColor' }) : null,
+      h('span', { className: 'fs-contact-fab__label' }, 'Contact FieldSight'),
+      props.hasDraft ? h('span', { className: 'fs-contact-fab__dot', 'aria-label': 'unsent message' }) : null);
+  }
+
   function ContactHost(props) {
     var rOpen = React.useState(false); var open = rOpen[0], setOpen = rOpen[1];
     var rUsed = React.useState(false); var used = rUsed[0], setUsed = rUsed[1];
@@ -405,9 +427,10 @@
         });
     }
 
-    if (!used) return null;
+    var launcher = React.createElement(ContactLauncher, { onClick: openWindow, hasDraft: hasUnsentDraft(draft) });
+    if (!used) return launcher;
     var Modal = window.FieldSight && window.FieldSight.ModalOverlay;
-    if (!open || !Modal || !draft) return null;
+    if (!open || !Modal || !draft) return launcher;
 
     var u = props.user;
     var name = personName(u, me);
@@ -485,6 +508,7 @@
       pickMime: pickMime, canSend: canSend, appendTranscript: appendTranscript,
       fallbackMailto: fallbackMailto, contextFor: contextFor, errorCopy: errorCopy,
       classifySend: classifySend, transcriptFrom: transcriptFrom, formatClock: formatClock,
+      hasUnsentDraft: hasUnsentDraft,
     };
   }
 })();

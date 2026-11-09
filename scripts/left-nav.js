@@ -582,17 +582,10 @@ function LeftNav({ user, currentRoute, isCollapsed, onToggleCollapse, onNavigate
       }),
     ),
 
-    /* Settings and help — sticky footer ABOVE UserArea, OUTSIDE scroll area.
-       Help is not gated on the settings permission: anyone stuck can ask. */
-    React.createElement('div', { style: settingsAreaStyle },
-      React.createElement(NavItem, {
-        navKey: 'help',
-        label: 'Contact FieldSight',
-        isActive: false,
-        isCollapsed: isCollapsed,
-        onClick: function() { contactHelp(user, currentRoute); },
-      }),
-    ),
+    /* Settings — sticky footer ABOVE UserArea, OUTSIDE scroll area. Contact
+       FieldSight moved to the floating button bottom-right (owner, 2026-11-09;
+       composites/contact-window.js ContactLauncher). contactHelp stays exported
+       for callers that open it programmatically. */
     visibleKeys.has('settings') ? React.createElement('div', { style: settingsAreaStyle },
       React.createElement(NavItem, {
         navKey: 'settings',
