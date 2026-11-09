@@ -398,7 +398,13 @@ function buildHelpMailto(user, route) {
     + '&body=' + encodeURIComponent(lines.join('\n'));
 }
 
+/* The in-page window (composites/contact-window.js) when AppShell has mounted
+   it; the mail app only when it has not. */
 function contactHelp(user, route) {
+  if (window.FS && window.FS.contact && typeof window.FS.contact.open === 'function') {
+    window.FS.contact.open();
+    return;
+  }
   window.location.href = buildHelpMailto(user, route);
   /* mailto: fails silently on a computer with no mail app, so the address is
      always on screen as well. */
@@ -575,17 +581,10 @@ function LeftNav({ user, currentRoute, isCollapsed, onToggleCollapse, onNavigate
       }),
     ),
 
-    /* Settings and help — sticky footer ABOVE UserArea, OUTSIDE scroll area.
-       Help is not gated on the settings permission: anyone stuck can ask. */
-    React.createElement('div', { style: settingsAreaStyle },
-      React.createElement(NavItem, {
-        navKey: 'help',
-        label: 'Contact FieldSight',
-        isActive: false,
-        isCollapsed: isCollapsed,
-        onClick: function() { contactHelp(user, currentRoute); },
-      }),
-    ),
+    /* Settings — sticky footer ABOVE UserArea, OUTSIDE scroll area. Contact
+       FieldSight moved to the floating button bottom-right (owner, 2026-11-09;
+       composites/contact-window.js ContactLauncher). contactHelp stays exported
+       for callers that open it programmatically. */
     visibleKeys.has('settings') ? React.createElement('div', { style: settingsAreaStyle },
       React.createElement(NavItem, {
         navKey: 'settings',
@@ -609,5 +608,5 @@ window.FieldSight.NavIcon = NavIcon;
    `module` undefined). navSections is exported rather than the flag helper:
    the thing worth asserting is the list that gets rendered, not the boolean. */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { navSections: navSections, NAV_SECTIONS: NAV_SECTIONS, buildHelpMailto: buildHelpMailto };
+  module.exports = { navSections: navSections, NAV_SECTIONS: NAV_SECTIONS, buildHelpMailto: buildHelpMailto, contactHelp: contactHelp };
 }

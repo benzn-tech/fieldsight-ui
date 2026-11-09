@@ -8327,7 +8327,7 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 
 .fs-toast-stack {
   position:       fixed;
-  bottom:         24px;
+  bottom:         80px;   /* clears the Contact FieldSight button (.fs-contact-fab) */
   right:          24px;
   z-index:        var(--z-overlay, 600);
   display:        flex;
@@ -14619,4 +14619,63 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 .fs-ask-docs__item:disabled { cursor: default; color: var(--text-secondary); border-bottom-color: transparent; }
 @media (pointer: coarse) {
   .fs-ask-docs__item { font-size: 16px; min-height: 44px; display: flex; align-items: center; }
+}
+
+/* Contact FieldSight window (composites/contact-window.js, spec 2026-11-08).
+   Compact on purpose: at a 474 px tall viewport the md modal body has about
+   350 px, and the whole form should fit without scrolling. */
+.fs-contact { display: flex; flex-direction: column; gap: 12px; }
+.fs-contact__meta { font-size: 13px; color: var(--text-primary); display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.fs-contact__label { color: var(--text-secondary); }
+.fs-contact__text { min-height: 96px; padding: 8px 12px; resize: vertical; }
+.fs-contact__rec, .fs-contact__clip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 32px; }
+.fs-contact__hint, .fs-contact__note, .fs-contact__status { font-size: 12px; color: var(--text-secondary); }
+.fs-contact__dot { display: inline-block; width: 8px; height: 8px; border-radius: var(--radius-full); background: var(--color-danger-500); margin-right: 6px; }
+.fs-contact__stop-icon { display: inline-block; width: 8px; height: 8px; border-radius: 1px; background: var(--color-danger-500); margin-right: 6px; }
+.fs-contact__meter { width: 160px; height: 28px; color: var(--text-warning); }
+.fs-contact__meter--still { display: inline-block; height: 6px; border-radius: var(--radius-full); background: var(--text-warning); }
+.fs-contact__clock { font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.fs-contact__audio { height: 32px; max-width: 100%; flex: 1 1 220px; }
+.fs-contact__notice {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  font-size: 13px; color: var(--text-primary);
+  padding: 8px 10px; border-left: 3px solid var(--text-warning);
+  background: var(--surface-panel-muted); border-radius: var(--radius-sm);
+}
+.fs-contact__actions { display: flex; justify-content: flex-end; gap: 8px; }
+@media (pointer: coarse) {
+  .fs-contact__text { font-size: 16px; }
+}
+
+/* Contact FieldSight launcher (owner, 2026-11-09): fixed bottom-right on every
+   page, under modals (z-fixed < z-backdrop) so an open window covers it. */
+.fs-contact-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: var(--z-fixed, 300);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 18px 0 14px;
+  border: 1px solid var(--color-accent-600);
+  border-radius: 22px;
+  background: var(--color-accent-500);
+  color: var(--color-neutral-900); /* fixed dark on yellow in both themes, as .fs-btn--primary */
+  font: 600 14px/1 var(--font-sans, inherit);
+  box-shadow: var(--shadow-lg);
+  cursor: pointer;
+}
+.fs-contact-fab:hover { background: var(--color-accent-600); }
+.fs-contact-fab:focus-visible { outline: 2px solid var(--focus-ring-color); outline-offset: 2px; }
+.fs-contact-fab__dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--color-danger-500);
+}
+@media (max-width: 767px) {
+  .fs-contact-fab { bottom: 72px; right: 16px; } /* above the 56px bottom nav */
+}
+@media print {
+  .fs-contact-fab { display: none; }
 }
