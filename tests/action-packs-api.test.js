@@ -295,3 +295,16 @@ test('mocks answer when not live, with no orgRequest call', async () => {
   assert.strictEqual((await ap.dismiss(pack.id, pack.actions.find((a) => a.state === 'stale').id)).kind, 'ok');
   assert.strictEqual(hit, 0);
 });
+
+/* ---- review fixes ------------------------------------------------------------ */
+
+test('writes pass timeoutMs 30000', async () => {
+  const { ap, calls } = liveApi({ id: 'p1', state: 'queued' });
+  await ap.create({ instruction: 'x', siteId: 's' });
+  await ap.apply('p', 'a', 'close_item');
+  await ap.dismiss('p', 'a');
+  await ap.cancel('p');
+  await ap.archive('p', true);
+  assert.strictEqual(calls.length, 5);
+  calls.forEach(([p, o]) => assert.strictEqual(o.timeoutMs, 30000, p));
+});

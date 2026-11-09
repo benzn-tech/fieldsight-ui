@@ -48,6 +48,11 @@
     create_item: ['text', 'responsible', 'deadline', 'priority'],
   };
 
+  /* A write runs a real transaction (apply takes row and advisory locks); the
+     10 s request default (_fetch.js) can give up on an apply that then
+     commits. Writes are never retried, so they get one longer wait. */
+  var WRITE_TIMEOUT_MS = 30000;
+
   function orgLive() { return !api.useMocks && !!api.orgBaseUrl; }
   function enc(v) { return encodeURIComponent(String(v === null || v === undefined ? '' : v)); }
   function packPath(id) { return '/action-packs/' + enc(id); }
@@ -349,7 +354,7 @@
     var body = { instruction: String(input.instruction === undefined || input.instruction === null ? '' : input.instruction),
                  site_id: input.siteId === undefined ? null : input.siteId };
     if (orgLive()) {
-      return createOutcome(await settle(api.orgRequest('/action-packs', { method: 'POST', body: body, retry: false })));
+      return createOutcome(await settle(api.orgRequest('/action-packs', { method: 'POST', body: body, retry: false, timeoutMs: WRITE_TIMEOUT_MS })));
     }
     await mockDelay();
     var m = mockPacks();
@@ -370,7 +375,7 @@
   async function cancel(id) {
     if (orgLive()) {
       return writeOutcome('cancel', await settle(api.orgRequest(packPath(id) + '/cancel',
-        { method: 'POST', body: {}, retry: false })));
+        { method: 'POST', body: {}, retry: false, timeoutMs: WRITE_TIMEOUT_MS })));
     }
     await mockDelay();
     var p = mockFind(id);
@@ -387,7 +392,7 @@
     var body = { archived: !!archived };
     if (orgLive()) {
       return writeOutcome('archive', await settle(api.orgRequest(packPath(id) + '/archive',
-        { method: 'POST', body: body, retry: false })));
+        { method: 'POST', body: body, retry: false, timeoutMs: WRITE_TIMEOUT_MS })));
     }
     await mockDelay();
     var p = mockFind(id);
@@ -407,7 +412,7 @@
   async function dismiss(id, aid) {
     if (orgLive()) {
       return writeOutcome('dismiss', await settle(api.orgRequest(actionPath(id, aid, 'dismiss'),
-        { method: 'POST', body: {}, retry: false })));
+        { method: 'POST', body: {}, retry: false, timeoutMs: WRITE_TIMEOUT_MS })));
     }
     await mockDelay();
     var m = mockAction(id, aid);
@@ -427,7 +432,7 @@
     var body = applyBody(type, fields);
     if (orgLive()) {
       return applyOutcome(await settle(api.orgRequest(actionPath(id, aid, 'apply'),
-        { method: 'POST', body: body, retry: false })));
+        { method: 'POST', body: body, retry: false, timeoutMs: WRITE_TIMEOUT_MS })));
     }
     await mockDelay();
     var m = mockAction(id, aid);

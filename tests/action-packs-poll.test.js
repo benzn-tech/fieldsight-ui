@@ -64,10 +64,15 @@ test('no second fetch starts before the first settles', async () => {
   h.poller.kick();
   h.poller.kick();
   await flush();
-  assert.strictEqual(h.fetches, 1, 'kick while in flight does nothing');
+  assert.strictEqual(h.fetches, 1, 'kick while in flight starts nothing now');
   assert.strictEqual(h.timers.length, 0, 'nothing is scheduled while a fetch is in flight');
   h.resolvers[0]();
   await flush();
+  assert.strictEqual(h.fetches, 2, 'two kicks in flight make ONE re-read after it settles');
+  assert.strictEqual(h.timers.length, 0);
+  h.resolvers[1]();
+  await flush();
+  assert.strictEqual(h.fetches, 2);
   assert.strictEqual(h.timers.length, 1);
   assert.strictEqual(h.timers[0].ms, 4000);
   assert.strictEqual(h.maxInFlight, 1);
@@ -131,4 +136,42 @@ test('stop cancels the next tick and drops a late response', async () => {
   await flush();
   h2.poller.stop();
   assert.ok(h2.timers[0].cleared);
+});
+
+test('the first fetch is marked first, later ones are not', async () => {
+  const marks = [];
+  const timers = [];
+  const p = createPoller({
+    fetch: (t) => { marks.push(!!(t && t.first)); return Promise.resolve({ state: 'running' }); },
+    onData: () => {}, isDone: () => false, delay: { visible: 1, hidden: 1 }, visibility: () => 'visible',
+    setTimer: (fn) => { timers.push(fn); return {}; }, clearTimer: () => {},
+  });
+  p.start();
+  await flush();
+  timers.shift()();
+  await flush();
+  assert.deepStrictEqual(marks, [true, false]);
+});
+
+test('a reload during an in-flight read fetches again, even when that read was final', async () => {
+  const h = harness([{ state: 'ready', actions: 'before A2' }, { state: 'ready', actions: 'after A2' }], { manual: true });
+  h.poller.start();
+  await flush();
+  /* A1's re-read is in flight; A2 lands and asks for a reload. */
+  h.poller.stop();
+  h.poller.start();
+  h.resolvers[0]();
+  await flush();
+  assert.strictEqual(h.fetches, 2, 'a fresh GET follows the stale one');
+  h.resolvers[1]();
+  await flush();
+  assert.strictEqual(h.seen[h.seen.length - 1].res.actions, 'after A2');
+  assert.ok(!h.seen.some((r) => r.res && r.res.actions === 'before A2'), 'the read taken before the write is dropped');
+  const h2 = harness([{ state: 'running' }, { state: 'ready' }], { manual: true });
+  h2.poller.start();
+  await flush();
+  h2.poller.kick();
+  h2.resolvers[0]();
+  await flush();
+  assert.strictEqual(h2.fetches, 2, 'a kick while in flight also re-reads');
 });

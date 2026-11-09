@@ -200,7 +200,8 @@
 
   /* Only what the person changed from the prefill: an untouched snapshot
      value is not sent (it would widen the stale check and write an audit row
-     for nothing). A cleared deadline is null. */
+     for nothing). A cleared deadline is null; any other cleared field is
+     left out (PATCH has no "unset" for priority or responsible). */
   function editDiff(a, values) {
     var base = editFields(a);
     var out = {};
@@ -209,10 +210,16 @@
       if (!Object.prototype.hasOwnProperty.call(values, k)) return;
       var v = formValue(values[k]);
       if (v === base.values[k]) return;
-      out[k] = (v === '' && k === 'deadline') ? null : v;
+      if (v === '' && k !== 'deadline') return;   /* "—" on a select means leave it */
+      out[k] = v === '' ? null : v;
     });
     return out;
   }
+
+  /* After an apply nobody could confirm (gateway timeout, network), the
+     re-read right away may still miss a commit that lands a moment later:
+     read once more after ~5 s. */
+  function followUpDelay(out) { return out && out.kind === 'unknown' ? 5000 : null; }
 
   function failureText(failure) {
     if (failure === 'company_inactive') {
@@ -259,6 +266,8 @@
     var stopped = true;
     var inFlight = false;
     var handle = null;
+    var dirty = false;      /* start()/kick() while a read is in flight: read again */
+    var first = false;      /* the first read after start() uses the default GET retry */
 
     function schedule() {
       if (stopped) return;
@@ -270,6 +279,13 @@
     function finish(r) {
       inFlight = false;
       if (stopped) return;
+      if (dirty) {
+        /* The read in flight was taken before the reason for the reload (an
+           apply, a dismiss): drop it and read again, final state or not. */
+        dirty = false;
+        tick();
+        return;
+      }
       o.onData(r);
       if (stopped) return;
       if (r.res && (isEnvelope(r.res) || (o.isDone && o.isDone(r.res)))) { stopped = true; return; }
@@ -280,15 +296,23 @@
       if (stopped || inFlight) return;
       handle = null;
       inFlight = true;
-      Promise.resolve().then(o.fetch).then(function (res) { finish({ res: res }); },
+      var mark = { first: first };
+      first = false;
+      Promise.resolve(mark).then(o.fetch).then(function (res) { finish({ res: res }); },
         function (err) { finish({ err: err }); });
     }
 
     return {
-      start: function () { stopped = false; tick(); },
+      start: function () {
+        stopped = false;
+        first = true;
+        if (inFlight) { dirty = true; return; }
+        tick();
+      },
       stop: function () { stopped = true; if (handle) clearTimer(handle); handle = null; },
       kick: function () {
-        if (stopped || inFlight) return;
+        if (stopped) return;
+        if (inFlight) { dirty = true; return; }
         if (handle) clearTimer(handle);
         handle = null;
         tick();
@@ -370,7 +394,7 @@
           'aria-pressed': !!props.archived, onClick: function () { props.onArchived(true); } }, 'Archived'),
         h('label', { className: 'fs-pack__filter' }, 'State ',
           h('select', { value: props.stateFilter || '', onChange: function (e) { props.onState(e.target.value); } },
-            [['', 'All'], ['running', 'Running'], ['ready', 'Ready'], ['failed', 'Failed'], ['cancelled', 'Cancelled']]
+            [['', 'All'], ['queued', 'Queued'], ['running', 'Running'], ['ready', 'Ready'], ['failed', 'Failed'], ['cancelled', 'Cancelled']]
               .map(function (o) { return h('option', { key: o[0], value: o[0] }, o[1]); })))),
       body);
   }
@@ -408,7 +432,10 @@
     usePoller(function () {
       setSt({ status: 'loading' });
       return createPoller({
-        fetch: function () { return apiPacks().list({ archived: archived ? 'true' : undefined, state: stateFilter || undefined, poll: true }); },
+        fetch: function (t) {
+          return apiPacks().list({ archived: archived ? 'true' : undefined, state: stateFilter || undefined,
+            poll: !(t && t.first) });
+        },
         isDone: function (res) {
           return !((res && res.packs) || []).some(function (p) { return p.state === 'queued' || p.state === 'running'; });
         },
@@ -436,7 +463,9 @@
     if (out.kind === 'refused' && out.code === 'company_inactive') {
       return "This project's company is suspended or has left FieldSight.";
     }
-    if (out.kind === 'refused' && out.status === 404 && !out.message) {
+    /* A 404 on create is the flag (the route answers {"error":"not found"});
+       only "site not found" is about the request. */
+    if (out.kind === 'refused' && out.status === 404 && (!out.message || out.message === 'not found')) {
       return 'Action packs are not switched on in this environment.';
     }
     if (out.kind === 'refused') return str(out.message) || ('Refused (HTTP ' + str(out.status) + ').');
@@ -918,6 +947,30 @@
         s.truncated ? h(Muted, null, '(truncated)') : null) : null);
   }
 
+  function ApplyAllConfirm(props) {
+    var plan = props.plan || { run: [], skipped: [] };
+    var n = plan.run.length;
+    function line(a) {
+      var what = a.type === 'create_item' ? str(a.proposed && a.proposed.text)
+        : ((a.target_task_no !== null && a.target_task_no !== undefined ? '#' + str(a.target_task_no) + ' ' : '')
+          + str(a.target_snapshot && a.target_snapshot.text));
+      return 'Action ' + str(a.seq) + ' · ' + (TYPE_TEXT[a.type] || str(a.type)) + (what ? ' · ' + what : '');
+    }
+    return h(Modal, { title: 'Apply ' + n + ' supported action' + (n === 1 ? '' : 's') + '?', onClose: props.onClose },
+      h('p', null, 'Apply ' + n + ' supported action' + (n === 1 ? '' : 's') + '?'),
+      h('ul', { className: 'fs-pack__report' }, plan.run.map(function (a) { return h('li', { key: a.id }, line(a)); })),
+      plan.skipped.length ? h('div', null,
+        h('p', { className: 'fs-pack__muted' }, 'Skipped:'),
+        h('ul', { className: 'fs-pack__report' }, plan.skipped.map(function (s) {
+          return h('li', { key: s.action.id }, line(s.action) + ' — ' + str(s.text));
+        }))) : null,
+      plan.weakCount ? h('p', { className: 'fs-pack__muted' }, plan.weakCount + ' uncertain not included.') : null,
+      h('div', { className: 'fs-pack__form-actions' },
+        h('button', { type: 'button', className: 'fs-pack__btn', onClick: props.onClose }, 'Cancel'),
+        h('button', { type: 'button', className: 'fs-pack__btn fs-pack__btn--primary',
+          onClick: function () { props.onConfirm(plan); } }, 'Apply ' + n)));
+  }
+
   function SourceDialog(props) {
     var t = chipTarget(props.ref, props.sources);
     return h(Modal, { title: 'Source ' + str(props.ref), onClose: props.onClose, size: 'sm' },
@@ -968,7 +1021,7 @@
     var poller = usePoller(function () {
       setSt({ status: 'loading' });
       return createPoller({
-        fetch: function () { return apiPacks().get(id, { poll: true }); },
+        fetch: function (t) { return apiPacks().get(id, { poll: !(t && t.first) }); },
         isDone: function (res) { return !!(res && FINAL[res.state]); },
         delay: { visible: 4000, hidden: 15000 },
         onData: function (r) {
@@ -1009,6 +1062,8 @@
         setOne(setBusy, a.id, false);
         setOne(setOutcomes, a.id, out);
         if (out.kind === 'stale') setDialog({ kind: 'stale', action: a, fresh: { live: out.live, snapshot: out.snapshot } });
+        var later = followUpDelay(out);
+        if (later) setTimeout(function () { if (alive.current) reload(); }, later);
         return out;
       });
     }
@@ -1026,7 +1081,10 @@
       });
     }
 
-    function onApplyAll(plan) {
+    function onApplyAll(plan) { setDialog({ kind: 'applyall', plan: plan }); }
+
+    function runApplyAll(plan) {
+      setDialog(null);
       var report = plan.run.map(function (a) { return { action: a, outcome: null } })
         .concat(plan.skipped.map(function (s) { return { action: s.action, outcome: { kind: 'skipped', text: s.text } }; }));
       setApplyAll({ running: true, report: report });
@@ -1107,6 +1165,8 @@
         onSnapshot: function (ref) { setDialog({ kind: 'snapshot', ref: ref }); } });
     } else if (dialog && dialog.kind === 'snapshot') {
       dlg = h(SnapshotDialog, { ref: dialog.ref, packId: pack.id, onClose: function () { setDialog(null); } });
+    } else if (dialog && dialog.kind === 'applyall') {
+      dlg = h(ApplyAllConfirm, { plan: dialog.plan, onClose: function () { setDialog(null); }, onConfirm: runApplyAll });
     } else if (dialog && dialog.kind === 'new') {
       dlg = h(NewPackForm, { instruction: pack.instruction, siteId: pack.site_id,
         onClose: function () { setDialog(null); },
@@ -1163,7 +1223,8 @@
   var exported = {
     ListBody: ListBody, PackBody: PackBody, ActionCard: ActionCard, SubTaskList: SubTaskList,
     ConclusionList: ConclusionList, SourceCard: SourceCard, ActionPacksMiddle: ActionPacksMiddle,
-    createMessage: createMessage, outcomeText: outcomeText,
+    createMessage: createMessage, outcomeText: outcomeText, ApplyAllConfirm: ApplyAllConfirm,
+    followUpDelay: followUpDelay,
     visibleActions: visibleActions, actionGroups: actionGroups, actionCounts: actionCounts,
     actionBadge: actionBadge, conclusionBadge: conclusionBadge, reasonLine: reasonLine,
     subTaskView: subTaskView, chipTarget: chipTarget, isWebOnly: isWebOnly,

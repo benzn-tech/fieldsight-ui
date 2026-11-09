@@ -364,3 +364,59 @@ test('the page source has no innerHTML, dangerouslySetInnerHTML or Markdown', ()
     assert.ok(!/dangerouslySetInnerHTML|innerHTML|FieldSight\.Markdown|markdown\.js/i.test(src), f.join('/'));
   }
 });
+
+/* ---- review fixes ------------------------------------------------------------ */
+
+test('create: any 404 envelope, or the bare "not found", reads as not switched on', () => {
+  withReact();
+  const page = loadPage();
+  const off = 'Action packs are not switched on in this environment.';
+  assert.strictEqual(page.createMessage({ kind: 'refused', status: 404, message: 'not found' }), off);
+  assert.strictEqual(page.createMessage({ kind: 'refused', status: 404, message: null }), off);
+  assert.strictEqual(page.createMessage({ kind: 'refused', status: 404, message: 'site not found' }), 'site not found');
+});
+
+test('a cleared priority or responsible is dropped, a cleared deadline is null', () => {
+  const create = A({ seq: 1, type: 'create_item', proposed: { text: 'T', priority: 'high', responsible: 'Sam' } });
+  const v = Object.assign({}, P.editFields(create).values, { priority: '', responsible: '' });
+  assert.deepStrictEqual(P.editDiff(create, v), {});
+  const update = A({ seq: 2, type: 'update_item', proposed: {}, target_snapshot: { deadline: '2026-11-01', priority: 'low' } });
+  assert.deepStrictEqual(P.editDiff(update, Object.assign({}, P.editFields(update).values, { deadline: '', priority: '' })),
+    { deadline: null });
+});
+
+test('an unknown apply outcome schedules one extra re-read about 5 s later', () => {
+  assert.strictEqual(P.followUpDelay({ kind: 'unknown' }), 5000);
+  ['applied', 'noop', 'stale', 'refused', 'failed', 'ok'].forEach((k) => assert.strictEqual(P.followUpDelay({ kind: k }), null, k));
+});
+
+test('apply-all asks first, listing what it will apply and what it skips', () => {
+  withReact();
+  const page = loadPage();
+  const plan = P.applyAllPlan([
+    A({ seq: 1, applicable: true, target_stable_id: 't1', target_task_no: 69, target_snapshot: { text: 'Take cylinders' } }),
+    A({ seq: 2, applicable: true, target_stable_id: 't1', type: 'update_item', target_snapshot: { text: 'Take cylinders' } }),
+    A({ seq: 3, applicable: true, type: 'create_item', proposed: { text: 'Send cure log' } }),
+  ]);
+  let confirmed = null;
+  const tree = expand(page.ApplyAllConfirm({ plan, onConfirm: (p) => { confirmed = p; }, onClose: noop }));
+  const text = textOf(tree);
+  assert.match(text, /Apply 2 supported actions\?/);
+  assert.match(text, /Action 1/);
+  assert.match(text, /Take cylinders/);
+  assert.match(text, /Send cure log/);
+  assert.match(text, /Action 2.*Another action changes this task/);
+  const btn = findAll(tree, (n) => n.type === 'button' && /^Apply 2$/.test(textOf(n.kids)))[0];
+  assert.ok(btn, 'a confirm button');
+  btn.props.onClick();
+  assert.strictEqual(confirmed, plan);
+  const one = textOf(expand(page.ApplyAllConfirm({ plan: { run: [plan.run[0]], skipped: [], weakCount: 0 }, onConfirm: noop, onClose: noop })));
+  assert.match(one, /Apply 1 supported action\?/);
+});
+
+test('the state filter offers Queued', () => {
+  withReact();
+  const page = loadPage();
+  const opts = findAll(expand(page.ListBody({ st: { status: 'ok', packs: [] } })), (n) => n.type === 'option').map((n) => n.props.value);
+  assert.deepStrictEqual(opts, ['', 'queued', 'running', 'ready', 'failed', 'cancelled']);
+});
