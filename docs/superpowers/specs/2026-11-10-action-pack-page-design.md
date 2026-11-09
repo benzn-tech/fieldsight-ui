@@ -588,7 +588,10 @@ text label, not colour alone. The fields this action wanted to change are bold.
   you." The only button is Dismiss.
 - When the dialog opens from an action already in state `stale`, the values are unknown until
   the person applies again. The dialog calls `apply()` once to fetch the 409 with live values.
-  This is safe: a stale action writes nothing (`src/lambda_org_api.py:1306-1309`).
+  This is safe: a stale action writes nothing (`src/lambda_org_api.py:1306-1309`). On an
+  archived pack, apply refuses with 409 before it reaches the stale branch (`:1256-1257`).
+  In that case the dialog shows `applied_result.reason` as text instead: "changed", "task
+  gone" or "task moved to another project". It shows no comparison.
 
 ### 7.3 Apply-all
 
