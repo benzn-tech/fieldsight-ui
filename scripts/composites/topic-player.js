@@ -26,7 +26,47 @@
      a Range request that expires mid-stream may only ever surface as a stall. */
   var URL_MAX_AGE_MS = 13 * 60 * 1000;
 
+  /* A probe that has not answered by now counts as failed: the file keeps the
+     600 s assumption and is shown, never hidden (spec 2026-11-10 §6.1). */
+  var PROBE_TIMEOUT_MS = 4000;
+
   function tp() { return window.FS.topicPlayback; }
+
+  /* A preview's real length, from its metadata only (the previews are
+     faststart, so this reads the head of the file). Null on any failure. */
+  function probeDuration(url) {
+    return new Promise(function (resolve) {
+      var v = window.document.createElement('video');
+      var done = false;
+      var timer = 0;
+      function finish(d) {
+        if (done) return;
+        done = true;
+        window.clearTimeout(timer);
+        v.onloadedmetadata = null; v.onerror = null;
+        try { v.removeAttribute('src'); v.load(); } catch (_) { /* released */ }
+        resolve(d);
+      }
+      timer = window.setTimeout(function () { finish(null); }, PROBE_TIMEOUT_MS);
+      v.preload = 'metadata';
+      v.muted = true;
+      v.onloadedmetadata = function () { finish(isFinite(v.duration) && v.duration > 0 ? v.duration : null); };
+      v.onerror = function () { finish(null); };
+      v.src = url;
+    });
+  }
+
+  /* The previews that really overlap the topic window. */
+  function spansFor(videos, props) {
+    var P = tp();
+    return Promise.all(P.probeTargets(videos).map(function (v) {
+      return probeDuration(v.url).then(function (d) { return [v.filename, d]; });
+    })).then(function (pairs) {
+      var durations = {};
+      pairs.forEach(function (p) { if (p[1]) durations[p[0]] = p[1]; });
+      return P.overlapping(P.videoSpans(videos, durations), toSec(props.start), toSec(props.end));
+    });
+  }
 
   function toSec(t) {
     var p = String(t || '').split(':').map(Number);
@@ -160,7 +200,9 @@
     var P = tp();
     var h = React.createElement;
 
-    var s_load = React.useState({ status: 'loading', segments: [], videos: [] });
+    /* videos: the raw preview list. spans: null until the probes settle, then the
+       previews that overlap the topic. */
+    var s_load = React.useState({ status: 'loading', segments: [], videos: [], spans: null });
     var load = s_load[0], setLoad = s_load[1];
     var s_pos = React.useState(0); var pos = s_pos[0], setPos = s_pos[1];
     var s_drag = React.useState(null); var drag = s_drag[0], setDrag = s_drag[1];
@@ -200,10 +242,17 @@
       ]).then(function (r) {
         if (cancelled) return;
         var segs = r[0];
-        setLoad({ status: segs === null ? 'error' : 'ok', segments: segs || [], videos: r[1] });
+        var videos = r[1];
+        setLoad({ status: segs === null ? 'error' : 'ok', segments: segs || [], videos: videos, spans: videos.length ? null : [] });
         var t = P.buildTimeline(segs || []);
         var startSec = toSec(props.start);
         setPos(startSec === null ? 0 : P.clockToPos(t, startSec));
+        /* The button appears late rather than wrongly. */
+        if (videos.length) {
+          spansFor(videos, props).then(function (spans) {
+            if (!cancelled) setLoad(function (l) { return Object.assign({}, l, { spans: spans }); });
+          });
+        }
       });
       return function () {
         cancelled = true;
@@ -350,8 +399,11 @@
     if (load.status === 'error') {
       return h('div', { className: 'fs-topic-player fs-topic-player--quiet' }, 'Could not load audio.');
     }
-    var hasVideo = load.videos.length > 0;
+    var hasVideo = load.spans !== null && load.spans.length > 0;
     if (!timeline.items.length && !hasVideo) {
+      if (load.spans === null && load.videos.length) {
+        return h('div', { className: 'fs-topic-player fs-topic-player--quiet' }, 'Loading recording…');
+      }
       return h('div', { className: 'fs-topic-player fs-topic-player--quiet' }, 'No recording in this window.');
     }
 
@@ -427,7 +479,7 @@
       showVideo
         ? h(VideoPlayer, {
             date: props.date, user: props.user, start: props.start, end: props.end,
-            videos: load.videos,
+            videos: load.spans,
             seekClock: seekClock,
             onNoMoment: onNoVideoMoment,
             onClock: function (sec) { store.set({ activeTurn: P.turnAtClock(store.getState().turns, sec) }); },

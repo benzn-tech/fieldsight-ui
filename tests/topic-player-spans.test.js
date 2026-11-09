@@ -181,3 +181,26 @@ test('uncovered: the bar ranges no video span covers', () => {
   assert.deepStrictEqual(P.uncovered(TL, [{ span_start: 0, span_end: 99999 }]), []);
   assert.deepStrictEqual(P.uncovered(P.buildTimeline([]), []), []);
 });
+
+/* ---- wiring (source scans, as this suite does) ---- */
+const player = () => readSrc('scripts', 'composites', 'topic-player.js');
+
+test('the Video button waits for the real spans, and a video-only topic says it is loading meanwhile', () => {
+  const src = player();
+  assert.match(src, /var hasVideo = load\.spans !== null && load\.spans\.length > 0;/);
+  assert.match(src, /spans: videos\.length \? null : \[\]/, 'no video means no wait');
+  assert.match(src, /load\.spans === null && load\.videos\.length\) \{\s*return h\('div', \{ className: 'fs-topic-player fs-topic-player--quiet' \}, 'Loading recording…'\)/);
+  assert.match(src, /videos: load\.spans/, 'VideoPlayer gets the overlapping spans');
+  assert.match(src, /P\.overlapping\(P\.videoSpans\(videos, durations\), toSec\(props\.start\), toSec\(props\.end\)\)/);
+});
+
+test('a probe reads metadata only, gives up, and lets the file go', () => {
+  const src = player();
+  const probe = src.slice(src.indexOf('function probeDuration'), src.indexOf('function probeDuration') + 1200);
+  assert.match(probe, /preload = 'metadata'/);
+  assert.match(probe, /muted = true/);
+  assert.match(probe, /setTimeout\(function \(\) \{ finish\(null\); \}, PROBE_TIMEOUT_MS\)/);
+  assert.match(probe, /removeAttribute\('src'\)/);
+  assert.match(src, /var PROBE_TIMEOUT_MS = 4000;/);
+  assert.match(src, /P\.probeTargets\(videos\)/);
+});
