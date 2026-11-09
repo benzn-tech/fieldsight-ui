@@ -90,15 +90,18 @@ test('clockToPos sets a start in the file holding the moment', () => {
   assert.strictEqual(P.clockToPos(TL, 99999), 452, 'after the last');
 });
 
-test('activity marks: join only, colour only from a confirmed name', () => {
+/* Spec 2026-11-10 §6.2 retired the confirmed-name accent: every mark carries its
+   speaker label, which the chips' colour function maps. */
+test('activity marks: join only, and each carries its speaker label, not a name', () => {
   const marks = P.activityMarks([
-    { source_filename: A + '.json', chunk_start: 0, duration: 45.2, speaker_name: 'Sam', speaker_state: 'confirmed' },
-    { source_filename: A + '.json', chunk_start: 50, duration: 1, speaker_name: 'Lee', speaker_state: 'tentative' },
-    { source_filename: 'gone.json', chunk_start: 0, duration: 9 },
+    { source_filename: A + '.json', chunk_start: 0, duration: 45.2, speaker: 'spk_0', speaker_name: 'Sam', speaker_state: 'confirmed' },
+    { source_filename: A + '.json', chunk_start: 50, duration: 1, speaker: 'spk_1', speaker_name: 'Lee', speaker_state: 'tentative' },
+    { source_filename: 'gone.json', chunk_start: 0, duration: 9, speaker: 'spk_2' },
   ], TL);
   assert.strictEqual(marks.length, 2);
-  assert.strictEqual(marks[0].name, 'Sam');
-  assert.strictEqual(marks[1].name, null);
+  assert.strictEqual(marks[0].speaker, 'spk_0');
+  assert.strictEqual(marks[1].speaker, 'spk_1');
+  assert.ok(!('name' in marks[0]));
   assert.ok(Math.abs(marks[0].width - 0.1) < 1e-9);
 });
 

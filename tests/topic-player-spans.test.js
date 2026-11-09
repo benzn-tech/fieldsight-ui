@@ -112,3 +112,40 @@ test('real day, no probe: the 600 s fallback shows c0010 for a moment it does no
   assert.strictEqual(spans[10].span_known, false);
   assert.deepStrictEqual(P.overlapping(spans, sec('14:20:00'), sec('14:20:00')), []);
 });
+
+/* ---- speaker colours ---- */
+const fs = require('node:fs');
+const path = require('node:path');
+const readSrc = (...p) => fs.readFileSync(path.join(__dirname, '..', ...p), 'utf8').replace(/\r\n/g, '\n');
+
+test('speaker colours follow first appearance, wrap after six, and key on the label', () => {
+  const turns = ['spk_2', 'spk_0', 'spk_2', 'spk_1', 'a', 'b', 'c', 'd'].map((s) => ({ speaker: s, speaker_name: 'Same Name' }));
+  const c = P.speakerColors(turns);
+  assert.deepStrictEqual(Object.keys(c), ['spk_2', 'spk_0', 'spk_1', 'a', 'b', 'c', 'd']);
+  assert.deepStrictEqual(c.spk_2, P.SPEAKER_PALETTE[0]);
+  assert.deepStrictEqual(c.spk_0, P.SPEAKER_PALETTE[1]);
+  assert.deepStrictEqual(c.d, P.SPEAKER_PALETTE[0], 'the seventh wraps');
+  assert.strictEqual(P.SPEAKER_PALETTE.length, 6);
+  assert.deepStrictEqual(P.SPEAKER_PALETTE[0], { fg: '#1E40AF', bg: '#DBEAFE' }, 'spk first = blue, as the chips');
+  assert.deepStrictEqual(P.speakerColors(null), {});
+});
+
+test('the swatch is the chip text colour in light, the chip fill in dark', () => {
+  const pair = { fg: '#1E40AF', bg: '#DBEAFE' };
+  assert.strictEqual(P.swatch(pair, false), '#1E40AF');
+  assert.strictEqual(P.swatch(pair, true), '#DBEAFE');
+  assert.strictEqual(P.swatch(undefined, true), null);
+});
+
+test('the transcript takes its colours from the same function, over the same turns the player gets', () => {
+  const src = readSrc('scripts', 'composites', 'transcript-list.js');
+  assert.doesNotMatch(src, /SPEAKER_PALETTE/);
+  assert.match(src, /speakerColors\(state\.segments\)/);
+  assert.match(src, /store\.set\(\{ turns: state\.segments \}\)/);
+});
+
+test('topic-playback.js loads before transcript-list.js', () => {
+  const html = readSrc('app-shell-preview.html');
+  assert.ok(html.indexOf('scripts/api/topic-playback.js') > 0);
+  assert.ok(html.indexOf('scripts/api/topic-playback.js') < html.indexOf('scripts/composites/transcript-list.js'));
+});

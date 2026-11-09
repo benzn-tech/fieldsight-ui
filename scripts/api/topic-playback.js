@@ -211,8 +211,8 @@
     return Math.floor(s / 60) + ':' + (r < 10 ? '0' + r : r);
   }
 
-  /* Fractions of the bar. A turn that does not join draws nothing. A colour comes
-     only from a confirmed name: a tentative one must not read as a fact. */
+  /* Fractions of the bar. A turn that does not join draws nothing. Each mark
+     carries its speaker LABEL, coloured by speakerColors like the chips. */
   function activityMarks(turns, timeline) {
     if (!timeline.total) return [];
     var marks = [];
@@ -222,10 +222,40 @@
       marks.push({
         left: position(timeline, at.index, at.offset) / timeline.total,
         width: (Number(t.duration) || 0) / timeline.total,
-        name: t.speaker_state === 'confirmed' ? (t.speaker_name || null) : null,
+        speaker: t.speaker,
       });
     });
     return marks;
+  }
+
+  /* ---- Speaker colours (spec 2026-11-10 §6.2) ----
+     One function for the transcript chips and the bar, so they cannot disagree.
+     Mapped by FIRST APPEARANCE of the `speaker` label (never speaker_name) over
+     all turns; six colours, then they wrap. */
+  var SPEAKER_PALETTE = [
+    { fg: '#1E40AF', bg: '#DBEAFE' }, /* info */
+    { fg: '#15803D', bg: '#DCFCE7' }, /* success */
+    { fg: '#B45309', bg: '#FEF3C7' }, /* warning */
+    { fg: '#9A2A13', bg: '#FFE6D5' }, /* accent */
+    { fg: '#6B21A8', bg: '#EDE9FE' }, /* purple */
+    { fg: '#0F766E', bg: '#CCFBF1' }, /* teal */
+  ];
+
+  function speakerColors(turns) {
+    var out = {};
+    var n = 0;
+    (turns || []).forEach(function (t) {
+      if (!t) return;
+      if (!(t.speaker in out)) { out[t.speaker] = SPEAKER_PALETTE[n % SPEAKER_PALETTE.length]; n += 1; }
+    });
+    return out;
+  }
+
+  /* Whichever of the chip's pair passes 3:1 on the panel: the text colour on the
+     light panel, the fill on the dark one. Same hue as the chip either way. */
+  function swatch(pair, dark) {
+    if (!pair) return null;
+    return dark ? pair.bg : pair.fg;
   }
 
   /* Turns whose file the audio listing did not return. Audio filters on a batch's
@@ -282,7 +312,8 @@
     turnTarget: turnTarget, turnAt: turnAt, turnAtClock: turnAtClock, videoTarget: videoTarget,
     sessionOf: sessionOf, probeTargets: probeTargets, videoSpans: videoSpans, overlapping: overlapping,
     clockToPos: clockToPos, clockAt: clockAt, fmtClock: fmtClock, fmtLength: fmtLength,
-    activityMarks: activityMarks, missingFileStart: missingFileStart, mergeSegments: mergeSegments,
+    activityMarks: activityMarks, SPEAKER_PALETTE: SPEAKER_PALETTE, speakerColors: speakerColors, swatch: swatch,
+    missingFileStart: missingFileStart, mergeSegments: mergeSegments,
     createStore: createStore,
   };
 
