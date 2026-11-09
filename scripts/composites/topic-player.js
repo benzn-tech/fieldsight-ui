@@ -334,11 +334,12 @@
     React.useEffect(function () {
       if (!hostVideo) return undefined;
       var mounted = videoRef.current;
+      var wrap = wrapRef.current;
       return function () {
         vidIndex.current = -1;
         vidPending.current = null;
         var d = window.document;
-        if (d.fullscreenElement && d.exitFullscreen) { try { d.exitFullscreen(); } catch (_) { /* not ours */ } }
+        if (wrap && d.fullscreenElement === wrap && d.exitFullscreen) { try { d.exitFullscreen(); } catch (_) { /* not ours */ } }
         var v = videoRef.current || mounted;
         if (v) { try { v.pause(); v.removeAttribute('src'); v.load(); } catch (_) { /* gone */ } }
       };
@@ -540,15 +541,13 @@
     function onNoVideoMoment(request) {
       modeRef.current = 'audio';
       if (videoRef.current) videoRef.current.pause();
+      stopFlag();   /* the video's own pause event is now ignored */
       setMode('audio');
       var toast = window.FS && window.FS.toast;
       if (toast) toast.show({ message: 'No video at this moment', tone: 'info', duration: 3000 });
       var at = request && request.turn ? P.turnTarget(timelineRef.current, request.turn) : null;
       if (at) { seekPos(P.position(timelineRef.current, at.index, at.offset), true); return; }
-      if (request && typeof request.pos === 'number') {
-        stopFlag();
-        seekPos(request.pos, request.resume !== false);
-      }
+      if (request && typeof request.pos === 'number') seekPos(request.pos, request.resume !== false);
     }
 
     function toggleFullscreen() {
