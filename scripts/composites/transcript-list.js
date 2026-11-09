@@ -63,17 +63,8 @@
 (function () {
   'use strict';
 
-  /* Five-colour palette mapped by FIRST-APPEARANCE order in the current
-     view. Six is enough for any single topic — diarization won't reach
-     more in practice. */
-  var SPEAKER_PALETTE = [
-    { fg: '#1E40AF', bg: '#DBEAFE' }, /* info */
-    { fg: '#15803D', bg: '#DCFCE7' }, /* success */
-    { fg: '#B45309', bg: '#FEF3C7' }, /* warning */
-    { fg: '#9A2A13', bg: '#FFE6D5' }, /* accent */
-    { fg: '#6B21A8', bg: '#EDE9FE' }, /* purple */
-    { fg: '#0F766E', bg: '#CCFBF1' }, /* teal */
-  ];
+  /* Speaker chip colours live in FS.topicPlayback.speakerColors, shared with
+     the topic player's bar. */
 
   /* A2-2 — "HH:MM:SS" → seconds-since-midnight, same space as segment
      .start/.end (BACKEND-CONTEXT transcript shape). Returns null when
@@ -915,13 +906,11 @@
         emptyText);
     }
 
-    /* Build position-within-view label → palette index map. */
-    var labelToIdx = {};
-    state.segments.forEach(function (s) {
-      if (!(s.speaker in labelToIdx)) {
-        labelToIdx[s.speaker] = Object.keys(labelToIdx).length;
-      }
-    });
+    /* Label → chip colours, by first appearance. The same function colours the
+       topic player's bar, over the same array (store.set({ turns }) above), so
+       the two cannot disagree (spec 2026-11-10 §6.2). */
+    var speakerColors = window.FS.topicPlayback.speakerColors(state.segments);
+    var labels = Object.keys(speakerColors);
 
     /* Best-effort name overlay from participants[] — and "best-effort" is the
        whole of it: this pairs the i-th name with the i-th label, and nothing
@@ -930,11 +919,10 @@
        called it. */
     var participantHint = {};
     var participants = props.participants || [];
-    Object.keys(labelToIdx).forEach(function (label, i) {
+    labels.forEach(function (label, i) {
       if (participants[i]) participantHint[label] = participants[i];
     });
-    var hintAmbiguous = sn.hintIsAmbiguous(participants,
-                                           Object.keys(labelToIdx).length);
+    var hintAmbiguous = sn.hintIsAmbiguous(participants, labels.length);
 
     /* The naming affordance appears only when the backend says the feature is
        on for this environment (the `unmatchedNames` key) AND the caller holds
@@ -1040,7 +1028,7 @@
         : null,
 
       state.segments.map(function (s, i) {
-        var palette = SPEAKER_PALETTE[labelToIdx[s.speaker] % SPEAKER_PALETTE.length];
+        var palette = speakerColors[s.speaker];
         var nameHint = participantHint[s.speaker];
         var pending  = optimistic[i];
         /* Precedence: what you just did → what the server says → what the label's own
