@@ -204,3 +204,23 @@ test('a probe reads metadata only, gives up, and lets the file go', () => {
   assert.match(src, /var PROBE_TIMEOUT_MS = 4000;/);
   assert.match(src, /P\.probeTargets\(videos\)/);
 });
+
+test('the bar draws speaker colours: a strip from every mark, no confirmed-name accent', () => {
+  const src = player();
+  assert.doesNotMatch(src, /m\.name/);
+  assert.match(src, /P\.swatch\(p\.colors\[m\.speaker\], p\.dark\)/);
+  assert.match(src, /var STRIP = 4;/);
+  assert.match(src, /g\.globalAlpha = played \? 1 : \(inside \? 0\.6 : 0\.3\)/);
+  assert.match(src, /return P\.speakerColors\(turns\); \}, \[turns\]\)/, 'the same function and turns as the chips');
+  assert.match(src, /colors: colors, dark: dark/);
+});
+
+test('the bar follows the theme: data-theme observed, observer released', () => {
+  const src = player();
+  const hook = src.slice(src.indexOf('function useDarkTheme'), src.indexOf('function useDarkTheme') + 900);
+  assert.match(hook, /getAttribute\('data-theme'\) === 'dark'/);
+  assert.match(hook, /new window\.MutationObserver/);
+  assert.match(hook, /attributeFilter: \['data-theme'\]/);
+  assert.match(hook, /disconnect\(\)/);
+  assert.match(src, /props\.dark, props\.colors, props\.gaps\]/, 'a theme change redraws');
+});

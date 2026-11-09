@@ -79,6 +79,22 @@
   }
 
   var BAR_STEP = 3;   /* 2px bar, 1px gap */
+  var STRIP = 4;      /* the speaker strip along the bottom, px */
+
+  /* The bar's swatches differ by theme (spec 2026-11-10 §6.2), so follow it. */
+  function useDarkTheme() {
+    var root = window.document.documentElement;
+    function read() { return root.getAttribute('data-theme') === 'dark'; }
+    var s_dark = React.useState(read); var dark = s_dark[0], setDark = s_dark[1];
+    React.useEffect(function () {
+      if (typeof window.MutationObserver !== 'function') return undefined;
+      var mo = new window.MutationObserver(function () { setDark(read()); });
+      mo.observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+      setDark(read());
+      return function () { mo.disconnect(); };
+    }, []);
+    return dark;
+  }
 
   function token(style, name, fallback) {
     return (style.getPropertyValue(name) || '').trim() || fallback;
@@ -117,6 +133,7 @@
       var strong = token(style, '--text-secondary', '#888');
       var quiet = token(style, '--text-tertiary', '#666');
       var range = token(style, '--surface-topic-selected', 'rgba(128,128,128,.15)');
+      var dim = token(style, '--surface-panel-muted', '#888');
 
       var total = p.timeline.total || 1;
       var head = Math.max(0, Math.min(1, p.getPos() / total)) * w;
@@ -127,19 +144,31 @@
         g.fillRect(left, 0, Math.max(0, right - left), h);
       }
 
-      var mid = h / 2;
+      var P = tp();
+      var mid = (h - STRIP) / 2;
       var list = barsRef.current;
       if (list) {
+        /* Each bar takes the swatch of the turn covering it; none = neutral. */
+        var tint = new Array(list.length);
+        p.marks.forEach(function (m) {
+          var c = P.swatch(p.colors[m.speaker], p.dark);
+          if (!c) return;
+          var from = Math.max(0, Math.floor(m.left * w / BAR_STEP));
+          var to = Math.min(list.length - 1, Math.floor((m.left + m.width) * w / BAR_STEP));
+          for (var k = from; k <= to; k++) tint[k] = c;
+        });
         for (var i = 0; i < list.length; i++) {
           var x = i * BAR_STEP;
-          var height = Math.max(2, list[i] * (h - 8));
+          var height = Math.max(2, list[i] * (h - STRIP - 6));
           /* Bars by the head move, scaled by how loud they really are. */
           if (now && Math.abs(x - head) < BAR_STEP * 7) {
             height *= 1 + 0.28 * list[i] * Math.sin(now / 110 + i * 1.4);
           }
           var inside = x >= left && x <= right;
-          g.globalAlpha = x <= head ? 1 : (inside ? 0.85 : 0.45);
-          g.fillStyle = x <= head ? accent : (inside ? strong : quiet);
+          var played = x <= head;
+          /* Dimmed bars are decoration; the strip below carries the colour. */
+          g.globalAlpha = played ? 1 : (inside ? 0.6 : 0.3);
+          g.fillStyle = tint[i] || (played ? accent : (inside ? strong : quiet));
           g.fillRect(x, mid - height / 2, 2, height);
         }
         g.globalAlpha = 1;
@@ -155,11 +184,23 @@
         g.fillRect(0, mid - 1, head, 2);
       }
 
-      /* A confirmed name is the only thing that earns a colour. */
-      g.fillStyle = accent;
+      /* The strip: who spoke where, at full strength, with or without a shape. */
       p.marks.forEach(function (m) {
-        if (m.name) g.fillRect(m.left * w, h - 2, Math.max(2, m.width * w), 2);
+        var c = P.swatch(p.colors[m.speaker], p.dark);
+        if (!c) return;
+        g.fillStyle = c;
+        g.fillRect(m.left * w, h - STRIP, Math.max(2, m.width * w), STRIP);
       });
+
+      /* Video mode: dim what no video covers. Shading only. */
+      if (p.gaps && p.gaps.length) {
+        g.fillStyle = dim;
+        g.globalAlpha = 0.35;
+        p.gaps.forEach(function (r) { g.fillRect(r.left * w, 0, Math.max(0, (r.right - r.left) * w), h); });
+        g.globalAlpha = 1;
+      }
+
+      g.fillStyle = accent;
       g.fillRect(Math.min(head, w - 2), 0, 2, h);
     }
 
@@ -183,7 +224,7 @@
       }
       frame = window.requestAnimationFrame(loop);
       return function () { window.cancelAnimationFrame(frame); };
-    }, [props.playing, bars, props.shown, props.marks, props.shade]);
+    }, [props.playing, bars, props.shown, props.marks, props.shade, props.dark, props.colors, props.gaps]);
 
     return React.createElement('canvas', { ref: canvasRef, className: 'fs-topic-player__wave', 'aria-hidden': true });
   }
@@ -221,6 +262,9 @@
     var widened = React.useRef(false);
 
     var turns = useStore(store, function (s) { return s.turns; });
+    /* The chips' colour function over the chips' own array (store.turns). */
+    var colors = React.useMemo(function () { return P.speakerColors(turns); }, [turns]);
+    var dark = useDarkTheme();
     var timeline = React.useMemo(function () { return P.buildTimeline(load.segments); }, [load.segments]);
     var timelineRef = React.useRef(timeline); timelineRef.current = timeline;
     var modeRef = React.useRef(mode); modeRef.current = mode;
@@ -491,7 +535,7 @@
             }, h(PlayIcon, { playing: playing })),
             h('div', { className: 'fs-topic-player__track' },
               h(Waveform, {
-                timeline: timeline, peaks: peaks, marks: marks, shade: shade,
+                timeline: timeline, peaks: peaks, marks: marks, shade: shade, colors: colors, dark: dark,
                 playing: playing, shown: shown, getPos: readPos,
               }),
               h('input', {
