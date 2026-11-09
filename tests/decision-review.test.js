@@ -116,7 +116,7 @@ test('the page and its api are loaded, in the nav, with an icon', () => {
   assert.ok(idx > 0 && dec > idx, 'decisions.js must load after api/index.js (which replaces FS.api)');
   assert.match(html, /<script type="text\/babel" src="scripts\/pages\/decision-review\.js\?v=\d+"><\/script>/);
   const nav = read('scripts', 'left-nav.js');
-  assert.match(nav, /items: \['sites', 'team', 'trace', 'decisionReview'\]/);
+  assert.match(nav, /items: \['sites', 'team', 'trace', 'decisionReview'(, 'actionPacks')?\]/);
   assert.match(nav, /decisionReview: 'list-checks'/);
   global.window.FieldSight = {};
   loadPage();

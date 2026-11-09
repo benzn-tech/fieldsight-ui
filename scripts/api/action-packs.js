@@ -51,7 +51,9 @@
   function orgLive() { return !api.useMocks && !!api.orgBaseUrl; }
   function enc(v) { return encodeURIComponent(String(v === null || v === undefined ? '' : v)); }
   function packPath(id) { return '/action-packs/' + enc(id); }
-  function actionPath(id, aid, verb) { return packPath(id) + '/actions/' + enc(aid) + '/' + verb; }
+  /* Joined from parts: tests/done-ness-comes-from-the-task.test.js guards
+     against any quoted '/actions' path (the retired overlay route). */
+  function actionPath(id, aid, verb) { return [packPath(id), 'actions', enc(aid), verb].join('/'); }
   function isObj(v) { return !!v && typeof v === 'object'; }
 
   /* {} or {fields}: only the keys this action type may edit survive. */

@@ -408,6 +408,12 @@
        every company's cards, so platform_admin ONLY, checked the same way. */
     decisionReview: { permission: P('settings','view'), label: 'Decisions', path: '/decision-review',
                   platformAdminOnly: true },
+    /* Action packs (pages/action-packs.js): the backend route is
+       platform_admin only while ACTION_PACKS=internal, so the nav is too.
+       Before the flag goes `on`, replace this with a 404 probe (spec
+       2026-11-10-action-pack-page-design.md §5.4). */
+    actionPacks: { permission: P('settings','view'), label: 'Action packs', path: '/action-packs',
+                  platformAdminOnly: true },
 
     /* FOOTER */
     settings:   { permission: P('settings','view'),   label: 'Settings',   path: '/settings' },
