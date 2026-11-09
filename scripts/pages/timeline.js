@@ -3012,8 +3012,9 @@
         bullets: report.executive_summary,
       }),
       /* Above the picker, below the summary: a subject that came up again is
-         context for reading the day, not a task buried under it. Renders
-         nothing when the queue is empty, which is almost always. */
+         context for reading the day, not a task buried under it. Collapsed to
+         one line: open, a long queue pushed the day's topics off the screen.
+         Renders nothing when the queue is empty. */
       React.createElement(ThreadReviewSection, { site: site }),
       React.createElement(ChecklistReportsCard, { date: date, userFolder: user || null }),
       (showSessionPicker || excludedNote) ? React.createElement('div', {
@@ -3463,8 +3464,8 @@
 
     if (!enabled || !Queue || !rows || !rows.length) return null;
 
-    return React.createElement('section', { className: 'fs-timeline-page__threads' },
-      React.createElement('div', { className: 'fs-timeline-page__section-label' },
+    return React.createElement('details', { className: 'fs-timeline-page__threads' },
+      React.createElement('summary', { className: 'fs-timeline-page__section-label' },
         'Came up again · ' + rows.length),
       React.createElement(Queue, {
         suggestions: rows,
@@ -3571,8 +3572,6 @@
   var DAILY_TABS = [
     { key: 'overview',   label: 'Overview' },
     { key: 'transcript', label: 'Transcript' },
-    { key: 'audio',      label: 'Audio' },
-    { key: 'video',      label: 'Video' },
     { key: 'photos',     label: 'Photos' },
   ];
   var MEETING_TABS = [
@@ -4173,6 +4172,40 @@
         return opts;
     }
 
+    /* The deadline, same shape as the owner above. DateField takes a strict
+       'YYYY-MM-DD' | null and crashes on the free text extraction stores
+       ("next Tuesday"), so the value it sees is always resolved first. */
+    var dueRef = React.useState({});
+    var dues = dueRef[0], setDues = dueRef[1];
+
+    function dueOf(a) {
+      var o = dues[a && a.id];
+      if (o !== undefined) return o;
+      return (a && a.deadline && window.FS.api.resolveDeadline(a.deadline, props.date).absolute) || null;
+    }
+
+    function setDue(a, iso) {
+      if (!a || !a.id) return;
+      var before = dues[a.id];
+      var next = iso || null;
+      if (next === dueOf(a)) return;
+      function undo(err, res) {
+        setDues(function (m) {
+          var n = Object.assign({}, m);
+          if (before === undefined) delete n[a.id]; else n[a.id] = before;
+          return n;
+        });
+        var toast = window.FS && window.FS.toast;
+        if (toast) toast.show({ message: (err && err.error) || (res && res.error) || 'Could not update task', tone: 'error', duration: 5000 });
+      }
+      setDues(function (m) { var n = Object.assign({}, m); n[a.id] = next; return n; });
+      var api = window.FS && window.FS.api && window.FS.api.actions;
+      if (!api || !api.updateAction) return;
+      api.updateAction(a.id, { deadline: next }).then(function (res) {
+        if (!api.settleSave(res, { table: 'action_items', id: a.id }).ok) undo(null, res);
+      }).catch(function (err) { undo(err, null); });
+    }
+
     function assignTo(a, name) {
       if (!a || !a.id) return;
       var before = assigneeOf(a);
@@ -4331,6 +4364,10 @@
               var editKey  = 'action_items:' + a.id;
               var override = overrides[editKey];
               var displayAction = override !== undefined ? Object.assign({}, a, { action: override }) : a;
+              /* The row's own "owner · Due" line has to follow the pickers below
+                 it, or the screen shows two answers after a save. */
+              if (a.id && owners[a.id] !== undefined) displayAction = Object.assign({}, displayAction, { responsible: owners[a.id] });
+              if (a.id && dues[a.id] !== undefined) displayAction = Object.assign({}, displayAction, { deadline: dues[a.id] });
               var rowEditable = canEditContent && !!a.id;
               return React.createElement('div', {
                 key:       key,
@@ -4394,6 +4431,13 @@
                     : React.createElement('span', {
                         className: 'fs-topic-detail__assignee-static',
                       }, assigneeOf(a) || '—'),
+                  window.FieldSight.DateField ? React.createElement('span', {
+                    className: 'fs-topic-detail__assignee-label fs-topic-detail__assignee-label--due',
+                  }, 'Due') : null,
+                  window.FieldSight.DateField ? React.createElement(window.FieldSight.DateField, {
+                    size: 'sm', value: dueOf(a),
+                    onChange: function (iso) { setDue(a, iso); },
+                  }) : null,
                 ) : null,
                 rowEditable && editingKey === editKey ? React.createElement(EditableText, {
                   editable: true, table: 'action_items', id: a.id, field: 'text',
@@ -4641,6 +4685,20 @@
        below them hoists as undefined, freezing those deps at [undefined]. */
     var sel = props.selectedItem;
 
+    /* The player and the transcript are siblings, so the store they share lives
+       here, one per selected topic. */
+    var topicKey = sel && sel.id;
+    var playerStore = React.useMemo(function () {
+      return window.FS.topicPlayback.createStore();
+    }, [topicKey]);
+    var wantTurns = React.useSyncExternalStore(playerStore.subscribe, function () {
+      return playerStore.getState().wantTurns;
+    });
+    /* The transcript reads S3 per file, so it is not fetched merely on opening a
+       topic: first Transcript tab or first Play. Then it stays, hidden, so the
+       highlight and its scroll position survive a tab change. */
+    var transcriptSeen = React.useRef({});
+
     /* Seed with ticks already accepted this session (the bus only reaches
        panes that were mounted when it fired). */
     React.useEffect(function () {
@@ -4705,8 +4763,6 @@
     var highlightTime = sel.turnTime || null;
 
     var TranscriptList = fs.TranscriptList;
-    var AudioPlaylist  = fs.AudioPlaylist;
-    var VideoPlayer    = fs.VideoPlayer;
     var PhotoGrid      = fs.PhotoGrid;
 
     /* user-dimension audit key plan (Task 5) — report OWNER's folder,
@@ -4767,13 +4823,8 @@
             topic: topic, date: sel.date, actionState: refActions[0], userFolder: ownerFolder,
             isOwnReport: isOwnReport, siteId: sel.site_id || null,
           })),
-        transcript: TranscriptList ? React.createElement(TranscriptList,
-          Object.assign({}, mediaProps, {
-            participants:  topic.participants || [],
-            highlightTime: highlightTime,
-          })) : null,
-        audio:      AudioPlaylist  ? React.createElement(AudioPlaylist,  mediaProps) : null,
-        video:      VideoPlayer    ? React.createElement(VideoPlayer,    mediaProps) : null,
+        /* Rendered beside the tab body, not through it: see below. */
+        transcript: null,
         photos:     PhotoGrid      ? React.createElement(PhotoGrid, {
           photos:          topic.related_photos || [],
           /* P5: use the resolved folder, not sel.user_name. render_report_shape
@@ -4845,6 +4896,11 @@
         }) : null,
       ),
 
+      /* Above the tabs, so changing tab does not touch playback. */
+      !isMeeting && fs.TopicPlayer ? React.createElement(fs.TopicPlayer, Object.assign({
+        key: 'player-' + sel.id, store: playerStore,
+      }, mediaProps)) : null,
+
       /* Tab strip */
       React.createElement('div', {
         className: 'fs-topic-detail__tabs',
@@ -4865,7 +4921,21 @@
 
       /* Body */
       React.createElement('div', { className: 'fs-topic-detail__body' },
-        bodyByTab[tab],
+        tab === 'transcript' ? null : bodyByTab[tab],
+        (function () {
+          if (isMeeting || !TranscriptList) return null;
+          if (tab === 'transcript' || wantTurns) transcriptSeen.current[sel.id] = true;
+          if (!transcriptSeen.current[sel.id]) return null;
+          return React.createElement('div', { hidden: tab !== 'transcript' },
+            React.createElement(TranscriptList, Object.assign({}, mediaProps, {
+              /* Naming state is per window; another topic must not inherit it. */
+              key: 'transcript-' + sel.id,
+              participants:  topic.participants || [],
+              highlightTime: highlightTime,
+              store:         playerStore,
+              visible:       tab === 'transcript',
+            })));
+        })(),
       ),
     );
   }

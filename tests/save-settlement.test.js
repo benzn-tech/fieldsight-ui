@@ -148,9 +148,9 @@ test('9: today title editor block does not call settleSave', () => {
   assert.doesNotMatch(b, /settleSave\(/);
 });
 
-test('9: exactly these four call sites exist in pages/', () => {
+test('9: exactly these five call sites exist in pages/ (Timeline due date added)', () => {
   const n = ['timeline.js', 'today.js', 'tasks.js']
     .map((f) => (page(f).match(/settleSave\(/g) || []).length)
     .reduce((a, b) => a + b, 0);
-  assert.strictEqual(n, 4);
+  assert.strictEqual(n, 5);
 });

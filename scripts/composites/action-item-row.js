@@ -320,16 +320,20 @@
     var className = 'fs-action-item-row' + (checked ? ' fs-action-item-row--checked' : '');
     var closerCaption = checked ? formatCloserCaption(closer) : null;
 
-    var row = React.createElement('label', { className: className },
-      React.createElement('input', {
-        type:      'checkbox',
-        className: 'fs-action-item-row__checkbox',
-        checked:   checked,
-        onChange:  onChange,
-        disabled:  !toggleable,
-        title:     toggleable ? undefined : 'This item has no task record yet, so it cannot be ticked here.',
-        'aria-label': action.action,
-      }),
+    /* Only the checkbox completes the task. The row used to be one big <label>,
+       so reading a to-do and clicking its text silently marked it done. The
+       <label> stays around the box alone: a bigger hit area, nothing more. */
+    var row = React.createElement('div', { className: className },
+      React.createElement('label', { className: 'fs-action-item-row__check' },
+        React.createElement('input', {
+          type:      'checkbox',
+          className: 'fs-action-item-row__checkbox',
+          checked:   checked,
+          onChange:  onChange,
+          disabled:  !toggleable,
+          title:     toggleable ? undefined : 'This item has no task record yet, so it cannot be ticked here.',
+          'aria-label': action.action,
+        })),
       React.createElement('div', { className: 'fs-action-item-row__main' },
         React.createElement('div', { className: 'fs-action-item-row__text' },
           action.action),
@@ -385,8 +389,8 @@
                 className: 'fs-action-item-row__meta-item fs-action-item-row__history-toggle',
                 'aria-expanded': historyOpen,
                 onClick: function (e) {
-                  /* Inside a <label>: without preventDefault the click would
-                     also toggle the checkbox. */
+                  /* Do not reach the topic card's body click, which would
+                     re-select the topic underneath the disclosure. */
                   e.preventDefault();
                   e.stopPropagation();
                   setHistoryOpen(function (v) { return !v; });
