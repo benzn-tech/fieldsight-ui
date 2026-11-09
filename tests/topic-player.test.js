@@ -328,3 +328,30 @@ test('new scripts load, pure modules before the player and the page', () => {
   assert.ok(at('scripts/composites/topic-player.js') > 0);
   assert.ok(at('scripts/composites/topic-player.js') < at('scripts/pages/timeline.js'));
 });
+
+/* Review of PR #473 (2026-11-10): media races the bar refactor opened. */
+test('an audio file mid-load never starts behind the video', () => {
+  const src = read('composites', 'topic-player.js');
+  assert.match(src, /if \(w\.resume && modeRef\.current === 'audio'\) start\(el\);/);
+  const sw = src.slice(src.indexOf('function switchMode('), src.indexOf('function toggleFullscreen('));
+  assert.match(sw, /if \(pending\.current\) pending\.current\.resume = false;/);
+});
+
+test('pause during a file load cancels the queued resume and clears the flag', () => {
+  const src = read('composites', 'topic-player.js');
+  const tp = src.slice(src.indexOf('function togglePlay('), src.indexOf('/* The transcript reaches playback'));
+  assert.match(tp, /if \(vidPending\.current\) vidPending\.current\.resume = false;\s*v\.pause\(\); stopFlag\(\);/);
+  assert.match(tp, /if \(pending\.current\) pending\.current\.resume = false;\s*el\.pause\(\); stopFlag\(\);/);
+});
+
+test('entering video with none at the playhead starts at the first overlapping span', () => {
+  const src = read('composites', 'topic-player.js');
+  assert.match(src, /!P\.videoTarget\(allSpansRef\.current, clock\) && load\.spans && load\.spans\.length/);
+  assert.match(src, /clock = load\.spans\[0\]\.span_start;/);
+});
+
+test('fullscreen exits only our own wrapper; a stale refetch leaves a left video alone', () => {
+  const src = read('composites', 'topic-player.js');
+  assert.match(src, /d\.fullscreenElement === wrapRef\.current && d\.exitFullscreen/);
+  assert.match(src, /if \(modeRef\.current !== 'video' \|\| videoRef\.current !== v\) return;/);
+});

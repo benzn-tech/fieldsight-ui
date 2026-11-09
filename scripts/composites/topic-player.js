@@ -478,14 +478,22 @@
       if (hosting()) {
         var v = videoRef.current;
         if (!v) return;
-        if (playing) { v.pause(); return; }
+        if (playing) {
+          /* A file mid-load is already paused and fires no pause event: cancel the
+             queued resume and clear the flag here. */
+          if (vidPending.current) vidPending.current.resume = false;
+          v.pause(); stopFlag(); return;
+        }
         if (vidIndex.current < 0 || vidPending.current) { seekBar(pos, true); return; }
         start(v);
         return;
       }
       var el = audioRef.current;
       if (!el) return;
-      if (playing) { el.pause(); return; }
+      if (playing) {
+        if (pending.current) pending.current.resume = false;
+        el.pause(); stopFlag(); return;
+      }
       if (loadedIndex.current < 0 || pending.current) { seekPos(pos, true); return; }
       start(el);
     }
@@ -528,7 +536,14 @@
         /* The transcript has to be there to follow the video and to jump from. */
         store.set({ wantTurns: true });
         if (audioRef.current) audioRef.current.pause();
+        /* An audio file mid-load would otherwise start behind the video. */
+        if (pending.current) pending.current.resume = false;
         var clock = P.clockAt(timeline, pos, turn);
+        /* No video at this moment but the topic has some: start at the first
+           overlapping span rather than bounce back to audio. */
+        if (clock !== null && !P.videoTarget(allSpansRef.current, clock) && load.spans && load.spans.length) {
+          clock = load.spans[0].span_start;
+        }
         setSeekClock(clock === null ? null : { sec: clock, resume: was, pos: pos, nonce: Date.now() });
         stopFlag();
       } else {
@@ -555,7 +570,10 @@
 
     function toggleFullscreen() {
       var d = window.document;
-      if (d.fullscreenElement) { if (d.exitFullscreen) d.exitFullscreen(); return; }
+      if (d.fullscreenElement) {
+        if (d.fullscreenElement === wrapRef.current && d.exitFullscreen) d.exitFullscreen();
+        return;
+      }
       if (!wrapRef.current || !wrapRef.current.requestFullscreen) return;
       var r = wrapRef.current.requestFullscreen();
       if (r && r.catch) r.catch(function () { /* refused; the player stays as it was */ });
@@ -617,7 +635,7 @@
           pending.current = null;
           setRate(el, speed);
           try { el.currentTime = w.offset; } catch (_) { /* stays at 0 */ }
-          if (w.resume) start(el);
+          if (w.resume && modeRef.current === 'audio') start(el);
         },
         onPlay: function () {
           if (modeRef.current !== 'audio') return;
@@ -710,9 +728,10 @@
             if (vidRetried.current) { stopFlag(); setError('Could not load video.'); return; }
             vidRetried.current = true;
             fetchVideos().then(function (list) {
+              if (modeRef.current !== 'video' || videoRef.current !== v) return;
               var byName = {};
               list.forEach(function (x) { byName[x.filename] = x.url; });
-              if (!byName[cur.filename]) { setError('Could not load video.'); return; }
+              if (!byName[cur.filename]) { stopFlag(); setError('Could not load video.'); return; }
               setLoad(function (l) {
                 return Object.assign({}, l, { allSpans: (l.allSpans || []).map(function (s) {
                   return byName[s.filename] ? Object.assign({}, s, { url: byName[s.filename] }) : s;
@@ -721,7 +740,7 @@
               vidPending.current = w;
               v.src = byName[cur.filename];
               v.load();
-            }).catch(function () { setError('Could not load video.'); });
+            }).catch(function () { stopFlag(); setError('Could not load video.'); });
           },
         }),
         span ? h('div', { className: 'fs-topic-player__meta' },
