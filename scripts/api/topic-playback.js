@@ -268,12 +268,12 @@
      Mapped by FIRST APPEARANCE of the `speaker` label (never speaker_name) over
      all turns; six colours, then they wrap. */
   var SPEAKER_PALETTE = [
-    { fg: '#1E40AF', bg: '#DBEAFE' }, /* info */
-    { fg: '#15803D', bg: '#DCFCE7' }, /* success */
-    { fg: '#B45309', bg: '#FEF3C7' }, /* warning */
-    { fg: '#9A2A13', bg: '#FFE6D5' }, /* accent */
-    { fg: '#6B21A8', bg: '#EDE9FE' }, /* purple */
-    { fg: '#0F766E', bg: '#CCFBF1' }, /* teal */
+    { fg: '#1E40AF', bg: '#DBEAFE', dark: '#93C5FD' }, /* info */
+    { fg: '#15803D', bg: '#DCFCE7', dark: '#4ADE80' }, /* success */
+    { fg: '#B45309', bg: '#FEF3C7', dark: '#FCD34D' }, /* warning */
+    { fg: '#9A2A13', bg: '#FFE6D5', dark: '#F87171' }, /* accent */
+    { fg: '#6B21A8', bg: '#EDE9FE', dark: '#C084FC' }, /* purple */
+    { fg: '#0F766E', bg: '#CCFBF1', dark: '#2DD4BF' }, /* teal */
   ];
 
   function speakerColors(turns) {
@@ -286,11 +286,13 @@
     return out;
   }
 
-  /* Whichever of the chip's pair passes 3:1 on the panel: the text colour on the
-     light panel, the fill on the dark one. Same hue as the chip either way. */
+  /* The bar's swatch, same hue as the chip. Light panel: the chip's text colour
+     (passes 3:1). Dark panel: a mid tone of that hue (`dark`); the chip fills
+     themselves are too alike there (amber vs peach measured 1.08:1, 2026-11-10).
+     The chips keep fg/bg; only the bar reads `dark`. */
   function swatch(pair, dark) {
     if (!pair) return null;
-    return dark ? pair.bg : pair.fg;
+    return dark ? (pair.dark || pair.bg) : pair.fg;
   }
 
   /* Turns whose file the audio listing did not return. Audio filters on a batch's

@@ -181,7 +181,10 @@
         g.globalAlpha = 0.35;
         g.fillRect(0, mid - 1, w, 2);
         g.globalAlpha = 0.7;
-        p.marks.forEach(function (m) { g.fillRect(m.left * w, mid - 6, Math.max(2, m.width * w), 12); });
+        p.marks.forEach(function (m) {
+          g.fillStyle = P.swatch(p.colors[m.speaker], p.dark) || quiet;
+          g.fillRect(m.left * w, mid - 6, Math.max(2, m.width * w), 12);
+        });
         g.globalAlpha = 1;
         g.fillStyle = accent;
         g.fillRect(0, mid - 1, head, 2);

@@ -126,15 +126,42 @@ test('speaker colours follow first appearance, wrap after six, and key on the la
   assert.deepStrictEqual(c.spk_0, P.SPEAKER_PALETTE[1]);
   assert.deepStrictEqual(c.d, P.SPEAKER_PALETTE[0], 'the seventh wraps');
   assert.strictEqual(P.SPEAKER_PALETTE.length, 6);
-  assert.deepStrictEqual(P.SPEAKER_PALETTE[0], { fg: '#1E40AF', bg: '#DBEAFE' }, 'spk first = blue, as the chips');
+  assert.deepStrictEqual(P.SPEAKER_PALETTE[0], { fg: '#1E40AF', bg: '#DBEAFE', dark: '#93C5FD' }, 'spk first = blue, as the chips');
   assert.deepStrictEqual(P.speakerColors(null), {});
 });
 
-test('the swatch is the chip text colour in light, the chip fill in dark', () => {
-  const pair = { fg: '#1E40AF', bg: '#DBEAFE' };
+test('the swatch is the chip text colour in light, a mid tone of the same hue in dark', () => {
+  const pair = { fg: '#1E40AF', bg: '#DBEAFE', dark: '#93C5FD' };
   assert.strictEqual(P.swatch(pair, false), '#1E40AF');
-  assert.strictEqual(P.swatch(pair, true), '#DBEAFE');
+  assert.strictEqual(P.swatch(pair, true), '#93C5FD');
+  // a pair without a dark tone falls back to the chip fill
+  assert.strictEqual(P.swatch({ fg: '#1E40AF', bg: '#DBEAFE' }, true), '#DBEAFE');
   assert.strictEqual(P.swatch(undefined, true), null);
+});
+
+test('dark bar tones: readable on the dark player and distinguishable from each other', () => {
+  // Measured 2026-11-10: the chip fills amber #FEF3C7 and peach #FFE6D5 are 1.08:1 apart.
+  const lum = (hex) => [1, 3, 5].map((i) => parseInt(hex.substr(i, 2), 16) / 255)
+    .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
+    .reduce((s, c, i) => s + c * [0.2126, 0.7152, 0.0722][i], 0);
+  const cr = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+  const tones = Object.values(P.speakerColors(
+    ['a', 'b', 'c', 'd', 'e', 'f'].map((s) => ({ speaker: s })))).map((p) => p.dark);
+  assert.strictEqual(new Set(tones).size, 6);
+  tones.forEach((t) => assert.ok(cr(t, '#0F1623') >= 3, t + ' on the dark player'));
+  // neighbours in the palette order differ in hue enough to tell apart
+  const hue = (hex) => {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.substr(i, 2), 16) / 255);
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+    let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return (h * 60 + 360) % 360;
+  };
+  for (let i = 0; i < tones.length; i++) {
+    for (let j = i + 1; j < tones.length; j++) {
+      const dh = Math.abs(hue(tones[i]) - hue(tones[j]));
+      assert.ok(Math.min(dh, 360 - dh) >= 15, tones[i] + ' vs ' + tones[j]);
+    }
+  }
 });
 
 test('the transcript takes its colours from the same function, over the same turns the player gets', () => {
