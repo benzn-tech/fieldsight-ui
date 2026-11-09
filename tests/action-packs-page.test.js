@@ -230,3 +230,137 @@ test('safeHref allows only http and https', () => {
   assert.strictEqual(P.safeHref(' data:text/html,x'), null);
   assert.strictEqual(P.safeHref(null), null);
 });
+
+/* ---- components (presentational pieces are hook-free) ------------------------ */
+
+function withReact() {
+  global.React = { createElement(type, props, ...kids) { return { type, props: props || {}, kids }; } };
+}
+
+function expand(node) {
+  if (node === null || node === undefined || node === false || node === true) return null;
+  if (Array.isArray(node)) return node.map(expand);
+  if (typeof node !== 'object') return node;
+  if (typeof node.type === 'function') return expand(node.type(Object.assign({}, node.props, { children: node.kids })));
+  return { type: node.type, props: node.props, kids: expand(node.kids) };
+}
+
+function textOf(tree) {
+  const out = [];
+  (function walk(n) {
+    if (n === null || n === undefined) return;
+    if (Array.isArray(n)) { n.forEach(walk); return; }
+    if (typeof n !== 'object') { out.push(String(n)); return; }
+    walk(n.kids);
+  })(tree);
+  return out.join(' ');
+}
+
+function findAll(tree, pred) {
+  const hits = [];
+  (function walk(n) {
+    if (!n || typeof n !== 'object') return;
+    if (Array.isArray(n)) { n.forEach(walk); return; }
+    if (pred(n)) hits.push(n);
+    walk(n.kids);
+  })(tree);
+  return hits;
+}
+
+const noop = () => {};
+const HANDLERS = { onApply: noop, onEdit: noop, onDismiss: noop, onStale: noop, onApplyAll: noop, onOpenRef: noop,
+  onCopy: noop, onHighlight: noop, onJump: noop, onCancel: noop, onArchive: noop, onExport: noop, onRunAgain: noop };
+
+function mockPack() {
+  global.window = { FS_ENV: {} };
+  delete require.cache[require.resolve('../scripts/api/index.js')];
+  require('../scripts/api/index.js');
+  Object.assign(global.window.FS.api, { delay: async () => {}, useMocks: true });
+  delete require.cache[require.resolve('../scripts/api/action-packs.js')];
+  require('../scripts/api/action-packs.js');
+  return global.window.FS.api.actionPacks.get('mock-pack-ready');
+}
+
+test('list: a 404 envelope says not switched on; a non-404 _notFound says Could not load (HTTP 502)', () => {
+  withReact();
+  const page = loadPage();
+  const t1 = textOf(expand(page.ListBody({ st: { status: 'env', res: { _notFound: true, status: 404 } } })));
+  assert.match(t1, /Action packs are not switched on in this environment\./);
+  const t2 = textOf(expand(page.ListBody({ st: { status: 'env', res: { _notFound: true, status: 502 } } })));
+  assert.match(t2, /Could not load \(HTTP 502\)\./);
+  assert.doesNotMatch(t2, /not switched on/);
+  const t3 = textOf(expand(page.ListBody({ st: { status: 'ok', packs: [{ id: 'p', title: null,
+    instruction: 'Tidy the open items', state: 'failed', failure: 'company_inactive', site_name: 'Site A' }] } })));
+  assert.match(t3, /Tidy the open items/);
+  assert.match(t3, /suspended or has left FieldSight/);
+});
+
+test('detail: no unsupported action text appears anywhere in the rendered tree', async () => {
+  const pack = await mockPack();
+  withReact();
+  const page = loadPage();
+  const tree = expand(page.PackBody(Object.assign({ pack }, HANDLERS)));
+  const text = textOf(tree);
+  assert.ok(pack.actions.some((a) => a.verifier === 'unsupported'), 'the fixture carries one');
+  assert.doesNotMatch(text, /UNSUPPORTED MOCK RATIONALE/);
+  assert.doesNotMatch(text, /Unsupported target|#72|Action 4\b|Not checked/);
+  assert.match(text, /Apply all supported \(1\)/, 'the second action on the same target is not counted');
+  assert.match(text, /1 uncertain not included/);
+  assert.match(text, /1 skipped/);
+});
+
+test('detail: weak action shows Uncertain and its reason as text', async () => {
+  const pack = await mockPack();
+  withReact();
+  const page = loadPage();
+  const weak = pack.actions.find((a) => a.verifier === 'weak');
+  const text = textOf(expand(page.ActionCard(Object.assign({ action: weak, sources: pack.sources }, HANDLERS))));
+  assert.match(text, /Uncertain/);
+  assert.match(text, /Deadline assumed: date raised\./);
+});
+
+test('detail: a close with null target_snapshot says "Task not visible to you, or no longer exists" and has no Apply', () => {
+  withReact();
+  const page = loadPage();
+  const a = A({ seq: 9, applicable: true, target_snapshot: null, target_stable_id: 't' });
+  const tree = expand(page.ActionCard(Object.assign({ action: a, sources: [] }, HANDLERS)));
+  assert.match(textOf(tree), /Task not visible to you, or no longer exists/);
+  assert.strictEqual(findAll(tree, (n) => n.type === 'button' && textOf(n.kids) === 'Apply').length, 0);
+});
+
+test('detail: Apply only where applicable === true', () => {
+  withReact();
+  const page = loadPage();
+  const snap = { status: 'open', text: 'Take cylinders' };
+  const buttons = (a) => findAll(expand(page.ActionCard(Object.assign({ action: a, sources: [] }, HANDLERS))),
+    (n) => n.type === 'button').map((n) => textOf(n.kids));
+  assert.ok(buttons(A({ seq: 1, applicable: true, target_snapshot: snap })).includes('Apply'));
+  assert.ok(!buttons(A({ seq: 2, applicable: false, target_snapshot: snap })).includes('Apply'));
+  assert.ok(!buttons(A({ seq: 3, applicable: 'true', target_snapshot: snap })).includes('Apply'));
+  assert.ok(!buttons(A({ seq: 4, applicable: true, target_snapshot: snap, }), true).includes('Retry'));
+  assert.ok(buttons(A({ seq: 5, applicable: true, state: 'failed', target_snapshot: snap })).includes('Retry'));
+  const locked = findAll(expand(page.ActionCard(Object.assign({ action: A({ seq: 6, applicable: true, target_snapshot: snap }),
+    sources: [], locked: true }, HANDLERS))), (n) => n.type === 'button').map((n) => textOf(n.kids));
+  assert.ok(!locked.includes('Apply') && !locked.includes('Dismiss'), 'no per-card buttons while Apply-all runs');
+  const notMember = buttons(A({ seq: 7, type: 'update_item', applicable: false, applicable_reason: 'responsible_not_member',
+    proposed: { responsible: 'Nobody' }, target_snapshot: snap }));
+  assert.ok(!notMember.includes('Apply') && notMember.includes('Edit and apply'));
+});
+
+test('detail: sub-task with not_answered shows the code text', async () => {
+  const pack = await mockPack();
+  withReact();
+  const page = loadPage();
+  const text = textOf(expand(page.SubTaskList({ subTasks: pack.sub_tasks, conclusionLen: pack.conclusion.length,
+    visibleSeqs: page.visibleActions(pack.actions).map((a) => a.seq), onHighlight: noop, onJump: noop })));
+  assert.match(text, /The agent did not answer this part/);
+  assert.match(text, /No record states a date/);
+  assert.match(text, /Action 1/);
+});
+
+test('the page source has no innerHTML, dangerouslySetInnerHTML or Markdown', () => {
+  for (const f of [['scripts', 'pages', 'action-packs.js'], ['scripts', 'api', 'action-packs.js']]) {
+    const src = read(...f).replace(/\/\*[\s\S]*?\*\//g, '');
+    assert.ok(!/dangerouslySetInnerHTML|innerHTML|FieldSight\.Markdown|markdown\.js/i.test(src), f.join('/'));
+  }
+});
