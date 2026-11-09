@@ -1,13 +1,23 @@
 # Action pack page — design
 
-Date: 2026-11-10. Status: draft for owner review.
+Date: 2026-11-10. Status: rev 2.
 
-Backend facts were read from `fieldsight-pipeline` `origin/develop` at `11b13981`. Frontend
-facts were read from `fieldsight-ui` `origin/dev` at `ed8b6a8`. Backend paths are relative to
-`fieldsight-pipeline/`. The backend's UI hand-off is
-`docs/handoffs/2026-11-01-action-packs-ui.md` ("the hand-off" below). This spec relies on it
-for exact error strings. Where the code on `develop` now differs from the hand-off, §4.6 lists
-the differences, and the code wins.
+Rev 2 applies two things:
+
+- the backend line's answer on the UI contract;
+- the Fable review, which approved with changes.
+
+§14 lists what changed.
+
+Facts and sources:
+
+- Backend facts come from `fieldsight-pipeline` `origin/develop`. They were read at `11b13981`
+  and re-checked at `0e97467c`; no action-pack file changed between the two.
+- Frontend facts come from `fieldsight-ui` `origin/dev` at `ed8b6a8`.
+- Backend paths are relative to `fieldsight-pipeline/`.
+- The backend's UI hand-off is `docs/handoffs/2026-11-01-action-packs-ui.md` ("the
+  hand-off"). This spec relies on it for exact error strings.
+- Where the code differs from the hand-off, the code wins (§4.6).
 
 ---
 
@@ -17,101 +27,99 @@ An action pack is the stored result of one background run (spec
 `docs/superpowers/specs/2026-11-01-background-action-agent-design.md` §1). A person gives an
 instruction. The run reads the records, then writes:
 
-- a **reading**: how it understood the instruction;
-- **sub-tasks**: the instruction split into asks, each marked done, partly done or not done;
-- a **conclusion**: cited findings;
-- **actions**: proposed changes to Tasks, plus drafts;
-- **sources**.
+- a **reading**;
+- **sub-tasks**, each marked done, partly or not done;
+- a cited **conclusion**;
+- **actions**: proposed changes to Tasks, plus drafts.
 
-A second model labels each element.
+A second model then labels each element.
 
-The owner wants to see, for each instruction, **what the agent did, what it did not do and
-why**. The owner then decides whether to trust it and act on it. The page has to answer three
+The owner wants to see, per instruction, **what the agent did, what it did not do and why**.
+From that, the owner decides whether to trust it and act on it. The page answers three
 questions at a glance:
 
-1. Did it understand me? (reading and sub-tasks)
-2. Which parts of my instruction did it do, and why not the rest? (sub-task checklist with
-   reasons)
-3. Can I believe each line and act on it? (verifier badge and reason, ref chips to the
-   evidence, and Apply only where the backend says this viewer may)
+1. **Did it understand me?** The reading and the sub-tasks answer this.
+2. **Which parts did it do, and why not the rest?** The sub-task checklist and its reasons
+   answer this.
+3. **Can I believe each line and act on it?** These answer it:
+   - the verifier badge and its reason;
+   - ref chips that lead to the evidence;
+   - an Apply button, shown only where the backend says this viewer may apply.
 
 Nothing changes in Tasks until a person applies one action
-(`src/lambda_org_api.py:1239-1294`). The page is where that happens.
+(`src/lambda_org_api.py:1239-1294`).
 
 ## 2. Goals, non-goals, anti-goals
 
 **Goals**
 
-- G1. A list of the viewer's packs and a detail view of one pack. Both read only what the
-  backend returns.
-- G2. A "New pack" form on the page: an instruction plus a site. It creates a pack, opens it,
-  and polls until the pack finishes.
-- G3. The sub-task checklist (#1252) and the verifier detail (#1254), rendered as §6 says.
-- G4. Apply, Dismiss and Apply-all on real data, with the stale dialog. The backend supports
-  all of them (§4.3).
+- G1. A list of the viewer's packs, and a detail view of one pack.
+- G2. A "New pack" form. It creates the pack, opens it, and polls until the run finishes.
+- G3. The sub-task checklist and the verifier detail, rendered as in §6.
+- G4. Apply, Edit-and-apply, Dismiss, Apply-all and the stale dialog, all on real data. The
+  backend supports every one of them (§4.3).
 - G5. Every piece of model and user text renders as plain text.
 
-**Non-goals (follow-ups, named so they are not lost)**
+**Non-goals (follow-ups)**
 
-- The three entry points in other pages: Ask "Do this in the background", Day view "Review
-  this day" and Tasks "Tidy open items" (hand-off §10).
-- Tasks-side changes:
-  - `#task_no` in Tasks (hand-off §8);
-  - the "Agent" source badge (hand-off §9);
-  - the `compliance-aggregator.js` fix that includes agent topics;
-  - the "Added from action pack" history row.
+- The entry points on other pages (hand-off §10): Ask "Do this in the background", Day view
+  "Review this day", and Tasks "Tidy open items".
+- Changes on the Tasks side:
+  - `#task_no` (hand-off §8);
+  - the "Agent" badge (hand-off §9);
+  - including agent topics in `compliance-aggregator.js`;
+  - the "Added from action pack" row in task history.
 
-  **Consequence:** until the Agent badge lands, a task created by Apply shows in Tasks under
-  whatever label the UI derives from `is_live === false`, which is "nightly" today. On TEST,
-  with platform_admin only, this is acceptable. It must be fixed before the flag goes `on`.
-- The `.docx` export. The backend answers 400 to it (`src/lambda_org_api.py:1045-1047`).
-- "Rerun with changes", chat refinement, standing or nightly packs (backend spec §1.3).
+  Until the Agent badge lands, a task created by Apply shows the label derived from
+  `is_live === false`, which is "nightly" today. That is acceptable on TEST, where only
+  platform admins see packs. It must be fixed before the flag is `on`.
+- A `.docx` export. The backend answers 400 on purpose in v1
+  (`src/lambda_org_api.py:1045-1047`).
+- Rerun with changes, chat refinement, and standing or nightly packs (backend spec §1.3).
 
-**Anti-goals: a failure even if the page "works"**
+**Anti-goals**
 
-- AG1. Showing Apply on an action the backend did not mark `applicable: true`.
-- AG2. Rendering model text (reading, conclusion, rationale, reason, excerpt, snapshot, draft
-  body) as HTML or Markdown.
-- AG3. Re-sending a create after a timeout. That could start a second run.
-- AG4. A weak or unchecked action that looks the same as a supported one.
-- AG5. An "apply anyway" path past a stale result. The person's change always wins (backend
-  spec A3).
+- AG1. Showing Apply on an action whose `applicable` is not `true`.
+- AG2. Rendering model text as HTML or Markdown.
+- AG3. Re-sending a create after a timeout.
+- AG4. Rendering, counting or mentioning any action with `verifier == "unsupported"` (§4.6.2).
+- AG5. Any "apply anyway" path past a stale result (backend spec A3).
+- AG6. Reading an error envelope as success. A 403 or 404 resolves to an object; it does not
+  throw (§7.1).
 
 ## 3. Who sees it
 
-| Backend flag `ACTION_PACKS` | Routes | Page |
+| `ACTION_PACKS` | Routes | Page |
 |---|---|---|
-| `off` (also the value for unset or unknown) | Every route answers 404, as if unknown (`src/action_pack_view.py:104-122`, `src/lambda_org_api.py:734-740`) | The nav item is hidden for non-platform-admins. A platform admin sees the empty state "Action packs are not switched on in this environment." |
-| `internal` (TEST today) | Only `global_role == "platform_admin"` reaches the routes (`src/action_pack_view.py:120-121`) | Nav item for platform_admin only |
-| `on` | Everyone. Readers are filtered per pack (below) | Needs the probe in §5.4 first |
+| `off` (also unset or unknown) | Every route answers 404, as if it did not exist (`src/action_pack_view.py:104-122`, `src/lambda_org_api.py:734-740`) | Hidden from everyone except platform admins, who see the "not switched on" state |
+| `internal` (TEST) | `platform_admin` only (`src/action_pack_view.py:120-121`) | Nav item for platform admins |
+| `on` | Everyone, filtered per pack by reader | Needs the probe in §5.4 first |
 
-**Under `internal`, a platform admin reads only the packs it created.** The repository's reader
-rule has no platform-admin arm except "creator" (`cross_company`):
+**Under `internal`, a platform admin reads only the packs it created.** A platform admin has
+only the creator reader role, not the others (`src/repositories/action_packs.py:78-82`,
+`:183-195`; `_reader_clause`, `:453-473`). The other reader roles only matter at `on`:
 
-- `src/repositories/action_packs.py:78-82`;
-- `src/repositories/action_packs.py:183-195`;
-- `_reader_clause`, `src/repositories/action_packs.py:453-473`.
+- the creator, while the site is in their scope;
+- an admin or GM of the site's company;
+- the site's pm or site manager.
 
-So the list is "my packs". The other reader arms only matter at `on`:
+**Apply rights belong to whoever applies, checked at apply time.** A platform admin counts as
+a company admin for apply (`_is_company_admin_of`, `src/lambda_org_api.py:13307-13311`, used
+by `may_create_item_on_site`, `:963-981`). The page never decides this itself; it reads
+`applicable` (§6.5).
 
-- creator, while the site is in their scope;
-- admin or GM of the site's company;
-- pm or site_manager of the site.
-
-These are the same lines in `src/repositories/action_packs.py`.
-
-**Apply rights are the applier's, checked at apply time.** A platform admin counts as a
-company admin for apply (`_is_company_admin_of` returns true for cross-company callers,
-`src/lambda_org_api.py:13307-13311`, used by `may_create_item_on_site` at `:963-981`). So on
-TEST the owner can apply on any site. The page never decides this itself. It reads
-`applicable` (§6.4).
+**`company_inactive` never fires for a platform admin in v1.** The write gate exempts
+platform admins (`_write_refused`, `src/lambda_org_api.py:436-443`). The
+`failure === "company_inactive"` copy (§6.2) is for other roles at `on`.
 
 ## 4. Backend contract (as built)
 
-All routes live under `/api/org` and are dispatched at `src/lambda_org_api.py:1599-1602`.
-Every error body is `{"error": "..."}`. A malformed id, a wrong method, or a pack this caller
-may not read is always 404 `not found` (`src/lambda_org_api.py:734-776`). The route regex is at
-`:710-712`.
+All routes sit under `/api/org` and are dispatched at `src/lambda_org_api.py:1599-1602`; the
+route regex is at `:710-712`.
+
+- Every error body is `{"error": "..."}`.
+- A malformed id, a wrong method, or a pack the caller may not read always gets 404
+  `not found` (`:734-776`).
 
 ### 4.1 Routes
 
@@ -119,645 +127,803 @@ may not read is always 404 `not found` (`src/lambda_org_api.py:734-776`). The ro
 |---|---|---|---|
 | POST `/action-packs` | `create_action_pack` `:794-841` | exactly `{instruction, site_id?}` | 202 `{id, state:"queued"}` |
 | GET `/action-packs` | `list_action_packs` `:844-868` | `?state=queued\|running\|ready\|failed\|cancelled&site_id=<uuid>&archived=false\|true\|all` | 200 `{packs:[row]}`, newest first, at most 50, no paging |
-| GET `/action-packs/{id}` | `get_action_pack` `:1030-1038`, view `:984-1027` | — | 200 the pack (§6) |
+| GET `/action-packs/{id}` | `get_action_pack` `:1030-1038`, view `:984-1027` | — | 200, the pack (§6) |
 | GET `/action-packs/{id}/export` | `:1041-1054` | `?format=md` only | 200 `{format, filename, content_type, content}` |
-| GET `/action-packs/{id}/sources/{ref}/snapshot` | `:1057-1087` | — | 200 `{ref, url, fetched_at, text, truncated}` (text at most 200 kB) |
-| POST `/action-packs/{id}/cancel` | `:1090-1116` | `{}` | 200 `{id, state:"cancelled"}`. 403 unless the caller is the creator or a company admin. 409 `{state}` if the pack already finished |
-| POST `/action-packs/{id}/archive` | `:1119-1127` | exactly `{archived: bool}` | 200 `{id, archived}`. Any reader |
-| POST `/action-packs/{id}/actions/{aid}/dismiss` | `:1130-1157` | must be empty: `{}` | 200 `{id, state:"dismissed"}` |
+| GET `/action-packs/{id}/sources/{ref}/snapshot` | `:1057-1087` | — | 200 `{ref, url, fetched_at, text, truncated}` (`text` at most 200 kB) |
+| POST `/action-packs/{id}/cancel` | `:1090-1116` | `{}` | 200 `{id, state:"cancelled"}` |
+| POST `/action-packs/{id}/archive` | `:1119-1127` | exactly `{archived: bool}` | 200 `{id, archived}` |
+| POST `/action-packs/{id}/actions/{aid}/dismiss` | `:1130-1157` | empty `{}` | 200 `{id, state:"dismissed"}` |
 | POST `/action-packs/{id}/actions/{aid}/apply` | `:1239-1294`, `_apply_locked` `:1297-1317` | `{}` or `{fields:{...}}` | 200 `{id, state:"applied", applied_result}` |
 
-Create rules (`src/action_pack_view.py:125-144`, `src/lambda_org_api.py:802-841`):
+**Who may call the write routes, and their refusals**
 
-- `instruction`: 1 to 2000 characters after trimming.
-- `site_id`: required when the caller sees more than one site. A platform admin sees many, so
-  the form always sends it. An unseen or unknown site is 404 `site not found`.
-- One queued or running pack per person: otherwise 409 `you already have a pack in progress`
-  (`:824-825`).
-- 503 `the pack could not be started`: the pack is already marked `failed` (`:830-839`).
+- **Cancel:** only the creator or a company admin; anyone else gets 403. A platform admin can
+  cancel only as the creator (`:1100-1105`). A pack that has already finished answers 409
+  `{state}`.
+- **Archive:** any reader.
+- **Dismiss:**
+  - 409 `pack is archived`;
+  - 409 `{error:"action is ‹state›", state}` when the action is already final
+    (`:1153-1154`).
 
-The list row (`src/action_pack_view.py:613-619`) is
-`{id, title, instruction, state, failure, site_id, site_name, created_at, archived, action_counts}`.
-`action_counts` has all five action states (`src/repositories/action_packs.py:95`).
+**Create rules** (`src/action_pack_view.py:125-144`, `src/lambda_org_api.py:802-841`):
 
-GET runs a sweep first. A run whose worker has been silent for 20 minutes becomes
-`failed/internal` (`src/lambda_org_api.py:779-791`, `:1034`; `STALE_SWEEP_MINUTES`,
-`src/action_pack_view.py:91`). So polling always ends.
+- `instruction` is 1 to 2000 characters after trimming.
+- `site_id` is required when the caller sees more than one site, which is always true for a
+  platform admin. A site the caller cannot see, or that does not exist, gets 404
+  `site not found`.
+- One queued or running pack per person. A second create gets 409
+  `you already have a pack in progress` (`:824-825`).
+- 503 `the pack could not be started` means the row is already marked `failed`
+  (`:830-839`).
+
+**List rows** (`src/action_pack_view.py:613-619`) have the fields `{id, title, instruction,
+state, failure, site_id, site_name, created_at, archived, action_counts}`.
+
+- `action_counts` holds all five action states (`src/repositories/action_packs.py:95`).
+- Those counts come from the stored rows, so they include unsupported actions. The list
+  therefore shows no action counts (§5.2).
+
+**GET sweeps dead runs first.** A run whose worker has been silent for 20 minutes becomes
+`failed/internal` (`:779-791`, `:1034`; `src/action_pack_view.py:91`). Polling therefore
+always ends.
 
 ### 4.2 How packs are created today
 
-The only creator is POST `/action-packs`. Nothing else calls `create_queued`: a grep of
-`src/` shows only `src/lambda_org_api.py:822`. Apart from that route, the only caller is the
-TEST eval harness (`scripts/action_pack_eval/live.py:74`). There is no device or voice path
-and no Ask path. **The web should create packs.** It is the only intended human entry point
-(backend spec §10), and this page's form is its first one.
+POST `/action-packs` is the only way in. `create_queued` has one caller in `src/`
+(`src/lambda_org_api.py:822`). The only other user of the route is the TEST eval harness
+(`scripts/action_pack_eval/live.py:74`).
+
+There is no device, voice or Ask path. The web is the intended entry point (backend spec §10),
+and this page's form is the first one.
 
 ### 4.3 Apply exists
 
-The semantics, all from `src/lambda_org_api.py`:
+All line numbers below are in `src/lambda_org_api.py`.
 
-- **Pre-checks**, each answering without writing (`:1253-1277`). The pack must be:
-  - readable (404);
-  - not archived (409);
-  - `ready` (409 `{state}`).
+- **Pre-checks** (`:1253-1277`). None of these writes anything.
+  - The pack must be readable (404), not archived (409) and `ready` (409 `{state}`).
+  - The action must be visible (404 `action not found`), of an apply type (409 for drafts),
+    and not `unsupported` (409).
+  - The body must pass validation (400, `src/action_pack_view.py:374-393`).
+  - Then the company-exit gate.
+- **Idempotent replay.** If the action is already `applied`, the route returns 200 with the
+  stored `applied_result` and writes nothing (`:1303-1305`).
+- **Stale: the person's edit wins.** Nothing is written when:
+  - a field the action touches has changed;
+  - any edit was made after `as_of`;
+  - the target is gone or has moved.
 
-  The action must be:
-  - visible to this reader (404 `action not found`);
-  - an apply type (409 for drafts);
-  - not `unsupported` (409).
-
-  The body must pass `validate_apply_body` (400s, `src/action_pack_view.py:374-393`). Finally,
-  the company-exit gate.
-- **Idempotent replay.** An already-`applied` action returns 200 with its stored
-  `applied_result` and writes nothing (`:1303-1305`).
-- **Stale: the human wins.**
-  - If a field the action touches changed since the run, or any edit was recorded after
-    `as_of`, or the target is gone or moved, nothing is written. The action becomes `stale`
-    and the answer is 409 `{error:"action is stale", state:"stale", live, snapshot}`
-    (`:1181-1203`, `:1320-1330`).
-  - `live` and `snapshot` are both null when the caller cannot see the task.
-  - Applying a stale action again re-reads `live` and gives the same 409 (`:1306-1309`).
+  The action becomes `stale` and the route answers 409
+  `{error:"action is stale", state:"stale", live, snapshot}` (`:1181-1203`, `:1320-1330`).
+  - Both `live` and `snapshot` are null when the caller cannot see the task.
+  - Applying a stale action again re-reads `live` and returns the same 409 (`:1306-1309`).
 - **The write.**
-  - close and update go through PATCH's own ACL, validators and `content_edits` audit, inside
-    one savepoint with the action's state change (`:1160-1165`).
-  - create inserts the item under a per-pack synthetic "agent" topic (`:1167`).
-  - Editable fields per type (`APPLY_EDIT_FIELDS`, `src/action_pack_view.py:355-359`):
-    - close: `status`, which must be `done` or `closed`;
-    - update: `deadline`, `responsible`, `priority`, `status`;
-    - create: `text`, `responsible`, `deadline`, `priority`.
+  - Close and update use the PATCH route's ACL, validators and `content_edits` audit, in one
+    savepoint together with the action state (`:1160-1165`).
+  - Create inserts the item under a per-pack "agent" topic (`:1167`).
+  - The editable fields per type come from `APPLY_EDIT_FIELDS`
+    (`src/action_pack_view.py:355-359`):
 
-    Edits merge over the proposal (`:396-428`).
+    | Type | Editable fields |
+    |---|---|
+    | close | `status`: `done` or `closed` |
+    | update | `deadline` (null allowed), `responsible`, `priority`, `status` |
+    | create | `text`, `responsible`, `deadline`, `priority` |
+
+  - Edits are merged over the proposal (`:396-428`).
 - **Server fault.** The savepoint rolls back, the action becomes `failed` with
-  `{error:"internal"}`, and the answer is 500 `{error:"apply failed", code:"internal"}`
-  (`:1285-1291`). `failed` can be applied again (`APPLICABLE_STATES`,
-  `src/action_pack_view.py:90`).
+  `{error:"internal"}`, and the route returns 500 `{error:"apply failed", code:"internal"}`
+  (`:1285-1291`). A `failed` action can be applied again (`src/action_pack_view.py:90`).
 - **`applied_result` shapes:**
-  - close/update applied: `{action_item_id, content_edit_ids}`;
-  - `{noop:true, action_item_id}`: someone already did it by hand;
-  - create: `{action_item_id, task_no, content_edit_ids}`;
+  - close/update: `{action_item_id, content_edit_ids}`;
+  - `{noop:true, action_item_id}` when the change was already made;
+  - create: `{action_item_id, task_no, content_edit_ids}`, where `task_no` may be null;
   - stale: `{reason: changed|target_gone|target_moved}`;
   - failed: `{error}`.
 
-  See hand-off §3.3. The response shapes are listed there, and the code above writes them.
-
-There is no bulk endpoint. Apply-all is a UI loop (backend spec §5.3).
+There is no bulk endpoint; Apply-all is a loop in the UI (backend spec §5.3).
 
 ### 4.4 Existing web UI
 
-None. `git grep -i "action-pack\|actionPack\|action_pack"` on `fieldsight-ui` `origin/dev`
-finds nothing. No `task_no` or `source === 'agent'` handling exists either.
+There is none. `git grep -i "action-pack\|actionPack\|action_pack"` on `fieldsight-ui`
+`origin/dev` finds nothing.
 
 ### 4.5 Frontend facts this spec builds on
 
-- **Router.** Hash routes with query params and no path params (`scripts/router.js:12-24`).
-  Pages are keyed by exact path. Reading params: `scripts/pages/timeline.js:38-39`.
-- **Requests.** `FS.api.orgRequest` resolves a 404 to `{_notFound:true}` and a 403 to
-  `{_accessDenied:true, error}`. It **throws** on any other non-2xx, with `err.status` and
-  `err.body` (`scripts/api/_fetch.js:325-375`, `:399-408`).
-- **Retries.** Non-GET requests are retried on a plain 5xx, on the 1/2/4 s ladder, unless they
-  pass `retry:false`. A wake-shaped failure on a non-GET stops after one try
-  (`scripts/api/_fetch.js:186-235`).
-- **Platform-admin-only nav.** `NAV_ITEMS.decisionReview` with `platformAdminOnly: true`
-  (`scripts/fs-globals.js:405-410`), checked by `canSeeNav` (`:466-473`), placed in the
-  MANAGEMENT section (`scripts/left-nav.js:28`, `:68`).
-- **Closest page and API pattern.** `scripts/pages/decision-review.js` and
-  `scripts/api/decisions.js`:
-  - live-only writes, no `orgWrite()` gate;
-  - in-memory mocks when not live;
-  - body whitelist (`decisions.js:35-47`);
-  - the 404 envelope means "flag off" (`decision-review.js:11-13`, `:262-263`).
-- **Modals.** `scripts/composites/modal-overlay.js` handles focus in and out, ESC and the
-  portal.
-- **Dates.** `FS.api.nzDateTime` parses the backend's space-separated datetimes
-  (`scripts/api/index.js:162-170`, `:223-227`).
-- **Sites and members.** `getOrgSites` (`scripts/api/org.js:84`) and `getSiteMembers`
-  (`scripts/api/org.js:669`).
-- **Script order.** `api/index.js` replaces `FS.api` wholesale, so API modules load after it
-  (`app-shell-preview.html:219`, `:249`). Pages load as `text/babel` (`:411`).
-- **CI.** CI runs `node --test "tests/**/*.test.js"` with `TZ=Pacific/Auckland` on PRs to
-  `dev` and `main` (`.github/workflows/tests.yml`).
+**Routing.** The router uses hash routes with query params and no path params
+(`scripts/router.js:12-24`). Pages are keyed by exact path. For reading params, see
+`scripts/pages/timeline.js:38-39`.
 
-### 4.6 Where `develop` differs from the hand-off and from the contract wording
+**`FS.api.orgRequest`** (`scripts/api/_fetch.js`):
 
-1. **`sub_tasks[].listed` is not returned.** `account_sub_tasks` computes it in the worker
-   (`src/action_pack_stages.py:1797-1815`). The store payload sends only
-   `id, ask, kind, status, actions, conclusion, reason_code, reason`
-   (`src/action_pack_stages.py:2156-2161`). `visible_sub_tasks` copies and remaps
-   (`src/action_pack_view.py:508-529`). **The UI must not depend on `listed`.** It reads
-   `listed === false` if the field ever arrives. Until then it uses the reason codes, which
-   say the same thing:
-   - `not_answered`: the writer skipped this sub-task (`src/action_pack_stages.py:1808-1810`);
-   - `dropped_by_checks`: the writer answered it, and code checks removed what it proposed
-     (`:1790-1792`).
-2. **`not_checked` is not a verifier label.** Action labels are only
-   `supported | weak | unsupported` (`src/action_pack_stages.py:124`,
-   `src/action_pack_verify.py:158`).
-   - A check that failed or timed out is stored as `verifier: "unsupported"` with
-     `verifier_detail.reason_code: "not_checked"` (`src/action_pack_verify.py:682-716`).
-   - **Unsupported actions are returned, not hidden.** Only unsupported conclusion lines are
-     hidden server-side (`hidden: true`, filtered at `src/action_pack_view.py:492-505`).
-   - Conclusion lines carry `confidence: supported | uncertain`, not `verifier`
-     (`src/action_pack_verify.py:723-732`).
-   - An unchecked conclusion line is hidden (`:682-687`, `:724-728`).
-   - An uncited line kept as uncertain has a `verifier_detail` whose fields are all null
-     (`:660-661`).
-3. **`verifier_detail.served` is stripped on GET.** GET returns
-   `{model, attempt, reason_code, reason}` (`src/action_pack_view.py:532-545`, `:587`).
-4. **`format=docx` is 400** (`src/lambda_org_api.py:1045-1047`). The hand-off already says
-   this. Backend spec §5.1 still offers `.docx`.
-5. `verifier_detail` is null on packs stored before migration 0097, and `sub_tasks` is null on
-   those packs and on plans without sub-tasks (`src/action_pack_view.py:532-537`, `:604-609`).
+- Some failures **resolve** instead of throwing:
+  - 403 → `{_accessDenied:true, status:403, error}` (`:342-347`);
+  - 404 → `{_notFound:true, status:404, raw: body}` (`:349-350`);
+  - a non-JSON answer of any status → `{_notFound:true, status}` (`:335-337`).
+- Any other non-2xx **throws**, with `err.status` and `err.body` (`:352-370`).
+- A thrown error carries `err.waking`, and the waking banner shows, when every failure was a
+  timeout or a 502, 503 or 504 (`:236`, `:249-251`, `:366-369`). This holds even with
+  `retry:false`, so a single backend 503 also sets `waking`.
+- A non-GET is not repeated after a wake-shaped failure. A plain 5xx is repeated unless the
+  call passes `retry:false` (`:186-235`).
+- A successful non-GET clears the read cache (`:382-385`).
+
+**Building blocks to copy or reuse**
+
+| What | Where |
+|---|---|
+| Envelope-to-words pattern | `envelopeMessage`, `scripts/pages/decision-review.js:158-169` |
+| Platform-admin-only nav item | `NAV_ITEMS.decisionReview` with `platformAdminOnly: true` (`scripts/fs-globals.js:405-410`), checked by `canSeeNav` (`:466-473`). MANAGEMENT section: `scripts/left-nav.js:28`, `:68` |
+| Page and API pattern | `scripts/pages/decision-review.js` + `scripts/api/decisions.js`: live means `!useMocks && orgBaseUrl`, with no `orgWrite()` gate; in-memory mocks when not live; a body whitelist (`decisions.js:35-47`) |
+| Modal | `scripts/composites/modal-overlay.js` |
+| Dates | `FS.api.nzDateTime` and `nzDate` (`scripts/api/index.js:162-170`, `:223-227`) |
+| Sites | `getOrgSites` (`scripts/api/org.js:84-95`). Rows carry `company_id` and `company_name` (backend `src/lambda_org_api.py:6610-6613`) |
+| Site members | `getSiteMembers` (`scripts/api/org.js:669`) |
+
+**Script order.** API modules load after `api/index.js` (`app-shell-preview.html:219`,
+`:249`). Pages load as `text/babel` (`:411`).
+
+**CI.** `node --test "tests/**/*.test.js"` with `TZ=Pacific/Auckland`
+(`.github/workflows/tests.yml`).
+
+### 4.6 The UI contract (backend line's answer, checked at `0e97467c`)
+
+1. **Sub-tasks.** `sub_tasks` is null, or a list in plan order of
+   `{id, ask, kind, status, actions, conclusion, reason_code, reason}`
+   (`src/action_pack_stages.py:2156-2161`, `src/action_pack_view.py:508-529`).
+   - `status` is `done`, `partly` or `not_done`.
+   - `actions` holds the visible `seq` values.
+   - `conclusion` holds 0-based indexes into the conclusion of this same response, already
+     remapped for this reader.
+   - **`reason_code` is the contract.** Its values are `not_answered`, `dropped_by_checks`,
+     `no_evidence`, `not_found`, `ambiguous_target`, `out_of_scope`, `already_done` and
+     `other` (`src/action_pack_stages.py:627-629`, `:1790-1792`, `:1808-1810`).
+   - `listed` is not returned and will not be. The UI never reads it.
+2. **Unsupported actions are never rendered.** This covers any action with
+   `verifier == "unsupported"`, whatever its `reason_code` (not supported, `contradicted`,
+   `not_checked`), in both hide modes. The quality-fixes spec
+   `docs/superpowers/specs/2026-11-05-action-pack-quality-fixes-design.md:768` says
+   "`unsupported` stays non-applicable and not shown".
+   - GET returns these actions for eval and audit only.
+   - The page filters them out first and shows nothing about them: no group, no badge, no
+     count.
+   - Unsupported conclusion lines are already hidden by the server
+     (`src/action_pack_view.py:492-505`).
+3. **Badges.**
+   - Actions key on `verifier` (`supported` or `weak`) plus `verifier_detail.reason_code` and
+     `verifier_detail.reason`.
+   - Conclusion lines key on `confidence` (`supported` or `uncertain`) plus their own
+     `verifier_detail`.
+   - `verifier_detail` may be null or absent (old packs, uncited lines), so test it with
+     `== null`.
+   - `served` is stripped on purpose (`src/action_pack_view.py:532-545`).
+4. **Export** is `.md` only.
 
 ## 5. Pages and routes
 
 ### 5.1 One route: `#/action-packs`
 
+The page registers as
 `window.FieldSight.PAGES['/action-packs'] = { Middle, layout: 'full-width' }`.
 
-- `#/action-packs` shows the list. `?state=` and `?archived=` act as filters.
-- `#/action-packs?id=<uuid>` shows the detail of one pack, with a "← All packs" link.
-- `#/action-packs?new=1` opens the "New pack" form. The form also opens from a button on the
-  list.
+| Hash | Shows |
+|---|---|
+| `#/action-packs` | The list |
+| `#/action-packs?id=<uuid>` | The detail view, with a "← All packs" link |
+| `#/action-packs?new=1` | The New pack form, which a button on the list also opens |
 
-**My call: detail is a page, not a window.** A pack is a durable record (backend spec G5).
-People share its link, come back to it while it runs, and act on it for minutes. That fits a
-page better than the Settings-style window, which suits transient tasks. A query param is used
-because the router has no path params (§4.5).
+**My call: the detail is a page, not a window.** A pack is a durable record. People link to
+it, come back to it while it runs, and act on it over several minutes. The router has no path
+params, so the id goes in a query param.
+
+`document.title` is set as plain text: "‹title or instruction› · Action packs" on the detail,
+"Action packs" on the list. The previous title is restored on unmount.
 
 ### 5.2 List
 
-- **Header.** "Action packs", a "New pack" button, and filter tabs: **Active** (default, the
-  list with `archived=false`) and **Archived** (`archived=true`). A state select offers All,
-  Running, Ready, Failed and Cancelled. "Running" sends `state=running`. Queued packs show
-  under All.
-- **Row.**
-  - `title`, or the `instruction` cut to one line when `title` is null;
-  - `site_name`;
-  - a state chip;
-  - `nzDateTime(created_at)`;
-  - counts from `action_counts`: "3 proposed · 1 applied · 1 stale", hiding zeros;
-  - a failed pack shows "Failed (‹failure›)".
+**Header**
 
-  The whole row is a link to `?id=`.
-- **Polling.** While any row is queued or running, the list polls every 15 s, and every 60 s
-  when the tab is hidden.
-- **Cap note.** When the list shows 50 rows: "Showing the newest 50."
+- "Action packs" and a "New pack" button.
+- Tabs: **Active** (the default, `archived=false`) and **Archived** (`archived=true`).
+- A state select: All, Running, Ready, Failed, Cancelled.
+
+**Rows.** Each row links to `?id=` and shows:
+
+- `title`, or `instruction` cut to one line when there is no title;
+- `site_name`;
+- a state chip;
+- `nzDateTime(created_at)`;
+- "Failed (‹failure copy›)" when the run failed.
+
+**No action counts on the list.** `action_counts` includes unsupported actions (AG4). The
+detail view computes its own counts from the visible actions (§6.5).
+
+**Envelopes**
+
+| Response | Shows |
+|---|---|
+| `_notFound` with `status === 404` | "Action packs are not switched on in this environment." |
+| `_notFound`, any other status | "Could not load (HTTP ‹status›)." |
+| `_accessDenied` | its `error` |
+
+**Polling.** Only while some row is queued or running, using the same chained timer as §6.2:
+15 s while visible, 60 s while hidden.
+
+At 50 rows, show "Showing the newest 50."
 
 ### 5.3 New pack form
 
-ModalOverlay with `closeOnBackdrop:false`:
+The form is a `ModalOverlay` with `closeOnBackdrop:false`. It has two fields:
 
-- A site select from `getOrgSites`, required, with no default. A platform admin sees many
-  sites.
-- An instruction textarea, 1 to 2000 characters, with a live count.
-- Submit sends exactly `{instruction, site_id}` with `retry:false` (AG3).
+- **Site:** a select from `getOrgSites`. Required, with no default.
+- **Instruction:** a textarea of 1 to 2000 characters, with a live count.
 
-| Response | UI |
+Submit sends exactly `{instruction, site_id}` with `retry:false` (AG3). `createOutcome`
+(§7.1) maps the result in this order:
+
+| Result | UI |
 |---|---|
-| 202 | Close the form and navigate to `?id=<id>` |
-| 409 `you already have a pack in progress` | Inline message plus a link to the running pack (GET list `state=running`, then `state=queued`) |
-| 409 `company_inactive` | "This project's company is suspended or has left FieldSight." |
-| 400 / 404 | The backend's `error` text, shown inline |
-| 503 | "The pack could not be started. Try again." Keep the form filled |
-| Network error or wake-shaped failure | "We could not tell whether the pack started." Link to the list. No automatic resend |
+| 202 body with `id` | Close the form and go to `?id=<id>` |
+| `_accessDenied` | Its `error`, shown inline |
+| `_notFound`, status 404 | `raw.error` (e.g. "site not found"). If missing, "Action packs are not switched on in this environment." |
+| `_notFound`, other status | "Could not reach the server (HTTP ‹status›)." |
+| thrown 409, `body.error` "you already have a pack in progress" | That text, plus a link to the running pack (list with `state=running`, then `state=queued`) |
+| thrown 409, `body.error` "company_inactive" | "This project's company is suspended or has left FieldSight." |
+| thrown 400, or any other 409 | `body.error`, shown inline |
+| thrown 503 with `body.error === "the pack could not be started"` | "The pack could not be started. Try again." The form keeps its contents |
+| any other thrown error (waking, network, timeout, 5xx without that body) | "We could not tell whether the pack started. Check the list before trying again." Link to the list; the waking banner may also show. Never re-send automatically |
 
 ### 5.4 Nav and the flag
 
-- **v1 (`internal`).** Add `NAV_ITEMS.actionPacks` = `{ permission: P('settings','view'),
-  label: 'Action packs', path: '/action-packs', platformAdminOnly: true }`. Add it to the
-  MANAGEMENT items next to `decisionReview`, with a `left-nav.js` icon such as `'sparkles'`,
-  or any existing icon. A 404 from the list renders the "not switched on" empty state, the
-  same pattern as decision-review.
-- **Before `on` (follow-up).** Replace `platformAdminOnly` with a probe. Call
-  `GET /action-packs?state=running` once per session and cache the answer. On 200, show the
-  nav. On a 404 envelope, hide it. This is the hand-off §1 recommendation. **My call:** it is
-  deferred because under `internal` the role check gives the same answer with no extra
-  request, and the probe needs a new nav hook that the other nav items do not have.
+**v1 (`internal`).** Add this nav item after `decisionReview` in the MANAGEMENT section, with
+an existing `left-nav.js` icon:
+
+```js
+NAV_ITEMS.actionPacks = { permission: P('settings','view'), label: 'Action packs',
+  path: '/action-packs', platformAdminOnly: true }
+```
+
+Wherever the flag is off, including prod today, a platform admin sees the item and lands on
+the "not switched on" state (§13).
+
+**Before `on` (follow-up).** Replace the role check with a probe:
+
+1. Call `GET /action-packs?state=running` once per session and cache the answer.
+2. On 200, show the nav item.
+3. On `_notFound` with status 404, hide it.
+
+**My call:** the probe is deferred, because under `internal` the role check gives the same
+answer with no extra request.
 
 ## 6. Detail view: field → UI
 
-Sections appear top to bottom in this order: header, reading, sub-tasks, conclusion, actions,
-sources, run details. All text nodes are React text children (§8).
+Sections, top to bottom: header, reading, sub-tasks, conclusion, actions, sources, run
+details. Every text node is a React text child (§8).
+
+**Visible actions** means `actions.filter(a => a.verifier !== 'unsupported')`. Every count,
+group, link and plan below uses only this list (AG4).
 
 ### 6.1 Header
 
-- **Title.** `title`, or `instruction` when `title` is null.
-- **Instruction.** Shown in full under the title, in a muted quote block, prefixed "You
-  asked:".
-- **Facts line.**
-  - `site_name` · state chip · "Started ‹nzDateTime(created_at)›";
-  - "Read as of ‹nzDateTime(as_of)›" when the pack is ready;
-  - "Archived" when `archived` is true.
-- **Buttons.**
-  - **Cancel**: shown while queued or running when `is_creator` is true. A company admin may
-    also cancel, but `is_creator` is the only signal the backend gives. A 403 shows the
-    backend's text.
-  - **Archive / Unarchive**: always shown.
-  - **Export .md**: shown when the pack is ready. GET export, then download `content` as
-    `filename`.
+- **Title:** `title`, or `instruction` when there is no title.
+- **Instruction:** shown in full in a muted block, prefixed "You asked:".
+- **Facts line:**
+  - `site_name`;
+  - the state chip;
+  - "Started ‹nzDateTime(created_at)›";
+  - "Read as of ‹nzDateTime(as_of)›", once the pack is ready;
+  - "Archived", when archived;
+  - "Another company's project · ‹company_name›", when the viewer is a platform admin and the
+    pack's `site_id` appears in `getOrgSites` with a `company_name`. A platform admin's home
+    company owns no customer sites, so every such site counts. Omit it if the site is not
+    found.
+- **Buttons:**
+  - **Cancel**, while queued or running and `is_creator` is true.
+  - **Archive** / **Unarchive**.
+  - **Export .md**, once the pack is ready. It downloads `content` as `filename` through a
+    Blob and a temporary `<a download>`.
 
-### 6.2 States
+### 6.2 States and polling
 
-| `state` | Body |
+| State | Body |
 |---|---|
-| loading (no response yet) | "Loading…" |
-| 404 envelope | "This pack does not exist or you cannot see it." with a link back. The backend never says which |
-| `queued` | "Waiting to start…" and the instruction. Poll |
-| `running` | "Working… this usually takes 1–5 minutes." Show `reading` and `title` as soon as they are non-null, under "I read this as:" (hand-off §4), so the person can cancel early. Poll |
-| `ready` | Full view |
-| `failed` | "The run could not finish (‹failure›). Try again." `failure` is one of `budget, model, tools, verifier, internal, company_inactive`. A "Run again" button opens the New pack form pre-filled with the same instruction and site. No actions are shown |
-| `cancelled` | "Cancelled." Show the reading if present |
-| fetch error (thrown) | Error text with a "Retry" button. Polling keeps going at its interval |
+| loading | "Loading…" |
+| `_notFound`, status 404 | "This pack does not exist or you cannot see it." with a link back |
+| `_notFound`, other status | "Could not load (HTTP ‹status›)." with Retry |
+| `_accessDenied` | its `error` |
+| `queued` | "Waiting to start…" |
+| `running` | "Working… this usually takes 1–5 minutes." Once `reading` or `title` exists, show it under "I read this as:", so the person can cancel early |
+| `ready` | the full view |
+| `failed` | the failure copy (below) and "Run again", which opens the form prefilled with the same instruction and site |
+| `cancelled` | "Cancelled.", plus the reading if there is one |
+| fetch error thrown | its message, with Retry |
 
-**Polling.** Poll GET `/action-packs/{id}` every 4 s while the pack is queued or running. Poll
-every 15 s while the tab is hidden: read `document.visibilityState` and poll once when the tab
-becomes visible again. Stop on ready, failed or cancelled. Polling stops on unmount and on a
-change of `id`.
+**Failure copy**
 
-### 6.3 Sub-tasks (#1252): checklist under the reading
+| `failure` | Copy |
+|---|---|
+| `company_inactive` | "This project's company is suspended or has left FieldSight, so the run stopped." |
+| anything else (`budget`, `model`, `tools`, `verifier`, `internal`, …) | "The run could not finish (‹failure›). Try again." |
 
-- **When it shows.** Only when `sub_tasks` is a non-empty array. Null means an old pack or a
-  plan without sub-tasks: render nothing.
-- **Order.** Plan order, as returned.
-- **Row content.**
-  - **Status chip.** `done` reads "Done" (ok tone). `partly` reads "Partly" (warn tone).
-    `not_done` reads "Not done" (muted tone). The chip pairs an icon with the word, never
-    colour alone.
-  - **`ask`.** Plain text.
-  - **`kind`.** A small label: close, update, create, review, standards, draft or other
-    (`SUB_TASK_KINDS`, `src/action_pack_stages.py:623`).
-  - **Reason.** For `partly` and `not_done`, a reason line. Show `reason` as text when it is
-    non-null. Otherwise show the reason-code text from the table below. When `reason` is
-    present, append the code text in muted style if it adds information. For example,
-    `not_answered` always shows its text.
-  - **Links.** "Actions: #1, #3" (the `seq` values) and "Findings: 1, 2". These are the
-    1-based display numbers of `conclusion[i]`.
+**Polling: a chained timer, never `setInterval`**
 
-| `reason_code` | Text |
+- The next GET is scheduled only after the previous one has settled, so requests never
+  overlap.
+- Poll GETs pass `retry:false`.
+- The delay is 4 s when `document.visibilityState === 'visible'` and 15 s when hidden. When
+  the tab becomes visible again, poll once at once.
+- Stop on `ready`, `failed` or `cancelled`, and on any envelope (`_notFound` or
+  `_accessDenied`), which then renders its state.
+- Stop on unmount and when the `id` changes. Drop any response that arrives after that.
+- If a poll throws, keep the last good view, show "Could not refresh — retrying", and carry on
+  at the next tick.
+
+### 6.3 Sub-tasks: checklist under the reading
+
+The checklist shows only when `sub_tasks` is a non-empty array; null renders nothing. Rows
+follow plan order.
+
+**Each row has:**
+
+- **Status chip:** an icon and a word.
+  - `done`: "Done", ok tone;
+  - `partly`: "Partly", warn tone;
+  - `not_done`: "Not done", muted tone.
+- **`ask`.**
+- **`kind` label** (`src/action_pack_stages.py:623`).
+- **Reason line**, only for `partly` and `not_done`. `reasonLine` decides it, where "empty"
+  means null, undefined or whitespace only:
+
+  | `reason` | `reason_code` | Reason line |
+  |---|---|---|
+  | non-empty | `not_answered` or `dropped_by_checks` | `reason`, then the code text in muted style |
+  | non-empty | any other | `reason` only |
+  | empty | a known code | the code text |
+  | empty | `other`, or unknown | none |
+
+- **Links:** "Actions: Action 1, Action 3" and "Findings: 1, 2". Findings are numbered from 1
+  over this response's conclusion. Indexes that do not resolve are ignored.
+
+**Code text** (`src/action_pack_stages.py:627-629`)
+
+| Code | Text |
 |---|---|
 | `no_evidence` | No evidence found in the records |
 | `not_found` | Could not find what this refers to |
 | `ambiguous_target` | More than one item could be meant |
 | `out_of_scope` | Outside what this pack may change |
 | `already_done` | Already done |
-| `other` | — (show `reason` only) |
 | `not_answered` | The agent did not answer this part |
 | `dropped_by_checks` | What the agent proposed was removed by checks |
+| `other` | — |
 
-Codes come from `src/action_pack_stages.py:627-629`. An unknown code shows nothing extra.
+**Linking and keyboard**
 
-- **Linking.**
-  - `actions` holds visible `seq` values. `conclusion` holds 0-based indexes into **this
-    response's** `conclusion` array. The backend already remapped both for this reader
-    (`src/action_pack_view.py:508-529`).
-  - Hovering or focusing a row adds a highlight class to the linked action cards and
-    conclusion lines. Leaving the row removes it.
-  - Clicking "Actions: #3" scrolls to and focuses that action card.
-  - An index or seq that is not found is ignored. The UI never throws on it.
-- **Keyboard.** Each row is focusable (`tabIndex=0`), and focus triggers the same highlight as
-  hover.
-- **`listed`.** If `listed === false` ever appears, the row shows "Skipped by the agent" next
-  to the chip. Today the field is absent (§4.6.1), and `not_answered` carries the same
-  meaning.
+- Rows are focusable (`tabIndex=0`).
+- Hover or focus on a row highlights the action cards and conclusion lines it links to.
+- Clicking "Action 3" scrolls to that card and focuses it.
+- A `seq` that is not in the visible actions is ignored. This happens, for example, when that
+  action is unsupported.
 
 ### 6.4 Conclusion
 
-Each element of `conclusion` is `{text, refs, confidence, verifier_detail}`. Lines are
-numbered 1..n so sub-tasks can refer to them.
+Each line is `{text, refs, confidence, verifier_detail}`, numbered from 1.
 
-- `text` as plain text.
-- Ref chips for `refs` (§6.6).
-- `confidence: "uncertain"` shows an **"Uncertain"** badge. When `verifier_detail.reason` is
-  non-null, it shows below the line as muted plain text (#1254). When `verifier_detail` is
-  null, or its reason is null, the badge shows with no reason. An uncited uncertain line falls
-  in this case.
-- `confidence: "supported"` shows no badge.
-- Unsupported lines never arrive (hidden server-side, §4.6.2).
-- **"Web source, not your project's documents."** This label shows when **every** ref of the
-  line resolves to a `provenance: "web"` source. It is derived from `sources`, and the backend
-  stores no flag for it (hand-off §5).
+- **Text:** `text`, as plain text.
+- **Ref chips:** one per ref (§6.6).
+- **`confidence: "uncertain"`:** an **"Uncertain"** badge. If `verifier_detail != null` and
+  its `reason` is non-empty, show the reason as muted plain text below the line.
+- **`confidence: "supported"`:** no badge.
+- **Web-only:** "Web source, not your project's documents" when **every** ref resolves to a
+  `provenance: "web"` source. A line with no refs never gets this label (hand-off §5).
 
 ### 6.5 Actions
 
-Actions arrive in `seq` order. There are three groups:
+**Groups.** Group the visible actions by state only, each group in `seq` order:
 
-- **Proposed**: state `proposed` or `failed`, with verifier `supported` or `weak`;
-- **Done**: state `applied`, `dismissed` or `stale`, any verifier;
-- **"Not shown as reliable"**: verifier `unsupported`, any state. This group is collapsed by
-  default and shows a count.
-
-Each card shows:
-
-- **Head.**
-  - `#seq`;
-  - a type label: Close task, Update task, New task, Draft RFI, Draft email or Note
-    (`_ACTION_LABEL`, `src/action_pack_view.py:624-625`);
-  - for close and update, the target: "#‹target_task_no›" when it is non-null, followed by
-    `target_snapshot.text`.
-
-  When `target_snapshot` is null on a close or update, show **"Task not visible to you"** and
-  no Apply (hand-off §3.3).
-- **Change.**
-  - Close: "Status: ‹snapshot.status› → ‹proposed.status›".
-  - Update: one row per key of `proposed`, before → after. The before value comes from
-    `target_snapshot`.
-  - Create: the `text`, `responsible`, `deadline` and `priority` of `proposed`.
-  - Drafts: `subject` and `body` (and `to`), or `text`. Shown in a `pre-wrap` block with a
-    **Copy** button. Drafts are never applied.
-  - Dates are `YYYY-MM-DD` strings and are formatted as dates, not datetimes.
-- **Rationale.** `rationale` as plain text.
-- **Ref chips** (§6.6).
-- **Verifier**, keyed on `verifier` and `verifier_detail.reason_code`:
-
-| `verifier` | `reason_code` | Badge | Reason line |
-|---|---|---|---|
-| `supported` | any | none | none |
-| `weak` | any | **Uncertain** | `verifier_detail.reason` as plain text when non-null, otherwise nothing. The code caps write fixed text here, e.g. "Deadline assumed: date raised." (`src/action_pack_verify.py:349-354`) |
-| `unsupported` | `not_checked` | **Not checked** | none (#1254: like weak, without the reason) |
-| `unsupported` | `contradicted` | **Contradicted by evidence** | reason when non-null |
-| `unsupported` | other or null | **Not supported by evidence** | reason when non-null. A null `verifier_detail` means an old pack, where this label meant "not supported or not checked" |
-| `not_checked` (not sent today) | — | **Not checked** | none. Forward-compatible with the #1254 wording |
-| any other value | — | **Unverified** | none |
-
-- **State line.**
-
-| `state` | Display |
+| Group | States |
 |---|---|
-| `proposed` | none |
-| `applied` | "Applied ‹nzDateTime(applied_at)›". When `applied_result.noop` is set: "Already done". For a create with `applied_result.task_no`: "Created #‹task_no›" with a link to `#/tasks` |
-| `dismissed` | "Dismissed" |
-| `stale` | "Changed since the pack read it". Plus "Why?", which opens the stale dialog (§7.2) |
-| `failed` | "Last apply failed, you can retry". The Apply button reads "Retry" |
+| **To review** | `proposed`, `failed` |
+| **Changed since read** | `stale` |
+| **Done** | `applied`, `dismissed` |
 
-- **Buttons**, shown only when the backend allows them:
-  - **Apply** when `applicable === true` (AG1).
-  - **Edit and apply** when `applicable === true`, or when
-    `applicable_reason === "responsible_not_member"`. It opens a form with exactly
-    `APPLY_EDIT_FIELDS[type]` (§4.3). `responsible` is a select from `getSiteMembers(site_id)`
-    display names.
-  - **Dismiss** when the state is `proposed`, `failed` or `stale` and the pack is not
-    archived.
-  - With `applicable_reason === "responsible_not_member"`: show "Assignee is not on this
-    project" and offer Edit and apply only.
-  - No buttons on an archived pack. The backend refuses with 409.
+An unknown state goes into Done. The section heading counts the visible actions only, for
+example "3 to review · 1 applied", and leaves out zero counts.
+
+**Card head**
+
+- "Action ‹seq›".
+- The type label: Close task, Update task, New task, Draft RFI, Draft email or Note
+  (`src/action_pack_view.py:624-625`).
+- For close and update: "#‹target_task_no›" when it is non-null, then `target_snapshot.text`.
+- When `target_snapshot == null` on a close or update, show **"Task not visible to you, or no
+  longer exists"** and no Apply. The snapshot is null both when the live item is gone and when
+  the reader cannot see it (`src/lambda_org_api.py:993-997`,
+  `src/action_pack_view.py:585-586`).
+
+**What the action changes**
+
+| Type | Shown |
+|---|---|
+| close | "Status: ‹snapshot.status› → ‹proposed.status›" |
+| update | before → after for each key of `proposed`, with "before" taken from `target_snapshot` |
+| create | `text`, `responsible`, `deadline` and `priority` from `proposed` |
+| draft | `subject`, `body` and `to`, or `text`, in a `pre-wrap` block with **Copy**. Drafts are never applied |
+
+Deadlines are `YYYY-MM-DD` and are shown as dates.
+
+**Rationale and evidence.** Show `rationale` as plain text, then the ref chips. Actions get no
+derived web label: the verifier reason already covers web-only evidence
+(`src/action_pack_verify.py:349-354`).
+
+**Verifier badge**
+
+| `verifier` | Badge | Reason line |
+|---|---|---|
+| `supported` | none | none |
+| `weak` | **Uncertain** | `verifier_detail.reason` as plain text, when `verifier_detail != null` and the reason is non-empty. A code cap writes fixed text, e.g. "Deadline assumed: date raised." |
+| anything else | not rendered: filtered out before grouping (AG4) | — |
+
+**State line**
+
+| State | Line |
+|---|---|
+| `applied` | "Applied ‹nzDateTime(applied_at)›". If `applied_result.noop`: "Already done". For a create with a `task_no`: "Created #‹task_no›"; without one: "Created", never "#null". Links to `#/tasks` |
+| `dismissed` | "Dismissed" |
+| `stale` | "Changed since the pack read it", plus a "Why?" button that opens the stale dialog (§7.2) |
+| `failed` | "Last apply failed — you can retry". The Apply button reads "Retry" |
+
+**Buttons.** None show while Apply-all runs (§7.3) or on an archived pack. Otherwise:
+
+| Button | Shown when |
+|---|---|
+| **Apply** | `applicable === true` (AG1) |
+| **Edit and apply** | `applicable === true`, or `applicable_reason === "responsible_not_member"` |
+| **Dismiss** | state is `proposed`, `failed` or `stale` |
+
+When `applicable_reason === "responsible_not_member"`, the card also says "Assignee is not on
+this project", and Edit and apply is the only way to apply it.
+
+**Edit and apply form.** It shows exactly the fields in `APPLY_EDIT_FIELDS[type]`.
+
+- **Prefill:**
+  - create: `proposed`;
+  - update: `proposed` over `target_snapshot`;
+  - close: `proposed.status`, or `done` if there is none.
+- **`responsible`** is a select of display names from `getSiteMembers(site_id)`.
+- **An update's `deadline`** may be cleared, which sends `null`.
+- **Submit** sends in `fields` only the keys whose value differs from `proposed`. A key absent
+  from `proposed` counts as different when it is non-empty, or when it is set to null. If no
+  key differs, the body is `{}`.
 
 ### 6.6 Ref chips and sources
 
-A chip shows the ref text (`R2`, `D1`, `W1`). It is routed by **looking the ref up in
-`sources[]`** by `ref`. The routing never relies on order: sources sort as text, so R10 comes
-before R2 (hand-off §2, §5).
+A chip shows the ref (`R2`, `D1`, `W1`). It is looked up in `sources[]` by `ref`, never by
+position: sources sort as text, so `R10` comes before `R2` (hand-off §2, §5).
 
-| Source | Chip opens (popover or modal, all plain text) |
+| Source | The chip opens (all plain text) |
 |---|---|
-| not found in `sources`, or `removed: true` | Greyed chip, "Source removed", not clickable |
-| `provenance: "records"` | Card: `title`, `nzDate(date)`, `who`, `excerpt` as a quote. When `site_id` and `date` are present: "Open day" → `#/timeline?site=‹site_id›&date=‹date›` (pattern at `scripts/app-shell.js:862`) |
-| `provenance: "documents"` | Card: `title` ("‹doc› · ‹heading›"), "rev ‹revision›, p. ‹page_from›–‹page_to›", `excerpt`. No deep link in v1 (my call: the document page has no page anchor today) |
-| `kind: "web_source"` with `snapshot_s3_key` | Snapshot viewer modal. GET `.../sources/{ref}/snapshot`, then show "Snapshot of ‹url› taken ‹fetched_at›", `text` in a `pre-wrap` block, "(truncated)" when `truncated` is true, and a link to the live `url` with `rel="noopener noreferrer"` and `target="_blank"`. A 404 envelope shows "Snapshot not available" |
-| `kind: "web_source"` without snapshot | `title`, `url` as a link, "Page not stored" |
+| missing, or `removed: true` | nothing: a greyed "Source removed" chip that cannot be clicked |
+| `provenance: "records"` | a card with `title`, `nzDate(date)`, `who`, and `excerpt` as a quote. When `site_id` and `date` are present, an "Open day" link to `#/timeline?site=‹site_id›&date=‹date›` |
+| `provenance: "documents"` | a card with `title`, "rev ‹revision›, p. ‹page_from›–‹page_to›" and `excerpt`. No deep link |
+| `kind: "web_source"` with `snapshot_s3_key` | the snapshot modal (below) |
+| `kind: "web_source"` without a snapshot | `title`, `url` as a link, and "Page not stored" |
 | `kind: "web_answer"` | `excerpt` in a popover |
 
-**My call: no reuse of Ask's evidence card.** Ask's only reusable helper is `citationTarget`
-(`scripts/composites/ask-chat.js:61-65`). It parses an S3 report key, and pack sources do not
-carry one. A small `SourceCard` inside the page is simpler than adapting it.
+**Snapshot modal.** GET the snapshot, then show:
 
-A collapsed **Sources** section at the bottom lists every source with the same card, so the
-person can read the evidence without hunting chips.
+- "Snapshot of ‹url› taken ‹fetched_at›";
+- `text` in a `pre-wrap` block, with "(truncated)" when `truncated` is true;
+- a link to the live page.
+
+On `_notFound`, show "Snapshot not available".
+
+**My call: the page has its own `SourceCard`.** Ask's `citationTarget`
+(`scripts/composites/ask-chat.js:61-65`) parses an S3 report key, which pack sources do not
+carry. A collapsed **Sources** section at the end lists every source using the same card.
 
 ### 6.7 Run details
 
-`run_trace` and `models` go in a collapsed "Run details" disclosure. Show these fields as
-plain key: value text:
+A collapsed "Run details" section shows these as plain key: value text, from `run_trace` and
+`models`:
 
 - rounds;
-- tokens / token_cap;
-- refs gathered / cited;
-- `ms.total` as seconds;
-- planner, writer and verifier model ids.
+- tokens and `token_cap`;
+- refs gathered and refs cited;
+- `ms.total`, in seconds;
+- the planner, writer and verifier models.
 
-`{"dropped":"size"}` reads "Too large to show". This disclosure is useful for the owner's
-trust question ("what did it look at"). It is not needed for acting.
+A trace of `{"dropped":"size"}` shows "Too large to show".
 
 ## 7. Acting on a pack
 
 ### 7.1 API module: `scripts/api/action-packs.js` → `window.FS.api.actionPacks`
 
-The module follows `decisions.js`: live means `!useMocks && orgBaseUrl`, with no `orgWrite()`
-gate. When not live, a small in-memory set of packs answers: one ready pack with sub-tasks,
-weak, unsupported/not_checked and stale actions, plus one running pack. This lets the page
-render without a backend.
+The module follows `decisions.js`: live means `!useMocks && orgBaseUrl`, and there is no
+`orgWrite()` gate.
 
-The module is **the body whitelist**: every write builds its body from named fields only.
+When not live, an in-memory set of packs answers. It holds:
 
-| Function | Request | Body sent |
-|---|---|---|
-| `list({state, siteId, archived})` | GET `/action-packs` | — (params skip null) |
-| `get(id)` | GET `/action-packs/{id}` | — |
-| `create({instruction, siteId})` | POST, `retry:false` | `{instruction, site_id}` |
-| `cancel(id)` | POST `/cancel`, `retry:false` | `{}` |
-| `archive(id, archived)` | POST `/archive` | `{archived: !!archived}` |
-| `dismiss(id, aid)` | POST `.../dismiss` | `{}` |
-| `apply(id, aid, fields?)` | POST `.../apply`, `retry:false` | `{}`, or `{fields}` filtered to `APPLY_EDIT_FIELDS[type]` (the caller passes `type`) |
-| `exportMd(id)` | GET `/export`, `params:{format:'md'}` | — |
-| `snapshot(id, ref)` | GET `.../sources/{ref}/snapshot` | — |
+- one ready pack with sub-tasks, a weak action, an unsupported action (to prove the filter
+  works), a stale action, and two actions on the same target;
+- one running pack.
+
+Every write builds its body from named fields only.
+
+| Function | Request | Body | Options |
+|---|---|---|---|
+| `list({state, siteId, archived, poll})` | GET `/action-packs` | — | `retry:false` when `poll` |
+| `get(id, {poll})` | GET `/action-packs/{id}` | — | `retry:false` when `poll` |
+| `create({instruction, siteId})` | POST `/action-packs` | `{instruction, site_id}` | `retry:false` |
+| `cancel(id)` | POST `/cancel` | `{}` | `retry:false` |
+| `archive(id, archived)` | POST `/archive` | `{archived: !!archived}` | `retry:false` |
+| `dismiss(id, aid)` | POST `.../dismiss` | `{}` | `retry:false` |
+| `apply(id, aid, type, fields)` | POST `.../apply` | `{}`, or `{fields}` with only the keys in `APPLY_EDIT_FIELDS[type]` | `retry:false` |
+| `exportMd(id)` | GET `/export` | — | `params:{format:'md'}` |
+| `snapshot(id, ref)` | GET `.../sources/{ref}/snapshot` | — | — |
 
 Ids and refs go through `encodeURIComponent`.
 
-**My call: apply uses `retry:false`.** Replaying an apply is safe (it returns 200 when already
-applied), but the automatic retry would run under a spinner the person cannot see. A 500
-already marks the action `failed`, and the page offers Retry. Apply-all reports per action.
+**My call: every write uses `retry:false`, so nothing is ever repeated behind the person's
+back.** After any write that is not a clean success, the page re-GETs the pack, and that GET
+is the truth. Replaying an apply is idempotent, so the person may press Retry safely.
 
-**My call: apply is a single function that returns an outcome object, and never throws on a
-409.**
+**Outcome mapping.** Each write returns an outcome object and never throws. The pure helpers
+are `applyOutcome`, `writeOutcome` and `createOutcome`. They check in this order:
 
-- It catches the thrown error.
-- `err.body.state === "stale"` becomes `{kind:'stale', live, snapshot}`. It branches on
-  `body.state`, not on the status code (hand-off §3.9).
-- Any other 4xx becomes `{kind:'refused', status, message}`.
-- A 500 becomes `{kind:'failed'}`.
-- 200 becomes `{kind:'applied', result}`, or `{kind:'noop'}` when `result.noop` is set.
+1. **Envelopes first:**
+   - `_accessDenied` → `{kind:'refused', status:403, message: res.error}`;
+   - `_notFound` with `status === 404` →
+     `{kind:'refused', status:404, message: res.raw && res.raw.error}`;
+   - `_notFound` with any other status → `{kind:'unknown', status}`.
+2. **An object with no envelope** is a 200.
+3. **A thrown error**, mapped per write:
+
+| Write | 200 | Thrown |
+|---|---|---|
+| apply | `{kind:'noop'}` if `applied_result.noop`, otherwise `{kind:'applied', result}` | `body.state === 'stale'` → `{kind:'stale', live, snapshot}` (branch on the body, not the status code); status 500 → `{kind:'failed'}`; any other 4xx with a body → `{kind:'refused', status, message: body.error}`; anything else (502, 503, 504, timeout, network, no body) → `{kind:'unknown'}`: show "Could not confirm — refreshing", then re-GET |
+| dismiss | `{kind:'ok'}` | 409 with `body.state === 'dismissed'` → `{kind:'ok'}`, because a second dismiss counts as success; other 4xx → refused; else unknown |
+| cancel | `{kind:'ok'}` | 409 with a `body.state` → `{kind:'finished', state}`, then refresh; other 4xx → refused; else unknown |
+| archive | `{kind:'ok'}` | 4xx → refused; else unknown |
+| create | see §5.3 | see §5.3 |
+
+After any apply, dismiss, archive or cancel, re-GET the pack.
+
+**My call: no `content:edited` event.** `FS.events` documents `content:edited` as emitted only
+by `FS.api.actions.settleSave` (`scripts/api/events.js:6`). Its only listener bumps a version
+chip on Today (`scripts/pages/today.js:1366-1374`, `:1688-1700`). Today is not mounted while
+this full-width page is, and both Today and Tasks refetch when you navigate to them.
 
 ### 7.2 Stale dialog (ModalOverlay)
 
-Title: "This task changed since the pack read it". The table has two columns: **Now** (`live`)
-and **When the pack read it** (`snapshot`). The rows are status, deadline, responsible,
-priority, text and "last changed" (`updated_at`). Rows that differ are marked with a "changed"
-text label, not colour alone. The fields this action wanted to change are bold.
+The title is "This task changed since the pack read it". The dialog shows, in this order:
 
-- Buttons: "Open Tasks" (`#/tasks`) and "Dismiss action". There is no "apply anyway" (AG5).
-- When both `live` and `snapshot` are null: "This task changed or is no longer visible to
-  you." The only button is Dismiss.
-- When the dialog opens from an action already in state `stale`, the values are unknown until
-  the person applies again. The dialog calls `apply()` once to fetch the 409 with live values.
-  This is safe: a stale action writes nothing (`src/lambda_org_api.py:1306-1309`). On an
-  archived pack, apply refuses with 409 before it reaches the stale branch (`:1256-1257`).
-  In that case the dialog shows `applied_result.reason` as text instead: "changed", "task
-  gone" or "task moved to another project". It shows no comparison.
+1. **The stored reason, when `applied_result.reason` exists:**
+   - `changed`: "Someone changed this task after the pack read it."
+   - `target_gone`: "The task no longer exists."
+   - `target_moved`: "The task moved to another project."
+2. **The comparison.**
+   - It shows at once when the dialog opens from a fresh 409 that carries `live` and
+     `snapshot`.
+   - Otherwise a **"Compare with now"** button calls `apply()` once, to fetch the 409 with
+     the live values. That is safe, because a stale action writes nothing
+     (`src/lambda_org_api.py:1306-1309`).
+   - The button is hidden on an archived pack, because apply refuses there before it reaches
+     the stale branch (`:1256-1257`).
+
+**The comparison table** has two columns, **Now** (`live`) and **When the pack read it**
+(`snapshot`). Its rows are status, deadline, responsible, priority, text, and "last changed"
+(`updated_at`).
+
+- Rows that differ carry a "changed" label, not colour alone.
+- The fields the action wanted to change are in bold.
+- When `live` and `snapshot` are both null, show "This task changed or is no longer visible
+  to you."
+
+**Buttons:** "Open Tasks" (`#/tasks`) and "Dismiss action". There is no apply anyway (AG5).
 
 ### 7.3 Apply-all
 
-The button reads "Apply all supported (n)". It shows when n > 0, where n counts
-`actions.filter(a => a.verifier === 'supported' && a.applicable)`.
+**The plan.** `applyAllPlan(visibleActions)` takes the actions with
+`verifier === 'supported' && applicable === true`, in `seq` order.
 
-- The note "‹k› uncertain not included" counts weak actions with `applicable` set.
-- On confirm, apply each action **sequentially** in `seq` order, never with `fields`, and
-  never stop on a failure.
-- Show a per-action result list: applied, already done, stale (with a link to the dialog),
-  refused (with the message), or failed (with Retry).
-- Re-GET the pack at the end. This follows backend spec §5.3 and hand-off §6.
+- **Same target (my call).** When more than one planned action shares a
+  `target_stable_id`, only the first is applied; the second would go stale by design. Each
+  later one is listed as skipped with "Another action changes this task", and can still be
+  applied on its own. Creates have no target and are never skipped.
+- The plan also counts the applicable weak actions, for the note "‹k› uncertain not
+  included".
 
-**My call: Apply-all is in v1.** It is a short loop over the single apply, and the owner's
-TEST hand-test checklist includes "Apply-all skips weak actions"
-(`docs/runbooks/2026-11-01-action-packs-rollout.md:221-230`, in the pipeline repo).
+**The button.** "Apply all supported (n)", where n counts only the actions the plan will
+apply. It shows when n > 0.
 
-After any apply, dismiss, archive or cancel, re-GET the pack. `orgRequest` already clears the
-read cache on a successful non-GET (`scripts/api/_fetch.js:382-385`). Then emit
-`FS.events` `content:edited` so an open Tasks view refreshes, if the bus is loaded.
+**On confirm:**
+
+- Apply the actions **one after another**, never with `fields`.
+- Never stop on a failure.
+- While it runs, disable every per-card Apply, Edit and Dismiss button, and Apply-all itself.
+- On unmount, finish the current request, then stop.
+
+**Report.** One row per action: applied, already done, stale (with a link to the dialog),
+refused (with its message), failed (with Retry), not confirmed, or skipped (with its text).
+Re-GET the pack at the end.
+
+**My call: Apply-all is in v1.** The owner's TEST hand-test includes "Apply-all skips weak
+actions" (`docs/runbooks/2026-11-01-action-packs-rollout.md:221-230`, pipeline repo).
 
 ## 8. Plain-text rendering
 
-Every model- or user-originated string renders as a React text child:
+Every string from a model or a user renders as a React text child:
 
-- instruction, title, reading;
-- `ask`, `reason`, conclusion `text`;
-- `rationale`, every value in `proposed` and `target_snapshot`;
+- the instruction, title and reading;
+- `ask`, `reason`, and the conclusion `text`;
+- `rationale`, plus every value in `proposed` and `target_snapshot`;
 - `verifier_detail.reason`;
-- source `title`, `who`, `excerpt`;
-- snapshot `text`;
-- export `content`, which is downloaded, never rendered.
+- a source's `title`, `who` and `excerpt`;
+- the snapshot `text`.
 
-Long text uses `white-space: pre-wrap; overflow-wrap: anywhere`. Hard rules:
+Export `content` is downloaded, never rendered. Long text uses
+`white-space: pre-wrap; overflow-wrap: anywhere`.
 
-- no `dangerouslySetInnerHTML`;
-- no `innerHTML`;
-- no `composites/markdown.js`;
-- URLs only in `href`, and only when they start with `http:` or `https:`. Otherwise show the
-  URL as text.
+**Never used:** `dangerouslySetInnerHTML`, `innerHTML`, and `composites/markdown.js`.
+
+**Links:**
+
+- A URL goes into an `href` only if it starts with `http:` or `https:`.
+- Any other URL is shown as text.
+- External links use `rel="noopener noreferrer"`.
 
 ## 9. Accessibility basics
 
-- Chips and badges pair text with tone. Colour is never the only signal (sub-task status,
-  verifier, changed rows).
-- Sub-task rows and ref chips are reachable by keyboard. The highlight follows focus as well
-  as hover.
-- A chip is a `button` with `aria-label`, e.g. "Source R2: L3 slab pour, 10 Oct 2026". Removed
-  chips are `aria-disabled`.
+- Chips and badges always pair text with colour.
+- Sub-task rows and ref chips can be reached by keyboard, and focus highlights the same things
+  hover does.
+- A chip is a `button` with an `aria-label`, e.g. "Source R2: L3 slab pour, 10 Oct 2026". A
+  removed chip is `aria-disabled`.
 - The running status is an `aria-live="polite"` region. It announces the change to ready,
-  failed or cancelled once, not on every poll.
-- Modals use ModalOverlay, which handles focus trap and focus return.
-- Buttons keep their text while busy, and are disabled with `aria-busy`.
-- Tokens only: no hard-coded colours. The repo test
-  `tests/every-colour-names-a-token-that-exists.test.js` enforces this.
-- Light and dark themes are checked in the browser, not from the CSS (memory note "measure the
-  browser, don't trust CSS").
+  failed or cancelled once.
+- Modals use `ModalOverlay`.
+- Busy buttons keep their text and get `disabled` and `aria-busy`.
+- Colours come from tokens only, enforced by
+  `tests/every-colour-names-a-token-that-exists.test.js`.
+- Light and dark themes are checked in the browser.
 
 ## 10. Files
 
 | File | Change |
 |---|---|
-| `scripts/api/action-packs.js` | new (§7.1) |
-| `scripts/pages/action-packs.js` | new. Registers `PAGES['/action-packs']`. Exports pure helpers for tests: `badgeFor(element)`, `subTaskView(sub, conclusion, actions)`, `chipTarget(ref, sources)`, `isWebOnly(refs, sources)`, `actionGroups(actions)`, `applyAllPlan(actions)` |
-| `styles/` (the page's block in the components or app-shell stylesheet, as decision-review does) | `.fs-pack__*` BEM |
-| `scripts/fs-globals.js` | `NAV_ITEMS.actionPacks` (§5.4) |
-| `scripts/left-nav.js` | icon and MANAGEMENT items |
-| `app-shell-preview.html` | `scripts/api/action-packs.js?v=1` after `api/index.js` (next to `decisions.js`, `:249`). `scripts/pages/action-packs.js?v=1` as `text/babel` next to `decision-review.js` (`:411`) |
+| `scripts/api/action-packs.js` | new (§7.1); exports the outcome helpers for tests |
+| `scripts/pages/action-packs.js` | new; registers `PAGES['/action-packs']` and exports the pure helpers |
+| `styles/action-packs.css` | new: the `.fs-pack__*` block, tokens only |
+| `scripts/fs-globals.js` | `NAV_ITEMS.actionPacks` |
+| `scripts/left-nav.js` | the icon and the MANAGEMENT entry |
+| `app-shell-preview.html` | the stylesheet link and two script tags; bump the `?v=` keys of the changed files only (`fs-globals.js`, `left-nav.js`) |
 
-## 11. Test strategy (node:test, in the style of `tests/decision-review.test.js`)
+## 11. Test strategy (node:test, as in `tests/decision-review.test.js`)
 
-New file: `tests/action-packs.test.js`.
+**API — `tests/action-packs-api.test.js`**
 
-**API**
+- Each write sends exactly its whitelisted body.
+- `create`, `cancel`, `archive`, `dismiss` and `apply` pass `retry:false`.
+- Paths encode their ids.
+- Outcome mapping for every write:
+  - each envelope case: 403, 404 with `raw.error`, `_notFound` with a status other than 404;
+  - 200;
+  - apply: stale, 500, other 4xx, 502/504/no body as unknown, noop;
+  - dismiss: a 409 with state `dismissed` counts as ok;
+  - cancel: a 409 means finished;
+  - create: a 503 carrying the start-failed body is told apart from a waking 503 or a 503
+    with no body.
 
-- Each write sends exactly its whitelisted body. Extra keys from the caller are dropped.
-  `apply` with `fields` keeps only `APPLY_EDIT_FIELDS[type]`.
-- `create` and `apply` pass `retry:false`.
-- Paths encode ids.
-- `apply` maps outcomes:
-  - a thrown 409 with `body.state === 'stale'` becomes `stale` with live and snapshot;
-  - any other 409 becomes `refused`;
-  - 500 becomes `failed`;
-  - 200 with `noop` becomes `noop`;
-  - 200 becomes `applied`.
-- The 404 envelope from `list` reaches the page as "not switched on".
+**Pure helpers — `tests/action-packs-page.test.js`**
 
-**Pure helpers**
+| Helper | Cases |
+|---|---|
+| `visibleActions` | drops `unsupported` for every `reason_code`; counts exclude them |
+| `actionGroups` | `applied`, `dismissed`, `stale`, `proposed`, `failed` and an unknown state, each in `seq` order |
+| `actionBadge` | supported; weak with a reason; weak with a null detail; weak with no detail |
+| `conclusionBadge` | uncertain with a reason; with a null reason; with no detail |
+| `reasonLine` | every row of the §6.3 table; whitespace counts as empty |
+| `subTaskView` | conclusion indexes become 1-based numbers; out-of-range indexes are ignored; unknown or unsupported seqs are ignored; `listed` is never read; null renders nothing |
+| `chipTarget` | missing; removed; each provenance/kind row; `R10` vs `R2` |
+| `isWebOnly` | conclusion lines |
+| `applyAllPlan` | supported and applicable only, in `seq` order; same-target duplicates skipped, creates not; the weak count |
+| `editFields` | prefill per type; `fields` holds only the diff; a deadline can be cleared to null |
+| `failureText` | including `company_inactive` |
+| `createdText` | with a null `task_no` |
+| `staleReasonText` | the three reasons |
+| `envelopeState` | 404 → not switched on; any other status → "Could not load (HTTP n)" |
 
-- `badgeFor` covers every row of the §6.5 table, including `verifier_detail: null`, the
-  forward-compatible `verifier: "not_checked"` value, and an unknown value.
-- Conclusion `uncertain` with a reason, with a null reason, and with a null detail.
-- `subTaskView`:
-  - maps conclusion indexes to the 1-based numbers of this response;
-  - ignores out-of-range indexes and unknown seqs;
-  - picks the reason text from `reason`, falling back to the code;
-  - copes with `listed` absent, `true` and `false`;
-  - `sub_tasks: null` renders nothing.
-- `chipTarget`:
-  - a ref missing from sources means removed;
-  - `removed: true`;
-  - each provenance and kind row;
-  - `R10` vs `R2` lookup by ref, not by order.
-- `isWebOnly`: all-web gives true, mixed gives false, no refs gives false.
-- `applyAllPlan`: supported and applicable only, in `seq` order, with the weak count reported.
-- Apply shows only when `applicable === true`. A close with null `target_snapshot` shows "Task
-  not visible to you".
+**Polling — `tests/action-packs-poll.test.js`**
+
+`createPoller({fetch, onData, isDone, delay, visibility})`, driven by an injected timer:
+
+- no second fetch starts before the first settles;
+- it stops on `ready`, `failed` and `cancelled`;
+- it stops on an envelope;
+- it uses the hidden delay while hidden;
+- `stop()` cancels the next tick and drops a late response.
 
 **Wiring (source scan)**
 
-- `app-shell-preview.html` has both script tags, the API tag after `api/index.js`, and the
-  page tag as `text/babel`.
+- `app-shell-preview.html` has the API tag after `api/index.js`, the page tag with
+  `type="text/babel"`, and the stylesheet link.
 - `NAV_ITEMS.actionPacks` has `platformAdminOnly: true`.
-- `canSeeNav('actionPacks', {role:'admin', isAdmin:true})` is false, and true for
-  `platform_admin`.
+- `canSeeNav` returns false for a company admin and true for a platform admin.
 - `left-nav.js` lists `actionPacks`.
 
-**Plain text (source scan)**
+**Plain text (source scan).** The new files contain no `dangerouslySetInnerHTML`, no
+`innerHTML`, and no Markdown component.
 
-- `scripts/pages/action-packs.js` and `scripts/api/action-packs.js` contain no
-  `dangerouslySetInnerHTML`, no `innerHTML`, and no reference to `FieldSight.Markdown` or
-  `markdown`.
+**Manual check on TEST** (runbook `:221-230`), as a platform admin:
 
-**Polling**
-
-- With fake timers or an injected clock, the poll stops on ready, failed and cancelled.
-- The poll backs off when `document.visibilityState === 'hidden'`.
-
-**Manual check on TEST**, after merge to `dev`, as platform_admin:
-
-- create a pack;
-- see the reading while running;
-- open R, D and W chips;
-- apply one close;
-- force a stale by editing the task by hand, then applying;
-- Apply-all skips weak.
-
-This is the runbook's hand-test (`docs/runbooks/2026-11-01-action-packs-rollout.md:221-230`).
-Use an owner-alias test user: TEST sends real email.
+1. Create a pack.
+2. Watch the reading appear while it runs.
+3. Open an R, a D and a W chip.
+4. Apply one close.
+5. Force a stale action.
+6. Run Apply-all and check that it skips weak actions.
 
 ## 12. Decisions made on the owner's behalf (my call)
 
-1. One route `#/action-packs`, with `?id=` for detail and `?new=1` for the form. The detail is
-   a page, not a window (§5.1).
-2. Apply, Edit-and-apply, Dismiss, the stale dialog and Apply-all are all in v1. The backend
-   supports them fully (§4.3), and the runbook's TEST hand-test needs them.
-3. The New pack form lives on this page. The Ask, Day view and Tasks entry points, and the
-   Tasks-side items (task_no, Agent badge, compliance-aggregator, history), are follow-ups
-   (§2).
-4. The nav uses `platformAdminOnly` under `internal`. The 404 probe comes before `on` (§5.4).
-5. Unsupported actions are shown collapsed and split into "Not checked", "Contradicted" and
-   "Not supported" by `reason_code`, never hidden. The owner's question includes "what did it
-   not do".
-6. `listed` is not relied on. `not_answered` and `dropped_by_checks` carry the meaning until
-   the backend returns `listed` (§4.6.1).
-7. `retry:false` on create, cancel and apply. No automatic resend after a timeout.
-8. Own `SourceCard`, no reuse of Ask's citation code. Documents get no deep link in v1.
-9. Polling: 4 s while visible and 15 s while hidden on detail; 15 s and 60 s on the list.
+1. One route, `#/action-packs`, with `?id=` and `?new=1`. The detail is a page, not a window.
+2. Apply, Edit-and-apply, Dismiss, the stale dialog and Apply-all are all in v1.
+3. The New pack form lives on this page. The entry points on other pages and the Tasks-side
+   items are follow-ups.
+4. The nav item is `platformAdminOnly` under `internal`. The probe comes before `on`.
+5. Unsupported actions are never rendered or counted, and the list shows no action counts.
+6. Every write uses `retry:false`. Any other outcome leads to a re-GET, which is the truth.
+7. Apply-all applies only the first action per target and lists the rest as skipped.
+8. No `content:edited` event (§7.1).
+9. The page has its own `SourceCard`, and documents get no deep link in v1.
+10. Polling uses a chained timer: on the detail, 4 s visible and 15 s hidden; on the list,
+    15 s and 60 s.
 
 ## 13. Open questions (owner only)
 
-1. **Prod `internal`: may a platform admin apply on a customer's site?** The backend allows
-   it, because cross-company counts as company admin for apply
-   (`src/lambda_org_api.py:13307-13311`). On TEST this is what we want. On prod it means
-   FieldSight staff could close a customer's tasks. The default if unanswered: the page
-   follows `applicable` as on TEST, and the prod flag stays off until you say otherwise.
-2. **Should the backend add `listed` to the GET `sub_tasks`?** It is in the #1252 contract
-   wording but not stored (§4.6.1). The default if unanswered: no. The reason codes are
-   enough, and the UI reads `listed` if it ever arrives.
+1. **On prod `internal`, may a platform admin apply on a customer's site?** The backend allows
+   it, because a cross-company caller counts as a company admin for apply
+   (`src/lambda_org_api.py:13307-13311`). On prod, that means FieldSight staff could close a
+   customer's tasks.
+   - Default: the page follows `applicable`, as on TEST, and the prod flag stays off until you
+     decide.
+2. **Note, not a question.** On prod the flag is off, so a platform admin sees the "Action
+   packs" nav item and lands on the "not switched on" state. Say if you want it hidden there;
+   hiding it needs the probe in §5.4.
+
+## 14. Changes in rev 2
+
+**From the backend line's answer:**
+
+- Unsupported actions are never rendered. The "not shown as reliable" group and the
+  not_checked badge are removed.
+- `listed` is removed; `reason_code` is the contract.
+- The badge keys are as in §4.6.3.
+- No docx export, by design.
+- Cross-company apply stays an open question.
+
+**From the Fable review:**
+
+1. Every write checks envelopes before anything else (§7.1).
+2. A backend 503 is told apart from a waking 503, and apply gains an `unknown` outcome.
+3. Polling uses a chained timer, passes `retry:false`, and stops on an envelope.
+4. The null-snapshot text is now "not visible to you, or no longer exists".
+5. Apply-all skips the second action on the same target.
+6. Groups are by state only.
+7. The sub-task reason line is deterministic.
+8. Edit-and-apply prefills, and sends only the keys that changed.
+9. The `content:edited` event is dropped.
+10. "Not switched on" shows only for a 404 `_notFound`.
+11. The facts line shows "Another company's project".
+12. Nits:
+    - the null check is `== null`;
+    - cards say "Action 3";
+    - actions get no web label;
+    - the retry policy is set per write;
+    - `company_inactive` has its own copy;
+    - "Created" is null-safe;
+    - controls are disabled during Apply-all;
+    - the stale dialog shows the stored reason before "Compare with now";
+    - `document.title` is plain text;
+    - the prod nav note.
