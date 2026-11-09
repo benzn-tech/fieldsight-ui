@@ -56,7 +56,9 @@
     });
   }
 
-  /* The previews that really overlap the topic window. */
+  /* Every preview's real span (all), and those that overlap the topic window
+     (overlap: the Video button). The bar seeks and dims over all of them, so a
+     press beside the topic on real video plays it rather than say there is none. */
   function spansFor(videos, props) {
     var P = tp();
     return Promise.all(P.probeTargets(videos).map(function (v) {
@@ -64,7 +66,8 @@
     })).then(function (pairs) {
       var durations = {};
       pairs.forEach(function (p) { if (p[1]) durations[p[0]] = p[1]; });
-      return P.overlapping(P.videoSpans(videos, durations), toSec(props.start), toSec(props.end));
+      var all = P.videoSpans(videos, durations);
+      return { all: all, overlap: P.overlapping(all, toSec(props.start), toSec(props.end)) };
     });
   }
 
@@ -254,12 +257,21 @@
     var s_seekClock = React.useState(null); var seekClock = s_seekClock[0], setSeekClock = s_seekClock[1];
     var s_peaks = React.useState({}); var peaks = s_peaks[0], setPeaks = s_peaks[1];
 
+    var s_vidAt = React.useState(-1); var vidAt = s_vidAt[0], setVidAt = s_vidAt[1];
+
     var audioRef = React.useRef(null);
     var fetchedAt = React.useRef(0);
     var pending = React.useRef(null);     /* { offset, resume } waiting for metadata */
     var loadedIndex = React.useRef(-1);
     var retried = React.useRef(false);
     var widened = React.useRef(false);
+    /* The host video (spec 2026-11-10 §6.3): video mode on a topic with audio. */
+    var videoRef = React.useRef(null);
+    var wrapRef = React.useRef(null);
+    var vidIndex = React.useRef(-1);      /* index into load.allSpans */
+    var vidPending = React.useRef(null);  /* { offset, resume, request } waiting for metadata */
+    var vidRetried = React.useRef(false);
+    var allSpansRef = React.useRef([]); allSpansRef.current = load.allSpans || [];
 
     var turns = useStore(store, function (s) { return s.turns; });
     /* The chips' colour function over the chips' own array (store.turns). */
@@ -268,6 +280,11 @@
     var timeline = React.useMemo(function () { return P.buildTimeline(load.segments); }, [load.segments]);
     var timelineRef = React.useRef(timeline); timelineRef.current = timeline;
     var modeRef = React.useRef(mode); modeRef.current = mode;
+    /* Gaps in video coverage, dimmed on the bar in video mode. */
+    var gaps = React.useMemo(function () { return P.uncovered(timeline, load.allSpans || []); }, [timeline, load.allSpans]);
+    var hasVideo = load.spans !== null && load.spans.length > 0;
+    /* With audio, video mode uses this player's own <video> and bar. */
+    var hostVideo = hasVideo && mode === 'video' && timeline.items.length > 0;
 
     function fetchAudio(startOverride) {
       return window.FS.api.audio.getAudioSegments({
@@ -275,26 +292,32 @@
       }).then(function (res) { fetchedAt.current = Date.now(); return (res && res.segments) || []; });
     }
 
+    function fetchVideos() {
+      return window.FS.api.video.getVideoSegments({ date: props.date, user: props.user, start: props.start, end: props.end })
+        .then(function (res) { return ((res && res.videos) || []).filter(function (v) { return v.is_preview; }); });
+    }
+
     /* First load. The bar shows its real length before anything plays. */
     React.useEffect(function () {
       var cancelled = false;
       Promise.all([
         fetchAudio().catch(function () { return null; }),
-        window.FS.api.video.getVideoSegments({ date: props.date, user: props.user, start: props.start, end: props.end })
-          .then(function (res) { return ((res && res.videos) || []).filter(function (v) { return v.is_preview; }); })
-          .catch(function () { return []; }),
+        fetchVideos().catch(function () { return []; }),
       ]).then(function (r) {
         if (cancelled) return;
         var segs = r[0];
         var videos = r[1];
-        setLoad({ status: segs === null ? 'error' : 'ok', segments: segs || [], videos: videos, spans: videos.length ? null : [] });
+        setLoad({
+          status: segs === null ? 'error' : 'ok', segments: segs || [], videos: videos,
+          spans: videos.length ? null : [], allSpans: [],
+        });
         var t = P.buildTimeline(segs || []);
         var startSec = toSec(props.start);
         setPos(startSec === null ? 0 : P.clockToPos(t, startSec));
         /* The button appears late rather than wrongly. */
         if (videos.length) {
-          spansFor(videos, props).then(function (spans) {
-            if (!cancelled) setLoad(function (l) { return Object.assign({}, l, { spans: spans }); });
+          spansFor(videos, props).then(function (got) {
+            if (!cancelled) setLoad(function (l) { return Object.assign({}, l, { spans: got.overlap, allSpans: got.all }); });
           });
         }
       });
@@ -305,6 +328,21 @@
         if (el) { try { el.pause(); el.removeAttribute('src'); el.load(); } catch (_) { /* gone */ } }
       };
     }, [props.date, props.user, props.start, props.end]);
+
+    /* The host video stops explicitly when video mode ends or the topic closes.
+       Captured on mount: React has detached the ref by the time this runs. */
+    React.useEffect(function () {
+      if (!hostVideo) return undefined;
+      var mounted = videoRef.current;
+      return function () {
+        vidIndex.current = -1;
+        vidPending.current = null;
+        var d = window.document;
+        if (d.fullscreenElement && d.exitFullscreen) { try { d.exitFullscreen(); } catch (_) { /* not ours */ } }
+        var v = videoRef.current || mounted;
+        if (v) { try { v.pause(); v.removeAttribute('src'); v.load(); } catch (_) { /* gone */ } }
+      };
+    }, [hostVideo]);
 
     /* Audio filters a batch on its stitched length and transcripts on its real
        span, so a line can name a file this list left out. Ask once more, from that
@@ -389,10 +427,60 @@
       }
     }
 
+    /* Video mode on a topic with audio. Read from refs: the transcript's
+       handlers are registered once. */
+    function hosting() { return modeRef.current === 'video' && timelineRef.current.items.length > 0; }
+
+    function loadVideo(index, offset, resume, request) {
+      var v = videoRef.current;
+      var span = allSpansRef.current[index];
+      if (!v || !span) return;
+      setError(null);
+      vidIndex.current = index;
+      setVidAt(index);
+      vidPending.current = { offset: offset, resume: resume, request: request };
+      v.src = span.url;
+      v.load();
+    }
+
+    /* A clock moment in the host video, or the existing no-video path. */
+    function seekVideoClock(clock, resume, request) {
+      var v = videoRef.current;
+      var at = typeof clock === 'number' ? P.videoTarget(allSpansRef.current, clock) : null;
+      if (!at) { onNoVideoMoment(request); return; }
+      if (!v) return;
+      if (at.index === vidIndex.current && !vidPending.current) {
+        if (v.duration && at.offset > v.duration) { onNoVideoMoment(request); return; }
+        v.currentTime = at.offset;
+        if (resume) start(v);
+        return;
+      }
+      loadVideo(at.index, at.offset, resume, request);
+    }
+
+    /* A bar position. In video mode the clock comes from the turn under the
+       press (activeTurn there is clock-derived), then the span lookup. */
+    function seekBar(p, resume) {
+      if (!hosting()) { seekPos(p, resume); return; }
+      var tl = timelineRef.current;
+      var i = P.turnAt(store.getState().turns, timelineRef.current, p);
+      var clock = P.clockAt(tl, p, i === null ? null : store.getState().turns[i]);
+      setPos(Math.max(0, Math.min(Number(p) || 0, tl.total)));
+      seekVideoClock(clock, resume, { pos: p, resume: resume });
+    }
+
     function togglePlay() {
+      store.set({ wantTurns: true });
+      if (hosting()) {
+        var v = videoRef.current;
+        if (!v) return;
+        if (playing) { v.pause(); return; }
+        if (vidIndex.current < 0 || vidPending.current) { seekBar(pos, true); return; }
+        start(v);
+        return;
+      }
       var el = audioRef.current;
       if (!el) return;
-      store.set({ wantTurns: true });
       if (playing) { el.pause(); return; }
       if (loadedIndex.current < 0 || pending.current) { seekPos(pos, true); return; }
       start(el);
@@ -406,6 +494,7 @@
             || (modeRef.current === 'video' && typeof turn.start === 'number');
         },
         seekToTurn: function (turn) {
+          if (hosting()) { seekVideoClock(turn.start, true, { turn: turn }); return; }
           if (modeRef.current === 'video') { setSeekClock({ sec: turn.start, turn: turn, nonce: Date.now() }); return; }
           var at = P.turnTarget(timelineRef.current, turn);
           if (at) seekPos(P.position(timelineRef.current, at.index, at.offset), true);
@@ -414,27 +503,60 @@
       return function () { store.setHandlers(null); };
     }, [store]);
 
+    /* Entering video mode: go to the moment the audio was at, once the host
+       video has mounted. */
+    React.useEffect(function () {
+      if (!hostVideo || !seekClock) return;
+      seekVideoClock(seekClock.sec, !!seekClock.resume, { turn: seekClock.turn, pos: seekClock.pos, resume: seekClock.resume });
+    }, [hostVideo, seekClock && seekClock.nonce]);
+
+    function stopFlag() { setPlaying(false); store.set({ playing: false }); }
+
+    /* One playing flag: the outgoing element is paused in both directions, and
+       only the current mode's element reports play and pause. */
     function switchMode(next) {
       if (next === mode) return;
       var state = store.getState();
       var turn = state.activeTurn === null ? null : state.turns[state.activeTurn];
+      var was = playing;
+      modeRef.current = next;
       if (next === 'video') {
         /* The transcript has to be there to follow the video and to jump from. */
         store.set({ wantTurns: true });
         if (audioRef.current) audioRef.current.pause();
         var clock = P.clockAt(timeline, pos, turn);
-        setSeekClock(clock === null ? null : { sec: clock, nonce: Date.now() });
+        setSeekClock(clock === null ? null : { sec: clock, resume: was, pos: pos, nonce: Date.now() });
+        stopFlag();
+      } else {
+        if (videoRef.current) videoRef.current.pause();
+        stopFlag();
+        /* The video wrote pos as it played; the audio resumes from there. */
+        if (timeline.items.length) seekPos(pos, was);
       }
       setMode(next);
     }
 
-    /* The moment a pressed line asks for is not in any video. */
+    /* The moment asked for is not in any video: audio at that moment, and say so. */
     function onNoVideoMoment(request) {
+      modeRef.current = 'audio';
+      if (videoRef.current) videoRef.current.pause();
       setMode('audio');
       var toast = window.FS && window.FS.toast;
       if (toast) toast.show({ message: 'No video at this moment', tone: 'info', duration: 3000 });
       var at = request && request.turn ? P.turnTarget(timelineRef.current, request.turn) : null;
-      if (at) seekPos(P.position(timelineRef.current, at.index, at.offset), true);
+      if (at) { seekPos(P.position(timelineRef.current, at.index, at.offset), true); return; }
+      if (request && typeof request.pos === 'number') {
+        stopFlag();
+        seekPos(request.pos, request.resume !== false);
+      }
+    }
+
+    function toggleFullscreen() {
+      var d = window.document;
+      if (d.fullscreenElement) { if (d.exitFullscreen) d.exitFullscreen(); return; }
+      if (!wrapRef.current || !wrapRef.current.requestFullscreen) return;
+      var r = wrapRef.current.requestFullscreen();
+      if (r && r.catch) r.catch(function () { /* refused; the player stays as it was */ });
     }
 
     if (load.status === 'loading') {
@@ -443,7 +565,6 @@
     if (load.status === 'error') {
       return h('div', { className: 'fs-topic-player fs-topic-player--quiet' }, 'Could not load audio.');
     }
-    var hasVideo = load.spans !== null && load.spans.length > 0;
     if (!timeline.items.length && !hasVideo) {
       if (load.spans === null && load.videos.length) {
         return h('div', { className: 'fs-topic-player fs-topic-player--quiet' }, 'Loading recording…');
@@ -462,11 +583,21 @@
       right: P.clockToPos(timeline, rangeEnd) / timeline.total,
     } : null;
     var VideoPlayer = window.FieldSight.VideoPlayer;
-    /* A topic with video and no audio has nothing else to show. */
-    var showVideo = !!VideoPlayer && hasVideo && (mode === 'video' || !timeline.items.length);
+    /* A topic with video and no audio has nothing else to show: VideoPlayer,
+       native controls, as before. With audio, video mode is hostVideo. */
+    var showVideo = !!VideoPlayer && hasVideo && !timeline.items.length;
+    var span = hostVideo ? (load.allSpans || [])[vidAt] : null;
 
     function readPos() {
       if (drag !== null) return drag;
+      if (hostVideo) {
+        var v = videoRef.current;
+        var cur = allSpansRef.current[vidIndex.current];
+        if (playing && v && cur && !vidPending.current) {
+          return P.videoClockToPos(timeline, turns, cur.span_start + v.currentTime);
+        }
+        return pos;
+      }
       var el = audioRef.current;
       if (playing && el && !pending.current && loadedIndex.current >= 0) {
         return P.position(timeline, loadedIndex.current, el.currentTime);
@@ -474,7 +605,7 @@
       return pos;
     }
 
-    return h('div', { className: 'fs-topic-player' },
+    return h('div', { ref: wrapRef, className: 'fs-topic-player' + (hostVideo ? ' fs-topic-player--video' : '') },
       h('audio', {
         ref: audioRef,
         preload: 'metadata',
@@ -486,11 +617,17 @@
           try { el.currentTime = w.offset; } catch (_) { /* stays at 0 */ }
           if (w.resume) start(el);
         },
-        onPlay: function () { retried.current = false; setPlaying(true); store.set({ playing: true }); },
-        onPause: function () { setPlaying(false); store.set({ playing: false }); },
+        onPlay: function () {
+          if (modeRef.current !== 'audio') return;
+          retried.current = false; setPlaying(true); store.set({ playing: true });
+        },
+        onPause: function () {
+          if (modeRef.current !== 'audio') return;
+          setPlaying(false); store.set({ playing: false });
+        },
         onTimeUpdate: function () {
           var el = audioRef.current;
-          if (!el || pending.current || loadedIndex.current < 0) return;
+          if (!el || pending.current || loadedIndex.current < 0 || modeRef.current !== 'audio') return;
           var p = P.position(timelineRef.current, loadedIndex.current, el.currentTime);
           setPos(p);
           publishActive(p);
@@ -520,6 +657,76 @@
         },
       }),
 
+      /* No native controls: the bar and the row below are the controls. */
+      hostVideo ? h('div', { className: 'fs-topic-player__screen' },
+        h('video', {
+          ref: videoRef,
+          preload: 'metadata',
+          playsInline: true,
+          className: 'fs-topic-player__video',
+          onLoadedMetadata: function () {
+            var v = videoRef.current, w = vidPending.current;
+            if (!v) return;
+            setRate(v, speed);   /* a new src resets the rate */
+            if (!w) return;
+            vidPending.current = null;
+            /* Files do not cover every moment. Say so rather than play the wrong one. */
+            if (v.duration && w.offset > v.duration) { onNoVideoMoment(w.request); return; }
+            try { v.currentTime = w.offset; } catch (_) { /* stays at 0 */ }
+            if (w.resume) start(v);
+          },
+          onPlay: function () {
+            if (modeRef.current !== 'video') return;
+            vidRetried.current = false; setPlaying(true); store.set({ playing: true });
+          },
+          onPause: function () {
+            if (modeRef.current !== 'video') return;
+            setPlaying(false); store.set({ playing: false });
+          },
+          onTimeUpdate: function () {
+            var v = videoRef.current;
+            var cur = allSpansRef.current[vidIndex.current];
+            if (!v || !cur || vidPending.current || modeRef.current !== 'video') return;
+            var at = cur.span_start + v.currentTime;
+            var list = store.getState().turns;
+            store.set({ activeTurn: P.turnAtClock(list, at) });
+            setPos(P.videoClockToPos(timelineRef.current, list, at));
+          },
+          /* On into the next span, over any gap, as audio does across files. */
+          onEnded: function () {
+            var next = vidIndex.current + 1;
+            if (next < allSpansRef.current.length) loadVideo(next, 0, true, { pos: pos });
+            else stopFlag();
+          },
+          /* Links expire after 15 minutes: refetch once, match by filename. */
+          onError: function () {
+            var v = videoRef.current;
+            var cur = allSpansRef.current[vidIndex.current];
+            if (!v || !v.getAttribute('src') || !cur) return;
+            var w = vidPending.current || { offset: v.currentTime, resume: playing, request: { pos: pos } };
+            vidPending.current = null;
+            if (vidRetried.current) { stopFlag(); setError('Could not load video.'); return; }
+            vidRetried.current = true;
+            fetchVideos().then(function (list) {
+              var byName = {};
+              list.forEach(function (x) { byName[x.filename] = x.url; });
+              if (!byName[cur.filename]) { setError('Could not load video.'); return; }
+              setLoad(function (l) {
+                return Object.assign({}, l, { allSpans: (l.allSpans || []).map(function (s) {
+                  return byName[s.filename] ? Object.assign({}, s, { url: byName[s.filename] }) : s;
+                }) });
+              });
+              vidPending.current = w;
+              v.src = byName[cur.filename];
+              v.load();
+            }).catch(function () { setError('Could not load video.'); });
+          },
+        }),
+        span ? h('div', { className: 'fs-topic-player__meta' },
+          h('span', { className: 'fs-topic-player__meta-time' }, span.time_label || ''),
+          h('span', { className: 'fs-topic-player__meta-file' }, span.filename)) : null
+      ) : null,
+
       showVideo
         ? h(VideoPlayer, {
             date: props.date, user: props.user, start: props.start, end: props.end,
@@ -536,14 +743,15 @@
             h('div', { className: 'fs-topic-player__track' },
               h(Waveform, {
                 timeline: timeline, peaks: peaks, marks: marks, shade: shade, colors: colors, dark: dark,
+                gaps: hostVideo ? gaps : null,
                 playing: playing, shown: shown, getPos: readPos,
               }),
               h('input', {
                 type: 'range', className: 'fs-topic-player__seek', 'aria-label': 'Position in this recording',
                 min: 0, max: timeline.total, step: 0.1, value: Math.min(shown, timeline.total),
                 onChange: function (e) { setDrag(Number(e.target.value)); },
-                onPointerUp: function (e) { setDrag(null); seekPos(Number(e.target.value), playing); },
-                onKeyUp: function (e) { setDrag(null); seekPos(Number(e.target.value), playing); },
+                onPointerUp: function (e) { setDrag(null); seekBar(Number(e.target.value), playing); },
+                onKeyUp: function (e) { setDrag(null); seekBar(Number(e.target.value), playing); },
               })
             )
           ),
@@ -551,15 +759,16 @@
       /* The same row in both modes, so the way back is always where it was. */
       h('div', { className: 'fs-topic-player__controls' },
         showVideo ? null : h('button', { type: 'button', className: 'fs-topic-player__skip', 'aria-label': 'Back 10 seconds',
-          onClick: function () { seekPos(pos - 10, playing); } }, '-10'),
+          onClick: function () { seekBar(pos - 10, playing); } }, '-10'),
         showVideo ? null : h('button', { type: 'button', className: 'fs-topic-player__skip', 'aria-label': 'Forward 10 seconds',
-          onClick: function () { seekPos(pos + 10, playing); } }, '+10'),
+          onClick: function () { seekBar(pos + 10, playing); } }, '+10'),
         showVideo ? null : h('button', {
           type: 'button', className: 'fs-topic-player__speed', 'aria-label': 'Playback speed',
           onClick: function () {
             var next = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length];
             setSpeed(next);
             if (audioRef.current) setRate(audioRef.current, next);
+            if (videoRef.current) setRate(videoRef.current, next);
           },
         }, speed + 'x'),
         showVideo ? null : h('span', { className: 'fs-topic-player__time' },
@@ -573,12 +782,20 @@
               onClick: function () { switchMode(m); },
             }, m === 'audio' ? 'Audio' : 'Video');
           })
-        ) : null
+        ) : null,
+        /* The whole player, so the bar and controls stay usable. */
+        hostVideo && window.document.fullscreenEnabled ? h('button', {
+          type: 'button', className: 'fs-topic-player__skip fs-topic-player__fullscreen',
+          'aria-label': 'Full screen', title: 'Full screen', onClick: toggleFullscreen,
+        }, h('svg', { viewBox: '0 0 24 24', width: 14, height: 14, 'aria-hidden': true, fill: 'none',
+          stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' },
+          h('path', { d: 'M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5' }))) : null
       ),
 
       error ? h('div', { className: 'fs-topic-player__error', role: 'alert' }, error,
         ' ', h('button', { type: 'button', className: 'fs-settings__link-btn', onClick: function () {
-          retried.current = false; setError(null); seekPos(pos, true);
+          retried.current = false; vidRetried.current = false; vidIndex.current = -1;
+          setError(null); seekBar(pos, true);
         } }, 'Retry')) : null
     );
   }

@@ -191,7 +191,8 @@ test('the Video button waits for the real spans, and a video-only topic says it 
   assert.match(src, /spans: videos\.length \? null : \[\]/, 'no video means no wait');
   assert.match(src, /load\.spans === null && load\.videos\.length\) \{\s*return h\('div', \{ className: 'fs-topic-player fs-topic-player--quiet' \}, 'Loading recording…'\)/);
   assert.match(src, /videos: load\.spans/, 'VideoPlayer gets the overlapping spans');
-  assert.match(src, /P\.overlapping\(P\.videoSpans\(videos, durations\), toSec\(props\.start\), toSec\(props\.end\)\)/);
+  assert.match(src, /var all = P\.videoSpans\(videos, durations\);\s*return \{ all: all, overlap: P\.overlapping\(all, toSec\(props\.start\), toSec\(props\.end\)\) \}/);
+  assert.match(src, /spans: got\.overlap, allSpans: got\.all/, 'the button reads overlap; the host bar seeks over all');
 });
 
 test('a probe reads metadata only, gives up, and lets the file go', () => {
@@ -223,4 +224,40 @@ test('the bar follows the theme: data-theme observed, observer released', () => 
   assert.match(hook, /attributeFilter: \['data-theme'\]/);
   assert.match(hook, /disconnect\(\)/);
   assert.match(src, /props\.dark, props\.colors, props\.gaps\]/, 'a theme change redraws');
+});
+
+/* ---- one bar for video ---- */
+test('the host video has no native controls; VideoPlayer keeps its own', () => {
+  const src = player();
+  assert.strictEqual((src.match(/h\('video'/g) || []).length, 1);
+  const el = src.slice(src.indexOf("h('video'"), src.indexOf('}),', src.indexOf("h('video'")));
+  assert.doesNotMatch(el, /controls/);
+  assert.match(el, /preload: 'metadata'/);
+  assert.match(readSrc('scripts', 'composites', 'video-player.js'), /controls:\s*true/);
+});
+
+test('one playing flag: each element speaks only in its own mode, and switching pauses the other', () => {
+  const src = player();
+  assert.match(src, /onPlay: function \(\) \{\s*if \(modeRef\.current !== 'audio'\) return;/);
+  assert.match(src, /onPlay: function \(\) \{\s*if \(modeRef\.current !== 'video'\) return;/);
+  const sw = src.slice(src.indexOf('function switchMode'), src.indexOf('function onNoVideoMoment'));
+  assert.match(sw, /audioRef\.current\.pause\(\)/);
+  assert.match(sw, /videoRef\.current\.pause\(\)/);
+});
+
+test('pressing the bar in video mode asks for the turn under the press, not the active one', () => {
+  const src = player();
+  const seek = src.slice(src.indexOf('function seekBar'), src.indexOf('function seekBar') + 700);
+  assert.match(seek, /P\.turnAt\(store\.getState\(\)\.turns, timelineRef\.current, p\)/);
+  assert.doesNotMatch(seek, /activeTurn/);
+  assert.match(src, /P\.videoClockToPos\(/, 'the playhead is turn-anchored');
+  assert.match(src, /setRate\(v, speed\)/, 'a new src keeps the speed');
+});
+
+test('fullscreen takes the whole player, and only where the browser allows it', () => {
+  const src = player();
+  assert.match(src, /wrapRef\.current\.requestFullscreen\(\)/);
+  assert.match(src, /document\.fullscreenEnabled/);
+  assert.match(src, /ref: wrapRef, className: 'fs-topic-player'/);
+  assert.match(readSrc('styles', 'composites.css'), /\.fs-topic-player:fullscreen \{/);
 });

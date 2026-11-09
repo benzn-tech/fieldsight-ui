@@ -2574,6 +2574,54 @@
 .fs-topic-player__time + .fs-topic-player__modes { margin-left: 8px; }
 .fs-topic-player__mode--on { background: var(--surface-topic-selected); font-weight: var(--font-weight-semibold); }
 .fs-topic-player__error { flex: 1 1 100%; font-size: 12px; color: var(--text-danger); }
+/* Video mode with audio (spec 2026-11-10 §6.3): the player's own video, no native
+   controls; the bar and the row below drive it. */
+.fs-topic-player__screen {
+  flex: 1 1 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fs-topic-player__video {
+  display: block;
+  width: 100%;
+  max-height: min(240px, 34vh);
+  background: #000;
+  border-radius: var(--radius-md);
+}
+.fs-topic-player__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.fs-topic-player__meta-time { font-family: var(--font-mono); font-size: 12px; color: var(--text-primary); }
+.fs-topic-player__meta-file { font-family: var(--font-mono); word-break: break-all; }
+.fs-topic-player__fullscreen { display: inline-flex; align-items: center; justify-content: center; }
+/* Fullscreen is the whole player: video fills the free height, the bar and
+   controls stay underneath. */
+.fs-topic-player:fullscreen {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  justify-content: flex-end;
+  padding: 16px 24px;
+  border: none;
+  background: var(--surface-panel);
+}
+.fs-topic-player:fullscreen .fs-topic-player__screen { flex: 1 1 auto; min-height: 0; }
+.fs-topic-player:fullscreen .fs-topic-player__video {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
+}
+.fs-topic-player:fullscreen .fs-topic-player__main,
+.fs-topic-player:fullscreen .fs-topic-player__controls { flex: none; }
 
 .fs-transcript-list__chip {
   display: inline-flex;

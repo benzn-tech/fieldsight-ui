@@ -225,7 +225,8 @@ test('the player has no blank row: the line under it is gone', () => {
 
 test('video cannot push the tabs off a short window', () => {
   const css = readCss();
-  assert.match(css, /fs-video-player__media \{[^}]*max-height: min\(240px, \d+vh\)/);
+  assert.match(css, /fs-video-player__media \{[^}]*max-height: min\(240px, \d+vh\)/, 'video-only topics');
+  assert.match(css, /\.fs-topic-player__video \{[^}]*max-height: min\(240px, \d+vh\)/, 'the host video (spec 2026-11-10)');
   const detail = css.slice(css.indexOf('.fs-topic-detail {'));
   assert.match(detail.slice(0, detail.indexOf('}')), /overflow-y: auto/);
   const body = css.slice(css.indexOf('.fs-topic-detail__body {'));
@@ -237,12 +238,16 @@ test('the way back from video is outside the video branch, and video loads the t
   const row = src.indexOf("className: 'fs-topic-player__controls'");
   assert.ok(row > 0 && row < src.indexOf("className: 'fs-topic-player__mode'"));
   assert.ok(src.indexOf('h(VideoPlayer') < row, 'the row follows the video, in both modes');
+  assert.ok(src.indexOf("h('video'") > 0 && src.indexOf("h('video'") < row, 'the host video sits before the row too');
   assert.match(src.slice(src.indexOf('function switchMode')), /store\.set\(\{ wantTurns: true \}\)/);
-  assert.match(src, /!timeline\.items\.length\)/, 'video with no audio still shows the video');
+  /* Spec 2026-11-10 §6.3: VideoPlayer is now only the no-audio path; with audio the host video plays. */
+  assert.match(src, /var showVideo = !!VideoPlayer && hasVideo && !timeline\.items\.length;/, 'video with no audio still shows the video');
 });
 
 test('leaving video stops it, so two recordings never sound together', () => {
   assert.match(read('composites', 'video-player.js'), /return function \(\) \{\s*var el = videoEl\.current;\s*if \(el\) \{ try \{ el\.pause\(\)/);
+  /* The host video (spec 2026-11-10 §6.3) is stopped the same way. */
+  assert.match(read('composites', 'topic-player.js'), /var v = videoRef\.current \|\| mounted;\s*if \(v\) \{ try \{ v\.pause\(\); v\.removeAttribute\('src'\); v\.load\(\); \}/);
 });
 
 /* ---- the waveform ---- */
