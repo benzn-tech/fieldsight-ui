@@ -105,7 +105,72 @@
         hit = { index: i, offset: clockSec - v.video_start_sec };
       }
     });
-    return hit;
+    /* A span end refuses a later moment now, not after metadata loads. */
+    var end = hit ? videos[hit.index].span_end : null;
+    return (typeof end === 'number' && clockSec > end) ? null : hit;
+  }
+
+  /* ---- Real video spans (spec 2026-11-10 §6.1) ----
+     The backend assumes every file lasts 600 s; previews are ~30 s chunks. A
+     span is closed by the next chunk of the same session when it starts within
+     SUCCESSOR_SEC, else by a probed duration, else it keeps the 600 s
+     assumption: a failed check shows a video, it never hides one. */
+  var CHUNK_TOKENS_RE = /_sid([0-9a-f]{32})_c(\d{4,})(?:[._]|$)/;
+  var SUCCESSOR_SEC = 45;      /* 1.5 x the measured 30 s chunk */
+  var ASSUMED_SPAN_SEC = 600;  /* the backend's assumption */
+  var PROBE_CAP = 6;
+
+  function sessionOf(filename) {
+    var m = CHUNK_TOKENS_RE.exec(String(filename || ''));
+    return m ? m[1] : null;
+  }
+
+  /* Successor = the next entry IN THE LIST (ordered by video_start_sec) with the
+     same non-null sid, starting within SUCCESSOR_SEC. */
+  function successorStart(videos, i) {
+    var v = videos[i];
+    var sid = sessionOf(v.filename);
+    if (!sid || typeof v.video_start_sec !== 'number') return null;
+    for (var j = i + 1; j < videos.length; j++) {
+      if (sessionOf(videos[j].filename) !== sid) continue;
+      var s = videos[j].video_start_sec;
+      return (typeof s === 'number' && s - v.video_start_sec <= SUCCESSOR_SEC) ? s : null;
+    }
+    return null;
+  }
+
+  /* Entries the successor rule leaves open, which a probe could close. */
+  function probeTargets(videos, cap) {
+    var list = videos || [];
+    var out = [];
+    list.forEach(function (v, i) { if (successorStart(list, i) === null) out.push(v); });
+    return out.slice(0, typeof cap === 'number' ? cap : PROBE_CAP);
+  }
+
+  function videoSpans(videos, durations) {
+    var list = videos || [];
+    var d = durations || {};
+    return list.map(function (v, i) {
+      var start = typeof v.video_start_sec === 'number' ? v.video_start_sec : null;
+      var end = successorStart(list, i);
+      var known = end !== null;
+      if (!known && start !== null && Number(d[v.filename]) > 0) {
+        end = start + Number(d[v.filename]);
+        known = true;
+      }
+      if (!known) end = start === null ? null : start + ASSUMED_SPAN_SEC;
+      return Object.assign({}, v, { span_start: start, span_end: end, span_known: known });
+    });
+  }
+
+  /* Spans that share time with [startSec, endSec). A null bound is open. A span
+     with no clock is kept: when unsure, show it. */
+  function overlapping(spans, startSec, endSec) {
+    return (spans || []).filter(function (s) {
+      if (typeof s.span_start !== 'number' || typeof s.span_end !== 'number') return true;
+      return (startSec === null || startSec === undefined || s.span_end > startSec)
+        && (endSec === null || endSec === undefined || s.span_start < endSec);
+    });
   }
 
   /* Clock -> bar position. Approximate inside a batch, so it only ever sets a
@@ -215,6 +280,7 @@
   var api = {
     stem: stem, buildTimeline: buildTimeline, locate: locate, position: position,
     turnTarget: turnTarget, turnAt: turnAt, turnAtClock: turnAtClock, videoTarget: videoTarget,
+    sessionOf: sessionOf, probeTargets: probeTargets, videoSpans: videoSpans, overlapping: overlapping,
     clockToPos: clockToPos, clockAt: clockAt, fmtClock: fmtClock, fmtLength: fmtLength,
     activityMarks: activityMarks, missingFileStart: missingFileStart, mergeSegments: mergeSegments,
     createStore: createStore,
