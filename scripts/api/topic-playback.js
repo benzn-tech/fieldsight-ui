@@ -105,7 +105,72 @@
         hit = { index: i, offset: clockSec - v.video_start_sec };
       }
     });
-    return hit;
+    /* A span end refuses a later moment now, not after metadata loads. */
+    var end = hit ? videos[hit.index].span_end : null;
+    return (typeof end === 'number' && clockSec > end) ? null : hit;
+  }
+
+  /* ---- Real video spans (spec 2026-11-10 §6.1) ----
+     The backend assumes every file lasts 600 s; previews are ~30 s chunks. A
+     span is closed by the next chunk of the same session when it starts within
+     SUCCESSOR_SEC, else by a probed duration, else it keeps the 600 s
+     assumption: a failed check shows a video, it never hides one. */
+  var CHUNK_TOKENS_RE = /_sid([0-9a-f]{32})_c(\d{4,})(?:[._]|$)/;
+  var SUCCESSOR_SEC = 45;      /* 1.5 x the measured 30 s chunk */
+  var ASSUMED_SPAN_SEC = 600;  /* the backend's assumption */
+  var PROBE_CAP = 6;
+
+  function sessionOf(filename) {
+    var m = CHUNK_TOKENS_RE.exec(String(filename || ''));
+    return m ? m[1] : null;
+  }
+
+  /* Successor = the next entry IN THE LIST (ordered by video_start_sec) with the
+     same non-null sid, starting within SUCCESSOR_SEC. */
+  function successorStart(videos, i) {
+    var v = videos[i];
+    var sid = sessionOf(v.filename);
+    if (!sid || typeof v.video_start_sec !== 'number') return null;
+    for (var j = i + 1; j < videos.length; j++) {
+      if (sessionOf(videos[j].filename) !== sid) continue;
+      var s = videos[j].video_start_sec;
+      return (typeof s === 'number' && s - v.video_start_sec <= SUCCESSOR_SEC) ? s : null;
+    }
+    return null;
+  }
+
+  /* Entries the successor rule leaves open, which a probe could close. */
+  function probeTargets(videos, cap) {
+    var list = videos || [];
+    var out = [];
+    list.forEach(function (v, i) { if (successorStart(list, i) === null) out.push(v); });
+    return out.slice(0, typeof cap === 'number' ? cap : PROBE_CAP);
+  }
+
+  function videoSpans(videos, durations) {
+    var list = videos || [];
+    var d = durations || {};
+    return list.map(function (v, i) {
+      var start = typeof v.video_start_sec === 'number' ? v.video_start_sec : null;
+      var end = successorStart(list, i);
+      var known = end !== null;
+      if (!known && start !== null && Number(d[v.filename]) > 0) {
+        end = start + Number(d[v.filename]);
+        known = true;
+      }
+      if (!known) end = start === null ? null : start + ASSUMED_SPAN_SEC;
+      return Object.assign({}, v, { span_start: start, span_end: end, span_known: known });
+    });
+  }
+
+  /* Spans that share time with [startSec, endSec). A null bound is open. A span
+     with no clock is kept: when unsure, show it. */
+  function overlapping(spans, startSec, endSec) {
+    return (spans || []).filter(function (s) {
+      if (typeof s.span_start !== 'number' || typeof s.span_end !== 'number') return true;
+      return (startSec === null || startSec === undefined || s.span_end > startSec)
+        && (endSec === null || endSec === undefined || s.span_start < endSec);
+    });
   }
 
   /* Clock -> bar position. Approximate inside a batch, so it only ever sets a
@@ -119,6 +184,41 @@
       }
     }
     return timeline.total;
+  }
+
+  /* Video clock -> bar position (spec 2026-11-10 §6.3). The turn being spoken
+     joins by file plus offset, so the playhead sits on the block of the row the
+     transcript highlights. In silence, clockToPos, which runs ahead inside a
+     batch by the bridged gaps: shading-grade only. */
+  function videoClockToPos(timeline, turns, clock) {
+    var i = turnAtClock(turns, clock);
+    var t = i === null ? null : turns[i];
+    var at = t ? turnTarget(timeline, t) : null;
+    if (at) {
+      var d = Number(t.duration) || 0;
+      return position(timeline, at.index, at.offset + Math.max(0, Math.min(d, clock - t.start)));
+    }
+    return clockToPos(timeline, clock);
+  }
+
+  /* Bar fractions no video span covers, for the dim layer. Through clockToPos,
+     so approximate inside a batch. */
+  function uncovered(timeline, spans) {
+    var total = timeline.total;
+    if (!total) return [];
+    var covered = (spans || []).filter(function (s) {
+      return typeof s.span_start === 'number' && typeof s.span_end === 'number';
+    }).map(function (s) {
+      return [clockToPos(timeline, s.span_start), clockToPos(timeline, s.span_end)];
+    }).filter(function (r) { return r[1] > r[0]; }).sort(function (a, b) { return a[0] - b[0]; });
+    var gaps = [];
+    var at = 0;
+    covered.forEach(function (r) {
+      if (r[0] > at) gaps.push({ left: at / total, right: r[0] / total });
+      at = Math.max(at, r[1]);
+    });
+    if (at < total) gaps.push({ left: at / total, right: 1 });
+    return gaps;
   }
 
   /* Bar position -> clock, for display. A turn knows its own clock exactly, so
@@ -146,8 +246,8 @@
     return Math.floor(s / 60) + ':' + (r < 10 ? '0' + r : r);
   }
 
-  /* Fractions of the bar. A turn that does not join draws nothing. A colour comes
-     only from a confirmed name: a tentative one must not read as a fact. */
+  /* Fractions of the bar. A turn that does not join draws nothing. Each mark
+     carries its speaker LABEL, coloured by speakerColors like the chips. */
   function activityMarks(turns, timeline) {
     if (!timeline.total) return [];
     var marks = [];
@@ -157,10 +257,42 @@
       marks.push({
         left: position(timeline, at.index, at.offset) / timeline.total,
         width: (Number(t.duration) || 0) / timeline.total,
-        name: t.speaker_state === 'confirmed' ? (t.speaker_name || null) : null,
+        speaker: t.speaker,
       });
     });
     return marks;
+  }
+
+  /* ---- Speaker colours (spec 2026-11-10 §6.2) ----
+     One function for the transcript chips and the bar, so they cannot disagree.
+     Mapped by FIRST APPEARANCE of the `speaker` label (never speaker_name) over
+     all turns; six colours, then they wrap. */
+  var SPEAKER_PALETTE = [
+    { fg: '#1E40AF', bg: '#DBEAFE', dark: '#93C5FD' }, /* info */
+    { fg: '#15803D', bg: '#DCFCE7', dark: '#4ADE80' }, /* success */
+    { fg: '#B45309', bg: '#FEF3C7', dark: '#FCD34D' }, /* warning */
+    { fg: '#9A2A13', bg: '#FFE6D5', dark: '#F87171' }, /* accent */
+    { fg: '#6B21A8', bg: '#EDE9FE', dark: '#C084FC' }, /* purple */
+    { fg: '#0F766E', bg: '#CCFBF1', dark: '#2DD4BF' }, /* teal */
+  ];
+
+  function speakerColors(turns) {
+    var out = {};
+    var n = 0;
+    (turns || []).forEach(function (t) {
+      if (!t) return;
+      if (!(t.speaker in out)) { out[t.speaker] = SPEAKER_PALETTE[n % SPEAKER_PALETTE.length]; n += 1; }
+    });
+    return out;
+  }
+
+  /* The bar's swatch, same hue as the chip. Light panel: the chip's text colour
+     (passes 3:1). Dark panel: a mid tone of that hue (`dark`); the chip fills
+     themselves are too alike there (amber vs peach measured 1.08:1, 2026-11-10).
+     The chips keep fg/bg; only the bar reads `dark`. */
+  function swatch(pair, dark) {
+    if (!pair) return null;
+    return dark ? (pair.dark || pair.bg) : pair.fg;
   }
 
   /* Turns whose file the audio listing did not return. Audio filters on a batch's
@@ -215,8 +347,10 @@
   var api = {
     stem: stem, buildTimeline: buildTimeline, locate: locate, position: position,
     turnTarget: turnTarget, turnAt: turnAt, turnAtClock: turnAtClock, videoTarget: videoTarget,
-    clockToPos: clockToPos, clockAt: clockAt, fmtClock: fmtClock, fmtLength: fmtLength,
-    activityMarks: activityMarks, missingFileStart: missingFileStart, mergeSegments: mergeSegments,
+    sessionOf: sessionOf, probeTargets: probeTargets, videoSpans: videoSpans, overlapping: overlapping,
+    clockToPos: clockToPos, clockAt: clockAt, videoClockToPos: videoClockToPos, uncovered: uncovered, fmtClock: fmtClock, fmtLength: fmtLength,
+    activityMarks: activityMarks, SPEAKER_PALETTE: SPEAKER_PALETTE, speakerColors: speakerColors, swatch: swatch,
+    missingFileStart: missingFileStart, mergeSegments: mergeSegments,
     createStore: createStore,
   };
 

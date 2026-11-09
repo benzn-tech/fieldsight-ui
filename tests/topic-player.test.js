@@ -90,15 +90,18 @@ test('clockToPos sets a start in the file holding the moment', () => {
   assert.strictEqual(P.clockToPos(TL, 99999), 452, 'after the last');
 });
 
-test('activity marks: join only, colour only from a confirmed name', () => {
+/* Spec 2026-11-10 §6.2 retired the confirmed-name accent: every mark carries its
+   speaker label, which the chips' colour function maps. */
+test('activity marks: join only, and each carries its speaker label, not a name', () => {
   const marks = P.activityMarks([
-    { source_filename: A + '.json', chunk_start: 0, duration: 45.2, speaker_name: 'Sam', speaker_state: 'confirmed' },
-    { source_filename: A + '.json', chunk_start: 50, duration: 1, speaker_name: 'Lee', speaker_state: 'tentative' },
-    { source_filename: 'gone.json', chunk_start: 0, duration: 9 },
+    { source_filename: A + '.json', chunk_start: 0, duration: 45.2, speaker: 'spk_0', speaker_name: 'Sam', speaker_state: 'confirmed' },
+    { source_filename: A + '.json', chunk_start: 50, duration: 1, speaker: 'spk_1', speaker_name: 'Lee', speaker_state: 'tentative' },
+    { source_filename: 'gone.json', chunk_start: 0, duration: 9, speaker: 'spk_2' },
   ], TL);
   assert.strictEqual(marks.length, 2);
-  assert.strictEqual(marks[0].name, 'Sam');
-  assert.strictEqual(marks[1].name, null);
+  assert.strictEqual(marks[0].speaker, 'spk_0');
+  assert.strictEqual(marks[1].speaker, 'spk_1');
+  assert.ok(!('name' in marks[0]));
   assert.ok(Math.abs(marks[0].width - 0.1) < 1e-9);
 });
 
@@ -222,7 +225,8 @@ test('the player has no blank row: the line under it is gone', () => {
 
 test('video cannot push the tabs off a short window', () => {
   const css = readCss();
-  assert.match(css, /fs-video-player__media \{[^}]*max-height: min\(240px, \d+vh\)/);
+  assert.match(css, /fs-video-player__media \{[^}]*max-height: min\(240px, \d+vh\)/, 'video-only topics');
+  assert.match(css, /\.fs-topic-player__video \{[^}]*max-height: min\(240px, \d+vh\)/, 'the host video (spec 2026-11-10)');
   const detail = css.slice(css.indexOf('.fs-topic-detail {'));
   assert.match(detail.slice(0, detail.indexOf('}')), /overflow-y: auto/);
   const body = css.slice(css.indexOf('.fs-topic-detail__body {'));
@@ -234,12 +238,16 @@ test('the way back from video is outside the video branch, and video loads the t
   const row = src.indexOf("className: 'fs-topic-player__controls'");
   assert.ok(row > 0 && row < src.indexOf("className: 'fs-topic-player__mode'"));
   assert.ok(src.indexOf('h(VideoPlayer') < row, 'the row follows the video, in both modes');
+  assert.ok(src.indexOf("h('video'") > 0 && src.indexOf("h('video'") < row, 'the host video sits before the row too');
   assert.match(src.slice(src.indexOf('function switchMode')), /store\.set\(\{ wantTurns: true \}\)/);
-  assert.match(src, /!timeline\.items\.length\)/, 'video with no audio still shows the video');
+  /* Spec 2026-11-10 §6.3: VideoPlayer is now only the no-audio path; with audio the host video plays. */
+  assert.match(src, /var showVideo = !!VideoPlayer && hasVideo && !timeline\.items\.length;/, 'video with no audio still shows the video');
 });
 
 test('leaving video stops it, so two recordings never sound together', () => {
   assert.match(read('composites', 'video-player.js'), /return function \(\) \{\s*var el = videoEl\.current;\s*if \(el\) \{ try \{ el\.pause\(\)/);
+  /* The host video (spec 2026-11-10 §6.3) is stopped the same way. */
+  assert.match(read('composites', 'topic-player.js'), /var v = videoRef\.current \|\| mounted;\s*if \(v\) \{ try \{ v\.pause\(\); v\.removeAttribute\('src'\); v\.load\(\); \}/);
 });
 
 /* ---- the waveform ---- */
@@ -319,4 +327,31 @@ test('new scripts load, pure modules before the player and the page', () => {
   assert.ok(at('scripts/api/topic-wave.js') > 0 && at('scripts/api/topic-wave.js') < at('scripts/composites/topic-player.js'));
   assert.ok(at('scripts/composites/topic-player.js') > 0);
   assert.ok(at('scripts/composites/topic-player.js') < at('scripts/pages/timeline.js'));
+});
+
+/* Review of PR #473 (2026-11-10): media races the bar refactor opened. */
+test('an audio file mid-load never starts behind the video', () => {
+  const src = read('composites', 'topic-player.js');
+  assert.match(src, /if \(w\.resume && modeRef\.current === 'audio'\) start\(el\);/);
+  const sw = src.slice(src.indexOf('function switchMode('), src.indexOf('function toggleFullscreen('));
+  assert.match(sw, /if \(pending\.current\) pending\.current\.resume = false;/);
+});
+
+test('pause during a file load cancels the queued resume and clears the flag', () => {
+  const src = read('composites', 'topic-player.js');
+  const tp = src.slice(src.indexOf('function togglePlay('), src.indexOf('/* The transcript reaches playback'));
+  assert.match(tp, /if \(vidPending\.current\) vidPending\.current\.resume = false;\s*v\.pause\(\); stopFlag\(\);/);
+  assert.match(tp, /if \(pending\.current\) pending\.current\.resume = false;\s*el\.pause\(\); stopFlag\(\);/);
+});
+
+test('entering video with none at the playhead starts at the first overlapping span', () => {
+  const src = read('composites', 'topic-player.js');
+  assert.match(src, /!P\.videoTarget\(allSpansRef\.current, clock\) && load\.spans && load\.spans\.length/);
+  assert.match(src, /clock = load\.spans\[0\]\.span_start;/);
+});
+
+test('fullscreen exits only our own wrapper; a stale refetch leaves a left video alone', () => {
+  const src = read('composites', 'topic-player.js');
+  assert.match(src, /d\.fullscreenElement === wrapRef\.current && d\.exitFullscreen/);
+  assert.match(src, /if \(modeRef\.current !== 'video' \|\| videoRef\.current !== v\) return;/);
 });
