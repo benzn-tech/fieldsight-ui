@@ -186,6 +186,41 @@
     return timeline.total;
   }
 
+  /* Video clock -> bar position (spec 2026-11-10 §6.3). The turn being spoken
+     joins by file plus offset, so the playhead sits on the block of the row the
+     transcript highlights. In silence, clockToPos, which runs ahead inside a
+     batch by the bridged gaps: shading-grade only. */
+  function videoClockToPos(timeline, turns, clock) {
+    var i = turnAtClock(turns, clock);
+    var t = i === null ? null : turns[i];
+    var at = t ? turnTarget(timeline, t) : null;
+    if (at) {
+      var d = Number(t.duration) || 0;
+      return position(timeline, at.index, at.offset + Math.max(0, Math.min(d, clock - t.start)));
+    }
+    return clockToPos(timeline, clock);
+  }
+
+  /* Bar fractions no video span covers, for the dim layer. Through clockToPos,
+     so approximate inside a batch. */
+  function uncovered(timeline, spans) {
+    var total = timeline.total;
+    if (!total) return [];
+    var covered = (spans || []).filter(function (s) {
+      return typeof s.span_start === 'number' && typeof s.span_end === 'number';
+    }).map(function (s) {
+      return [clockToPos(timeline, s.span_start), clockToPos(timeline, s.span_end)];
+    }).filter(function (r) { return r[1] > r[0]; }).sort(function (a, b) { return a[0] - b[0]; });
+    var gaps = [];
+    var at = 0;
+    covered.forEach(function (r) {
+      if (r[0] > at) gaps.push({ left: at / total, right: r[0] / total });
+      at = Math.max(at, r[1]);
+    });
+    if (at < total) gaps.push({ left: at / total, right: 1 });
+    return gaps;
+  }
+
   /* Bar position -> clock, for display. A turn knows its own clock exactly, so
      it wins; otherwise the file's clock, approximate inside a batch. */
   function clockAt(timeline, pos, turn) {
@@ -311,7 +346,7 @@
     stem: stem, buildTimeline: buildTimeline, locate: locate, position: position,
     turnTarget: turnTarget, turnAt: turnAt, turnAtClock: turnAtClock, videoTarget: videoTarget,
     sessionOf: sessionOf, probeTargets: probeTargets, videoSpans: videoSpans, overlapping: overlapping,
-    clockToPos: clockToPos, clockAt: clockAt, fmtClock: fmtClock, fmtLength: fmtLength,
+    clockToPos: clockToPos, clockAt: clockAt, videoClockToPos: videoClockToPos, uncovered: uncovered, fmtClock: fmtClock, fmtLength: fmtLength,
     activityMarks: activityMarks, SPEAKER_PALETTE: SPEAKER_PALETTE, speakerColors: speakerColors, swatch: swatch,
     missingFileStart: missingFileStart, mergeSegments: mergeSegments,
     createStore: createStore,

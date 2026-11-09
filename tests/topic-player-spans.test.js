@@ -149,3 +149,35 @@ test('topic-playback.js loads before transcript-list.js', () => {
   assert.ok(html.indexOf('scripts/api/topic-playback.js') > 0);
   assert.ok(html.indexOf('scripts/api/topic-playback.js') < html.indexOf('scripts/composites/transcript-list.js'));
 });
+
+/* ---- video clock -> bar position ---- */
+const A = 'j_2026-11-04_13-00-17_sid1_c0000_off0.0_to300.0_srcwav';
+const B = 'j_2026-11-04_13-05-19_sid1_c0003_bn4_off0.0_to122.0_srcwav';
+const C = 'j_2026-11-04_13-10-00_sid1_c0007_off0.0_to30.0_srcwav';
+const TL = P.buildTimeline([
+  { filename: A + '.wav', url: 'a', duration: 300, absolute_start: 47000, absolute_end: 47300 },
+  { filename: B + '.wav', url: 'b', duration: 122, absolute_start: 47319, absolute_end: 47441 },
+  { filename: C + '.wav', url: 'c', duration: 30, absolute_start: 47600, absolute_end: 47630 },
+]);
+
+test('a clock inside a turn lands inside that turn on its own file', () => {
+  /* Inside batch B the clock has run past start + offset by the bridged gaps. */
+  const turns = [{ source_filename: B + '.json', chunk_start: 40, start: 47420, end: 47426, duration: 6 }];
+  assert.strictEqual(P.videoClockToPos(TL, turns, 47422), 300 + 40 + 2);
+  assert.notStrictEqual(P.clockToPos(TL, 47422), 342, 'clockToPos alone would sit elsewhere');
+  assert.strictEqual(P.videoClockToPos(TL, turns, 47426), 346, 'clamped to the turn');
+});
+
+test('in silence past a batch stitched end the clock falls through to the next file start (known limit)', () => {
+  assert.strictEqual(P.videoClockToPos(TL, [], 47500), 422);
+  const unjoined = [{ source_filename: 'gone.json', chunk_start: 0, start: 47490, end: 47510, duration: 20 }];
+  assert.strictEqual(P.videoClockToPos(TL, unjoined, 47500), 422, 'a turn that does not join falls back too');
+});
+
+test('uncovered: the bar ranges no video span covers', () => {
+  const only = P.uncovered(TL, [{ span_start: 47319, span_end: 47441 }]);
+  assert.deepStrictEqual(only.map((g) => [g.left * TL.total, g.right * TL.total]), [[0, 300], [422, 452]]);
+  assert.deepStrictEqual(P.uncovered(TL, []), [{ left: 0, right: 1 }]);
+  assert.deepStrictEqual(P.uncovered(TL, [{ span_start: 0, span_end: 99999 }]), []);
+  assert.deepStrictEqual(P.uncovered(P.buildTimeline([]), []), []);
+});
