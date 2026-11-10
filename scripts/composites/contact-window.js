@@ -218,9 +218,19 @@
   /* The entry point (owner, 2026-11-09): a labelled button fixed bottom-right on
      every page, replacing the left-nav item. The text label is the point: an icon
      alone could read as a site feature; this has to say "this reaches us". */
+  /* FieldSight's own contact mark: a speech bubble carrying a short voice wave,
+     because a message here is usually a voice note. Strokes use currentColor. */
+  function ContactMark() {
+    var h = React.createElement;
+    return h('svg', { className: 'fs-contact-fab__mark', viewBox: '0 0 24 24', width: 24, height: 24,
+      fill: 'none', stroke: 'currentColor', strokeWidth: 1.75, strokeLinecap: 'round',
+      strokeLinejoin: 'round', 'aria-hidden': 'true', focusable: 'false' },
+      h('path', { d: 'M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-4.5 4v-4h0A2.5 2.5 0 0 1 4 13.5z' }),
+      h('path', { d: 'M8.5 8.5v2M12 7v5M15.5 8.5v2' }));
+  }
+
   function ContactLauncher(props) {
     var h = React.createElement;
-    var Icon = window.FieldSight && window.FieldSight.NavIcon;
     return h('button', {
       type: 'button',
       className: 'fs-contact-fab',
@@ -228,8 +238,8 @@
       title: 'Questions, problems or feedback? Message the FieldSight team.',
       onClick: props.onClick,
     },
-      Icon ? h(Icon, { name: 'message-circle', size: 18, color: 'currentColor' }) : null,
-      h('span', { className: 'fs-contact-fab__label' }, 'Contact FieldSight'),
+      h(ContactMark, null),
+      h('span', { className: 'fs-contact-fab__label' }, 'Contact'),
       props.hasDraft ? h('span', { className: 'fs-contact-fab__dot', 'aria-label': 'unsent message' }) : null);
   }
 

@@ -8375,7 +8375,7 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
 
 .fs-toast-stack {
   position:       fixed;
-  bottom:         80px;   /* clears the Contact FieldSight button (.fs-contact-fab) */
+  bottom:         96px;   /* clears the 60px Contact button (.fs-contact-fab) at bottom 24px */
   right:          24px;
   z-index:        var(--z-overlay, 600);
   display:        flex;
@@ -14751,27 +14751,38 @@ body.fs-gantt-dragging--resize-end    { cursor: ew-resize !important; }
   right: 24px;
   bottom: 24px;
   z-index: var(--z-fixed, 300);
-  display: inline-flex;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  height: 44px;
-  padding: 0 18px 0 14px;
+  justify-content: center;
+  gap: 2px;
+  width: 60px;
+  height: 60px;
+  padding: 0;
   border: 1px solid var(--color-accent-600);
-  border-radius: 22px;
+  border-radius: 50%;
   background: var(--color-accent-500);
   color: var(--color-neutral-900); /* fixed dark on yellow in both themes, as .fs-btn--primary */
-  font: 600 14px/1 var(--font-sans, inherit);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-md);
   cursor: pointer;
+  transition: background 120ms ease, transform 120ms ease, box-shadow 120ms ease;
 }
-.fs-contact-fab:hover { background: var(--color-accent-600); }
+.fs-contact-fab:hover { background: var(--color-accent-600); box-shadow: var(--shadow-lg); transform: translateY(-1px); }
+.fs-contact-fab:active { transform: translateY(0); }
 .fs-contact-fab:focus-visible { outline: 2px solid var(--focus-ring-color); outline-offset: 2px; }
+.fs-contact-fab__mark { width: 24px; height: 24px; flex-shrink: 0; }
+.fs-contact-fab__label { font: 600 10.5px/1 var(--font-sans, inherit); letter-spacing: 0.01em; }
 .fs-contact-fab__dot {
-  width: 8px; height: 8px; border-radius: 50%;
+  position: absolute; top: 4px; right: 4px;
+  width: 10px; height: 10px; border-radius: 50%;
   background: var(--color-danger-500);
+  border: 2px solid var(--color-accent-500);
+}
+@media (prefers-reduced-motion: reduce) {
+  .fs-contact-fab, .fs-contact-fab:hover { transition: none; transform: none; }
 }
 @media (max-width: 767px) {
-  .fs-contact-fab { bottom: 72px; right: 16px; } /* above the 56px bottom nav */
+  .fs-contact-fab { bottom: 72px; right: 16px; width: 56px; height: 56px; } /* above the 56px bottom nav */
 }
 @media print {
   .fs-contact-fab { display: none; }
