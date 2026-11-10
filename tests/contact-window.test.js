@@ -197,7 +197,8 @@ test('the launcher is always rendered while the window is closed, and says what 
   assert.match(src, /if \(!used\) return launcher;/);
   assert.match(src, /if \(!open \|\| !Modal \|\| !draft\) return launcher;/);
   // a visible text label, not an icon alone, so it cannot be mistaken for a site feature
-  assert.match(src, /'Contact FieldSight'/);
+  assert.match(src, /className: 'fs-contact-fab__label' \}, 'Contact'\)/);
+  assert.match(src, /function ContactMark\(/);
   assert.match(src, /'aria-label': 'Contact the FieldSight team'/);
   assert.match(src, /className: 'fs-contact-fab'/);
 });
@@ -217,7 +218,7 @@ test('the launcher sits bottom-right below modals, and toasts and mobile nav cle
   assert.match(block, /right:\s*24px/);
   assert.match(block, /bottom:\s*24px/);
   const t = css.indexOf('.fs-toast-stack {');
-  assert.match(css.slice(t, css.indexOf('}', t)), /bottom:\s*80px/);
+  assert.match(css.slice(t, css.indexOf('}', t)), /bottom:\s*96px/);
   assert.match(css, /@media \(max-width: 767px\)\s*\{\s*\.fs-contact-fab \{[^}]*bottom:\s*72px/);
 });
 
