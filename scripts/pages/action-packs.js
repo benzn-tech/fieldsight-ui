@@ -337,6 +337,13 @@
   function navigate(path) {
     if (window.FS && window.FS.Router) window.FS.Router.navigate(path);
   }
+  // Same button family as the Daily Report's "Back to Today" (.fs-timeline-page__back).
+  function BackToPacks() {
+    return h('button', { type: 'button', className: 'fs-timeline-page__back fs-pack__back',
+      onClick: function () { navigate('/action-packs'); } },
+      h('span', { className: 'fs-timeline-page__back-arrow', 'aria-hidden': 'true' }, '←'),
+      h('span', null, 'Back to all packs'));
+  }
   function packHref(id) { return '#/action-packs?id=' + encodeURIComponent(id); }
   function currentUser() { return (window.AuthMock && window.AuthMock.currentUser) || {}; }
   var FINAL = { ready: true, failed: true, cancelled: true };
@@ -379,14 +386,15 @@
               h('span', { className: 'fs-pack__row-meta' },
                 str(p.site_name), ' · ', h(StateChip, { state: p.state }), ' · ', nzWhen(p.created_at),
                 p.state === 'failed' ? h('span', { className: 'fs-pack__row-failure' }, ' ' + failureText(p.failure)) : null)));
-        })) : h(Muted, null, props.archived ? 'No archived packs.' : 'No packs yet. Start one with “New pack”.'),
+        })) : h(Muted, null, props.archived ? 'No archived packs.' : 'No packs yet. Start one with “+ New pack”.'),
         packs.length >= 50 ? h(Muted, null, 'Showing the newest 50.') : null);
     }
     return h('div', { className: 'fs-page fs-pack' },
       h('div', { className: 'fs-pack__header' },
         h('h1', { className: 'fs-pack__title' }, 'Action packs'),
-        h('button', { type: 'button', className: 'fs-pack__btn fs-pack__btn--primary',
-          onClick: props.onNew }, 'New pack')),
+        h('div', { className: 'fs-pack__header-buttons' },
+          h('button', { type: 'button', className: 'fs-safety__raise-btn',
+            onClick: props.onNew }, '+ New pack'))),
       h('div', { className: 'fs-pack__filters', role: 'group', 'aria-label': 'Filter packs' },
         h('button', { type: 'button', className: 'fs-pack__tab' + (props.archived ? '' : ' fs-pack__tab--on'),
           'aria-pressed': !props.archived, onClick: function () { props.onArchived(false); } }, 'Active'),
@@ -792,7 +800,7 @@
     if (pack.archived) facts.push('Archived');
     if (props.companyName) facts.push("Another company's project · " + str(props.companyName));
     return h('div', { className: 'fs-page fs-pack' },
-      h('a', { className: 'fs-pack__back', href: '#/action-packs' }, '← All packs'),
+      h(BackToPacks, null),
       h('div', { className: 'fs-pack__header' },
         h('h1', { className: 'fs-pack__title' }, str(pack.title || pack.instruction)),
         h('div', { className: 'fs-pack__header-buttons' },
@@ -1147,7 +1155,7 @@
     if (st.status === 'env' || st.status === 'error') {
       var env = st.status === 'env' ? envelopeState(st.res, 'detail') : { kind: 'error', text: str(st.message) };
       return h('div', { className: 'fs-page fs-pack' },
-        h('a', { className: 'fs-pack__back', href: '#/action-packs' }, '← All packs'),
+        h(BackToPacks, null),
         h('p', { className: env.kind === 'gone' ? 'fs-pack__muted' : 'fs-pack__error' }, env.text),
         env.kind === 'gone' ? null : h('button', { type: 'button', className: 'fs-pack__btn', onClick: reload }, 'Retry'));
     }
