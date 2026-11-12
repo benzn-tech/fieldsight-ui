@@ -279,9 +279,59 @@
       });
     }, []);
 
-    var ctx = { state: state, removeRow: removeRow, patchRow: patchRow, view: view, setView: setView };
+    var ctx = { state: state, removeRow: removeRow, patchRow: patchRow, view: view, setView: setView,
+                activeSite: activeSite };
     return React.createElement(TasksContext.Provider, { value: ctx },
       props.children);
+  }
+
+  /* ---------- TasksPickCards ------------------------------------------- */
+
+  /* Status pick cards (spec 2026-11-12 §4.3): a status heard in a recording
+     that could be one of several open tasks. Shown above the task list for
+     the active site (ctx.activeSite, which the provider keeps in step with
+     FS.siteContext.onChange), re-read whenever that site changes. A failed
+     read shows nothing: it must never block the task list. After a
+     successful choose, the loaded row for that task takes the status the
+     server applied; the card goes away in every finished case. */
+  function TasksPickCards(props) {
+    var ctx = props.ctx || {};
+    var site = ctx.activeSite || null;
+    var StatusPickCard = window.FieldSight.StatusPickCard;
+
+    var cardsRef = React.useState([]);
+    var cards = cardsRef[0], setCards = cardsRef[1];
+
+    React.useEffect(function () {
+      var api = window.FS && window.FS.api && window.FS.api.actions;
+      if (!api || !api.listPickCards) return undefined;
+      var cancelled = false;
+      setCards([]);
+      api.listPickCards(site).then(function (env) {
+        if (cancelled) return;
+        setCards(env && env.ok ? (env.cards || []) : []);
+      });
+      return function () { cancelled = true; };
+    }, [site]);
+
+    function onDone(card, result) {
+      if (result && result.ok && result.action_item_id) {
+        var rows = (ctx.state && ctx.state.rows) || [];
+        var row = rows.filter(function (r) { return r.actionItemId === result.action_item_id; })[0];
+        if (row && ctx.patchRow) {
+          ctx.patchRow(row.id, { status: result.status, status_suggestion: null });
+        }
+      }
+      setCards(function (list) {
+        return (list || []).filter(function (c) { return c.id !== card.id; });
+      });
+    }
+
+    if (!StatusPickCard || !cards.length) return null;
+    return React.createElement('div', { className: 'fs-pick-cards' },
+      cards.map(function (c) {
+        return React.createElement(StatusPickCard, { key: c.id, card: c, onDone: onDone });
+      }));
   }
 
   /* ---------- TasksMiddleColumn ---------------------------------------- */
@@ -683,6 +733,9 @@
             ],
           })
         : null,
+
+      /* Status pick cards: which task a heard status belongs to. */
+      React.createElement(TasksPickCards, { ctx: ctx }),
 
       /* List */
       visible.length === 0
@@ -1245,6 +1298,7 @@
       computeBuckets: computeBuckets, isOverdue: isOverdue, isRowDone: isRowDone,
       isRowClosed: isRowClosed,
       actionItemHistoryProps: actionItemHistoryProps,
+      TasksPickCards: TasksPickCards,
     };
   }
 
