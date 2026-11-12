@@ -160,6 +160,71 @@
     return { ok: true, state: res && res.state, status: res && res.status };
   }
 
+  /* Status pick cards (spec 2026-11-12 §4.3). A status was heard but could
+     belong to several open tasks, so a person picks which one.
+
+       GET  /api/org/status-pick-cards[?site=<id>]
+            → { cards: [{ id, site_id, site_name, status, quote, created_at,
+                          can_dismiss, candidates: [{ stable_id,
+                          action_item_id, text, status, responsible, task_no,
+                          can_choose }] }] }
+       POST /api/org/status-pick-cards/{id}
+            body { decision: 'choose', stable_id } | { decision: 'none' }
+            → { id, state, status, action_item_id }   (action_item_id null
+              for none). choose IS the audited PATCH server-side.
+
+     Both ALWAYS RESOLVE. orgRequest THROWS on 409 ("card already decided",
+     "item no longer open") with err.status, and RESOLVES 403/404 as
+     {_accessDenied}/{_notFound}. Under mocks or with no org write path the
+     list is empty: there is nothing to pick from offline. */
+  async function listPickCards(siteId) {
+    if (!orgCheckoffLive()) return { ok: true, cards: [] };
+    var res;
+    try {
+      res = await window.FS.api.orgRequest('/status-pick-cards',
+        siteId ? { params: { site: siteId } } : {});
+    } catch (e) {
+      return { ok: false, reason: 'error', message: (e && e.message) || 'Could not load this.' };
+    }
+    if (res && res._accessDenied) return { ok: false, reason: 'denied', message: res.error || null };
+    if (res && res._notFound) return { ok: false, reason: 'not_found' };
+    return { ok: true, cards: (res && res.cards) || [] };
+  }
+
+  async function decidePickCard(id, body) {
+    body = body || {};
+    if (!id) return { ok: false, reason: 'error', message: 'This card has no record.' };
+    if (!orgCheckoffLive()) {
+      return { ok: false, reason: 'error', message: 'This cannot be saved offline.' };
+    }
+    /* The API layer whitelists the body: send the two fields the route reads
+       and nothing else from the caller's object. */
+    var out = { decision: body.decision };
+    if (body.stable_id !== undefined && body.stable_id !== null) out.stable_id = body.stable_id;
+    var res;
+    try {
+      /* Not retried: a 5xx after the write committed would come back as a
+         409 on the second attempt and read as someone else's answer. */
+      res = await window.FS.api.orgRequest('/status-pick-cards/' + encodeURIComponent(id),
+        { method: 'POST', body: out, retry: false });
+    } catch (e) {
+      if (e && e.status === 409) {
+        return { ok: false, reason: 'conflict', status: 409,
+                 message: e.message || 'Already handled.' };
+      }
+      return { ok: false, reason: 'error', status: (e && e.status) || 0,
+               message: (e && e.message) || 'Could not save this.' };
+    }
+    if (res && res._notFound) return { ok: false, reason: 'not_found', status: 404 };
+    if (!res || res._accessDenied) {
+      return { ok: false, reason: 'error', status: (res && res.status) || 403,
+               message: (res && res.error) || 'You cannot answer this card.' };
+    }
+    if (out.decision === 'choose' && res.action_item_id) dropTicksFor(res.action_item_id);
+    return { ok: true, state: res.state, status: res.status,
+             action_item_id: res.action_item_id || null };
+  }
+
   /* ======================================================================
      ONE authorised check-off entry point
      ----------------------------------------------------------------------
@@ -527,7 +592,9 @@
     isActionResolved:   isActionResolved,
     isActionFinished:   isActionFinished,
     decideStatusSuggestion: decideStatusSuggestion,
-    itemState:          itemState,
+    listPickCards:      listPickCards,
+    decidePickCard:     decidePickCard,
+    itemState:         itemState,
     ticksFor:           ticksFor,
     orgCheckoffLive:    orgCheckoffLive,
     /* Exposed so other read paths (not just the bus emit above) can remap
@@ -550,6 +617,10 @@
     actionKey:       actionKey,
     lookupAction:    lookupAction,
   };
+
+  /* The pick-card plan names these as FS.api.* — same functions. */
+  window.FS.api.listPickCards  = listPickCards;
+  window.FS.api.decidePickCard = decidePickCard;
 
   /* Expose the pure/routing helpers to Node's test runner only (CommonJS).
      No-op in the browser (this file is a plain <script>, `module` is

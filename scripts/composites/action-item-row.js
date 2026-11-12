@@ -444,6 +444,8 @@
   if (!window.FieldSight) window.FieldSight = {};
   window.FieldSight.ActionItemRow = ActionItemRow;
   window.FieldSight.StatusSuggestionChip = StatusSuggestionChip;
+  /* One status-label map: the pick card (status-pick-card.js) reads it too. */
+  window.FieldSight.suggestionLabel = suggestionLabel;
 
   /* Expose the pure helpers to Node's test runner only (CommonJS). No-op in
      the browser (this file is a plain <script>, `module` is undefined) —

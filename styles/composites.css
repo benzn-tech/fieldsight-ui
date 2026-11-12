@@ -976,6 +976,67 @@
 }
 .fs-status-suggestion__btn:disabled { opacity: 0.6; cursor: default; }
 
+/* "Which task was this?" (spec 2026-11-12 §4.3): a heard status that could be
+   one of several open tasks. Same quiet register as the suggestion strip
+   above — a question for the person, not a status badge. Tokens only, so it
+   follows light and dark. */
+.fs-pick-cards { display: flex; flex-direction: column; gap: 8px; margin: 0 0 10px; }
+.fs-pick-card {
+  padding: 10px 12px;
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel-muted);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.fs-pick-card--handled { font-style: italic; }
+.fs-pick-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.fs-pick-card__title { margin: 0; font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.fs-pick-card__meta { font-size: 12px; color: var(--text-tertiary); }
+.fs-pick-card__quote {
+  display: block;
+  margin: 6px 0 8px;
+  font-style: italic;
+  word-break: break-word;
+}
+.fs-pick-card__options { display: flex; flex-direction: column; gap: 4px; }
+.fs-pick-card__option {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.fs-pick-card__option:hover { background: var(--surface-panel); }
+.fs-pick-card__option--disabled { color: var(--text-disabled); cursor: default; }
+.fs-pick-card__option--disabled:hover { background: transparent; }
+.fs-pick-card__option input { margin: 0; align-self: center; }
+.fs-pick-card__no { font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+.fs-pick-card__text { flex: 1 1 auto; min-width: 0; word-break: break-word; }
+.fs-pick-card__who { color: var(--text-secondary); }
+.fs-pick-card__note { font-size: 12px; font-style: italic; color: var(--text-tertiary); }
+.fs-pick-card__error { margin-top: 6px; color: var(--text-danger); }
+.fs-pick-card__actions { display: flex; gap: 8px; margin-top: 8px; }
+.fs-pick-card__btn {
+  padding: 3px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.fs-pick-card__btn--primary { border-color: var(--color-accent-500); font-weight: 600; }
+.fs-pick-card__btn:disabled { opacity: 0.6; cursor: default; }
+
 /* "Said 3x" — the same commitment reached us from several recordings on this
    day, so the list shows one row instead of three.
 
